@@ -107,31 +107,82 @@ const FinCharts = (() => {
     });
   }
 
-  function bar(canvas, { labels = [], datasets = [] } = {}) {
+  function contrastInk(hex) {
+    const raw = String(hex || "#0f766e").replace("#", "");
+    if (raw.length < 6) return "#ffffff";
+    const r = parseInt(raw.slice(0, 2), 16);
+    const g = parseInt(raw.slice(2, 4), 16);
+    const b = parseInt(raw.slice(4, 6), 16);
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.58 ? "#0f172a" : "#ffffff";
+  }
+
+  function formatBarValue(v, kind) {
+    if (kind === "count") return String(Math.round(v));
+    return formatCompact(v);
+  }
+
+  function bar(canvas, { labels = [], datasets = [], scale = "shared", formats = [], legend = [] } = {}) {
     const { ctx, w, h } = size(canvas);
     ctx.clearRect(0, 0, w, h);
-    const maxVal = niceMax(Math.max(0, ...datasets.flatMap((d) => d.values || [0])));
-    axisY(ctx, w, h, maxVal, true);
+    const grouped = scale === "group";
+    const local = {
+      t: legend.length ? 30 : grouped ? 22 : pad.t,
+      r: pad.r,
+      b: pad.b,
+      l: grouped ? 16 : pad.l,
+    };
+    const sharedMax = niceMax(Math.max(0, ...datasets.flatMap((d) => d.values || [0])));
+    if (!grouped) axisY(ctx, w, h, sharedMax, true);
     const n = labels.length;
-    const innerW = w - pad.l - pad.r;
-    const innerH = h - pad.t - pad.b;
+    const innerW = w - local.l - local.r;
+    const innerH = h - local.t - local.b;
     const group = innerW / Math.max(n, 1);
-    const barW = Math.min(28, (group * 0.7) / Math.max(datasets.length, 1));
+    const barW = Math.min(32, (group * 0.72) / Math.max(datasets.length, 1));
+
+    if (legend.length) {
+      ctx.font = "11px Segoe UI, sans-serif";
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      let lx = local.l;
+      legend.forEach((item, i) => {
+        const color = item.color || datasets[i]?.color || "#0f766e";
+        ctx.fillStyle = color;
+        roundRect(ctx, lx, 10, 10, 10, 3);
+        ctx.fill();
+        ctx.fillStyle = muted();
+        ctx.fillText(String(item.label || ""), lx + 14, 15);
+        lx += 14 + ctx.measureText(String(item.label || "")).width + 14;
+      });
+    }
+
     labels.forEach((label, i) => {
+      const groupMax = grouped
+        ? niceMax(Math.max(0.0001, ...datasets.map((ds) => (ds.values || [])[i] || 0)))
+        : sharedMax;
       datasets.forEach((ds, di) => {
         const v = (ds.values || [])[i] || 0;
-        const bh = innerH * (v / maxVal);
-        const x = pad.l + group * i + group / 2 - (datasets.length * barW) / 2 + di * barW;
-        const y = pad.t + innerH - bh;
+        const bh = innerH * (v / groupMax);
+        const x = local.l + group * i + group / 2 - (datasets.length * barW) / 2 + di * barW;
+        const y = local.t + innerH - bh;
         ctx.fillStyle = ds.color || "#0f766e";
-        roundRect(ctx, x, y, barW - 2, Math.max(bh, 0), 4);
+        roundRect(ctx, x, y, barW - 2, Math.max(bh, 2), 4);
         ctx.fill();
+        const kind = formats[i] || ds.format || "money";
+        const text = formatBarValue(v, kind);
+        ctx.fillStyle = ink();
+        ctx.font = "600 10px Segoe UI, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        const labelY = bh > 22 ? y + 14 : y - 3;
+        if (bh > 22) ctx.textBaseline = "top";
+        ctx.fillStyle = bh > 22 ? contrastInk(ds.color || "#0f766e") : ink();
+        ctx.fillText(text, x + (barW - 2) / 2, labelY);
       });
       ctx.fillStyle = muted();
       ctx.font = "11px Segoe UI, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
-      ctx.fillText(String(label), pad.l + group * i + group / 2, h - pad.b + 10);
+      ctx.fillText(String(label), local.l + group * i + group / 2, h - local.b + 10);
     });
   }
 

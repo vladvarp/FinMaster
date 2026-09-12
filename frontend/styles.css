@@ -453,6 +453,20 @@ table.data .num { font-variant-numeric: tabular-nums; font-family: var(--mono); 
   flex: 1;
   min-width: 0;
 }
+.list-item input:not([type="color"]):not([type="radio"]),
+.list-item select[data-pu] {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: #fff;
+  color: var(--ink);
+  outline: none;
+}
+.list-item input:not([type="color"]):not([type="radio"]):focus,
+.list-item select[data-pu]:focus {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.14);
+}
 .list-item select[data-pu] {
   width: 92px;
   flex: 0 0 92px;
@@ -545,7 +559,7 @@ table.data .num { font-variant-numeric: tabular-nums; font-family: var(--mono); 
 }
 .modal-card h3 { margin: 0 0 8px; }
 .modal-card p { margin: 0 0 16px; color: var(--muted); }
-.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.modal-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 
 .toast {
   position: fixed;
@@ -831,6 +845,59 @@ table.data tfoot td {
   background: #f1f5f9;
   border-top: 2px solid var(--line);
 }
+.share-fold {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f8fafc;
+  margin-bottom: 8px;
+}
+.share-fold-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  padding: 9px 10px;
+  font-size: 13px;
+  font-weight: 650;
+  text-align: left;
+}
+.share-fold-ico { color: var(--muted); font-size: 12px; }
+.share-fold-body { display: block; padding: 0 10px 10px; }
+.share-fold.collapsed .share-fold-body { display: none; }
+.share-themes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+}
+.share-theme {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+.share-theme:hover { border-color: var(--accent-2); color: var(--ink); }
+.share-theme.active {
+  border-color: var(--accent);
+  color: var(--ink);
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.18);
+}
+.st-swatch {
+  width: 100%;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+}
 .share-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .share-fields {
   display: grid;
@@ -1044,6 +1111,7 @@ html[data-theme="dark"] .order-head {
 html[data-theme="dark"] .order-globals,
 html[data-theme="dark"] table.data th,
 html[data-theme="dark"] table.data tfoot td,
+html[data-theme="dark"] .share-fold,
 html[data-theme="dark"] .share-order,
 html[data-theme="dark"] .filter-bar {
   background: #1b2538;

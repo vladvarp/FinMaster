@@ -232,7 +232,7 @@
               <div class="chart-box"><canvas id="chart-an-line"></canvas></div>
             </div>
             <div class="card">
-              <h3>Сравнение периодов</h3>
+              <h3>Сравнение периодов <span class="insights-sub">каждая метрика — в своей шкале</span></h3>
               <div class="chart-box"><canvas id="chart-an-bar"></canvas></div>
             </div>
           </div>
@@ -321,15 +321,32 @@
             <label>Заголовок снимка</label>
             <input id="share-title" placeholder="Например: 0001 · Вывеска" />
           </div>
-          <label class="share-opt"><input type="checkbox" id="share-hide-labels" /> Скрыть подписи полей</label>
-          <label class="share-opt"><input type="checkbox" id="share-hide-stamp" /> Скрыть дату формирования</label>
-          <div class="share-presets">
-            <button class="btn small" type="button" data-share-preset="work">Только работы</button>
-            <button class="btn small" type="button" data-share-preset="invoice">Счёт</button>
-            <button class="btn small" type="button" data-share-preset="full">Все поля</button>
+          <div class="share-fold collapsed" id="share-fold-theme">
+            <button type="button" class="share-fold-head" data-share-fold>
+              <span>Оформление</span>
+              <span class="share-fold-ico">▸</span>
+            </button>
+            <div class="share-fold-body">
+              <div class="share-themes" id="share-themes"></div>
+            </div>
           </div>
-          <div class="share-fields" id="share-fields"></div>
-          <div class="share-preview-label" style="margin-top:12px">Заказы и строки</div>
+          <div class="share-fold collapsed" id="share-fold-fields">
+            <button type="button" class="share-fold-head" data-share-fold>
+              <span>Поля и скрытие пунктов</span>
+              <span class="share-fold-ico">▸</span>
+            </button>
+            <div class="share-fold-body">
+              <label class="share-opt"><input type="checkbox" id="share-hide-labels" /> Скрыть подписи полей</label>
+              <label class="share-opt"><input type="checkbox" id="share-hide-stamp" /> Скрыть дату формирования</label>
+              <div class="share-presets">
+                <button class="btn small" type="button" data-share-preset="work">Только работы</button>
+                <button class="btn small" type="button" data-share-preset="invoice">Счёт</button>
+                <button class="btn small" type="button" data-share-preset="full">Все поля</button>
+              </div>
+              <div class="share-fields" id="share-fields"></div>
+            </div>
+          </div>
+          <div class="share-preview-label">Заказы и строки</div>
           <div class="share-orders" id="share-orders"></div>
         </div>
         <div>
@@ -339,7 +356,8 @@
       </div>
       <div class="modal-actions">
         <button class="btn" type="button" id="share-cancel">Закрыть</button>
-        <button class="btn" type="button" id="share-copy">Копировать</button>
+        <button class="btn" type="button" id="share-copy-text">Копировать текст</button>
+        <button class="btn" type="button" id="share-copy">Копировать PNG</button>
         <button class="btn primary" type="button" id="share-save">Сохранить PNG</button>
       </div>
     </div>

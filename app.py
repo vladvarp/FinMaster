@@ -194,6 +194,21 @@ def api_write_bytes():
     return jsonify({"ok": True})
 
 
+@app.post("/api/clipboard-text")
+def api_clipboard_text():
+    from backend.clipboard import copy_text_to_clipboard
+
+    data = request.get_json(silent=True) or {}
+    text = data.get("text")
+    if text is None:
+        return jsonify({"error": "Нет текста."}), 400
+    try:
+        copy_text_to_clipboard(str(text))
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    return jsonify({"ok": True})
+
+
 @app.post("/api/clipboard-png")
 def api_clipboard_png():
     import base64

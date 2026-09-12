@@ -225,7 +225,7 @@
       products: [],
       customers: [],
       orders: [],
-      ui: { sidebar_collapsed: false, column_widths: {}, share_fields: [] },
+      ui: { sidebar_collapsed: false, column_widths: {}, share_fields: [], share_theme: "teal" },
     };
   }
 
@@ -1156,6 +1156,12 @@
     $("cmp-b").innerHTML = cmpHtml(b);
     FinCharts.bar($("chart-an-bar"), {
       labels: ["Выручка", "Оплачено", "Долг", "Позиции"],
+      scale: "group",
+      formats: ["money", "money", "money", "count"],
+      legend: [
+        { label: "Период A", color: "#0f766e" },
+        { label: "Период B", color: "#c9a227" },
+      ],
       datasets: [
         { values: [a.after, a.paid, a.unpaid, a.count], color: "#0f766e" },
         { values: [b.after, b.paid, b.unpaid, b.count], color: "#c9a227" },
@@ -1925,7 +1931,24 @@
       markDirty();
       renderSharePreview();
     });
+    $("share-themes").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-share-theme]");
+      if (!btn) return;
+      ensureUi().share_theme = btn.dataset.shareTheme;
+      markDirty();
+      renderShareThemes();
+      renderSharePreview();
+    });
     $("share-title").addEventListener("input", renderSharePreview);
+    $("share-modal").addEventListener("click", (e) => {
+      const head = e.target.closest("[data-share-fold]");
+      if (!head) return;
+      const fold = head.closest(".share-fold");
+      if (!fold) return;
+      const open = fold.classList.toggle("collapsed") === false;
+      const ico = fold.querySelector(".share-fold-ico");
+      if (ico) ico.textContent = open ? "▾" : "▸";
+    });
     $("share-hide-labels").addEventListener("change", renderSharePreview);
     $("share-hide-stamp").addEventListener("change", renderSharePreview);
     $("share-orders").addEventListener("click", (e) => {
@@ -1962,6 +1985,7 @@
     document.querySelectorAll("[data-share-preset]").forEach((btn) => {
       btn.addEventListener("click", () => applySharePreset(btn.dataset.sharePreset));
     });
+    $("share-copy-text").addEventListener("click", copyShareText);
     $("share-copy").addEventListener("click", copySharePng);
     $("share-save").addEventListener("click", saveSharePng);
     $("recent-list").addEventListener("click", async (e) => {
@@ -2303,6 +2327,138 @@
     full: SHARE_FIELDS.map((f) => f.id),
   };
 
+  const SHARE_THEMES = {
+    teal: {
+      label: "Изумруд",
+      head: ["#0f766e", "#115e59"],
+      headInk: "#ffffff",
+      accent: "#0f766e",
+      bg: "#ffffff",
+      ink: "#0f172a",
+      meta: "#334155",
+      line: "#e2e8f0",
+      thBg: "#f8fafc",
+      thInk: "#64748b",
+      zebra: "#f8fafc",
+      footBg: "#f1f5f9",
+      note: "#94a3b8",
+    },
+    graphite: {
+      label: "Графит",
+      head: ["#1e293b", "#0f172a"],
+      headInk: "#ffffff",
+      accent: "#334155",
+      bg: "#ffffff",
+      ink: "#0f172a",
+      meta: "#334155",
+      line: "#e2e8f0",
+      thBg: "#f8fafc",
+      thInk: "#64748b",
+      zebra: "#f8fafc",
+      footBg: "#f1f5f9",
+      note: "#94a3b8",
+    },
+    indigo: {
+      label: "Индиго",
+      head: ["#4f46e5", "#3730a3"],
+      headInk: "#ffffff",
+      accent: "#4f46e5",
+      bg: "#ffffff",
+      ink: "#111827",
+      meta: "#3f3f5a",
+      line: "#e4e7f5",
+      thBg: "#f5f6fd",
+      thInk: "#6366f1",
+      zebra: "#f9f9fe",
+      footBg: "#eef0fc",
+      note: "#a5b4fc",
+    },
+    gold: {
+      label: "Золото",
+      head: ["#c9a227", "#8a6d0f"],
+      headInk: "#ffffff",
+      accent: "#c9a227",
+      bg: "#fffdf6",
+      ink: "#1c1917",
+      meta: "#44403c",
+      line: "#ece3cd",
+      thBg: "#faf5e6",
+      thInk: "#a16207",
+      zebra: "#fdfaf0",
+      footBg: "#f7efdc",
+      note: "#b8a67a",
+    },
+    rose: {
+      label: "Вишня",
+      head: ["#be123c", "#881337"],
+      headInk: "#ffffff",
+      accent: "#be123c",
+      bg: "#ffffff",
+      ink: "#18181b",
+      meta: "#3f3f46",
+      line: "#f0dde2",
+      thBg: "#fdf2f5",
+      thInk: "#9f1239",
+      zebra: "#fdf8f9",
+      footBg: "#fbe8ed",
+      note: "#d4a4b3",
+    },
+    mono: {
+      label: "Минимал",
+      head: ["#ffffff", "#ffffff"],
+      headInk: "#0f172a",
+      headLine: true,
+      accent: "#0f172a",
+      bg: "#ffffff",
+      ink: "#0f172a",
+      meta: "#475569",
+      line: "#e2e8f0",
+      thBg: "#ffffff",
+      thInk: "#94a3b8",
+      zebra: "#fafafa",
+      footBg: "#f8fafc",
+      note: "#94a3b8",
+    },
+    night: {
+      label: "Ночь",
+      head: ["#1e293b", "#0b1220"],
+      headInk: "#ffffff",
+      accent: "#2dd4bf",
+      bg: "#0f172a",
+      ink: "#e7eef8",
+      meta: "#cbd5e1",
+      line: "#25324a",
+      thBg: "#16233b",
+      thInk: "#94a3b8",
+      zebra: "#131f36",
+      footBg: "#16233b",
+      note: "#64748b",
+    },
+  };
+
+  function shareThemeKey() {
+    const key = ensureUi().share_theme;
+    return SHARE_THEMES[key] ? key : "teal";
+  }
+
+  function shareTheme() {
+    return SHARE_THEMES[shareThemeKey()];
+  }
+
+  function renderShareThemes() {
+    const box = $("share-themes");
+    if (!box) return;
+    const cur = shareThemeKey();
+    box.innerHTML = Object.entries(SHARE_THEMES)
+      .map(
+        ([key, t]) => `<button type="button" class="share-theme ${key === cur ? "active" : ""}" data-share-theme="${key}" title="${esc(t.label)}">
+          <span class="st-swatch" style="background:linear-gradient(135deg, ${t.head[0]}, ${t.head[1]})"></span>
+          <span>${esc(t.label)}</span>
+        </button>`
+      )
+      .join("");
+  }
+
   function currentShareFields() {
     return [...document.querySelectorAll("#share-fields input:checked")].map((el) => el.value);
   }
@@ -2378,17 +2534,21 @@
       .filter(Boolean);
   }
 
-  function shareMetaItems(order, fields, hideLabels) {
+  function shareMetaPairs(order, fields) {
     const items = [];
-    const add = (label, value) => {
-      const v = value || "—";
-      items.push(hideLabels ? v : `${label}${v}`);
-    };
-    if (fields.includes("number")) add("№ ", order.number);
-    if (fields.includes("name")) add("Заказ: ", order.name);
-    if (fields.includes("customer")) add("Заказчик: ", order.customer);
-    if (fields.includes("organization")) add("Организация: ", customerOrg(order.customer));
+    if (fields.includes("number")) items.push(["№", order.number]);
+    if (fields.includes("name")) items.push(["Заказ", order.name]);
+    if (fields.includes("customer")) items.push(["Заказчик", order.customer]);
+    if (fields.includes("organization")) items.push(["Организация", customerOrg(order.customer)]);
     return items;
+  }
+
+  function shareMetaItems(order, fields, hideLabels) {
+    return shareMetaPairs(order, fields).map(([label, value]) => {
+      const v = value || "—";
+      if (hideLabels) return v;
+      return label === "№" ? `№ ${v}` : `${label}: ${v}`;
+    });
   }
 
   function shareTotalsText(fields, cols, lines) {
@@ -2484,8 +2644,14 @@
     $("share-fields").innerHTML = SHARE_FIELDS.map(
       (f) => `<label><input type="checkbox" value="${f.id}" ${selected.includes(f.id) ? "checked" : ""} /> ${esc(f.label)}</label>`
     ).join("");
+    renderShareThemes();
     renderShareOrdersPicker(order?.id || null);
     $("share-title").value = order ? [order.number, order.name].filter(Boolean).join(" · ") : "";
+    document.querySelectorAll("#share-modal .share-fold").forEach((fold) => {
+      fold.classList.add("collapsed");
+      const ico = fold.querySelector(".share-fold-ico");
+      if (ico) ico.textContent = "▸";
+    });
     renderSharePreview();
     $("share-modal").classList.add("open");
   }
@@ -2509,6 +2675,7 @@
     const hideStamp = shareHideStamp();
     const cols = SHARE_FIELDS.filter((f) => f.kind === "col" && fields.includes(f.id));
     const title = shareTitleText(blocks);
+    const t = shareTheme();
     const body = blocks.length
       ? blocks
           .map(({ order, lines }, i) => {
@@ -2522,13 +2689,16 @@
                   .join("")}</colgroup><thead><tr>${cols
                   .map(
                     (c) =>
-                      `<th style="text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;background:#f8fafc;border-top:1px solid #e2e8f0;white-space:nowrap">${esc(c.label)}</th>`
+                      `<th style="text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:${t.thInk};background:${t.thBg};border-top:1px solid ${t.line};white-space:nowrap">${esc(c.label)}</th>`
                   )
                   .join("")}</tr></thead><tbody>${lines
                   .map(
-                    (line) =>
-                      `<tr>${cols
-                        .map((c) => `<td style="text-align:left;padding:8px 10px;border-top:1px solid #e2e8f0;white-space:nowrap">${esc(shareLineValue(line, c.id))}</td>`)
+                    (line, ri) =>
+                      `<tr style="background:${ri % 2 ? t.zebra : "transparent"}">${cols
+                        .map(
+                          (c) =>
+                            `<td style="text-align:left;padding:8px 10px;border-top:1px solid ${t.line};color:${t.ink};white-space:nowrap">${esc(shareLineValue(line, c.id))}</td>`
+                        )
                         .join("")}</tr>`
                   )
                   .join("")}</tbody>${
@@ -2536,27 +2706,31 @@
                     ? `<tfoot><tr>${foot
                         .map(
                           (v) =>
-                            `<td style="text-align:left;padding:10px;border-top:2px solid #0f766e;font-weight:700;background:#f1f5f9;white-space:nowrap">${esc(v)}</td>`
+                            `<td style="text-align:left;padding:10px;border-top:2px solid ${t.accent};font-weight:700;color:${t.ink};background:${t.footBg};white-space:nowrap">${esc(v)}</td>`
                         )
                         .join("")}</tr></tfoot>`
                     : ""
                 }</table>`
               : "";
-            const sep = i ? "border-top:2px solid #0f766e;margin-top:12px;padding-top:16px;" : "";
+            const sep = i ? `border-top:2px solid ${t.accent};margin-top:12px;padding-top:16px;` : "";
             return `<div class="share-order-block" style="padding:0 20px 16px;${sep}">
-          ${meta.length ? `<div class="sp-meta" style="padding:0 0 10px;display:grid;gap:4px;font-size:13px;color:#334155">${meta.map((m) => `<div>${esc(m)}</div>`).join("")}</div>` : ""}
-          ${table || `<div style="padding:8px 0;font-size:13px;color:#64748b">Таблица работ скрыта — включите колонки слева.</div>`}
-          ${totalsText ? `<div class="sp-foot" style="padding:10px 0 4px;font-size:14px"><b>${esc(totalsText)}</b></div>` : ""}
+          ${meta.length ? `<div class="sp-meta" style="padding:0 0 10px;display:grid;gap:4px;font-size:13px;color:${t.meta}">${meta.map((m) => `<div>${esc(m)}</div>`).join("")}</div>` : ""}
+          ${table || `<div style="padding:8px 0;font-size:13px;color:${t.note}">Таблица работ скрыта — включите колонки слева.</div>`}
+          ${totalsText ? `<div class="sp-foot" style="padding:10px 0 4px;font-size:14px;color:${t.ink}"><b>${esc(totalsText)}</b></div>` : ""}
         </div>`;
           })
           .join("")
-      : `<div style="padding:20px;color:#64748b">Выберите хотя бы один заказ и строку слева.</div>`;
+      : `<div style="padding:20px;color:${t.note}">Выберите хотя бы один заказ и строку слева.</div>`;
+    box.style.background = t.bg;
+    box.style.color = t.ink;
     box.innerHTML = `
-      <div class="sp-head" style="background:linear-gradient(90deg,#0f766e,#115e59);color:#fff;padding:18px 20px">
+      <div class="sp-head" style="background:linear-gradient(90deg,${t.head[0]},${t.head[1]});color:${t.headInk};padding:18px 20px;${
+        t.headLine ? `border-bottom:2px solid ${t.accent};` : ""
+      }">
         <b style="font-size:18px;display:block">${esc(title)}</b>
       </div>
       ${body}
-      ${hideStamp ? "" : `<div class="sp-note" style="padding:0 20px 16px;font-size:11px;color:#94a3b8">Сформировано ${esc(new Date().toLocaleString("ru-RU"))}</div>`}
+      ${hideStamp ? "" : `<div class="sp-note" style="padding:0 20px 16px;font-size:11px;color:${t.note}">Сформировано ${esc(new Date().toLocaleString("ru-RU"))}</div>`}
     `;
   }
 
@@ -2634,26 +2808,36 @@
     });
     const height = headerH + bodyH + (hideStamp ? 16 : 36);
     const scale = 2;
+    const theme = shareTheme();
     const canvas = document.createElement("canvas");
     canvas.width = width * scale;
     canvas.height = height * scale;
     const ctx = canvas.getContext("2d");
     ctx.scale(scale, scale);
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = theme.bg;
     ctx.fillRect(0, 0, width, height);
     const head = ctx.createLinearGradient(0, 0, width, 0);
-    head.addColorStop(0, "#0f766e");
-    head.addColorStop(1, "#115e59");
+    head.addColorStop(0, theme.head[0]);
+    head.addColorStop(1, theme.head[1]);
     ctx.fillStyle = head;
     ctx.fillRect(0, 0, width, headerH);
-    ctx.fillStyle = "#ffffff";
+    if (theme.headLine) {
+      ctx.strokeStyle = theme.accent;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, headerH - 1);
+      ctx.lineTo(width, headerH - 1);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+    ctx.fillStyle = theme.headInk;
     ctx.font = "700 20px Segoe UI, sans-serif";
     ctx.fillText(title, pad, 40);
     let y = headerH + 16;
     layouts.forEach(({ order, lines, colWidths, tableW }, bi) => {
       if (bi) {
         y += 16;
-        ctx.strokeStyle = "#0f766e";
+        ctx.strokeStyle = theme.accent;
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(pad, y);
@@ -2663,7 +2847,7 @@
         y += 20;
       }
       const meta = shareMetaItems(order, fields, hideLabels);
-      ctx.fillStyle = "#334155";
+      ctx.fillStyle = theme.meta;
       ctx.font = "13px Segoe UI, sans-serif";
       meta.forEach((line) => {
         ctx.fillText(line, pad, y + 14);
@@ -2672,9 +2856,9 @@
       if (meta.length) y += 10;
       if (cols.length) {
         const xs = shareColStarts(colWidths, pad);
-        ctx.fillStyle = "#f8fafc";
+        ctx.fillStyle = theme.thBg;
         ctx.fillRect(pad, y, tableW, 32);
-        ctx.fillStyle = "#64748b";
+        ctx.fillStyle = theme.thInk;
         ctx.font = "600 11px Segoe UI, sans-serif";
         cols.forEach((col, i) => {
           ctx.fillText(fitCanvasText(ctx, col.label.toUpperCase(), colWidths[i] - 12), xs[i] + 8, y + 21);
@@ -2683,15 +2867,15 @@
         ctx.font = "13px Segoe UI, sans-serif";
         lines.forEach((line, ri) => {
           if (ri % 2) {
-            ctx.fillStyle = "#f8fafc";
+            ctx.fillStyle = theme.zebra;
             ctx.fillRect(pad, y, tableW, rowH);
           }
-          ctx.strokeStyle = "#e2e8f0";
+          ctx.strokeStyle = theme.line;
           ctx.beginPath();
           ctx.moveTo(pad, y);
           ctx.lineTo(pad + tableW, y);
           ctx.stroke();
-          ctx.fillStyle = "#0f172a";
+          ctx.fillStyle = theme.ink;
           cols.forEach((col, i) => {
             const text = fitCanvasText(ctx, String(shareLineValue(line, col.id) || "—"), colWidths[i] - 12);
             ctx.save();
@@ -2705,14 +2889,14 @@
         });
         const foot = shareFooterCells(cols, lines);
         if (foot) {
-          ctx.fillStyle = "#f1f5f9";
+          ctx.fillStyle = theme.footBg;
           ctx.fillRect(pad, y, tableW, rowH);
-          ctx.strokeStyle = "#0f766e";
+          ctx.strokeStyle = theme.accent;
           ctx.beginPath();
           ctx.moveTo(pad, y);
           ctx.lineTo(pad + tableW, y);
           ctx.stroke();
-          ctx.fillStyle = "#0f172a";
+          ctx.fillStyle = theme.ink;
           ctx.font = "700 13px Segoe UI, sans-serif";
           foot.forEach((v, i) => {
             ctx.save();
@@ -2728,7 +2912,7 @@
       const totalsText = shareTotalsText(fields, cols, lines);
       if (totalsText) {
         y += 14;
-        ctx.fillStyle = "#0f172a";
+        ctx.fillStyle = theme.ink;
         ctx.font = "700 14px Segoe UI, sans-serif";
         ctx.fillText(totalsText, pad, y + 14);
         y += 22;
@@ -2736,11 +2920,81 @@
       y += 16;
     });
     if (!hideStamp) {
-      ctx.fillStyle = "#94a3b8";
+      ctx.fillStyle = theme.note;
       ctx.font = "11px Segoe UI, sans-serif";
       ctx.fillText(stamp, pad, height - 16);
     }
     return canvas;
+  }
+
+  function visLen(s) {
+    return [...String(s ?? "")].length;
+  }
+
+  function padVis(s, n, align = "left") {
+    const str = String(s ?? "");
+    const extra = Math.max(0, n - visLen(str));
+    return align === "right" ? `${" ".repeat(extra)}${str}` : `${str}${" ".repeat(extra)}`;
+  }
+
+  function shareToText() {
+    const blocks = selectedShareBlocks();
+    if (!blocks.length) throw new Error("Выберите заказы и строки для снимка");
+    const fields = currentShareFields();
+    const hideLabels = shareHideLabels();
+    const hideStamp = shareHideStamp();
+    const cols = SHARE_FIELDS.filter((f) => f.kind === "col" && fields.includes(f.id));
+    const title = shareTitleText(blocks);
+    const out = [title];
+
+    blocks.forEach(({ order, lines }, bi) => {
+      if (bi) out.push("");
+      const pairs = shareMetaPairs(order, fields);
+      if (pairs.length) {
+        out.push("");
+        if (hideLabels) {
+          pairs.forEach(([, value]) => out.push(value || "—"));
+        } else {
+          const lw = Math.max(...pairs.map(([label]) => visLen(label)));
+          pairs.forEach(([label, value]) => out.push(`${padVis(label, lw)}   ${value || "—"}`));
+        }
+      }
+
+      if (cols.length) {
+        const foot = shareFooterCells(cols, lines);
+        const lw = Math.max(8, ...cols.map((c) => visLen(c.label)));
+        lines.forEach((line, i) => {
+          out.push("");
+          const head = [shareLineValue(line, "order_type"), shareLineValue(line, "product")].filter((v) => v && v !== "—").join(" · ");
+          out.push(head || `Позиция ${i + 1}`);
+          cols.forEach((c) => {
+            if (c.id === "order_type" && head) return;
+            if (c.id === "product" && head && shareLineValue(line, "order_type") && shareLineValue(line, "product")) return;
+            const val = shareLineValue(line, c.id);
+            out.push(hideLabels ? val : `${padVis(c.label, lw)}  ${val}`);
+          });
+        });
+        if (foot && foot.some(Boolean)) {
+          out.push("");
+          cols.forEach((c, i) => {
+            if (!foot[i]) return;
+            out.push(hideLabels ? foot[i] : `${padVis(c.label, lw)}  ${foot[i]}`);
+          });
+        }
+      }
+
+      const totalsText = shareTotalsText(fields, cols, lines);
+      if (totalsText) {
+        out.push("");
+        out.push(totalsText);
+      }
+    });
+
+    if (!hideStamp) {
+      out.push("");
+      out.push(`Сформировано ${new Date().toLocaleString("ru-RU")}`);
+    }
+    return `${out.join("\n").trim()}\n`;
   }
 
   function blobToBase64(blob) {
@@ -2750,6 +3004,25 @@
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
+  }
+
+  async function copyShareText() {
+    try {
+      const text = shareToText();
+      if (state.desktop) {
+        await apiPost("/api/clipboard-text", { text });
+        toast("Текст снимка скопирован — вставьте в чат (Ctrl+V)");
+        return;
+      }
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        toast("Текст снимка скопирован в буфер обмена");
+        return;
+      }
+      throw new Error("clipboard");
+    } catch (err) {
+      toast(`Не удалось скопировать текст: ${err.message || err}`);
+    }
   }
 
   async function copySharePng() {

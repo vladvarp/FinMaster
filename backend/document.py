@@ -56,6 +56,7 @@ def empty_document(title: str = "Новый отчёт") -> dict[str, Any]:
             "sidebar_collapsed": False,
             "column_widths": {},
             "share_fields": [],
+            "share_theme": "teal",
         },
     }
 
@@ -156,6 +157,7 @@ def normalize_document(raw: Any) -> dict[str, Any]:
             "sidebar_collapsed": bool(ui.get("sidebar_collapsed")),
             "column_widths": ui.get("column_widths") if isinstance(ui.get("column_widths"), dict) else {},
             "share_fields": ui.get("share_fields") if isinstance(ui.get("share_fields"), list) else [],
+            "share_theme": str(ui.get("share_theme") or "teal"),
         }
 
     return base
