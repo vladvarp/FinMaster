@@ -16,19 +16,104 @@
     newAfterSave: false,
     selectedCustomerId: null,
     shareOrderId: null,
+    orderFilter: "all",
   };
 
   const $ = (id) => document.getElementById(id);
+
+  const HISTORY_LIMIT = 80;
+  const history = { stack: [], index: -1, timer: null, busy: false };
+
+  function historySnapshot() {
+    try {
+      return JSON.stringify(state.doc);
+    } catch {
+      return null;
+    }
+  }
+
+  function historyReset() {
+    clearTimeout(history.timer);
+    const snap = state.doc ? historySnapshot() : null;
+    history.stack = snap ? [snap] : [];
+    history.index = history.stack.length - 1;
+    updateHistoryButtons();
+  }
+
+  function historyCommit() {
+    clearTimeout(history.timer);
+    if (!state.doc || history.busy) return;
+    const snap = historySnapshot();
+    if (snap == null || snap === history.stack[history.index]) return;
+    history.stack = history.stack.slice(0, history.index + 1);
+    history.stack.push(snap);
+    if (history.stack.length > HISTORY_LIMIT) history.stack.shift();
+    history.index = history.stack.length - 1;
+    updateHistoryButtons();
+  }
+
+  function historySchedule() {
+    if (history.busy) return;
+    clearTimeout(history.timer);
+    history.timer = setTimeout(historyCommit, 500);
+  }
+
+  function updateHistoryButtons() {
+    const undoBtn = $("btn-undo");
+    const redoBtn = $("btn-redo");
+    if (undoBtn) undoBtn.disabled = history.index <= 0;
+    if (redoBtn) redoBtn.disabled = history.index >= history.stack.length - 1;
+  }
+
+  function historyGo(step) {
+    if (!state.doc) return false;
+    if (step < 0) historyCommit();
+    const next = history.index + step;
+    if (next < 0 || next >= history.stack.length) {
+      toast(step < 0 ? "Отменять больше нечего" : "Повторять нечего");
+      return false;
+    }
+    let doc;
+    try {
+      doc = JSON.parse(history.stack[next]);
+    } catch {
+      return false;
+    }
+    history.busy = true;
+    history.index = next;
+    state.doc = doc;
+    state.dirty = true;
+    renderAll();
+    syncDirty();
+    updateHistoryButtons();
+    history.busy = false;
+    if (state.autosave) {
+      clearTimeout(state.autosaveTimer);
+      state.autosaveTimer = setTimeout(() => save({ silent: true }), 800);
+    }
+    return true;
+  }
+
+  function undo() {
+    if (historyGo(-1)) toast("Действие отменено");
+  }
+
+  function redo() {
+    if (historyGo(1)) toast("Действие возвращено");
+  }
 
   function uid() {
     if (crypto.randomUUID) return crypto.randomUUID();
     return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
 
-  function nowLocal() {
-    const d = new Date();
+  function localStamp(d) {
     const p = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  function nowLocal() {
+    return localStamp(new Date());
   }
 
   function money(n) {
@@ -203,12 +288,30 @@
     }
   }
 
-  function toast(text) {
+  function toast(text, action) {
     const el = $("toast");
-    el.textContent = text;
+    el.textContent = "";
+    const span = document.createElement("span");
+    span.textContent = text;
+    el.appendChild(span);
+    if (action) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "toast-action";
+      btn.textContent = action.label;
+      btn.addEventListener("click", () => {
+        el.classList.remove("show");
+        action.run();
+      });
+      el.appendChild(btn);
+    }
     el.classList.add("show");
     clearTimeout(el._t);
-    el._t = setTimeout(() => el.classList.remove("show"), 2800);
+    el._t = setTimeout(() => el.classList.remove("show"), action ? 6000 : 2800);
+  }
+
+  function undoToast(text) {
+    toast(text, { label: "Отменить", run: undo });
   }
 
   function localRecent() {
@@ -270,6 +373,7 @@
     if (!state.doc) return;
     state.dirty = true;
     state.doc.modified_at = new Date().toISOString();
+    historySchedule();
     updateChrome();
     syncDirty();
     if (state.autosave) {
@@ -295,6 +399,7 @@
     const autosaveEl = $("autosave");
     if (autosaveEl) autosaveEl.checked = !!state.autosave;
     document.title = `${state.dirty ? "• " : ""}${state.doc?.title || "FinMaster"} — FinMaster`;
+    updateHistoryButtons();
     applySidebar();
   }
 
@@ -331,12 +436,45 @@
     return blob.includes(q);
   }
 
+  function orderFilterMatch(order, filter) {
+    if (!filter || filter === "all") return true;
+    const t = orderTotals(order);
+    if (filter === "debt") return t.unpaid > 0.005;
+    if (filter === "paid") return t.after > 0.005 && t.unpaid <= 0.005;
+    if (filter === "empty") return (order.lines || []).some((line) => lineTotals(line).after <= 0.005);
+    if (filter === "month") {
+      const now = new Date();
+      const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      return (
+        (order.lines || []).some((line) => String(line.order_date || "").slice(0, 7) === key) ||
+        String(order.created_at || "").slice(0, 7) === key
+      );
+    }
+    return true;
+  }
+
+  function renderOrderChips() {
+    const box = $("order-chips");
+    if (!box || !state.doc) return;
+    const all = state.doc.orders || [];
+    box.querySelectorAll(".chip").forEach((chip) => {
+      const f = chip.dataset.filter;
+      chip.classList.toggle("active", f === state.orderFilter);
+      const badge = chip.querySelector(".chip-count");
+      if (badge) {
+        const n = all.filter((o) => orderFilterMatch(o, f)).length;
+        badge.textContent = n ? String(n) : "";
+      }
+    });
+  }
+
   function filteredOrders() {
     const q = state.search.trim().toLowerCase();
     let orders = [...(state.doc.orders || [])];
     if (q) {
       orders = orders.filter((o) => o.lines.some((l) => matchesSearch(o, l, q)) || matchesSearch(o, {}, q));
     }
+    orders = orders.filter((o) => orderFilterMatch(o, state.orderFilter));
     const sort = $("order-sort")?.value || "date-desc";
     const stamp = (o) => o.lines[0]?.order_date || o.created_at || "";
     orders.sort((a, b) => {
@@ -432,8 +570,159 @@
     `;
   }
 
+  function monthKeyOf(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  function trendChip(current, previous) {
+    if (!previous) return current ? { dir: "up", text: "новое" } : null;
+    const diff = ((current - previous) / previous) * 100;
+    if (!Number.isFinite(diff) || Math.abs(diff) < 1) return { dir: "", text: "без изменений" };
+    return { dir: diff > 0 ? "up" : "down", text: `${diff > 0 ? "+" : "−"}${Math.abs(Math.round(diff))}%` };
+  }
+
+  function insightCard({ tint, ico, label, value, note, trend }) {
+    return `<div class="insight" style="--tint:${tint}">
+      <div class="insight-ico">${ico}</div>
+      <div class="insight-body">
+        <div class="insight-label">${esc(label)}</div>
+        <div class="insight-value">${esc(value)}</div>
+        <div class="insight-note">${esc(note)}</div>
+      </div>
+      ${trend ? `<span class="trend ${trend.dir}">${esc(trend.text)}</span>` : ""}
+    </div>`;
+  }
+
+  function topBy(rows, keyFn, valueFn) {
+    const map = new Map();
+    rows.forEach((row) => {
+      const key = String(keyFn(row) || "").trim();
+      if (!key) return;
+      map.set(key, (map.get(key) || 0) + valueFn(row));
+    });
+    let best = null;
+    map.forEach((value, key) => {
+      if (!best || value > best.value) best = { key, value };
+    });
+    return best;
+  }
+
+  function renderInsights() {
+    const box = $("insights");
+    if (!box) return;
+    const rows = allRows();
+    if (!rows.length) {
+      box.innerHTML = `<div class="empty">Добавьте первый заказ — здесь появятся выводы по выручке, долгам и заказчикам.</div>`;
+      return;
+    }
+    const now = new Date();
+    const curKey = monthKeyOf(now.toISOString());
+    const prevKey = monthKeyOf(new Date(now.getFullYear(), now.getMonth() - 1, 15).toISOString());
+    let curMonth = 0;
+    let prevMonth = 0;
+    rows.forEach(({ line, totals }) => {
+      const k = monthKeyOf(line.order_date);
+      if (k === curKey) curMonth += totals.after;
+      if (k === prevKey) prevMonth += totals.after;
+    });
+
+    const s = summarize(rows);
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const dayOfMonth = now.getDate();
+    const forecast = curMonth ? (curMonth / dayOfMonth) * daysInMonth : 0;
+
+    const orderSums = new Map();
+    rows.forEach(({ order, totals }) => orderSums.set(order.id, (orderSums.get(order.id) || 0) + totals.after));
+    const paidOrders = [...orderSums.values()].filter((v) => v > 0);
+    const avgCheck = paidOrders.length ? paidOrders.reduce((a, b) => a + b, 0) / paidOrders.length : 0;
+
+    const topCustomer = topBy(rows, ({ order }) => order.customer, ({ totals }) => totals.after);
+    const topProduct = topBy(rows, ({ line }) => line.product, ({ totals }) => totals.after);
+
+    const monthAgo = localStamp(new Date(now.getTime() - 30 * 86400000));
+    const overdue = rows.filter(({ line, totals }) => totals.unpaid > 0.005 && line.order_date && line.order_date < monthAgo);
+    const overdueSum = overdue.reduce((acc, r) => acc + r.totals.unpaid, 0);
+
+    const twoMonthsAgo = localStamp(new Date(now.getTime() - 60 * 86400000));
+    const recentOrders = new Set();
+    const olderOrders = new Set();
+    rows.forEach(({ order, line }) => {
+      const d = line.order_date || "";
+      if (!d) return;
+      if (d >= monthAgo) recentOrders.add(order.id);
+      else if (d >= twoMonthsAgo) olderOrders.add(order.id);
+    });
+
+    const paidShare = s.after ? Math.round((s.paid / s.after) * 100) : 0;
+
+    box.innerHTML = [
+      insightCard({
+        tint: "#0f766e",
+        ico: "▲",
+        label: "Выручка за месяц",
+        value: money(curMonth),
+        note: `прошлый месяц ${money(prevMonth)}`,
+        trend: trendChip(curMonth, prevMonth),
+      }),
+      insightCard({
+        tint: "#2563eb",
+        ico: "◈",
+        label: "Прогноз до конца месяца",
+        value: money(forecast),
+        note: `по темпу за ${dayOfMonth} дн. из ${daysInMonth}`,
+      }),
+      insightCard({
+        tint: "#c9a227",
+        ico: "≡",
+        label: "Средний чек",
+        value: money(avgCheck),
+        note: `по ${paidOrders.length} заказам`,
+      }),
+      insightCard({
+        tint: paidShare >= 80 ? "#059669" : "#d97706",
+        ico: "%",
+        label: "Собираемость оплат",
+        value: `${paidShare}%`,
+        note: `не оплачено ${money(s.unpaid)}`,
+      }),
+      insightCard({
+        tint: "#7c3aed",
+        ico: "★",
+        label: "Лучший заказчик",
+        value: topCustomer ? topCustomer.key : "нет данных",
+        note: topCustomer ? `принёс ${money(topCustomer.value)}` : "укажите заказчиков в заказах",
+      }),
+      insightCard({
+        tint: "#0891b2",
+        ico: "✦",
+        label: "Хит продаж",
+        value: topProduct ? topProduct.key : "нет данных",
+        note: topProduct ? `выручка ${money(topProduct.value)}` : "укажите продукты в строках",
+      }),
+      insightCard({
+        tint: overdueSum > 0 ? "#dc2626" : "#64748b",
+        ico: "!",
+        label: "Долги старше 30 дней",
+        value: money(overdueSum),
+        note: overdue.length ? `${overdue.length} позиций ждут оплаты` : "просроченных долгов нет",
+      }),
+      insightCard({
+        tint: "#0284c7",
+        ico: "◐",
+        label: "Заказов за 30 дней",
+        value: String(recentOrders.size),
+        note: `предыдущие 30 дней: ${olderOrders.size}`,
+        trend: trendChip(recentOrders.size, olderOrders.size),
+      }),
+    ].join("");
+  }
+
   function renderDashboard() {
     renderKpis();
+    renderInsights();
     const rows = allRows();
     const byDay = {};
     rows.forEach(({ line, totals }) => {
@@ -553,7 +842,7 @@
     ["unpaid", "Не оплачено", 110],
     ["total", "Итог", 120],
     ["status", "Статус", 140],
-    ["actions", "", 44],
+    ["actions", "", 86],
   ];
 
   function ensureUi() {
@@ -565,7 +854,7 @@
 
   function colWidth(key, fallback) {
     const w = Number(ensureUi().column_widths[key]);
-    const min = key === "drag" ? 24 : 52;
+    const min = key === "drag" ? 24 : key === "actions" ? 86 : 52;
     return Math.max(min, Number.isFinite(w) && w > 0 ? w : fallback);
   }
 
@@ -667,10 +956,14 @@
 
   function renderOrders() {
     const orders = filteredOrders();
+    renderOrderChips();
     const summary = summarize(orders.flatMap((o) => (o.lines || []).map((line) => ({ order: o, line, totals: lineTotals(line) }))));
     $("orders-summary").innerHTML = `<span>${orders.length} зак. · ${money(summary.after)} · долг ${money(summary.unpaid)}</span>`;
     if (!orders.length) {
-      $("orders-list").innerHTML = `<div class="card empty">Нет заказов. Нажмите «+ Заказ», чтобы добавить первый.</div>`;
+      const filtered = state.orderFilter !== "all" || state.search.trim();
+      $("orders-list").innerHTML = filtered
+        ? `<div class="card empty">Под фильтр ничего не подошло. Сбросьте фильтр или поиск.</div>`
+        : `<div class="card empty">Нет заказов. Нажмите «+ Заказ», чтобы добавить первый.</div>`;
       return;
     }
     const statusNames = (state.doc.statuses || []).map((s) => s.name);
@@ -726,7 +1019,10 @@
                       <td class="num computed">${esc(money(t.unpaid))}</td>
                       <td class="num computed">${esc(money(t.after))}<div style="color:#94a3b8;font-weight:500;font-size:11px">до скидки ${esc(money(t.total))}</div></td>
                       <td><select data-lk="status">${optionList(unique([line.status, ...statusNames]), line.status)}</select></td>
-                      <td><button class="btn icon small danger" data-act="delline" title="Удалить тип">✕</button></td>
+                      <td><div class="row-actions">
+                        <button class="btn icon small" data-act="dupline" title="Дублировать строку (Ctrl+Alt+D)">⧉</button>
+                        <button class="btn icon small danger" data-act="delline" title="Удалить строку">✕</button>
+                      </div></td>
                     </tr>`;
                   })
                   .join("")}
@@ -989,6 +1285,7 @@
   function createNew() {
     state.doc = emptyDoc();
     state.path = null;
+    historyReset();
     setClean();
     showApp();
     setView("orders");
@@ -1013,6 +1310,7 @@
   function applyLoaded(res) {
     state.doc = res.document;
     state.path = res.path;
+    historyReset();
     if (res.recent) renderRecent(res.recent);
     else if (res.path) pushLocalRecent(res.path, res.document.title);
     setClean();
@@ -1260,6 +1558,42 @@
     $("orders-list").addEventListener("input", onOrderInput);
     $("orders-list").addEventListener("change", onOrderInput);
     $("orders-list").addEventListener("click", onOrderClick);
+    $("orders-list").addEventListener("keydown", onOrderKeydown);
+    $("order-chips").addEventListener("click", (e) => {
+      const chip = e.target.closest(".chip");
+      if (!chip) return;
+      state.orderFilter = chip.dataset.filter || "all";
+      renderOrders();
+    });
+    $("btn-undo").addEventListener("click", undo);
+    $("btn-redo").addEventListener("click", redo);
+    $("btn-command").addEventListener("click", openPalette);
+    $("btn-help").addEventListener("click", openHelp);
+    $("help-close").addEventListener("click", () => $("help-modal").classList.remove("open"));
+    $("help-modal").addEventListener("click", (e) => {
+      if (e.target === $("help-modal")) $("help-modal").classList.remove("open");
+    });
+    $("palette").addEventListener("click", (e) => {
+      if (e.target === $("palette")) closePalette();
+      const item = e.target.closest("[data-pi]");
+      if (item) paletteRun(Number(item.dataset.pi));
+    });
+    $("palette-input").addEventListener("input", (e) => renderPaletteList(e.target.value));
+    $("palette-input").addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        paletteMove(1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        paletteMove(-1);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        paletteRun(palette.index);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closePalette();
+      }
+    });
     $("orders-list").addEventListener("focusin", onExprFocus);
     $("orders-list").addEventListener("focusout", onExprBlur);
     bindSortable($("orders-list"), {
@@ -1348,9 +1682,11 @@
       }
       if (e.target.closest("[data-cact='del']")) {
         const i = Number(e.target.closest(".list-item").dataset.i);
+        historyCommit();
         state.doc.statuses.splice(i, 1);
         markDirty();
         renderCatalogs();
+        undoToast("Статус удалён");
       }
     });
     $("btn-add-status").addEventListener("click", () => {
@@ -1371,9 +1707,11 @@
     });
     $("unit-list").addEventListener("click", (e) => {
       if (e.target.dataset.uact === "del") {
+        historyCommit();
         state.doc.units.splice(Number(e.target.closest(".list-item").dataset.i), 1);
         markDirty();
         renderCatalogs();
+        undoToast("Единица измерения удалена");
       }
     });
     $("btn-add-unit").addEventListener("click", () => {
@@ -1388,9 +1726,11 @@
     });
     $("type-list").addEventListener("click", (e) => {
       if (e.target.dataset.tact === "del") {
+        historyCommit();
         state.doc.order_types.splice(Number(e.target.closest(".list-item").dataset.i), 1);
         markDirty();
         renderCatalogs();
+        undoToast("Тип заказа удалён");
       }
     });
     $("btn-add-type").addEventListener("click", () => {
@@ -1431,9 +1771,11 @@
     });
     $("product-catalog").addEventListener("click", (e) => {
       if (e.target.closest("[data-pact='del']")) {
+        historyCommit();
         state.doc.products.splice(Number(e.target.closest(".list-item").dataset.i), 1);
         markDirty();
         renderCatalogs();
+        undoToast("Продукт удалён из справочника");
       }
     });
     $("btn-add-product").addEventListener("click", () => {
@@ -1479,10 +1821,12 @@
       if (!btn) return;
       const row = btn.closest("[data-cid]");
       if (!row) return;
-      if (!confirm("Удалить заказчика из справочника? Заказы не удаляются.")) return;
+      historyCommit();
+      const gone = (state.doc.customers || []).find((x) => x.id === row.dataset.cid);
       state.doc.customers = (state.doc.customers || []).filter((x) => x.id !== row.dataset.cid);
       markDirty();
       renderCustomers();
+      undoToast(`Заказчик ${gone?.name || ""} убран из справочника`.replace(/\s+/g, " ").trim());
     });
     $("btn-add-customer").addEventListener("click", () => {
       const c = { id: uid(), name: "Новый заказчик", organization: "", phone: "", email: "", address: "", rating: 0 };
@@ -1644,6 +1988,7 @@
         const text = await file.text();
         state.doc = JSON.parse(text);
         state.path = file.name;
+        historyReset();
         pushLocalRecent(file.name, state.doc.title);
         setClean();
         showApp();
@@ -1707,17 +2052,59 @@
     });
 
     document.addEventListener("keydown", (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      const ctrl = e.ctrlKey || e.metaKey;
+      const code = e.code;
+      if (e.key === "F1") {
+        e.preventDefault();
+        openHelp();
+        return;
+      }
+      if (e.key === "Escape") {
+        if (paletteIsOpen()) {
+          closePalette();
+          return;
+        }
+        if ($("help-modal").classList.contains("open")) $("help-modal").classList.remove("open");
+      }
+      if (!ctrl) return;
+      if (code === "KeyK" || (e.shiftKey && code === "KeyP")) {
+        e.preventDefault();
+        paletteIsOpen() ? closePalette() : openPalette();
+        return;
+      }
+      if (code === "KeyS") {
         e.preventDefault();
         save({ as: e.shiftKey });
+        return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
+      if (code === "KeyO") {
         e.preventDefault();
         maybeOpen(openFromDialog);
+        return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
+      if (code === "KeyN") {
         e.preventDefault();
         onNew();
+        return;
+      }
+      if (code === "KeyF") {
+        e.preventDefault();
+        if (!$("app-shell").hidden) {
+          $("global-search").focus();
+          $("global-search").select();
+        }
+        return;
+      }
+      if (code === "KeyZ" && !e.shiftKey) {
+        if (paletteIsOpen()) return;
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (code === "KeyY" || (code === "KeyZ" && e.shiftKey)) {
+        if (paletteIsOpen()) return;
+        e.preventDefault();
+        redo();
       }
     });
 
@@ -2420,6 +2807,383 @@
     }
   }
 
+  function cssEscape(value) {
+    if (window.CSS && typeof CSS.escape === "function") return CSS.escape(String(value));
+    return String(value).replace(/["\\]/g, "\\$&");
+  }
+
+  function addOrderLine(order, afterId) {
+    const prev = afterId ? order.lines.find((l) => l.id === afterId) : (order.lines || [])[order.lines.length - 1];
+    const line = emptyLine();
+    if (prev) {
+      line.order_type = prev.order_type;
+      line.product = prev.product;
+      line.unit = prev.unit;
+      line.order_date = prev.order_date;
+      line.status = prev.status;
+    }
+    const idx = afterId ? order.lines.findIndex((l) => l.id === afterId) : -1;
+    if (idx >= 0) order.lines.splice(idx + 1, 0, line);
+    else order.lines.push(line);
+    markDirty();
+    renderOrders();
+    requestAnimationFrame(() => focusLineCell(line.id, 2));
+    return line;
+  }
+
+  function focusCellElement(cell) {
+    const target = cell?.querySelector("input, select");
+    if (!target) return false;
+    target.focus();
+    try {
+      target.select?.();
+    } catch {
+      /* ignore */
+    }
+    return true;
+  }
+
+  function focusLineCell(lineId, cellIndex) {
+    const row = document.querySelector(`tr[data-line="${cssEscape(lineId)}"]`);
+    if (!row) return;
+    focusCellElement(row.children[cellIndex]);
+    row.classList.add("focus-row");
+    setTimeout(() => row.classList.remove("focus-row"), 900);
+  }
+
+  function moveLine(order, lineId, dir, cellIndex) {
+    const i = order.lines.findIndex((l) => l.id === lineId);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= order.lines.length) return;
+    const [item] = order.lines.splice(i, 1);
+    order.lines.splice(j, 0, item);
+    markDirty();
+    renderOrders();
+    requestAnimationFrame(() => focusLineCell(lineId, cellIndex));
+  }
+
+  function copyCellFromAbove(tr, target) {
+    const prev = tr.previousElementSibling;
+    const lk = target.dataset?.lk;
+    if (!prev || !prev.dataset.line || !lk) return false;
+    const src = prev.querySelector(`[data-lk="${lk}"]`);
+    if (!src) return false;
+    const value = src.dataset.showing === "result" && src.dataset.expr != null ? src.dataset.expr : src.value;
+    if (target.dataset.showing) target.dataset.showing = "expr";
+    target.value = value;
+    target.dispatchEvent(new Event("input", { bubbles: true }));
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+    try {
+      target.select?.();
+    } catch {
+      /* ignore */
+    }
+    return true;
+  }
+
+  const NAV_SKIP_INPUT_TYPES = new Set(["datetime-local", "date", "time", "number"]);
+
+  function onOrderKeydown(e) {
+    const tr = e.target.closest?.("tr[data-line]");
+    const td = e.target.closest?.("td");
+    if (!tr || !td) return;
+    const card = tr.closest("[data-order]");
+    const order = findOrder(card?.dataset.order);
+    if (!order) return;
+    const cellIndex = [...tr.children].indexOf(td);
+    const ctrl = e.ctrlKey || e.metaKey;
+    const code = e.code;
+
+    if (e.altKey && !ctrl && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      e.preventDefault();
+      moveLine(order, tr.dataset.line, e.key === "ArrowUp" ? -1 : 1, cellIndex);
+      return;
+    }
+    if (ctrl && e.altKey && code === "KeyD") {
+      e.preventDefault();
+      const idx = order.lines.findIndex((l) => l.id === tr.dataset.line);
+      if (idx < 0) return;
+      const copy = JSON.parse(JSON.stringify(order.lines[idx]));
+      copy.id = uid();
+      order.lines.splice(idx + 1, 0, copy);
+      markDirty();
+      renderOrders();
+      requestAnimationFrame(() => focusLineCell(copy.id, cellIndex));
+      return;
+    }
+    if (ctrl && !e.altKey && code === "KeyD") {
+      e.preventDefault();
+      copyCellFromAbove(tr, e.target);
+      return;
+    }
+    if (ctrl && e.key === "Enter") {
+      e.preventDefault();
+      addOrderLine(order, tr.dataset.line);
+      return;
+    }
+    if (e.key === "Enter" && !ctrl && !e.altKey) {
+      e.preventDefault();
+      const next = e.shiftKey ? tr.previousElementSibling : tr.nextElementSibling;
+      if (next?.dataset.line) focusCellElement(next.children[cellIndex]);
+      else if (!e.shiftKey) addOrderLine(order, tr.dataset.line);
+      return;
+    }
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !ctrl && !e.altKey && !e.shiftKey) {
+      if (e.target.tagName === "SELECT") return;
+      if (e.target.tagName === "INPUT" && NAV_SKIP_INPUT_TYPES.has(e.target.type)) return;
+      const next = e.key === "ArrowUp" ? tr.previousElementSibling : tr.nextElementSibling;
+      if (next?.dataset.line && focusCellElement(next.children[cellIndex])) e.preventDefault();
+    }
+  }
+
+  function flashOrder(id) {
+    const card = document.querySelector(`[data-order="${cssEscape(id)}"]`);
+    if (!card) return;
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    card.classList.add("flash");
+    setTimeout(() => card.classList.remove("flash"), 1700);
+  }
+
+  function gotoOrder(id) {
+    state.orderFilter = "all";
+    state.search = "";
+    $("global-search").value = "";
+    setView("orders");
+    requestAnimationFrame(() => flashOrder(id));
+  }
+
+  function gotoCustomer(id) {
+    setView("customers");
+    requestAnimationFrame(() => {
+      const row = document.querySelector(`tr[data-cid="${cssEscape(id)}"]`);
+      if (!row) return;
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      row.classList.add("flash-row");
+      setTimeout(() => row.classList.remove("flash-row"), 1700);
+      row.querySelector("input")?.focus();
+    });
+  }
+
+  /* ==== Командная палитра ==== */
+  const palette = { items: [], index: 0 };
+
+  function paletteCommands() {
+    const items = [
+      { group: "Разделы", ico: "⌂", title: "Дашборд", sub: "KPI, инсайты и графики", run: () => setView("dashboard") },
+      { group: "Разделы", ico: "☰", title: "Заказы", sub: "таблицы заказов и позиций", run: () => setView("orders") },
+      { group: "Разделы", ico: "▦", title: "Аналитика", sub: "фильтры, сравнение периодов", run: () => setView("analytics") },
+      { group: "Разделы", ico: "◉", title: "Заказчики", sub: "контакты и рейтинг", run: () => setView("customers") },
+      { group: "Разделы", ico: "⚙", title: "Справочники", sub: "статусы, единицы, продукты", run: () => setView("catalogs") },
+
+      {
+        group: "Действия",
+        ico: "+",
+        title: "Новый заказ",
+        sub: "добавить пустой заказ",
+        run: () => {
+          state.doc.orders.push(emptyOrder());
+          markDirty();
+          state.orderFilter = "all";
+          setView("orders");
+          const last = state.doc.orders[state.doc.orders.length - 1];
+          requestAnimationFrame(() => flashOrder(last.id));
+        },
+      },
+      { group: "Действия", ico: "⤓", title: "Сохранить отчёт", right: "Ctrl+S", run: () => save() },
+      { group: "Действия", ico: "⤓", title: "Сохранить как…", right: "Ctrl+Shift+S", run: () => save({ as: true }) },
+      { group: "Действия", ico: "⌸", title: "Открыть отчёт", right: "Ctrl+O", run: () => maybeOpen(openFromDialog) },
+      { group: "Действия", ico: "✧", title: "Создать новый отчёт", right: "Ctrl+N", run: onNew },
+      { group: "Действия", ico: "⎘", title: "Экспорт в CSV", sub: "все позиции отчёта", run: exportCsv },
+      { group: "Действия", ico: "▣", title: "Снимок заказов", sub: "красивая картинка для заказчика", run: () => openShare(null) },
+      { group: "Действия", ico: "↶", title: "Отменить действие", right: "Ctrl+Z", run: undo },
+      { group: "Действия", ico: "↷", title: "Повторить действие", right: "Ctrl+Y", run: redo },
+      {
+        group: "Действия",
+        ico: "◐",
+        title: currentTheme() === "dark" ? "Включить светлую тему" : "Включить тёмную тему",
+        run: () => applyTheme(currentTheme() === "dark" ? "light" : "dark", true),
+      },
+      {
+        group: "Действия",
+        ico: "☰",
+        title: ensureUi().sidebar_collapsed ? "Развернуть боковую панель" : "Свернуть боковую панель",
+        run: () => {
+          ensureUi().sidebar_collapsed = !ensureUi().sidebar_collapsed;
+          applySidebar();
+          markDirty();
+        },
+      },
+      { group: "Действия", ico: "?", title: "Горячие клавиши", right: "F1", run: openHelp },
+
+      {
+        group: "Фильтры",
+        ico: "!",
+        title: "Заказы с долгом",
+        sub: "оставить только неоплаченные",
+        run: () => {
+          state.orderFilter = "debt";
+          setView("orders");
+        },
+      },
+      {
+        group: "Фильтры",
+        ico: "✓",
+        title: "Полностью оплаченные заказы",
+        run: () => {
+          state.orderFilter = "paid";
+          setView("orders");
+        },
+      },
+      {
+        group: "Фильтры",
+        ico: "◷",
+        title: "Заказы этого месяца",
+        run: () => {
+          state.orderFilter = "month";
+          setView("orders");
+        },
+      },
+      {
+        group: "Фильтры",
+        ico: "∑",
+        title: "Аналитика: только долги",
+        run: () => {
+          setView("analytics");
+          $("f-unpaid").checked = true;
+          renderAnalytics();
+        },
+      },
+    ];
+    return items;
+  }
+
+  function paletteDataItems() {
+    const items = [];
+    (state.doc.orders || []).forEach((order) => {
+      const t = orderTotals(order);
+      items.push({
+        group: "Заказы",
+        ico: "№",
+        title: `${order.number || "—"} · ${order.name || "без названия"}`,
+        sub: order.customer || "без заказчика",
+        right: money(t.after),
+        run: () => gotoOrder(order.id),
+      });
+    });
+    (state.doc.customers || []).forEach((c) => {
+      items.push({
+        group: "Заказчики",
+        ico: "◉",
+        title: c.name || "без имени",
+        sub: [c.organization, c.phone].filter(Boolean).join(" · "),
+        right: `${(state.doc.orders || []).filter((o) => o.customer === c.name).length} зак.`,
+        run: () => gotoCustomer(c.id),
+      });
+    });
+    (state.doc.products || []).forEach((p) => {
+      items.push({
+        group: "Продукты",
+        ico: "✦",
+        title: p.name,
+        sub: `ед. по умолчанию: ${p.unit}`,
+        run: () => {
+          setView("analytics");
+          $("f-product").value = p.name;
+          renderAnalytics();
+        },
+      });
+    });
+    return items;
+  }
+
+  function paletteMatch(item, tokens) {
+    if (!tokens.length) return true;
+    const hay = `${item.title} ${item.sub || ""} ${item.group}`.toLowerCase();
+    return tokens.every((t) => hay.includes(t));
+  }
+
+  function renderPaletteList(query) {
+    const tokens = String(query || "")
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
+    const all = [...paletteCommands(), ...paletteDataItems()];
+    const limit = tokens.length ? 8 : 5;
+    const counts = {};
+    const items = [];
+    all.forEach((item) => {
+      if (!paletteMatch(item, tokens)) return;
+      counts[item.group] = (counts[item.group] || 0) + 1;
+      if (counts[item.group] <= limit) items.push(item);
+    });
+    palette.items = items.slice(0, 40);
+    palette.index = 0;
+    drawPalette();
+  }
+
+  function drawPalette() {
+    const list = $("palette-list");
+    if (!palette.items.length) {
+      list.innerHTML = `<div class="palette-empty">Ничего не найдено. Попробуйте другое слово.</div>`;
+      return;
+    }
+    let group = null;
+    list.innerHTML = palette.items
+      .map((item, i) => {
+        let head = "";
+        if (item.group !== group) {
+          group = item.group;
+          head = `<div class="palette-group">${esc(group)}</div>`;
+        }
+        return `${head}<button type="button" class="palette-item ${i === palette.index ? "active" : ""}" data-pi="${i}">
+          <span class="pi-ico">${esc(item.ico || "•")}</span>
+          <span><span class="pi-title">${esc(item.title)}</span>${item.sub ? `<span class="pi-sub"> — ${esc(item.sub)}</span>` : ""}</span>
+          ${item.right ? `<span class="pi-right">${esc(item.right)}</span>` : ""}
+        </button>`;
+      })
+      .join("");
+    list.querySelector(".palette-item.active")?.scrollIntoView({ block: "nearest" });
+  }
+
+  function paletteMove(dir) {
+    if (!palette.items.length) return;
+    palette.index = (palette.index + dir + palette.items.length) % palette.items.length;
+    drawPalette();
+  }
+
+  function paletteRun(index) {
+    const item = palette.items[index];
+    if (!item) return;
+    closePalette();
+    try {
+      item.run();
+    } catch (err) {
+      toast(String(err.message || err));
+    }
+  }
+
+  function openPalette() {
+    if (!state.doc || $("app-shell").hidden) return;
+    $("palette").classList.add("open");
+    const input = $("palette-input");
+    input.value = "";
+    renderPaletteList("");
+    setTimeout(() => input.focus(), 10);
+  }
+
+  function closePalette() {
+    $("palette").classList.remove("open");
+  }
+
+  function paletteIsOpen() {
+    return $("palette").classList.contains("open");
+  }
+
+  function openHelp() {
+    $("help-modal").classList.add("open");
+  }
+
   function onOrderClick(e) {
     const act = e.target.dataset.act || e.target.closest("button")?.dataset.act;
     if (!act) return;
@@ -2441,10 +3205,23 @@
       return;
     }
     if (act === "del") {
-      if (!confirm("Удалить заказ целиком?")) return;
+      historyCommit();
       state.doc.orders = state.doc.orders.filter((o) => o.id !== order.id);
       markDirty();
       renderOrders();
+      undoToast(`Заказ ${order.number || ""} удалён`.trim());
+    }
+    if (act === "dupline") {
+      const tr = e.target.closest("[data-line]");
+      const idx = order.lines.findIndex((l) => l.id === tr?.dataset.line);
+      if (idx < 0) return;
+      const copy = JSON.parse(JSON.stringify(order.lines[idx]));
+      copy.id = uid();
+      order.lines.splice(idx + 1, 0, copy);
+      markDirty();
+      renderOrders();
+      requestAnimationFrame(() => focusLineCell(copy.id, 2));
+      return;
     }
     if (act === "dup") {
       const copy = JSON.parse(JSON.stringify(order));
@@ -2456,18 +3233,7 @@
       renderOrders();
     }
     if (act === "addline") {
-      const prev = (order.lines || [])[order.lines.length - 1];
-      const line = emptyLine();
-      if (prev) {
-        line.order_type = prev.order_type;
-        line.product = prev.product;
-        line.unit = prev.unit;
-        line.order_date = prev.order_date;
-        line.status = prev.status;
-      }
-      order.lines.push(line);
-      markDirty();
-      renderOrders();
+      addOrderLine(order);
     }
     if (act === "delline") {
       const id = e.target.closest("[data-line]").dataset.line;
@@ -2475,9 +3241,11 @@
         toast("У заказа должна остаться хотя бы одна позиция. Удалите заказ целиком, если он не нужен.");
         return;
       }
+      historyCommit();
       order.lines = order.lines.filter((l) => l.id !== id);
       markDirty();
       renderOrders();
+      undoToast("Строка удалена");
     }
   }
 

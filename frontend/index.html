@@ -100,16 +100,28 @@
             <span class="ico">⌕</span>
             <input id="global-search" placeholder="Поиск по номеру, заказчику, названию, продукту…" />
           </div>
+          <button class="btn cmd-btn" type="button" id="btn-command" title="Командная палитра">
+            <span class="cmd-star">✦</span><span class="cmd-text">Команды</span><kbd>Ctrl</kbd><kbd>K</kbd>
+          </button>
         </div>
         <div class="top-right">
+          <div class="history-group">
+            <button class="btn icon" type="button" id="btn-undo" title="Отменить (Ctrl+Z)" disabled>↶</button>
+            <button class="btn icon" type="button" id="btn-redo" title="Повторить (Ctrl+Y)" disabled>↷</button>
+          </div>
           <button class="btn js-theme-toggle" type="button" title="Тема">Тема</button>
           <button class="btn" id="btn-home">К списку отчётов</button>
           <button class="btn" id="btn-export">Экспорт CSV</button>
+          <button class="btn icon" type="button" id="btn-help" title="Горячие клавиши (F1)">?</button>
         </div>
       </header>
       <section class="content">
         <div class="view active" id="view-dashboard">
           <div class="kpis" id="kpi-row"></div>
+          <div class="card insights-card">
+            <h3>Инсайты <span class="insights-sub">считаются по всем заказам отчёта</span></h3>
+            <div class="insights" id="insights"></div>
+          </div>
           <div class="grid-2">
             <div class="card">
               <h3>Выручка по дням</h3>
@@ -146,6 +158,13 @@
               </select>
             </div>
             <div class="right" id="orders-summary"></div>
+          </div>
+          <div class="chips" id="order-chips">
+            <button class="chip active" type="button" data-filter="all">Все<span class="chip-count"></span></button>
+            <button class="chip" type="button" data-filter="debt">С долгом<span class="chip-count"></span></button>
+            <button class="chip" type="button" data-filter="paid">Оплаченные<span class="chip-count"></span></button>
+            <button class="chip" type="button" data-filter="month">Этот месяц<span class="chip-count"></span></button>
+            <button class="chip" type="button" data-filter="empty">Без цены<span class="chip-count"></span></button>
           </div>
           <div id="orders-list"></div>
         </div>
@@ -322,6 +341,58 @@
         <button class="btn" type="button" id="share-cancel">Закрыть</button>
         <button class="btn" type="button" id="share-copy">Копировать</button>
         <button class="btn primary" type="button" id="share-save">Сохранить PNG</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="palette" id="palette">
+    <div class="palette-card">
+      <div class="palette-input">
+        <span class="ico">✦</span>
+        <input id="palette-input" placeholder="Команда, заказ, заказчик или продукт…" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="palette-list" id="palette-list"></div>
+      <div class="palette-foot">
+        <span><kbd>↑</kbd><kbd>↓</kbd> выбор</span>
+        <span><kbd>Enter</kbd> выполнить</span>
+        <span><kbd>Esc</kbd> закрыть</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="help-modal">
+    <div class="modal-card help-modal">
+      <h3>Горячие клавиши</h3>
+      <p>Всё управление доступно с клавиатуры — руки не нужно убирать с клавиш.</p>
+      <div class="help-grid">
+        <div class="help-col">
+          <h4>Файл</h4>
+          <div class="help-row"><span>Сохранить</span><span><kbd>Ctrl</kbd><kbd>S</kbd></span></div>
+          <div class="help-row"><span>Сохранить как</span><span><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>S</kbd></span></div>
+          <div class="help-row"><span>Открыть отчёт</span><span><kbd>Ctrl</kbd><kbd>O</kbd></span></div>
+          <div class="help-row"><span>Новый отчёт</span><span><kbd>Ctrl</kbd><kbd>N</kbd></span></div>
+          <h4>Общее</h4>
+          <div class="help-row"><span>Командная палитра</span><span><kbd>Ctrl</kbd><kbd>K</kbd></span></div>
+          <div class="help-row"><span>Отменить действие</span><span><kbd>Ctrl</kbd><kbd>Z</kbd></span></div>
+          <div class="help-row"><span>Повторить действие</span><span><kbd>Ctrl</kbd><kbd>Y</kbd></span></div>
+          <div class="help-row"><span>Поиск по отчёту</span><span><kbd>Ctrl</kbd><kbd>F</kbd></span></div>
+          <div class="help-row"><span>Эта подсказка</span><span><kbd>F1</kbd></span></div>
+        </div>
+        <div class="help-col">
+          <h4>Таблица заказа</h4>
+          <div class="help-row"><span>Вниз / вверх по столбцу</span><span><kbd>Enter</kbd> / <kbd>Shift</kbd><kbd>Enter</kbd></span></div>
+          <div class="help-row"><span>Соседняя ячейка</span><span><kbd>↑</kbd><kbd>↓</kbd></span></div>
+          <div class="help-row"><span>Скопировать значение сверху</span><span><kbd>Ctrl</kbd><kbd>D</kbd></span></div>
+          <div class="help-row"><span>Передвинуть строку</span><span><kbd>Alt</kbd><kbd>↑</kbd><kbd>↓</kbd></span></div>
+          <div class="help-row"><span>Новая строка в заказе</span><span><kbd>Ctrl</kbd><kbd>Enter</kbd></span></div>
+          <div class="help-row"><span>Дублировать строку</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>D</kbd></span></div>
+          <h4>Ячейки</h4>
+          <div class="help-row"><span>Формулы в кол-ве, цене, скидке</span><span><kbd>2+3*4</kbd></span></div>
+          <div class="help-row"><span>Запятая превращается в точку</span><span><kbd>2,5</kbd> → <kbd>2.5</kbd></span></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn primary" type="button" id="help-close">Понятно</button>
       </div>
     </div>
   </div>
