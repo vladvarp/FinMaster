@@ -376,6 +376,7 @@
     historySchedule();
     updateChrome();
     syncDirty();
+    remotePublish();
     if (state.autosave) {
       clearTimeout(state.autosaveTimer);
       state.autosaveTimer = setTimeout(() => save({ silent: true }), 800);
@@ -386,6 +387,7 @@
     state.dirty = false;
     updateChrome();
     syncDirty();
+    remotePublish();
   }
 
   function updateChrome() {
@@ -1323,6 +1325,7 @@
     setClean();
     showApp();
     setView("dashboard");
+    remotePublish();
     toast("Отчёт открыт");
   }
 
@@ -2090,6 +2093,7 @@
           return;
         }
         if ($("help-modal").classList.contains("open")) $("help-modal").classList.remove("open");
+        if ($("remote-modal").classList.contains("open")) $("remote-modal").classList.remove("open");
       }
       if (!ctrl) return;
       if (code === "KeyK" || (e.shiftKey && code === "KeyP")) {
@@ -3264,6 +3268,13 @@
         },
       },
       { group: "Действия", ico: "⤓", title: "Сохранить отчёт", right: "Ctrl+S", run: () => save() },
+      {
+        group: "Действия",
+        ico: "▯",
+        title: remote.enabled ? "Телефон: показать QR-код" : "Управление с телефона",
+        sub: "работать с отчётом со смартфона",
+        run: () => $("btn-remote")?.click(),
+      },
       { group: "Действия", ico: "⤓", title: "Сохранить как…", right: "Ctrl+Shift+S", run: () => save({ as: true }) },
       { group: "Действия", ico: "⌸", title: "Открыть отчёт", right: "Ctrl+O", run: () => maybeOpen(openFromDialog) },
       { group: "Действия", ico: "✧", title: "Создать новый отчёт", right: "Ctrl+N", run: onNew },
@@ -3523,9 +3534,247 @@
     }
   }
 
+  /* ========== Управление с телефона ========== */
+
+  const remote = {
+    enabled: false,
+    url: "",
+    version: 0,
+    cid: `desktop-${Math.random().toString(16).slice(2, 8)}`,
+    lastCommand: 0,
+    publishTimer: null,
+    polling: false,
+    applying: false,
+  };
+
+  function remoteBadge() {
+    const phones = remote.clients?.filter((c) => c.kind === "mobile").length || 0;
+    const live = $("phone-live");
+    if (live) {
+      live.hidden = !remote.enabled;
+      live.textContent = phones ? String(phones) : "";
+      live.classList.toggle("idle", remote.enabled && !phones);
+    }
+    $("btn-remote")?.classList.toggle("on", remote.enabled);
+  }
+
+  function renderRemoteIps() {
+    const box = $("remote-ips");
+    if (!box) return;
+    const list = remote.ips || [];
+    box.hidden = !remote.enabled || list.length < 2;
+    if (box.hidden) return;
+    box.innerHTML = list
+      .map((ip) => `<button type="button" data-ip="${ip}" class="${ip === remote.ip ? "active" : ""}">${ip}</button>`)
+      .join("");
+  }
+
+  function renderRemoteModal(data) {
+    const qrBox = $("remote-qr");
+    const stateText = $("remote-state-text");
+    const stateBox = $("remote-state");
+    if (remote.enabled) {
+      if (data?.qr) qrBox.innerHTML = data.qr;
+      if (data?.ips) remote.ips = data.ips;
+      if (data?.ip) remote.ip = data.ip;
+      $("remote-url").textContent = remote.url || "—";
+      renderRemoteIps();
+      stateBox.classList.add("on");
+      const phones = remote.clients?.filter((c) => c.kind === "mobile").length || 0;
+      stateText.textContent = phones ? `Подключено телефонов: ${phones}` : "Доступ включён — ждём телефон";
+      $("remote-clients").textContent = phones
+        ? "Изменения с телефона применяются здесь автоматически."
+        : "Отсканируйте код камерой телефона.";
+      $("remote-start").hidden = true;
+      $("remote-stop").hidden = false;
+    } else {
+      qrBox.innerHTML = '<div class="remote-qr-empty">Сессия не запущена</div>';
+      $("remote-url").textContent = "—";
+      $("remote-ips").hidden = true;
+      stateBox.classList.remove("on");
+      stateText.textContent = "Доступ выключен";
+      $("remote-clients").textContent = "Подключённых устройств нет";
+      $("remote-start").hidden = false;
+      $("remote-stop").hidden = true;
+    }
+    remoteBadge();
+  }
+
+  async function remoteStart() {
+    if (!state.desktop) {
+      toast("Удалённый доступ работает только в приложении на компьютере");
+      return;
+    }
+    if (!state.doc) {
+      toast("Сначала откройте или создайте отчёт");
+      return;
+    }
+    try {
+      const data = await apiPost("/api/remote/start", { document: state.doc, path: state.path, dirty: state.dirty });
+      remote.enabled = true;
+      remote.url = data.url;
+      remote.ip = data.ip;
+      remote.ips = data.ips || [];
+      remote.version = data.version || 0;
+      remote.clients = [];
+      renderRemoteModal(data);
+      toast("Доступ с телефона включён");
+      if (!remote.polling) remotePoll();
+    } catch (err) {
+      toast(`Не удалось включить доступ: ${err.message || err}`);
+    }
+  }
+
+  async function remoteStop() {
+    try {
+      await apiPost("/api/remote/stop", {});
+    } catch {
+      /* ignore */
+    }
+    remote.enabled = false;
+    remote.url = "";
+    remote.clients = [];
+    renderRemoteModal();
+    toast("Доступ с телефона выключен");
+  }
+
+  function remotePublish() {
+    if (!remote.enabled || !state.desktop || !state.doc || remote.applying) return;
+    clearTimeout(remote.publishTimer);
+    remote.publishTimer = setTimeout(async () => {
+      try {
+        const res = await apiPost("/api/remote/publish", {
+          document: state.doc,
+          path: state.path,
+          dirty: state.dirty,
+        });
+        if (res.version) remote.version = res.version;
+      } catch {
+        /* телефон переподключится сам */
+      }
+    }, 250);
+  }
+
+  async function remotePoll() {
+    remote.polling = true;
+    while (remote.enabled) {
+      try {
+        const data = await apiGet(`/api/remote/pull?since=${remote.version}&cid=${remote.cid}&kind=desktop`);
+        if (data.enabled === false) break;
+        if (typeof data.version === "number") remote.version = data.version;
+        remote.clients = data.clients || [];
+        remoteBadge();
+        if ($("remote-modal").classList.contains("open")) renderRemoteModal();
+        if (data.command && data.command.id > remote.lastCommand) {
+          remote.lastCommand = data.command.id;
+          await runRemoteCommand(data.command);
+        } else if (data.changed && data.document && data.origin && data.origin !== "desktop") {
+          applyRemoteDoc(data.document);
+        }
+      } catch {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+    remote.polling = false;
+  }
+
+  function applyRemoteDoc(doc) {
+    const active = document.activeElement;
+    const typing = active && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName);
+    if (typing) {
+      remote.deferred = doc;
+      return;
+    }
+    remote.applying = true;
+    historyCommit();
+    state.doc = doc;
+    state.dirty = true;
+    renderAll();
+    syncDirty();
+    historySchedule();
+    remote.applying = false;
+    toast("Изменения с телефона применены");
+  }
+
+  function flushRemoteDoc() {
+    if (!remote.deferred) return;
+    const doc = remote.deferred;
+    remote.deferred = null;
+    applyRemoteDoc(doc);
+  }
+
+  async function runRemoteCommand(cmd) {
+    if (cmd.type === "save") {
+      const ok = await save({ silent: true });
+      toast(ok ? "Отчёт сохранён с телефона" : "Телефон просил сохранить — укажите файл на компьютере");
+      if (!ok) await save();
+    } else if (cmd.type === "open" && cmd.path) {
+      await openPath(cmd.path);
+      toast("Отчёт открыт по команде с телефона");
+    } else if (cmd.type === "new") {
+      state.doc = emptyDoc();
+      state.path = "";
+      historyReset();
+      setClean();
+      showApp();
+      setView("dashboard");
+      toast("Новый отчёт создан с телефона");
+    }
+    remotePublish();
+  }
+
+  function bindRemote() {
+    $("btn-remote")?.addEventListener("click", async () => {
+      $("remote-modal").classList.add("open");
+      if (state.desktop) {
+        try {
+          const info = await apiGet("/api/remote/info");
+          remote.enabled = !!info.enabled;
+          remote.clients = info.clients || [];
+        } catch {
+          /* ignore */
+        }
+      }
+      renderRemoteModal();
+      if (!remote.enabled) remoteStart();
+    });
+    $("remote-close")?.addEventListener("click", () => $("remote-modal").classList.remove("open"));
+    $("remote-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("remote-modal")) $("remote-modal").classList.remove("open");
+    });
+    $("remote-ips")?.addEventListener("click", async (e) => {
+      const btn = e.target.closest("[data-ip]");
+      if (!btn || btn.dataset.ip === remote.ip) return;
+      try {
+        const data = await apiPost("/api/remote/address", { ip: btn.dataset.ip });
+        remote.url = data.url;
+        remote.ip = data.ip;
+        remote.ips = data.ips || remote.ips;
+        renderRemoteModal(data);
+        toast(`Адрес переключён на ${data.ip}`);
+      } catch (err) {
+        toast(`Не удалось сменить адрес: ${err.message || err}`);
+      }
+    });
+    $("remote-start")?.addEventListener("click", remoteStart);
+    $("remote-stop")?.addEventListener("click", remoteStop);
+    $("remote-copy")?.addEventListener("click", async () => {
+      if (!remote.url) return;
+      try {
+        if (state.desktop) await apiPost("/api/clipboard-text", { text: remote.url });
+        else await navigator.clipboard.writeText(remote.url);
+        toast("Ссылка скопирована");
+      } catch {
+        toast("Не удалось скопировать ссылку");
+      }
+    });
+    document.addEventListener("focusout", () => setTimeout(flushRemoteDoc, 150));
+  }
+
   async function boot() {
     try {
       bind();
+      bindRemote();
     } catch (err) {
       console.error(err);
     }

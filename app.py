@@ -10,9 +10,11 @@ from typing import Any
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from backend import storage
+from backend import qr, storage
 from backend.dialogs import open_report_dialog, save_csv_dialog, save_png_dialog, save_report_dialog
 from backend.document import normalize_document, now_iso
+from backend.remote import SESSION as REMOTE
+from backend.remote import lan_candidates, lan_ip
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 FRONTEND = os.path.join(ROOT, "frontend")
@@ -21,11 +23,44 @@ app = Flask(__name__, static_folder=FRONTEND, static_url_path="")
 WINDOW = None
 FORCE_CLOSE = False
 DIRTY = False
+SERVER_PORT = 0
+
+LOCAL_ADDRS = {"127.0.0.1", "::1", "localhost"}
+MOBILE_FILES = {"/m", "/mobile.html", "/mobile.js", "/mobile.css"}
+
+
+def _is_local() -> bool:
+    return (request.remote_addr or "") in LOCAL_ADDRS
+
+
+@app.before_request
+def guard_remote_clients():
+    """Телефон видит только мобильный интерфейс и только с действующим токеном."""
+    if _is_local():
+        return None
+    if not REMOTE.enabled:
+        return jsonify({"error": "Удалённый доступ выключен на компьютере."}), 403
+    path = request.path
+    if path in MOBILE_FILES:
+        return None
+    if path.startswith("/api/remote/"):
+        token = request.headers.get("X-FM-Token") or request.args.get("t")
+        if not token:
+            token = (request.get_json(silent=True) or {}).get("token")
+        if not REMOTE.check(token):
+            return jsonify({"error": "Сессия недействительна — отсканируйте QR-код заново."}), 401
+        return None
+    return jsonify({"error": "Доступ запрещён."}), 403
 
 
 @app.get("/")
 def index():
     return send_from_directory(FRONTEND, "index.html")
+
+
+@app.get("/m")
+def mobile_index():
+    return send_from_directory(FRONTEND, "mobile.html")
 
 
 @app.get("/<path:filename>")
@@ -226,11 +261,137 @@ def api_clipboard_png():
     return jsonify({"ok": True})
 
 
+@app.post("/api/remote/start")
+def api_remote_start():
+    data = request.get_json(silent=True) or {}
+    token = REMOTE.start()
+    REMOTE.publish(data.get("document"), data.get("path") or "", "desktop", bool(data.get("dirty")))
+    ips = lan_candidates()
+    ip = str(data.get("ip") or "") if str(data.get("ip") or "") in ips else ips[0]
+    url = f"http://{ip}:{SERVER_PORT}/m?t={token}"
+    return jsonify(
+        {
+            "ok": True,
+            "url": url,
+            "token": token,
+            "ip": ip,
+            "ips": ips,
+            "port": SERVER_PORT,
+            "qr": qr.svg(url, module=6),
+            "version": REMOTE.version,
+        }
+    )
+
+
+@app.post("/api/remote/address")
+def api_remote_address():
+    """Перерисовать QR для другого сетевого адреса, не разрывая сессию."""
+    if not REMOTE.enabled:
+        return jsonify({"error": "Сессия не запущена."}), 409
+    data = request.get_json(silent=True) or {}
+    ips = lan_candidates()
+    ip = str(data.get("ip") or "")
+    if ip not in ips:
+        return jsonify({"error": "Неизвестный адрес."}), 400
+    url = f"http://{ip}:{SERVER_PORT}/m?t={REMOTE.token}"
+    return jsonify({"ok": True, "url": url, "ip": ip, "ips": ips, "qr": qr.svg(url, module=6)})
+
+
+@app.post("/api/remote/stop")
+def api_remote_stop():
+    REMOTE.stop()
+    return jsonify({"ok": True})
+
+
+@app.get("/api/remote/info")
+def api_remote_info():
+    snap = REMOTE.snapshot(with_doc=False)
+    snap["ip"] = lan_ip()
+    snap["ips"] = lan_candidates()
+    snap["port"] = SERVER_PORT
+    return jsonify(snap)
+
+
+@app.post("/api/remote/publish")
+def api_remote_publish():
+    """Компьютер отдаёт свежий документ подключённым телефонам."""
+    if not REMOTE.enabled:
+        return jsonify({"ok": False, "enabled": False})
+    data = request.get_json(silent=True) or {}
+    version = REMOTE.publish(data.get("document"), data.get("path") or "", "desktop", bool(data.get("dirty")))
+    return jsonify({"ok": True, "version": version})
+
+
+@app.get("/api/remote/pull")
+def api_remote_pull():
+    """Длинный опрос: ждём изменений документа с любой стороны."""
+    if not REMOTE.enabled:
+        return jsonify({"enabled": False, "version": REMOTE.version, "changed": False})
+    since = request.args.get("since", type=int) or 0
+    cid = request.args.get("cid") or ""
+    kind = request.args.get("kind") or "mobile"
+    name = request.args.get("name") or ""
+    REMOTE.touch(cid, kind, name)
+    snap = REMOTE.wait(since)
+    return jsonify(snap)
+
+
+@app.get("/api/remote/session")
+def api_remote_session():
+    """Стартовые данные мобильного клиента."""
+    snap = REMOTE.snapshot(with_doc=True)
+    snap["recent"] = _recent_payload()
+    snap["desktop_online"] = bool(REMOTE.clients("desktop"))
+    return jsonify(snap)
+
+
+@app.post("/api/remote/push")
+def api_remote_push():
+    """Телефон присылает изменённый документ."""
+    if not REMOTE.enabled:
+        return jsonify({"error": "Сессия закрыта."}), 409
+    data = request.get_json(silent=True) or {}
+    document = data.get("document")
+    if not isinstance(document, dict):
+        return jsonify({"error": "Нет документа."}), 400
+    cid = str(data.get("cid") or "mobile")
+    REMOTE.touch(cid, "mobile", str(data.get("name") or ""))
+    version = REMOTE.publish(document, REMOTE.path, cid, True)
+    return jsonify({"ok": True, "version": version})
+
+
+@app.post("/api/remote/command")
+def api_remote_command():
+    """Телефон просит компьютер сохранить отчёт или открыть другой файл."""
+    if not REMOTE.enabled:
+        return jsonify({"error": "Сессия закрыта."}), 409
+    data = request.get_json(silent=True) or {}
+    kind = str(data.get("type") or "")
+    if kind not in {"save", "open", "new"}:
+        return jsonify({"error": "Неизвестная команда."}), 400
+    payload: dict[str, Any] = {}
+    if kind == "open":
+        path = str(data.get("path") or "")
+        if not path or not os.path.exists(path):
+            return jsonify({"error": "Файл не найден."}), 404
+        payload["path"] = os.path.abspath(path)
+    version = REMOTE.issue_command(kind, **payload)
+    return jsonify({"ok": True, "version": version})
+
+
+@app.post("/api/remote/leave")
+def api_remote_leave():
+    data = request.get_json(silent=True) or {}
+    REMOTE.drop(str(data.get("cid") or ""))
+    return jsonify({"ok": True})
+
+
 @app.post("/api/quit")
 def api_quit():
     global FORCE_CLOSE, DIRTY
     FORCE_CLOSE = True
     DIRTY = False
+    REMOTE.stop()
     window = WINDOW
     if window is not None:
         threading.Timer(0.05, window.destroy).start()
@@ -241,18 +402,20 @@ def pick_port() -> int:
     import socket
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
+        sock.bind(("0.0.0.0", 0))
         return int(sock.getsockname()[1])
 
 
 def run_server(port: int) -> None:
-    app.run(host="127.0.0.1", port=port, threaded=True, use_reloader=False)
+    # Слушаем всю локальную сеть, но чужие адреса пускает только guard_remote_clients.
+    app.run(host="0.0.0.0", port=port, threaded=True, use_reloader=False)
 
 
 def main() -> None:
-    global WINDOW, FORCE_CLOSE, DIRTY
+    global WINDOW, FORCE_CLOSE, DIRTY, SERVER_PORT
 
     port = pick_port()
+    SERVER_PORT = port
     url = f"http://127.0.0.1:{port}/"
     thread = threading.Thread(target=run_server, args=(port,), daemon=True)
     thread.start()

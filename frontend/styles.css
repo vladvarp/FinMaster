@@ -1528,6 +1528,124 @@ html[data-theme="dark"] .chip.active { background: var(--accent); color: #fff; }
 html[data-theme="dark"] kbd { background: #1b2538; color: #cbd5e1; }
 html[data-theme="dark"] .fin-tip { box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5); }
 
+/* ==== Управление с телефона ==== */
+.phone-btn { display: inline-flex; align-items: center; gap: 7px; position: relative; }
+.phone-ico {
+  display: inline-block;
+  width: 11px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+  font-size: 0;
+}
+.phone-btn.on { border-color: var(--accent-2); color: var(--accent); }
+.phone-live {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--ok);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  animation: phone-pop 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.phone-live.idle { background: var(--muted); }
+.phone-live.idle::after { content: "•"; }
+@keyframes phone-pop {
+  from { transform: scale(0.4); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+.remote-modal { max-width: 720px; }
+.remote-layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 20px;
+  align-items: start;
+  margin-top: 14px;
+}
+.remote-qr-wrap { text-align: center; }
+.remote-qr {
+  display: grid;
+  place-items: center;
+  min-height: 216px;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+}
+.remote-qr svg { width: 100%; height: auto; max-width: 200px; display: block; }
+.remote-qr-empty { color: #94a3b8; font-size: 13px; }
+.remote-url {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+  font-family: Consolas, monospace;
+}
+.remote-ips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 10px;
+}
+.remote-ips button {
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--muted);
+  font-size: 11px;
+  font-family: Consolas, monospace;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.remote-ips button:hover { border-color: var(--accent-2); color: var(--ink); }
+.remote-ips button.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+
+.remote-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.remote-state.on { color: var(--ok); border-color: rgba(5, 150, 105, 0.35); }
+.remote-dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.remote-state.on .remote-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.35; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+.remote-steps {
+  margin: 14px 0 12px;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.75;
+}
+.remote-clients {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--muted);
+}
+@media (max-width: 720px) {
+  .remote-layout { grid-template-columns: 1fr; }
+}
+
 /* ==== Динамика интерфейса ==== */
 .view.active {
   animation: view-in 0.28s cubic-bezier(0.22, 1, 0.36, 1);

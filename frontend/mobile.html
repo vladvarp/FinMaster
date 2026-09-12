@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+    <meta name="theme-color" content="#0f766e" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>FinMaster — телефон</title>
+    <link rel="stylesheet" href="/mobile.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <button type="button" class="icon-btn" id="btn-back" hidden aria-label="Назад">‹</button>
+      <div class="topbar-title">
+        <strong id="head-title">FinMaster</strong>
+        <span id="head-sub">подключение…</span>
+      </div>
+      <button type="button" class="icon-btn" id="btn-theme" aria-label="Тема">◐</button>
+      <button type="button" class="icon-btn accent" id="btn-save" aria-label="Сохранить на компьютере">↓</button>
+    </header>
+
+    <div class="sync-bar" id="sync-bar"><span class="sync-dot"></span><span id="sync-text">синхронизация…</span></div>
+
+    <main id="main">
+      <!-- Заказы -->
+      <section class="screen" id="screen-orders">
+        <div class="search-wrap">
+          <input type="search" id="search" placeholder="Поиск: заказ, клиент, позиция" autocomplete="off" />
+        </div>
+        <div class="chips" id="chips"></div>
+        <div class="list" id="orders-list"></div>
+        <button type="button" class="fab" id="btn-add-order" aria-label="Новый заказ">+</button>
+      </section>
+
+      <!-- Карточка заказа -->
+      <section class="screen" id="screen-order" hidden>
+        <div id="order-head"></div>
+        <div class="list" id="lines-list"></div>
+        <div class="stack">
+          <button type="button" class="btn wide" id="btn-add-line">+ Добавить позицию</button>
+          <button type="button" class="btn wide danger-ghost" id="btn-del-order">Удалить заказ</button>
+        </div>
+      </section>
+
+      <!-- Сводка -->
+      <section class="screen" id="screen-stats" hidden>
+        <div id="stats-body"></div>
+      </section>
+
+      <!-- Отчёты -->
+      <section class="screen" id="screen-files" hidden>
+        <div id="files-body"></div>
+      </section>
+    </main>
+
+    <nav class="tabbar" id="tabbar">
+      <button type="button" data-tab="orders" class="active"><span>▤</span>Заказы</button>
+      <button type="button" data-tab="stats"><span>◔</span>Сводка</button>
+      <button type="button" data-tab="files"><span>◈</span>Отчёты</button>
+    </nav>
+
+    <div class="blocker" id="blocker" hidden>
+      <div class="blocker-card">
+        <h2 id="blocker-title">Сессия закрыта</h2>
+        <p id="blocker-text">Откройте на компьютере «Телефон» и отсканируйте QR-код заново.</p>
+        <button type="button" class="btn primary" id="btn-retry">Попробовать снова</button>
+      </div>
+    </div>
+
+    <div class="sheet" id="sheet" hidden>
+      <div class="sheet-back" data-close-sheet></div>
+      <div class="sheet-card">
+        <div class="sheet-grip"></div>
+        <h3 id="sheet-title">Выбор</h3>
+        <div class="sheet-list" id="sheet-list"></div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+    <script src="/mobile.js"></script>
+  </body>
+</html>

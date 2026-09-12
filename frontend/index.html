@@ -109,6 +109,9 @@
             <button class="btn icon" type="button" id="btn-undo" title="Отменить (Ctrl+Z)" disabled>↶</button>
             <button class="btn icon" type="button" id="btn-redo" title="Повторить (Ctrl+Y)" disabled>↷</button>
           </div>
+          <button class="btn phone-btn" type="button" id="btn-remote" title="Управление с телефона">
+            <span class="phone-ico">▯</span><span>Телефон</span><span class="phone-live" id="phone-live" hidden></span>
+          </button>
           <button class="btn js-theme-toggle" type="button" title="Тема">Тема</button>
           <button class="btn" id="btn-home">К списку отчётов</button>
           <button class="btn" id="btn-export">Экспорт CSV</button>
@@ -374,6 +377,38 @@
         <span><kbd>↑</kbd><kbd>↓</kbd> выбор</span>
         <span><kbd>Enter</kbd> выполнить</span>
         <span><kbd>Esc</kbd> закрыть</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="remote-modal">
+    <div class="modal-card remote-modal">
+      <h3>Управление с телефона</h3>
+      <p>Наведите камеру телефона на код — откроется полноценный интерфейс отчёта в браузере. Все правки появляются здесь мгновенно.</p>
+      <div class="remote-layout">
+        <div class="remote-qr-wrap">
+          <div class="remote-qr" id="remote-qr"><div class="remote-qr-empty">Сессия не запущена</div></div>
+          <div class="remote-url" id="remote-url">—</div>
+          <div class="remote-ips" id="remote-ips" hidden></div>
+        </div>
+        <div class="remote-side">
+          <div class="remote-state" id="remote-state">
+            <span class="remote-dot"></span><span id="remote-state-text">Доступ выключен</span>
+          </div>
+          <ul class="remote-steps">
+            <li>Телефон и компьютер должны быть в одной сети Wi‑Fi.</li>
+            <li>Камера или любой сканер QR откроет ссылку в браузере.</li>
+            <li>Ссылка действует, пока окно программы открыто и доступ включён.</li>
+            <li>Если браузер не открывает адрес — разрешите Python в брандмауэре Windows для частной сети.</li>
+          </ul>
+          <div class="remote-clients" id="remote-clients">Подключённых устройств нет</div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" type="button" id="remote-close">Закрыть</button>
+        <button class="btn" type="button" id="remote-copy">Копировать ссылку</button>
+        <button class="btn danger" type="button" id="remote-stop" hidden>Выключить доступ</button>
+        <button class="btn primary" type="button" id="remote-start">Включить доступ</button>
       </div>
     </div>
   </div>
