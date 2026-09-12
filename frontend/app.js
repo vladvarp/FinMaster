@@ -82,6 +82,24 @@
     return { total, after, paid, unpaid, discount };
   }
 
+  function paidStatus() {
+    const list = state.doc?.statuses || [];
+    return list.find((s) => s.is_paid) || list.find((s) => s.id === "paid") || list.find((s) => /оплачен/i.test(s.name || ""));
+  }
+
+  function applyPaidIfCovered(line) {
+    const ps = paidStatus();
+    if (!ps) return false;
+    const t = lineTotals(line);
+    if (t.after > 0 && t.paid + 0.005 >= t.after) {
+      if (line.status !== ps.name) {
+        line.status = ps.name;
+        return true;
+      }
+    }
+    return false;
+  }
+
   function orderTotals(order) {
     return (order.lines || []).reduce(
       (acc, line) => {
@@ -108,7 +126,7 @@
         { id: "in_progress", name: "Выполняется", color: "#2563eb" },
         { id: "waiting", name: "Ожидание", color: "#d97706" },
         { id: "unpaid", name: "Не оплачено", color: "#dc2626" },
-        { id: "paid", name: "Оплачено", color: "#059669" },
+        { id: "paid", name: "Оплачено", color: "#059669", is_paid: true },
         { id: "cancelled", name: "Отменено", color: "#64748b" },
         { id: "annulled", name: "Аннулирован", color: "#475569" },
         { id: "blacklist", name: "Черный список", color: "#111827" },
@@ -597,6 +615,18 @@
               <button class="btn small danger" data-act="del">Удалить</button>
             </div>
           </div>
+          <div class="order-globals">
+            <div class="field"><label>Тип всем строкам</label>
+              <select data-g="order_type"><option value="">— не менять —</option>${optionList(types, "")}</select>
+            </div>
+            <div class="field"><label>Скидка % всем</label>
+              <input data-g="discount" type="number" min="0" max="100" step="0.01" placeholder="%" />
+            </div>
+            <div class="field"><label>Статус всем строкам</label>
+              <select data-g="status"><option value="">— не менять —</option>${optionList(statusNames, "")}</select>
+            </div>
+            <button class="btn small primary" data-act="payall" title="В каждую строку запишет её итог и при полной оплате поставит статус «оплачено»">Оплатить все типы</button>
+          </div>
           <div class="table-wrap">
             <table class="data">
               ${colgroupHtml()}
@@ -699,7 +729,16 @@
             <td><span class="pill" style="background:${statusMeta(line.status).color}">${esc(line.status)}</span></td>
           </tr>`
           )
-          .join("")}</tbody></table>
+          .join("")}</tbody>
+          <tfoot><tr>
+            <td colspan="5">Итого</td>
+            <td class="num">${rows.length} поз.</td>
+            <td class="num">${esc(money(s.after))}</td>
+            <td class="num">${esc(money(s.paid))}</td>
+            <td class="num">${esc(money(s.unpaid))}</td>
+            <td colspan="2">${s.orderCount} зак.</td>
+          </tr></tfoot>
+          </table>
           <p class="hint">Найдено ${rows.length} позиций, ${s.orderCount} заказов, сумма ${money(s.after)}, долг ${money(s.unpaid)}</p>`
       : `<div class="empty">Ничего не найдено — ослабьте фильтры.</div>`;
   }
@@ -719,6 +758,7 @@
         (s, i) => `<div class="list-item" data-i="${i}">
         <input type="color" data-ck="color" value="${esc(toHex(s.color))}" />
         <input data-ck="name" value="${esc(s.name)}" />
+        <label class="paid-toggle" title="Статус полной оплаты"><input type="radio" name="paid-status-flag" data-ck="is_paid" ${s.is_paid ? "checked" : ""} /> Оплачено</label>
         <button class="btn small danger" data-cact="del">Удалить</button>
       </div>`
       )
@@ -987,6 +1027,7 @@
       markDirty();
       setView("orders");
     });
+    $("btn-share-many").addEventListener("click", () => openShare(null));
     $("order-sort").addEventListener("change", () => renderOrders());
     $("autosave").addEventListener("change", async (e) => {
       state.autosave = e.target.checked;
@@ -1018,6 +1059,15 @@
       if (e.target.dataset.ck === "color") s.color = e.target.value;
       markDirty();
     });
+    $("status-list").addEventListener("change", (e) => {
+      if (e.target.dataset.ck !== "is_paid") return;
+      const i = Number(e.target.closest(".list-item").dataset.i);
+      (state.doc.statuses || []).forEach((st, idx) => {
+        st.is_paid = idx === i;
+      });
+      markDirty();
+      renderCatalogs();
+    });
     $("status-list").addEventListener("click", (e) => {
       if (e.target.dataset.cact === "del") {
         const i = Number(e.target.closest(".list-item").dataset.i);
@@ -1027,7 +1077,7 @@
       }
     });
     $("btn-add-status").addEventListener("click", () => {
-      state.doc.statuses.push({ id: uid(), name: "Новый статус", color: "#64748b" });
+      state.doc.statuses.push({ id: uid(), name: "Новый статус", color: "#64748b", is_paid: false });
       markDirty();
       renderCatalogs();
     });
@@ -1184,6 +1234,23 @@
       markDirty();
       renderSharePreview();
     });
+    $("share-title").addEventListener("input", renderSharePreview);
+    $("share-hide-labels").addEventListener("change", renderSharePreview);
+    $("share-hide-stamp").addEventListener("change", renderSharePreview);
+    $("share-orders").addEventListener("change", (e) => {
+      const block = e.target.closest(".share-order");
+      if (block && e.target.hasAttribute("data-share-order")) {
+        block.querySelectorAll("[data-share-line]").forEach((el) => {
+          el.checked = e.target.checked;
+        });
+      }
+      if (block && e.target.hasAttribute("data-share-line")) {
+        const any = [...block.querySelectorAll("[data-share-line]")].some((el) => el.checked);
+        const orderCb = block.querySelector("[data-share-order]");
+        if (orderCb) orderCb.checked = any;
+      }
+      renderSharePreview();
+    });
     document.querySelectorAll("[data-share-preset]").forEach((btn) => {
       btn.addEventListener("click", () => applySharePreset(btn.dataset.sharePreset));
     });
@@ -1307,6 +1374,33 @@
     if (!card) return;
     const order = findOrder(card.dataset.order);
     if (!order) return;
+    if (e.target.dataset.g) {
+      const g = e.target.dataset.g;
+      if (g === "discount") {
+        const v = Math.min(100, Math.max(0, num(e.target.value)));
+        (order.lines || []).forEach((line) => {
+          line.discount = v;
+          line.discount_expr = String(v);
+          applyPaidIfCovered(line);
+        });
+        markDirty();
+        if (e.type !== "change") {
+          card.querySelectorAll("[data-line]").forEach((tr) => {
+            const line = order.lines.find((l) => l.id === tr.dataset.line);
+            if (line) refreshComputed(card, tr, order, line);
+          });
+          return;
+        }
+      } else if (g === "status" || g === "order_type") {
+        if (!e.target.value) return;
+        (order.lines || []).forEach((line) => {
+          line[g] = e.target.value;
+        });
+        markDirty();
+      }
+      renderOrders();
+      return;
+    }
     if (e.target.dataset.k) {
       order[e.target.dataset.k] = e.target.value;
       if (e.target.dataset.k === "name" && !state.path) state.doc.title = e.target.value || state.doc.title;
@@ -1339,7 +1433,10 @@
     } else {
       line[key] = e.target.type === "number" ? num(e.target.value) : e.target.value;
     }
-    if (key === "status") applyRowStatus(tr, line.status);
+    applyPaidIfCovered(line);
+    applyRowStatus(tr, line.status);
+    const statusSel = tr.querySelector('[data-lk="status"]');
+    if (statusSel && statusSel.value !== line.status) statusSel.value = line.status;
     markDirty();
     refreshComputed(card, tr, order, line);
   }
@@ -1399,6 +1496,10 @@
         inp.dataset.showing = "expr";
       }
     }
+    applyPaidIfCovered(line);
+    applyRowStatus(tr, line.status);
+    const statusSel = tr.querySelector('[data-lk="status"]');
+    if (statusSel && statusSel.value !== line.status) statusSel.value = line.status;
     refreshComputed(card, tr, order, line);
     markDirty();
   }
@@ -1456,14 +1557,110 @@
     return "";
   }
 
+  function shareHideLabels() {
+    return !!$("share-hide-labels")?.checked;
+  }
+
+  function shareHideStamp() {
+    return !!$("share-hide-stamp")?.checked;
+  }
+
+  function shareTitleText(blocks) {
+    const typed = ($("share-title")?.value || "").trim();
+    if (typed) return typed;
+    if (blocks.length === 1) {
+      const o = blocks[0].order;
+      return [o.number, o.name].filter(Boolean).join(" · ") || "Снимок заказа";
+    }
+    if (blocks.length > 1) return `Заказы (${blocks.length})`;
+    return "Снимок заказа";
+  }
+
+  function linesTotals(lines) {
+    return (lines || []).reduce(
+      (acc, line) => {
+        const t = lineTotals(line);
+        acc.total += t.total;
+        acc.after += t.after;
+        acc.paid += t.paid;
+        acc.unpaid += t.unpaid;
+        return acc;
+      },
+      { total: 0, after: 0, paid: 0, unpaid: 0 }
+    );
+  }
+
+  function selectedShareBlocks() {
+    return [...document.querySelectorAll("#share-orders .share-order")]
+      .map((block) => {
+        const order = findOrder(block.dataset.order);
+        if (!order || !block.querySelector("[data-share-order]")?.checked) return null;
+        const ids = new Set([...block.querySelectorAll("[data-share-line]:checked")].map((el) => el.dataset.shareLine));
+        const lines = (order.lines || []).filter((l) => ids.has(l.id));
+        if (!lines.length) return null;
+        return { order, lines };
+      })
+      .filter(Boolean);
+  }
+
+  function shareMetaItems(order, fields, hideLabels) {
+    const items = [];
+    const add = (label, value) => {
+      const v = value || "—";
+      items.push(hideLabels ? v : `${label}${v}`);
+    };
+    if (fields.includes("number")) add("№ ", order.number);
+    if (fields.includes("name")) add("Заказ: ", order.name);
+    if (fields.includes("customer")) add("Заказчик: ", order.customer);
+    if (fields.includes("organization")) add("Организация: ", customerOrg(order.customer));
+    return items;
+  }
+
+  function shareTotalsText(fields, cols, lines) {
+    if (!fields.includes("totals")) return "";
+    const tot = linesTotals(lines);
+    const bits = [];
+    if (fields.includes("total") || fields.includes("price") || !cols.length) bits.push(`Итого ${money(tot.after)}`);
+    if (fields.includes("paid")) bits.push(`оплачено ${money(tot.paid)}`);
+    if (fields.includes("unpaid")) bits.push(`остаток ${money(tot.unpaid)}`);
+    return bits.length ? bits.join(" · ") : `Позиций: ${lines.length}`;
+  }
+
+  function renderShareOrdersPicker(focusOrderId) {
+    const box = $("share-orders");
+    const orders = state.doc.orders || [];
+    box.innerHTML = orders.length
+      ? orders
+          .map((order) => {
+            const on = !focusOrderId || focusOrderId === order.id;
+            return `<div class="share-order" data-order="${esc(order.id)}">
+          <label><input type="checkbox" data-share-order ${on ? "checked" : ""} /> ${esc(order.number || "—")} · ${esc(order.name || "без названия")}</label>
+          <div class="share-lines">${(order.lines || [])
+            .map(
+              (line) =>
+                `<label><input type="checkbox" data-share-line="${esc(line.id)}" ${on ? "checked" : ""} /> ${esc(line.order_type || "тип")} · ${esc(line.product || "—")}</label>`
+            )
+            .join("")}</div>
+        </div>`;
+          })
+          .join("")
+      : `<div class="hint">Нет заказов</div>`;
+  }
+
   function openShare(order) {
-    if (!order) return;
-    state.shareOrderId = order.id;
     const saved = ensureUi().share_fields;
     const selected = saved && saved.length ? saved : SHARE_PRESETS.work;
     $("share-fields").innerHTML = SHARE_FIELDS.map(
       (f) => `<label><input type="checkbox" value="${f.id}" ${selected.includes(f.id) ? "checked" : ""} /> ${esc(f.label)}</label>`
     ).join("");
+    renderShareOrdersPicker(order?.id || null);
+    if (order) {
+      $("share-title").value = [order.number, order.name].filter(Boolean).join(" · ");
+    } else if (!(state.doc.orders || []).length) {
+      $("share-title").value = "";
+    } else {
+      $("share-title").value = "";
+    }
     renderSharePreview();
     $("share-modal").classList.add("open");
   }
@@ -1479,85 +1676,102 @@
   }
 
   function renderSharePreview() {
-    const order = findOrder(state.shareOrderId);
     const box = $("share-preview");
-    if (!order || !box) return;
+    if (!box) return;
+    const blocks = selectedShareBlocks();
     const fields = currentShareFields();
-    const meta = [];
-    if (fields.includes("number")) meta.push(`<div><b>№</b> ${esc(order.number || "—")}</div>`);
-    if (fields.includes("name")) meta.push(`<div><b>Заказ:</b> ${esc(order.name || "—")}</div>`);
-    if (fields.includes("customer")) meta.push(`<div><b>Заказчик:</b> ${esc(order.customer || "—")}</div>`);
-    if (fields.includes("organization")) meta.push(`<div><b>Организация:</b> ${esc(customerOrg(order.customer) || "—")}</div>`);
+    const hideLabels = shareHideLabels();
+    const hideStamp = shareHideStamp();
     const cols = SHARE_FIELDS.filter((f) => f.kind === "col" && fields.includes(f.id));
-    const tot = orderTotals(order);
-    const totalsBits = [];
-    if (fields.includes("totals")) {
-      const moneyBits = [];
-      if (fields.includes("total") || !cols.some((c) => c.id === "total")) moneyBits.push(`Итого ${esc(money(tot.after))}`);
-      if (fields.includes("paid")) moneyBits.push(`оплачено ${esc(money(tot.paid))}`);
-      if (fields.includes("unpaid")) moneyBits.push(`остаток ${esc(money(tot.unpaid))}`);
-      if (!fields.includes("paid") && !fields.includes("unpaid") && !fields.includes("total") && !fields.includes("price")) {
-        totalsBits.push(`Позиций: ${(order.lines || []).length}`);
-      } else {
-        totalsBits.push(moneyBits.join(" · "));
-      }
-    }
+    const title = shareTitleText(blocks);
+    const body = blocks.length
+      ? blocks
+          .map(({ order, lines }) => {
+            const meta = shareMetaItems(order, fields, hideLabels);
+            const totalsText = shareTotalsText(fields, cols, lines);
+            const table = cols.length
+              ? `<table style="width:100%;border-collapse:collapse;font-size:13px">${
+                  hideLabels
+                    ? ""
+                    : `<thead><tr>${cols
+                        .map(
+                          (c) =>
+                            `<th style="text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;background:#f8fafc;border-top:1px solid #e2e8f0">${esc(c.label)}</th>`
+                        )
+                        .join("")}</tr></thead>`
+                }<tbody>${lines
+                  .map(
+                    (line) =>
+                      `<tr>${cols
+                        .map((c) => `<td style="text-align:left;padding:8px 10px;border-top:1px solid #e2e8f0">${esc(shareLineValue(line, c.id))}</td>`)
+                        .join("")}</tr>`
+                  )
+                  .join("")}</tbody></table>`
+              : "";
+            return `<div style="padding:0 0 12px">
+          ${meta.length ? `<div class="sp-meta" style="padding:10px 20px 6px;display:grid;gap:4px;font-size:13px;color:#334155">${meta.map((m) => `<div>${esc(m)}</div>`).join("")}</div>` : ""}
+          ${table || `<div style="padding:8px 20px;font-size:13px;color:#64748b">Таблица работ скрыта — включите колонки слева.</div>`}
+          ${totalsText ? `<div class="sp-foot" style="padding:10px 20px 4px;font-size:14px"><b>${esc(totalsText)}</b></div>` : ""}
+        </div>`;
+          })
+          .join("")
+      : `<div style="padding:20px;color:#64748b">Выберите хотя бы один заказ и строку слева.</div>`;
     box.innerHTML = `
       <div class="sp-head" style="background:linear-gradient(90deg,#0f766e,#115e59);color:#fff;padding:18px 20px">
-        <b style="font-size:18px;display:block">FinMaster</b>
-        <span style="display:block;opacity:.85;font-size:12px;margin-top:4px">${esc(state.doc.title || "Отчёт")} · снимок заказа</span>
+        <b style="font-size:18px;display:block">${esc(title)}</b>
       </div>
-      <div class="sp-meta" style="padding:14px 20px 8px;display:grid;gap:4px;font-size:13px;color:#334155">${meta.join("") || "<div>Состав работ</div>"}</div>
-      ${
-        cols.length
-          ? `<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>${cols
-              .map((c) => `<th style="text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;background:#f8fafc;border-top:1px solid #e2e8f0">${esc(c.label)}</th>`)
-              .join("")}</tr></thead><tbody>${(order.lines || [])
-              .map(
-                (line) =>
-                  `<tr>${cols
-                    .map((c) => `<td style="text-align:left;padding:8px 10px;border-top:1px solid #e2e8f0">${esc(shareLineValue(line, c.id))}</td>`)
-                    .join("")}</tr>`
-              )
-              .join("")}</tbody></table>`
-          : `<div style="padding:8px 20px;font-size:13px;color:#64748b">Таблица работ скрыта — включите нужные колонки слева.</div>`
-      }
-      ${totalsBits.length ? `<div class="sp-foot" style="padding:12px 20px 8px;font-size:14px"><b>${esc(totalsBits[0])}</b></div>` : ""}
-      <div class="sp-note" style="padding:0 20px 16px;font-size:11px;color:#94a3b8">Сформировано ${esc(new Date().toLocaleString("ru-RU"))}</div>
+      ${body}
+      ${hideStamp ? "" : `<div class="sp-note" style="padding:0 20px 16px;font-size:11px;color:#94a3b8">Сформировано ${esc(new Date().toLocaleString("ru-RU"))}</div>`}
     `;
   }
 
+  function wrapCanvasText(ctx, text, maxW) {
+    const words = String(text || "").split(/\s+/);
+    const lines = [];
+    let cur = "";
+    words.forEach((w) => {
+      const test = cur ? `${cur} ${w}` : w;
+      if (ctx.measureText(test).width > maxW && cur) {
+        lines.push(cur);
+        cur = w;
+      } else cur = test;
+    });
+    if (cur) lines.push(cur);
+    return lines.length ? lines : [""];
+  }
+
+  function fitCanvasText(ctx, text, maxW) {
+    const s = String(text || "");
+    if (ctx.measureText(s).width <= maxW) return s;
+    let t = s;
+    while (t.length && ctx.measureText(`${t}…`).width > maxW) t = t.slice(0, -1);
+    return `${t}…`;
+  }
+
   function shareToCanvas() {
-    const order = findOrder(state.shareOrderId);
-    if (!order) throw new Error("Заказ не выбран");
+    const blocks = selectedShareBlocks();
+    if (!blocks.length) throw new Error("Выберите заказы и строки для снимка");
     const fields = currentShareFields();
+    const hideLabels = shareHideLabels();
+    const hideStamp = shareHideStamp();
     const cols = SHARE_FIELDS.filter((f) => f.kind === "col" && fields.includes(f.id));
-    const lines = order.lines || [];
-    const meta = [];
-    if (fields.includes("number")) meta.push(`№ ${order.number || "—"}`);
-    if (fields.includes("name")) meta.push(`Заказ: ${order.name || "—"}`);
-    if (fields.includes("customer")) meta.push(`Заказчик: ${order.customer || "—"}`);
-    if (fields.includes("organization")) meta.push(`Организация: ${customerOrg(order.customer) || "—"}`);
-    const tot = orderTotals(order);
-    let totalsText = "";
-    if (fields.includes("totals")) {
-      const bits = [];
-      if (fields.includes("total") || fields.includes("price") || !cols.length) bits.push(`Итого ${money(tot.after)}`);
-      if (fields.includes("paid")) bits.push(`оплачено ${money(tot.paid)}`);
-      if (fields.includes("unpaid")) bits.push(`остаток ${money(tot.unpaid)}`);
-      totalsText = bits.length ? bits.join("  ·  ") : `Позиций: ${lines.length}`;
-    }
+    const title = shareTitleText(blocks);
     const stamp = `Сформировано ${new Date().toLocaleString("ru-RU")}`;
     const width = 920;
     const pad = 28;
-    const headerH = 82;
     const rowH = 34;
     const colCount = Math.max(cols.length, 1);
     const colW = (width - pad * 2) / colCount;
-    const metaH = meta.length ? meta.length * 22 + 16 : 12;
-    const tableH = cols.length ? 36 + lines.length * rowH : 28;
-    const footH = totalsText ? 40 : 8;
-    const height = headerH + metaH + tableH + footH + 36;
+    const measure = document.createElement("canvas").getContext("2d");
+    measure.font = "700 20px Segoe UI, sans-serif";
+    const titleLines = wrapCanvasText(measure, title, width - pad * 2);
+    const headerH = 22 + titleLines.length * 26 + 18;
+    let bodyH = 0;
+    blocks.forEach(({ order, lines }) => {
+      const meta = shareMetaItems(order, fields, hideLabels);
+      bodyH += (meta.length ? meta.length * 22 + 10 : 8) + (cols.length ? (hideLabels ? 0 : 32) + lines.length * rowH : 28) + (shareTotalsText(fields, cols, lines) ? 36 : 8) + 10;
+    });
+    const height = headerH + bodyH + (hideStamp ? 16 : 36);
     const scale = 2;
     const canvas = document.createElement("canvas");
     canvas.width = width * scale;
@@ -1572,62 +1786,70 @@
     ctx.fillStyle = head;
     ctx.fillRect(0, 0, width, headerH);
     ctx.fillStyle = "#ffffff";
-    ctx.font = "700 22px Segoe UI, sans-serif";
-    ctx.fillText("FinMaster", pad, 38);
-    ctx.font = "12px Segoe UI, sans-serif";
-    ctx.globalAlpha = 0.88;
-    ctx.fillText(`${state.doc.title || "Отчёт"} · снимок заказа`, pad, 60);
-    ctx.globalAlpha = 1;
-    let y = headerH + 22;
-    ctx.fillStyle = "#334155";
-    ctx.font = "13px Segoe UI, sans-serif";
-    (meta.length ? meta : ["Состав работ"]).forEach((line) => {
-      ctx.fillText(line, pad, y);
-      y += 22;
+    ctx.font = "700 20px Segoe UI, sans-serif";
+    titleLines.forEach((line, i) => {
+      ctx.fillText(line, pad, 34 + i * 26);
     });
-    y += 8;
-    if (cols.length) {
-      ctx.fillStyle = "#f8fafc";
-      ctx.fillRect(pad, y, width - pad * 2, 32);
-      ctx.fillStyle = "#64748b";
-      ctx.font = "600 11px Segoe UI, sans-serif";
-      cols.forEach((col, i) => {
-        ctx.fillText(col.label.toUpperCase(), pad + 8 + i * colW, y + 21);
-      });
-      y += 32;
+    let y = headerH + 18;
+    blocks.forEach(({ order, lines }, bi) => {
+      if (bi) y += 8;
+      const meta = shareMetaItems(order, fields, hideLabels);
+      ctx.fillStyle = "#334155";
       ctx.font = "13px Segoe UI, sans-serif";
-      lines.forEach((line, ri) => {
-        if (ri % 2) {
-          ctx.fillStyle = "#f8fafc";
-          ctx.fillRect(pad, y, width - pad * 2, rowH);
-        }
-        ctx.strokeStyle = "#e2e8f0";
-        ctx.beginPath();
-        ctx.moveTo(pad, y);
-        ctx.lineTo(width - pad, y);
-        ctx.stroke();
-        ctx.fillStyle = "#0f172a";
-        cols.forEach((col, i) => {
-          const text = String(shareLineValue(line, col.id) || "—");
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(pad + i * colW, y, colW - 4, rowH);
-          ctx.clip();
-          ctx.fillText(text, pad + 8 + i * colW, y + 22);
-          ctx.restore();
-        });
-        y += rowH;
+      meta.forEach((line) => {
+        ctx.fillText(fitCanvasText(ctx, line, width - pad * 2), pad, y);
+        y += 22;
       });
+      y += 6;
+      if (cols.length) {
+        if (!hideLabels) {
+          ctx.fillStyle = "#f8fafc";
+          ctx.fillRect(pad, y, width - pad * 2, 32);
+          ctx.fillStyle = "#64748b";
+          ctx.font = "600 11px Segoe UI, sans-serif";
+          cols.forEach((col, i) => {
+            ctx.fillText(fitCanvasText(ctx, col.label.toUpperCase(), colW - 12), pad + 8 + i * colW, y + 21);
+          });
+          y += 32;
+        }
+        ctx.font = "13px Segoe UI, sans-serif";
+        lines.forEach((line, ri) => {
+          if (ri % 2) {
+            ctx.fillStyle = "#f8fafc";
+            ctx.fillRect(pad, y, width - pad * 2, rowH);
+          }
+          ctx.strokeStyle = "#e2e8f0";
+          ctx.beginPath();
+          ctx.moveTo(pad, y);
+          ctx.lineTo(width - pad, y);
+          ctx.stroke();
+          ctx.fillStyle = "#0f172a";
+          cols.forEach((col, i) => {
+            const text = fitCanvasText(ctx, String(shareLineValue(line, col.id) || "—"), colW - 12);
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(pad + i * colW, y, colW - 4, rowH);
+            ctx.clip();
+            ctx.fillText(text, pad + 8 + i * colW, y + 22);
+            ctx.restore();
+          });
+          y += rowH;
+        });
+      }
+      const totalsText = shareTotalsText(fields, cols, lines);
+      if (totalsText) {
+        y += 18;
+        ctx.fillStyle = "#0f172a";
+        ctx.font = "700 14px Segoe UI, sans-serif";
+        ctx.fillText(fitCanvasText(ctx, totalsText, width - pad * 2), pad, y);
+        y += 18;
+      }
+    });
+    if (!hideStamp) {
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "11px Segoe UI, sans-serif";
+      ctx.fillText(stamp, pad, height - 16);
     }
-    if (totalsText) {
-      y += 18;
-      ctx.fillStyle = "#0f172a";
-      ctx.font = "700 14px Segoe UI, sans-serif";
-      ctx.fillText(totalsText, pad, y);
-    }
-    ctx.fillStyle = "#94a3b8";
-    ctx.font = "11px Segoe UI, sans-serif";
-    ctx.fillText(stamp, pad, height - 16);
     return canvas;
   }
 
@@ -1669,8 +1891,8 @@
     try {
       const canvas = await shareToCanvas();
       const blob = await canvasToPngBlob(canvas);
-      const order = findOrder(state.shareOrderId);
-      const name = `Заказ_${order?.number || "снимок"}.png`.replace(/[\\/:*?"<>|]+/g, "_");
+      const title = shareTitleText(selectedShareBlocks());
+      const name = `${(title || "снимок").slice(0, 80)}.png`.replace(/[\\/:*?"<>|]+/g, "_");
       if (state.desktop) {
         const picked = await apiPost("/api/dialog/png", { suggested: name });
         if (picked.cancelled || !picked.path) return;
@@ -1702,6 +1924,17 @@
     const order = findOrder(card.dataset.order);
     if (act === "share") {
       openShare(order);
+      return;
+    }
+    if (act === "payall") {
+      (order.lines || []).forEach((line) => {
+        const after = lineTotals(line).after;
+        line.paid = after;
+        line.paid_expr = String(after);
+        applyPaidIfCovered(line);
+      });
+      markDirty();
+      renderOrders();
       return;
     }
     if (act === "del") {

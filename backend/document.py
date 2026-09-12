@@ -11,7 +11,7 @@ DEFAULT_STATUSES = [
     {"id": "in_progress", "name": "Выполняется", "color": "#2563eb"},
     {"id": "waiting", "name": "Ожидание", "color": "#d97706"},
     {"id": "unpaid", "name": "Не оплачено", "color": "#dc2626"},
-    {"id": "paid", "name": "Оплачено", "color": "#059669"},
+    {"id": "paid", "name": "Оплачено", "color": "#059669", "is_paid": True},
     {"id": "cancelled", "name": "Отменено", "color": "#64748b"},
     {"id": "annulled", "name": "Аннулирован", "color": "#475569"},
     {"id": "blacklist", "name": "Черный список", "color": "#111827"},
@@ -70,8 +70,21 @@ def normalize_document(raw: Any) -> dict[str, Any]:
                     "id": str(item.get("id") or name),
                     "name": name,
                     "color": str(item.get("color") or "#64748b"),
+                    "is_paid": bool(item.get("is_paid")),
                 }
             )
+        if cleaned and not any(x.get("is_paid") for x in cleaned):
+            for item in cleaned:
+                if item["id"] == "paid" or "оплач" in item["name"].lower():
+                    item["is_paid"] = True
+                    break
+        paid_seen = False
+        for item in cleaned:
+            if item.get("is_paid"):
+                if paid_seen:
+                    item["is_paid"] = False
+                else:
+                    paid_seen = True
         if cleaned:
             base["statuses"] = cleaned
 

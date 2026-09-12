@@ -120,6 +120,7 @@
           <div class="toolbar">
             <div class="left">
               <button class="btn primary" id="btn-add-order">+ Заказ</button>
+              <button class="btn" type="button" id="btn-share-many">Снимок заказов</button>
               <select id="order-sort" class="btn">
                 <option value="date-desc">Сначала новые</option>
                 <option value="date-asc">Сначала старые</option>
@@ -207,7 +208,7 @@
           <div class="catalog-grid">
             <div class="card">
               <h3>Статусы заказа</h3>
-              <p class="hint" style="margin-top:0">Можно переименовать, перекрасить, добавить и удалить. Удаление не трогает уже проставленные статусы в заказах.</p>
+              <p class="hint" style="margin-top:0">Переименуйте статусы как удобно. Тумблер «Оплачено» отмечает статус, который программа ставит, когда позиция полностью оплачена.</p>
               <div class="list-edit" id="status-list"></div>
               <button class="btn small" id="btn-add-status" style="margin-top:10px">+ Статус</button>
             </div>
@@ -269,15 +270,23 @@
   <div class="modal" id="share-modal">
     <div class="modal-card share-modal">
       <h3>Снимок для заказчика</h3>
-      <p>Отметьте, что попадёт на картинку. Скрытые поля заказчик не увидит.</p>
+      <p>Выберите поля, заказы и строки. Заголовок снимка задаёте сами.</p>
       <div class="share-layout">
-        <div>
+        <div class="share-side">
+          <div class="field" style="margin-bottom:10px">
+            <label>Заголовок снимка</label>
+            <input id="share-title" placeholder="Например: 0001 · Вывеска" />
+          </div>
+          <label class="share-opt"><input type="checkbox" id="share-hide-labels" /> Скрыть подписи полей</label>
+          <label class="share-opt"><input type="checkbox" id="share-hide-stamp" /> Скрыть дату формирования</label>
           <div class="share-presets">
             <button class="btn small" type="button" data-share-preset="work">Только работы</button>
             <button class="btn small" type="button" data-share-preset="invoice">Счёт</button>
             <button class="btn small" type="button" data-share-preset="full">Все поля</button>
           </div>
           <div class="share-fields" id="share-fields"></div>
+          <div class="share-preview-label" style="margin-top:12px">Заказы и строки</div>
+          <div class="share-orders" id="share-orders"></div>
         </div>
         <div>
           <div class="share-preview-label">Предпросмотр</div>
