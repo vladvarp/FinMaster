@@ -188,14 +188,15 @@
   }
 
   function updateChrome() {
-  function updateChrome() {
     const titleEl = $("report-title");
-    if (document.activeElement !== titleEl) {
+    if (titleEl && document.activeElement !== titleEl) {
       titleEl.value = state.doc?.title || "Отчёт";
     }
-    $("file-path").textContent = state.path || "Файл ещё не сохранён";
-    $("dirty-dot").classList.toggle("hidden", !state.dirty);
-    $("autosave").checked = !!state.autosave;
+    const pathEl = $("file-path");
+    if (pathEl) pathEl.textContent = state.path || "Файл ещё не сохранён";
+    $("dirty-dot")?.classList.toggle("hidden", !state.dirty);
+    const autosaveEl = $("autosave");
+    if (autosaveEl) autosaveEl.checked = !!state.autosave;
     document.title = `${state.dirty ? "• " : ""}${state.doc?.title || "FinMaster"} — FinMaster`;
   }
 
@@ -1136,15 +1137,8 @@
     $("autosave").checked = state.autosave;
   }
 
-  document.addEventListener("click", (e) => {
-    if (e.target.closest("#btn-start-new")) {
-      e.preventDefault();
-      createNew();
-    } else if (e.target.closest("#btn-start-open")) {
-      e.preventDefault();
-      openFromDialog();
-    }
-  });
+  window.finmasterNew = createNew;
+  window.finmasterOpen = openFromDialog;
 
   boot();
 })();
