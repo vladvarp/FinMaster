@@ -65,14 +65,14 @@
           <button data-view="catalogs" title="Справочники"><span class="nav-ico">⚙</span><span class="nav-label">Справочники</span></button>
           <button data-view="customers" title="Заказчики"><span class="nav-ico">◉</span><span class="nav-label">Заказчики</span></button>
         </nav>
-        <div class="side-actions">
-          <button class="btn ghost" id="btn-new">Новый</button>
-          <button class="btn ghost" id="btn-open">Открыть</button>
-          <button class="btn primary" id="btn-save">Сохранить</button>
-          <button class="btn ghost" id="btn-save-as">Сохранить как</button>
-          <label class="side-check"><input type="checkbox" id="autosave" /> <span>Автосохранение</span></label>
-          <div class="hint">Без галочки отчёт пишется только по кнопке «Сохранить». При закрытии с несохранёнными изменениями программа спросит подтверждение.</div>
-        </div>
+      </div>
+      <div class="side-actions">
+        <button class="btn ghost" id="btn-new">Новый</button>
+        <button class="btn ghost" id="btn-open">Открыть</button>
+        <button class="btn primary" id="btn-save">Сохранить</button>
+        <button class="btn ghost" id="btn-save-as">Сохранить как</button>
+        <label class="side-check"><input type="checkbox" id="autosave" /> <span>Автосохранение</span></label>
+        <div class="hint">Без галочки отчёт пишется только по кнопке «Сохранить». При закрытии с несохранёнными изменениями программа спросит подтверждение.</div>
       </div>
     </aside>
 
@@ -260,6 +260,32 @@
         <button class="btn" id="new-cancel">Отмена</button>
         <button class="btn" id="new-save">Сохранить и создать</button>
         <button class="btn primary" id="new-discard">Создать без сохранения</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="share-modal">
+    <div class="modal-card share-modal">
+      <h3>Снимок для заказчика</h3>
+      <p>Отметьте, что попадёт на картинку. Скрытые поля заказчик не увидит.</p>
+      <div class="share-layout">
+        <div>
+          <div class="share-presets">
+            <button class="btn small" type="button" data-share-preset="work">Только работы</button>
+            <button class="btn small" type="button" data-share-preset="invoice">Счёт</button>
+            <button class="btn small" type="button" data-share-preset="full">Все поля</button>
+          </div>
+          <div class="share-fields" id="share-fields"></div>
+        </div>
+        <div>
+          <div class="share-preview-label">Предпросмотр</div>
+          <div class="share-preview-wrap"><div id="share-preview" class="share-preview"></div></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" type="button" id="share-cancel">Закрыть</button>
+        <button class="btn" type="button" id="share-copy">Копировать</button>
+        <button class="btn primary" type="button" id="share-save">Сохранить PNG</button>
       </div>
     </div>
   </div>

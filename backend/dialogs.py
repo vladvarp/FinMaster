@@ -97,3 +97,29 @@ def save_csv_dialog(suggested: str = "Экспорт.csv", initial_dir: str = ""
             return path
         finally:
             root.destroy()
+
+
+def save_png_dialog(suggested: str = "Заказ.png", initial_dir: str = "") -> str | None:
+    from tkinter import filedialog
+    import os
+
+    with _lock:
+        root = _root()
+        try:
+            kwargs: dict[str, Any] = {
+                "parent": root,
+                "title": "Сохранить снимок заказа",
+                "defaultextension": ".png",
+                "filetypes": [("PNG", "*.png"), ("Все файлы", "*.*")],
+                "initialfile": suggested,
+            }
+            if initial_dir:
+                kwargs["initialdir"] = initial_dir
+            path = filedialog.asksaveasfilename(**kwargs)
+            if not path:
+                return None
+            if not os.path.splitext(path)[1]:
+                path += ".png"
+            return path
+        finally:
+            root.destroy()

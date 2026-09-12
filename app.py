@@ -11,7 +11,7 @@ from typing import Any
 from flask import Flask, jsonify, request, send_from_directory
 
 from backend import storage
-from backend.dialogs import open_report_dialog, save_csv_dialog, save_report_dialog
+from backend.dialogs import open_report_dialog, save_csv_dialog, save_png_dialog, save_report_dialog
 from backend.document import normalize_document, now_iso
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -144,6 +144,54 @@ def api_write_text():
     if not path:
         return jsonify({"error": "Не указан путь файла."}), 400
     storage.atomic_write(path, content)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/dialog/png")
+def api_dialog_png():
+    data = request.get_json(silent=True) or {}
+    suggested = data.get("suggested") or "Заказ.png"
+    path = save_png_dialog(suggested, storage.load_config().get("last_dir") or "")
+    if not path:
+        return jsonify({"cancelled": True})
+    return jsonify({"path": path, "cancelled": False})
+
+
+@app.post("/api/write-bytes")
+def api_write_bytes():
+    import base64
+
+    data = request.get_json(silent=True) or {}
+    path = data.get("path") or ""
+    payload = data.get("base64") or ""
+    if not path:
+        return jsonify({"error": "Не указан путь файла."}), 400
+    raw = base64.b64decode(payload)
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    os.makedirs(directory, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as fh:
+        fh.write(raw)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/clipboard-png")
+def api_clipboard_png():
+    import base64
+
+    from backend.clipboard import copy_png_to_clipboard
+
+    data = request.get_json(silent=True) or {}
+    payload = data.get("base64") or ""
+    if not payload:
+        return jsonify({"error": "Нет изображения."}), 400
+    try:
+        copy_png_to_clipboard(base64.b64decode(payload))
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
     return jsonify({"ok": True})
 
 

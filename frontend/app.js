@@ -15,6 +15,7 @@
     closeAfterSave: false,
     newAfterSave: false,
     selectedCustomerId: null,
+    shareOrderId: null,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -116,7 +117,7 @@
       order_types: ["Производство", "Услуга", "Поставка", "Монтаж"],
       customers: [],
       orders: [],
-      ui: { sidebar_collapsed: false, column_widths: {} },
+      ui: { sidebar_collapsed: false, column_widths: {}, share_fields: [] },
     };
   }
 
@@ -482,6 +483,7 @@
   function ensureUi() {
     if (!state.doc.ui || typeof state.doc.ui !== "object") state.doc.ui = { sidebar_collapsed: false, column_widths: {} };
     if (!state.doc.ui.column_widths || typeof state.doc.ui.column_widths !== "object") state.doc.ui.column_widths = {};
+    if (!Array.isArray(state.doc.ui.share_fields)) state.doc.ui.share_fields = [];
     return state.doc.ui;
   }
 
@@ -590,6 +592,7 @@
             <div class="field"><label>Заказчик</label><input data-k="customer" list="customer-list" value="${esc(order.customer)}" /></div>
             <div class="field"><label>Название заказа</label><input data-k="name" value="${esc(order.name)}" /></div>
             <div class="field" style="align-items:flex-end;flex-direction:row;gap:8px">
+              <button class="btn small" data-act="share">Снимок</button>
               <button class="btn small" data-act="dup">Дублировать</button>
               <button class="btn small danger" data-act="del">Удалить</button>
             </div>
@@ -1175,6 +1178,17 @@
       showStart();
     });
     $("btn-export").addEventListener("click", exportCsv);
+    $("share-cancel").addEventListener("click", () => $("share-modal").classList.remove("open"));
+    $("share-fields").addEventListener("change", () => {
+      ensureUi().share_fields = currentShareFields();
+      markDirty();
+      renderSharePreview();
+    });
+    document.querySelectorAll("[data-share-preset]").forEach((btn) => {
+      btn.addEventListener("click", () => applySharePreset(btn.dataset.sharePreset));
+    });
+    $("share-copy").addEventListener("click", copySharePng);
+    $("share-save").addEventListener("click", saveSharePng);
     $("recent-list").addEventListener("click", (e) => {
       const item = e.target.closest(".recent-item");
       if (!item || item.classList.contains("missing")) return;
@@ -1389,11 +1403,307 @@
     markDirty();
   }
 
+  const SHARE_FIELDS = [
+    { id: "number", label: "Номер заказа", kind: "meta" },
+    { id: "customer", label: "Имя заказчика", kind: "meta" },
+    { id: "organization", label: "Организация", kind: "meta" },
+    { id: "name", label: "Название заказа", kind: "meta" },
+    { id: "order_type", label: "Тип / работа", kind: "col" },
+    { id: "product", label: "Продукт", kind: "col" },
+    { id: "quantity", label: "Количество", kind: "col" },
+    { id: "order_date", label: "Дата заказа", kind: "col" },
+    { id: "status", label: "Статус", kind: "col" },
+    { id: "price", label: "Цена", kind: "col" },
+    { id: "discount", label: "Скидка", kind: "col" },
+    { id: "total", label: "Сумма позиции", kind: "col" },
+    { id: "paid", label: "Оплачено", kind: "col" },
+    { id: "unpaid", label: "Не оплачено", kind: "col" },
+    { id: "payment_date", label: "Дата оплаты", kind: "col" },
+    { id: "totals", label: "Итоги заказа", kind: "meta" },
+  ];
+  const SHARE_PRESETS = {
+    work: ["number", "name", "order_type", "product", "quantity", "status", "order_date"],
+    invoice: ["number", "customer", "organization", "name", "order_type", "product", "quantity", "price", "discount", "total", "paid", "unpaid", "totals"],
+    full: SHARE_FIELDS.map((f) => f.id),
+  };
+
+  function currentShareFields() {
+    return [...document.querySelectorAll("#share-fields input:checked")].map((el) => el.value);
+  }
+
+  function fmtShareDate(value) {
+    if (!value) return "—";
+    return String(value).replace("T", " ").slice(0, 16);
+  }
+
+  function customerOrg(name) {
+    return (state.doc.customers || []).find((c) => c.name === name)?.organization || "";
+  }
+
+  function shareLineValue(line, id) {
+    const t = lineTotals(line);
+    if (id === "order_type") return line.order_type || "—";
+    if (id === "product") return line.product || "—";
+    if (id === "quantity") return `${qtyValue(line)} ${line.unit || ""}`.trim();
+    if (id === "price") return money(numExpr(line, "price_expr", "price"));
+    if (id === "discount") return `${numExpr(line, "discount_expr", "discount")} %`;
+    if (id === "total") return money(t.after);
+    if (id === "paid") return money(t.paid);
+    if (id === "unpaid") return money(t.unpaid);
+    if (id === "order_date") return fmtShareDate(line.order_date);
+    if (id === "payment_date") return fmtShareDate(line.payment_date);
+    if (id === "status") return line.status || "—";
+    return "";
+  }
+
+  function openShare(order) {
+    if (!order) return;
+    state.shareOrderId = order.id;
+    const saved = ensureUi().share_fields;
+    const selected = saved && saved.length ? saved : SHARE_PRESETS.work;
+    $("share-fields").innerHTML = SHARE_FIELDS.map(
+      (f) => `<label><input type="checkbox" value="${f.id}" ${selected.includes(f.id) ? "checked" : ""} /> ${esc(f.label)}</label>`
+    ).join("");
+    renderSharePreview();
+    $("share-modal").classList.add("open");
+  }
+
+  function applySharePreset(name) {
+    const ids = SHARE_PRESETS[name] || SHARE_PRESETS.work;
+    document.querySelectorAll("#share-fields input").forEach((el) => {
+      el.checked = ids.includes(el.value);
+    });
+    ensureUi().share_fields = ids.slice();
+    markDirty();
+    renderSharePreview();
+  }
+
+  function renderSharePreview() {
+    const order = findOrder(state.shareOrderId);
+    const box = $("share-preview");
+    if (!order || !box) return;
+    const fields = currentShareFields();
+    const meta = [];
+    if (fields.includes("number")) meta.push(`<div><b>№</b> ${esc(order.number || "—")}</div>`);
+    if (fields.includes("name")) meta.push(`<div><b>Заказ:</b> ${esc(order.name || "—")}</div>`);
+    if (fields.includes("customer")) meta.push(`<div><b>Заказчик:</b> ${esc(order.customer || "—")}</div>`);
+    if (fields.includes("organization")) meta.push(`<div><b>Организация:</b> ${esc(customerOrg(order.customer) || "—")}</div>`);
+    const cols = SHARE_FIELDS.filter((f) => f.kind === "col" && fields.includes(f.id));
+    const tot = orderTotals(order);
+    const totalsBits = [];
+    if (fields.includes("totals")) {
+      const moneyBits = [];
+      if (fields.includes("total") || !cols.some((c) => c.id === "total")) moneyBits.push(`Итого ${esc(money(tot.after))}`);
+      if (fields.includes("paid")) moneyBits.push(`оплачено ${esc(money(tot.paid))}`);
+      if (fields.includes("unpaid")) moneyBits.push(`остаток ${esc(money(tot.unpaid))}`);
+      if (!fields.includes("paid") && !fields.includes("unpaid") && !fields.includes("total") && !fields.includes("price")) {
+        totalsBits.push(`Позиций: ${(order.lines || []).length}`);
+      } else {
+        totalsBits.push(moneyBits.join(" · "));
+      }
+    }
+    box.innerHTML = `
+      <div class="sp-head" style="background:linear-gradient(90deg,#0f766e,#115e59);color:#fff;padding:18px 20px">
+        <b style="font-size:18px;display:block">FinMaster</b>
+        <span style="display:block;opacity:.85;font-size:12px;margin-top:4px">${esc(state.doc.title || "Отчёт")} · снимок заказа</span>
+      </div>
+      <div class="sp-meta" style="padding:14px 20px 8px;display:grid;gap:4px;font-size:13px;color:#334155">${meta.join("") || "<div>Состав работ</div>"}</div>
+      ${
+        cols.length
+          ? `<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>${cols
+              .map((c) => `<th style="text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;background:#f8fafc;border-top:1px solid #e2e8f0">${esc(c.label)}</th>`)
+              .join("")}</tr></thead><tbody>${(order.lines || [])
+              .map(
+                (line) =>
+                  `<tr>${cols
+                    .map((c) => `<td style="text-align:left;padding:8px 10px;border-top:1px solid #e2e8f0">${esc(shareLineValue(line, c.id))}</td>`)
+                    .join("")}</tr>`
+              )
+              .join("")}</tbody></table>`
+          : `<div style="padding:8px 20px;font-size:13px;color:#64748b">Таблица работ скрыта — включите нужные колонки слева.</div>`
+      }
+      ${totalsBits.length ? `<div class="sp-foot" style="padding:12px 20px 8px;font-size:14px"><b>${esc(totalsBits[0])}</b></div>` : ""}
+      <div class="sp-note" style="padding:0 20px 16px;font-size:11px;color:#94a3b8">Сформировано ${esc(new Date().toLocaleString("ru-RU"))}</div>
+    `;
+  }
+
+  function shareToCanvas() {
+    const order = findOrder(state.shareOrderId);
+    if (!order) throw new Error("Заказ не выбран");
+    const fields = currentShareFields();
+    const cols = SHARE_FIELDS.filter((f) => f.kind === "col" && fields.includes(f.id));
+    const lines = order.lines || [];
+    const meta = [];
+    if (fields.includes("number")) meta.push(`№ ${order.number || "—"}`);
+    if (fields.includes("name")) meta.push(`Заказ: ${order.name || "—"}`);
+    if (fields.includes("customer")) meta.push(`Заказчик: ${order.customer || "—"}`);
+    if (fields.includes("organization")) meta.push(`Организация: ${customerOrg(order.customer) || "—"}`);
+    const tot = orderTotals(order);
+    let totalsText = "";
+    if (fields.includes("totals")) {
+      const bits = [];
+      if (fields.includes("total") || fields.includes("price") || !cols.length) bits.push(`Итого ${money(tot.after)}`);
+      if (fields.includes("paid")) bits.push(`оплачено ${money(tot.paid)}`);
+      if (fields.includes("unpaid")) bits.push(`остаток ${money(tot.unpaid)}`);
+      totalsText = bits.length ? bits.join("  ·  ") : `Позиций: ${lines.length}`;
+    }
+    const stamp = `Сформировано ${new Date().toLocaleString("ru-RU")}`;
+    const width = 920;
+    const pad = 28;
+    const headerH = 82;
+    const rowH = 34;
+    const colCount = Math.max(cols.length, 1);
+    const colW = (width - pad * 2) / colCount;
+    const metaH = meta.length ? meta.length * 22 + 16 : 12;
+    const tableH = cols.length ? 36 + lines.length * rowH : 28;
+    const footH = totalsText ? 40 : 8;
+    const height = headerH + metaH + tableH + footH + 36;
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    const head = ctx.createLinearGradient(0, 0, width, 0);
+    head.addColorStop(0, "#0f766e");
+    head.addColorStop(1, "#115e59");
+    ctx.fillStyle = head;
+    ctx.fillRect(0, 0, width, headerH);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "700 22px Segoe UI, sans-serif";
+    ctx.fillText("FinMaster", pad, 38);
+    ctx.font = "12px Segoe UI, sans-serif";
+    ctx.globalAlpha = 0.88;
+    ctx.fillText(`${state.doc.title || "Отчёт"} · снимок заказа`, pad, 60);
+    ctx.globalAlpha = 1;
+    let y = headerH + 22;
+    ctx.fillStyle = "#334155";
+    ctx.font = "13px Segoe UI, sans-serif";
+    (meta.length ? meta : ["Состав работ"]).forEach((line) => {
+      ctx.fillText(line, pad, y);
+      y += 22;
+    });
+    y += 8;
+    if (cols.length) {
+      ctx.fillStyle = "#f8fafc";
+      ctx.fillRect(pad, y, width - pad * 2, 32);
+      ctx.fillStyle = "#64748b";
+      ctx.font = "600 11px Segoe UI, sans-serif";
+      cols.forEach((col, i) => {
+        ctx.fillText(col.label.toUpperCase(), pad + 8 + i * colW, y + 21);
+      });
+      y += 32;
+      ctx.font = "13px Segoe UI, sans-serif";
+      lines.forEach((line, ri) => {
+        if (ri % 2) {
+          ctx.fillStyle = "#f8fafc";
+          ctx.fillRect(pad, y, width - pad * 2, rowH);
+        }
+        ctx.strokeStyle = "#e2e8f0";
+        ctx.beginPath();
+        ctx.moveTo(pad, y);
+        ctx.lineTo(width - pad, y);
+        ctx.stroke();
+        ctx.fillStyle = "#0f172a";
+        cols.forEach((col, i) => {
+          const text = String(shareLineValue(line, col.id) || "—");
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(pad + i * colW, y, colW - 4, rowH);
+          ctx.clip();
+          ctx.fillText(text, pad + 8 + i * colW, y + 22);
+          ctx.restore();
+        });
+        y += rowH;
+      });
+    }
+    if (totalsText) {
+      y += 18;
+      ctx.fillStyle = "#0f172a";
+      ctx.font = "700 14px Segoe UI, sans-serif";
+      ctx.fillText(totalsText, pad, y);
+    }
+    ctx.fillStyle = "#94a3b8";
+    ctx.font = "11px Segoe UI, sans-serif";
+    ctx.fillText(stamp, pad, height - 16);
+    return canvas;
+  }
+
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function copySharePng() {
+    try {
+      const canvas = shareToCanvas();
+      const blob = await canvasToPngBlob(canvas);
+      if (!blob) throw new Error("Не удалось создать изображение");
+      if (state.desktop) {
+        await apiPost("/api/clipboard-png", { base64: await blobToBase64(blob) });
+        toast("Снимок скопирован — вставьте в чат или документ (Ctrl+V)");
+        return;
+      }
+      if (navigator.clipboard && window.ClipboardItem) {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        toast("Снимок скопирован в буфер обмена");
+        return;
+      }
+      throw new Error("clipboard");
+    } catch (err) {
+      toast(`Не удалось скопировать: ${err.message || err}`);
+    }
+  }
+
+  async function canvasToPngBlob(canvas) {
+    return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), "image/png"));
+  }
+
+  async function saveSharePng() {
+    try {
+      const canvas = await shareToCanvas();
+      const blob = await canvasToPngBlob(canvas);
+      const order = findOrder(state.shareOrderId);
+      const name = `Заказ_${order?.number || "снимок"}.png`.replace(/[\\/:*?"<>|]+/g, "_");
+      if (state.desktop) {
+        const picked = await apiPost("/api/dialog/png", { suggested: name });
+        if (picked.cancelled || !picked.path) return;
+        const buf = await blob.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let bin = "";
+        bytes.forEach((b) => {
+          bin += String.fromCharCode(b);
+        });
+        await apiPost("/api/write-bytes", { path: picked.path, base64: btoa(bin) });
+        toast("PNG сохранён");
+        return;
+      }
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast("PNG скачан");
+    } catch (err) {
+      toast(`Не удалось сохранить снимок: ${err.message || err}`);
+    }
+  }
+
   function onOrderClick(e) {
     const act = e.target.dataset.act || e.target.closest("button")?.dataset.act;
     if (!act) return;
     const card = e.target.closest("[data-order]");
     const order = findOrder(card.dataset.order);
+    if (act === "share") {
+      openShare(order);
+      return;
+    }
     if (act === "del") {
       if (!confirm("Удалить заказ целиком?")) return;
       state.doc.orders = state.doc.orders.filter((o) => o.id !== order.id);
