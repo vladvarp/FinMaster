@@ -732,7 +732,7 @@
     const labels = Object.keys(byDay).sort().slice(-14);
     FinCharts.line($("chart-dash-line"), {
       labels,
-      datasets: [{ values: labels.map((k) => byDay[k] || 0), color: "#0f766e", fill: "rgba(15,118,110,0.12)" }],
+      datasets: [{ values: labels.map((k) => byDay[k] || 0), color: "#0f766e", label: "Выручка" }],
     });
     const byStatus = {};
     rows.forEach(({ line, totals }) => {
@@ -1147,7 +1147,7 @@
     const labels = Object.keys(series).sort();
     FinCharts.line($("chart-an-line"), {
       labels,
-      datasets: [{ values: labels.map((k) => series[k]), color: "#2563eb", fill: "rgba(37,99,235,0.12)" }],
+      datasets: [{ values: labels.map((k) => series[k]), color: "#2563eb", label: "Выручка" }],
     });
 
     const a = periodStats($("c-a-from").value, $("c-a-to").value, dateField);
@@ -1251,6 +1251,7 @@
   function renderAll() {
     if (!state.doc) return;
     normalizeProducts();
+    FinCharts.setCurrency(state.doc.currency || "₽");
     updateChrome();
     fillFilterSelects();
     if (state.view === "dashboard") renderDashboard();
