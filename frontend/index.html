@@ -6,6 +6,13 @@
   <title>FinMaster</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 42 42'%3E%3Crect width='42' height='42' rx='12' fill='%230f766e'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/styles.css" />
+  <script>
+    try {
+      if (localStorage.getItem("finmaster.theme") === "dark") {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <div class="start" id="start-screen">
@@ -29,6 +36,7 @@
         <div class="start-actions">
           <button class="btn primary" type="button" id="btn-start-new" onclick="window.finmasterNew && window.finmasterNew()">Новый отчёт</button>
           <button class="btn" type="button" id="btn-start-open" onclick="window.finmasterOpen && window.finmasterOpen()">Открыть файл</button>
+          <button class="btn js-theme-toggle" type="button" title="Тема">Тема</button>
         </div>
       </div>
       <h3 style="margin:0 0 12px;color:#cbd5e1">Недавно открытые</h3>
@@ -71,7 +79,14 @@
       <div class="side-actions">
         <button class="btn ghost" id="btn-new">Новый</button>
         <button class="btn ghost" id="btn-open">Открыть</button>
-        <button class="btn primary" id="btn-save">Сохранить</button>
+        <button class="btn primary save-btn" id="btn-save" title="Сохранить">
+          <svg class="save-ico" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M5 3h11l5 5v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M8 3v7h8V3" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M8 21v-7h8v7" stroke="currentColor" stroke-width="1.8"/>
+          </svg>
+          <span class="save-label">Сохранить</span>
+        </button>
         <button class="btn ghost" id="btn-save-as">Сохранить как</button>
         <label class="side-check"><input type="checkbox" id="autosave" /> <span>Автосохранение</span></label>
         <div class="hint">Без галочки отчёт пишется только по кнопке «Сохранить». При закрытии с несохранёнными изменениями программа спросит подтверждение.</div>
@@ -87,6 +102,7 @@
           </div>
         </div>
         <div class="top-right">
+          <button class="btn js-theme-toggle" type="button" title="Тема">Тема</button>
           <button class="btn" id="btn-home">К списку отчётов</button>
           <button class="btn" id="btn-export">Экспорт CSV</button>
         </div>
@@ -161,13 +177,16 @@
               <div class="field"><label>Ед. изм.</label><select id="f-unit"><option value="">Все</option></select></div>
               <div class="field"><label>Сумма от</label><input type="number" id="f-min" step="0.01" /></div>
               <div class="field"><label>Сумма до</label><input type="number" id="f-max" step="0.01" /></div>
-              <div class="check-row">
-                <label><input type="checkbox" id="f-unpaid" /> Только долги</label>
-                <label><input type="checkbox" id="f-blacklist" /> Чёрный список</label>
-                <button class="btn small" id="btn-preset-month">Этот месяц</button>
-                <button class="btn small" id="btn-preset-week">7 дней</button>
-                <button class="btn small" id="btn-filters-reset">Сбросить</button>
+            </div>
+            <div class="filter-bar">
+              <div class="filter-presets">
+                <button class="btn small" type="button" id="btn-preset-today">Сегодня</button>
+                <button class="btn small" type="button" id="btn-preset-week">7 дней</button>
+                <button class="btn small" type="button" id="btn-preset-month">Этот месяц</button>
+                <button class="btn small" type="button" id="btn-preset-year">Этот год</button>
               </div>
+              <label class="filter-check"><input type="checkbox" id="f-unpaid" /> Только долги</label>
+              <button class="btn small" type="button" id="btn-filters-reset">Сбросить</button>
             </div>
           </div>
           <div class="compare">
@@ -208,7 +227,7 @@
           <div class="catalog-grid">
             <div class="card">
               <h3>Статусы заказа</h3>
-              <p class="hint" style="margin-top:0">Переименуйте статусы как удобно. Тумблер «Оплачено» отмечает статус, который программа ставит, когда позиция полностью оплачена.</p>
+              <p class="hint" style="margin-top:0">Замок защищает статус от массовой смены в заказе. «Оплачено» — статус полной оплаты.</p>
               <div class="list-edit" id="status-list"></div>
               <button class="btn small" id="btn-add-status" style="margin-top:10px">+ Статус</button>
             </div>
@@ -221,6 +240,11 @@
               <h3>Типы заказа</h3>
               <div class="list-edit" id="type-list"></div>
               <button class="btn small" id="btn-add-type" style="margin-top:10px">+ Тип</button>
+            </div>
+            <div class="card">
+              <h3>Продукты</h3>
+              <div class="list-edit" id="product-catalog"></div>
+              <button class="btn small" id="btn-add-product" style="margin-top:10px">+ Продукт</button>
             </div>
           </div>
         </div>

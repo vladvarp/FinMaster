@@ -87,9 +87,13 @@
     return list.find((s) => s.is_paid) || list.find((s) => s.id === "paid") || list.find((s) => /оплачен/i.test(s.name || ""));
   }
 
+  function statusLocked(name) {
+    return !!(state.doc.statuses || []).find((s) => s.name === name && s.locked);
+  }
+
   function applyPaidIfCovered(line) {
     const ps = paidStatus();
-    if (!ps) return false;
+    if (!ps || statusLocked(line.status)) return false;
     const t = lineTotals(line);
     if (t.after > 0 && t.paid + 0.005 >= t.after) {
       if (line.status !== ps.name) {
@@ -133,6 +137,7 @@
       ],
       units: ["шт.", "м²", "м", "мин"],
       order_types: ["Производство", "Услуга", "Поставка", "Монтаж"],
+      products: [],
       customers: [],
       orders: [],
       ui: { sidebar_collapsed: false, column_widths: {}, share_fields: [] },
@@ -218,6 +223,47 @@
     const list = localRecent().filter((x) => x.path !== path);
     list.unshift({ path, title, opened_at: new Date().toISOString(), exists: true });
     localStorage.setItem(LS_RECENT, JSON.stringify(list.slice(0, 15)));
+  }
+
+  async function removeRecent(path) {
+    if (!path) return;
+    if (state.desktop) {
+      try {
+        const res = await apiPost("/api/recent/remove", { path });
+        await renderRecent(res.recent || []);
+        return;
+      } catch {
+        toast("Не удалось убрать из списка");
+        return;
+      }
+    }
+    localStorage.setItem(LS_RECENT, JSON.stringify(localRecent().filter((x) => x.path !== path)));
+    await renderRecent();
+  }
+
+  const LS_THEME = "finmaster.theme";
+
+  function currentTheme() {
+    return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+  }
+
+  function applyTheme(theme, persist) {
+    const t = theme === "dark" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", t);
+    try {
+      localStorage.setItem(LS_THEME, t);
+    } catch {
+      /* ignore */
+    }
+    document.querySelectorAll(".js-theme-toggle").forEach((btn) => {
+      btn.setAttribute("aria-pressed", t === "dark" ? "true" : "false");
+      btn.textContent = t === "dark" ? "Светлая" : "Тёмная";
+      btn.title = t === "dark" ? "Включить светлую тему" : "Включить тёмную тему";
+    });
+    if (persist && state.desktop) {
+      apiPost("/api/theme", { theme: t }).catch(() => {});
+    }
+    if (state.doc) renderAll();
   }
 
   function markDirty() {
@@ -316,7 +362,6 @@
     const min = $("f-min").value === "" ? null : num($("f-min").value);
     const max = $("f-max").value === "" ? null : num($("f-max").value);
     const unpaidOnly = $("f-unpaid").checked;
-    const blacklist = $("f-blacklist").checked;
 
     return allRows().filter(({ order, line, totals }) => {
       if (q && !matchesSearch(order, line, q)) return false;
@@ -332,7 +377,6 @@
       if (min != null && totals.after < min) return false;
       if (max != null && totals.after > max) return false;
       if (unpaidOnly && totals.unpaid <= 0) return false;
-      if (blacklist && line.status !== "Черный список" && !statusMeta(line.status).name.toLowerCase().includes("черн")) return false;
       return true;
     });
   }
@@ -417,7 +461,7 @@
           .map(({ order, line, totals }) => {
             const msg = /черн/i.test(line.status) ? "чёрный список" : `долг ${money(totals.unpaid)}`;
             return `<div class="alert-row"><span class="pill" style="background:${statusMeta(line.status).color}">${esc(line.status)}</span>
-              <div><b>${esc(order.number)}</b> · ${esc(order.customer) || "без заказчика"} · ${esc(line.product) || esc(order.name)}</div>
+              <div><b>${esc(order.number)}</b> · ${esc(order.name) || "без названия"} · ${esc(line.product) || "без продукта"}</div>
               <div style="margin-left:auto;color:#dc2626">${esc(msg)}</div></div>`;
           })
           .join("")
@@ -437,6 +481,19 @@
     discount_expr: "discount",
     paid_expr: "paid",
   };
+  const DECIMAL_KEYS = new Set(["qty_expr", "price_expr", "discount_expr"]);
+
+  function commaToDot(inp) {
+    if (!DECIMAL_KEYS.has(inp?.dataset?.lk) || !inp.value.includes(",")) return;
+    const start = inp.selectionStart;
+    const end = inp.selectionEnd;
+    inp.value = inp.value.replaceAll(",", ".");
+    try {
+      if (start != null) inp.setSelectionRange(start, end);
+    } catch {
+      /* ignore */
+    }
+  }
 
   function exprRaw(line, exprKey) {
     const numKey = EXPR_MAP[exprKey];
@@ -483,6 +540,7 @@
   }
 
   const ORDER_COLS = [
+    ["drag", "", 28],
     ["order_type", "Тип заказа", 130],
     ["product", "Продукт", 150],
     ["qty_expr", "Кол-во", 90],
@@ -507,7 +565,8 @@
 
   function colWidth(key, fallback) {
     const w = Number(ensureUi().column_widths[key]);
-    return Math.max(52, Number.isFinite(w) && w > 0 ? w : fallback);
+    const min = key === "drag" ? 24 : 52;
+    return Math.max(min, Number.isFinite(w) && w > 0 ? w : fallback);
   }
 
   function colgroupHtml() {
@@ -515,7 +574,16 @@
   }
 
   function orderHeadHtml() {
-    return ORDER_COLS.map(([key, label]) => `<th data-col="${key}">${label}${key === "actions" ? "" : `<span class="col-resizer" data-col="${key}"></span>`}</th>`).join("");
+    return ORDER_COLS.map(([key, label]) => {
+      const cal =
+        key === "order_date" || key === "payment_date"
+          ? `<span class="th-cal" title="Дата всем строкам заказа">
+              <input type="datetime-local" data-g="${key}" />
+            </span>`
+          : "";
+      const resize = key === "actions" || key === "drag" ? "" : `<span class="col-resizer" data-col="${key}"></span>`;
+      return `<th data-col="${key}"><span class="th-title">${label}</span>${cal}${resize}</th>`;
+    }).join("");
   }
 
   function applySidebar() {
@@ -560,6 +628,13 @@
     });
   }
 
+  function starRatingHtml(value) {
+    const n = Math.max(0, Math.min(5, Math.round(num(value))));
+    return `<div class="star-rating" title="${n ? `${n} из 5` : "без оценки"}">${[5, 4, 3, 2, 1]
+      .map((i) => `<button type="button" class="star${i <= n ? " on" : ""}" data-star="${i}" aria-label="${i} из 5">★</button>`)
+      .join("")}</div>`;
+  }
+
   function renderCustomers() {
     const box = $("customers-panel");
     if (!box || !state.doc) return;
@@ -581,7 +656,7 @@
             <td><input data-cf="phone" value="${esc(c.phone || "")}" /></td>
             <td><input data-cf="email" value="${esc(c.email || "")}" /></td>
             <td><input data-cf="address" value="${esc(c.address || "")}" /></td>
-            <td><div class="rating-wrap"><input type="range" min="0" max="5" step="1" data-cf="rating" value="${esc(c.rating || 0)}" /><span class="rating-label">${Number(c.rating) ? "★".repeat(Number(c.rating)) : "—"}</span></div></td>
+            <td>${starRatingHtml(c.rating)}</td>
             <td class="meta">${esc(customerTenure(c))}</td>
             <td>${n}</td>
             <td><button class="btn small danger" type="button" data-cact="delcust">Удалить</button></td>
@@ -638,6 +713,7 @@
                   .map((line) => {
                     const t = lineTotals(line);
                     return `<tr data-line="${line.id}" class="line-row" style="--status-color:${esc(statusColor(line.status))}">
+                      <td class="line-drag" title="Перетащить строку"><span></span></td>
                       <td><select data-lk="order_type">${optionList(unique([line.order_type, ...types]), line.order_type)}</select></td>
                       <td><input data-lk="product" list="product-list" value="${esc(line.product)}" /></td>
                       <td class="num">${exprInput(line, "qty_expr")}</td>
@@ -666,6 +742,38 @@
       .join("");
   }
 
+  function ensureProduct(name) {
+    const n = String(name || "").trim();
+    if (!n) return;
+    const list = state.doc.products || (state.doc.products = []);
+    if (!list.some((p) => p === n)) list.push(n);
+  }
+
+  function syncProductsFromOrders() {
+    const list = state.doc.products || (state.doc.products = []);
+    (state.doc.orders || []).forEach((order) => {
+      (order.lines || []).forEach((line) => ensureProduct(line.product));
+    });
+  }
+
+  function renameProduct(oldName, nextName) {
+    if (!oldName || oldName === nextName) return;
+    (state.doc.orders || []).forEach((order) => {
+      (order.lines || []).forEach((line) => {
+        if (line.product === oldName) line.product = nextName;
+      });
+    });
+  }
+
+  function orderNewestStamp(order) {
+    let best = order.created_at || "";
+    for (const line of order.lines || []) {
+      const d = line.order_date || "";
+      if (d > best) best = d;
+    }
+    return best;
+  }
+
   function unique(arr) {
     return [...new Set(arr.filter((x) => x != null && String(x).length))];
   }
@@ -680,7 +788,7 @@
     setSel("f-type", state.doc.order_types || []);
     setSel("f-unit", state.doc.units || []);
     $("customer-list").innerHTML = unique((state.doc.orders || []).map((o) => o.customer)).map((c) => `<option value="${esc(c)}">`).join("");
-    $("product-list").innerHTML = unique(allRows().map((r) => r.line.product)).map((c) => `<option value="${esc(c)}">`).join("");
+    $("product-list").innerHTML = unique([...(state.doc.products || []), ...allRows().map((r) => r.line.product)]).map((c) => `<option value="${esc(c)}">`).join("");
   }
 
   function renderAnalytics() {
@@ -756,18 +864,29 @@
     $("status-list").innerHTML = (state.doc.statuses || [])
       .map(
         (s, i) => `<div class="list-item" data-i="${i}">
+        <button type="button" class="item-drag" title="Перетащить"><span></span></button>
         <input type="color" data-ck="color" value="${esc(toHex(s.color))}" />
         <input data-ck="name" value="${esc(s.name)}" />
         <label class="paid-toggle" title="Статус полной оплаты"><input type="radio" name="paid-status-flag" data-ck="is_paid" ${s.is_paid ? "checked" : ""} /> Оплачено</label>
+        <button type="button" class="lock-btn ${s.locked ? "on" : ""}" data-cact="lock" title="${s.locked ? "Снять замок" : "Замок: не менять глобальным статусом"}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/>
+            <path d="${s.locked ? "M8 11V8a4 4 0 0 1 8 0v3" : "M8 11V8a4 4 0 0 1 7.5-2"}" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </button>
         <button class="btn small danger" data-cact="del">Удалить</button>
       </div>`
       )
       .join("");
     $("unit-list").innerHTML = (state.doc.units || [])
-      .map((u, i) => `<div class="list-item" data-i="${i}"><input data-uk value="${esc(u)}" /><button class="btn small danger" data-uact="del">Удалить</button></div>`)
+      .map((u, i) => `<div class="list-item" data-i="${i}"><button type="button" class="item-drag" title="Перетащить"><span></span></button><input data-uk value="${esc(u)}" /><button class="btn small danger" data-uact="del">Удалить</button></div>`)
       .join("");
     $("type-list").innerHTML = (state.doc.order_types || [])
-      .map((u, i) => `<div class="list-item" data-i="${i}"><input data-tk value="${esc(u)}" /><button class="btn small danger" data-tact="del">Удалить</button></div>`)
+      .map((u, i) => `<div class="list-item" data-i="${i}"><button type="button" class="item-drag" title="Перетащить"><span></span></button><input data-tk value="${esc(u)}" /><button class="btn small danger" data-tact="del">Удалить</button></div>`)
+      .join("");
+    syncProductsFromOrders();
+    $("product-catalog").innerHTML = (state.doc.products || [])
+      .map((u, i) => `<div class="list-item" data-i="${i}"><button type="button" class="item-drag" title="Перетащить"><span></span></button><input data-pk value="${esc(u)}" /><button class="btn small danger" data-pact="del">Удалить</button></div>`)
       .join("");
   }
 
@@ -982,7 +1101,10 @@
         const date = (item.opened_at || "").replace("T", " ").slice(0, 19);
         return `<div class="recent-item ${missing ? "missing" : ""}" data-path="${esc(item.path)}">
           <div><b>${esc(item.title || item.path)}</b><div class="meta">${esc(item.path)}</div></div>
-          <div class="meta">${missing ? "файл не найден" : esc(date)}</div>
+          <div class="recent-side">
+            <div class="meta">${missing ? "файл не найден" : esc(date)}</div>
+            <button type="button" class="recent-remove" data-recent-remove title="Убрать из списка">✕</button>
+          </div>
         </div>`;
       })
       .join("");
@@ -1008,7 +1130,47 @@
       .replaceAll("'", "&#39;");
   }
 
+  function bindSortable(container, { handle, item, onCommit }) {
+    if (!container) return;
+    container.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      const grip = e.target.closest(handle);
+      if (!grip || !container.contains(grip)) return;
+      const row = grip.closest(item);
+      if (!row) return;
+      e.preventDefault();
+      row.classList.add("is-dragging");
+      const parent = row.parentNode;
+      let moved = false;
+      const move = (ev) => {
+        const el = document.elementFromPoint(ev.clientX, ev.clientY);
+        const over = el?.closest(item);
+        if (!over || over === row || over.parentNode !== parent) return;
+        const rect = over.getBoundingClientRect();
+        parent.insertBefore(row, ev.clientY > rect.top + rect.height / 2 ? over.nextSibling : over);
+        moved = true;
+      };
+      const up = () => {
+        row.classList.remove("is-dragging");
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
+        document.removeEventListener("pointercancel", up);
+        if (moved) onCommit(row);
+      };
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
+      document.addEventListener("pointercancel", up);
+    });
+  }
+
+  function reorderByDom(arr, nodes, attr = "i") {
+    return [...nodes]
+      .map((el) => arr[Number(el.dataset[attr])])
+      .filter((x) => x !== undefined);
+  }
+
   function bind() {
+    applyTheme(localStorage.getItem(LS_THEME) || currentTheme(), false);
     $("nav").addEventListener("click", (e) => {
       const btn = e.target.closest("button[data-view]");
       if (btn) setView(btn.dataset.view);
@@ -1049,6 +1211,61 @@
     $("orders-list").addEventListener("click", onOrderClick);
     $("orders-list").addEventListener("focusin", onExprFocus);
     $("orders-list").addEventListener("focusout", onExprBlur);
+    bindSortable($("orders-list"), {
+      handle: ".line-drag",
+      item: "tr[data-line]",
+      onCommit: (tr) => {
+        const card = tr.closest("[data-order]");
+        const order = findOrder(card?.dataset.order);
+        if (!order) return;
+        const ids = [...card.querySelectorAll("tr[data-line]")].map((r) => r.dataset.line);
+        order.lines = ids.map((id) => order.lines.find((l) => l.id === id)).filter(Boolean);
+        markDirty();
+      },
+    });
+    bindSortable($("status-list"), {
+      handle: ".item-drag",
+      item: ".list-item",
+      onCommit: (row) => {
+        const next = reorderByDom(state.doc.statuses, row.parentNode.querySelectorAll(".list-item"));
+        if (next.length === (state.doc.statuses || []).length) state.doc.statuses = next;
+        markDirty();
+        renderCatalogs();
+      },
+    });
+    bindSortable($("unit-list"), {
+      handle: ".item-drag",
+      item: ".list-item",
+      onCommit: () => {
+        const list = $("unit-list");
+        const next = reorderByDom(state.doc.units, list.querySelectorAll(".list-item"));
+        if (next.length === (state.doc.units || []).length) state.doc.units = next;
+        markDirty();
+        renderCatalogs();
+      },
+    });
+    bindSortable($("type-list"), {
+      handle: ".item-drag",
+      item: ".list-item",
+      onCommit: () => {
+        const list = $("type-list");
+        const next = reorderByDom(state.doc.order_types, list.querySelectorAll(".list-item"));
+        if (next.length === (state.doc.order_types || []).length) state.doc.order_types = next;
+        markDirty();
+        renderCatalogs();
+      },
+    });
+    bindSortable($("product-catalog"), {
+      handle: ".item-drag",
+      item: ".list-item",
+      onCommit: () => {
+        const list = $("product-catalog");
+        const next = reorderByDom(state.doc.products, list.querySelectorAll(".list-item"));
+        if (next.length === (state.doc.products || []).length) state.doc.products = next;
+        markDirty();
+        renderCatalogs();
+      },
+    });
 
     $("status-list").addEventListener("input", (e) => {
       const row = e.target.closest(".list-item");
@@ -1069,7 +1286,16 @@
       renderCatalogs();
     });
     $("status-list").addEventListener("click", (e) => {
-      if (e.target.dataset.cact === "del") {
+      const lockBtn = e.target.closest("[data-cact='lock']");
+      if (lockBtn) {
+        const i = Number(lockBtn.closest(".list-item").dataset.i);
+        const s = state.doc.statuses[i];
+        if (s) s.locked = !s.locked;
+        markDirty();
+        renderCatalogs();
+        return;
+      }
+      if (e.target.closest("[data-cact='del']")) {
         const i = Number(e.target.closest(".list-item").dataset.i);
         state.doc.statuses.splice(i, 1);
         markDirty();
@@ -1077,7 +1303,7 @@
       }
     });
     $("btn-add-status").addEventListener("click", () => {
-      state.doc.statuses.push({ id: uid(), name: "Новый статус", color: "#64748b", is_paid: false });
+      state.doc.statuses.push({ id: uid(), name: "Новый статус", color: "#64748b", is_paid: false, locked: false });
       markDirty();
       renderCatalogs();
     });
@@ -1115,6 +1341,31 @@
       markDirty();
       renderCatalogs();
     });
+    $("product-catalog").addEventListener("focusin", (e) => {
+      if (e.target.hasAttribute("data-pk")) e.target.dataset.old = e.target.value;
+    });
+    $("product-catalog").addEventListener("input", (e) => {
+      const i = Number(e.target.closest(".list-item").dataset.i);
+      if (!e.target.hasAttribute("data-pk")) return;
+      const old = e.target.dataset.old || "";
+      const val = e.target.value;
+      state.doc.products[i] = val;
+      renameProduct(old, val);
+      e.target.dataset.old = val;
+      markDirty();
+    });
+    $("product-catalog").addEventListener("click", (e) => {
+      if (e.target.closest("[data-pact='del']")) {
+        state.doc.products.splice(Number(e.target.closest(".list-item").dataset.i), 1);
+        markDirty();
+        renderCatalogs();
+      }
+    });
+    $("btn-add-product").addEventListener("click", () => {
+      (state.doc.products || (state.doc.products = [])).push("Новый продукт");
+      markDirty();
+      renderCatalogs();
+    });
     $("customers-panel").addEventListener("input", (e) => {
       const card = e.target.closest("[data-cid]");
       const cf = e.target.dataset.cf;
@@ -1129,16 +1380,23 @@
             if (o.customer === old) o.customer = c.name;
           });
         }
-      } else if (cf === "rating") {
-        c.rating = num(e.target.value);
-        const lab = e.target.closest(".rating-wrap")?.querySelector(".rating-label");
-        if (lab) lab.textContent = c.rating ? "★".repeat(c.rating) : "—";
       } else {
         c[cf] = e.target.value;
       }
       markDirty();
     });
     $("customers-panel").addEventListener("click", (e) => {
+      const star = e.target.closest("[data-star]");
+      if (star) {
+        const row = star.closest("[data-cid]");
+        const c = (state.doc.customers || []).find((x) => x.id === row?.dataset.cid);
+        if (!c) return;
+        const v = Number(star.dataset.star);
+        c.rating = c.rating === v ? 0 : v;
+        markDirty();
+        renderCustomers();
+        return;
+      }
       const btn = e.target.closest("[data-cact='delcust']");
       if (!btn) return;
       const row = btn.closest("[data-cid]");
@@ -1185,7 +1443,7 @@
       document.addEventListener("mouseup", up);
     });
 
-    ["f-from", "f-to", "f-date-field", "f-group", "f-status", "f-type", "f-customer", "f-product", "f-unit", "f-min", "f-max", "f-unpaid", "f-blacklist", "c-a-from", "c-a-to", "c-b-from", "c-b-to"].forEach(
+    ["f-from", "f-to", "f-date-field", "f-group", "f-status", "f-type", "f-customer", "f-product", "f-unit", "f-min", "f-max", "f-unpaid", "c-a-from", "c-a-to", "c-b-from", "c-b-to"].forEach(
       (id) => {
         $(id).addEventListener("input", () => state.view === "analytics" && renderAnalytics());
         $(id).addEventListener("change", () => state.view === "analytics" && renderAnalytics());
@@ -1197,20 +1455,31 @@
       $("f-type").value = "";
       $("f-unit").value = "";
       $("f-unpaid").checked = false;
-      $("f-blacklist").checked = false;
       renderAnalytics();
     });
-    $("btn-preset-month").addEventListener("click", () => {
+    $("btn-preset-today").addEventListener("click", () => {
       const d = new Date();
-      const from = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0);
-      setDT("f-from", from);
-      setDT("f-to", d);
+      setDT("f-from", new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0));
+      setDT("f-to", new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59));
       renderAnalytics();
     });
     $("btn-preset-week").addEventListener("click", () => {
       const d = new Date();
       const from = new Date(d.getTime() - 7 * 86400000);
+      from.setHours(0, 0, 0, 0);
       setDT("f-from", from);
+      setDT("f-to", d);
+      renderAnalytics();
+    });
+    $("btn-preset-month").addEventListener("click", () => {
+      const d = new Date();
+      setDT("f-from", new Date(d.getFullYear(), d.getMonth(), 1, 0, 0));
+      setDT("f-to", d);
+      renderAnalytics();
+    });
+    $("btn-preset-year").addEventListener("click", () => {
+      const d = new Date();
+      setDT("f-from", new Date(d.getFullYear(), 0, 1, 0, 0));
       setDT("f-to", d);
       renderAnalytics();
     });
@@ -1237,12 +1506,29 @@
     $("share-title").addEventListener("input", renderSharePreview);
     $("share-hide-labels").addEventListener("change", renderSharePreview);
     $("share-hide-stamp").addEventListener("change", renderSharePreview);
+    $("share-orders").addEventListener("click", (e) => {
+      const tog = e.target.closest("[data-share-toggle]");
+      if (!tog) return;
+      const block = tog.closest(".share-order");
+      if (!block) return;
+      const open = block.classList.toggle("collapsed") === false;
+      tog.setAttribute("aria-expanded", open ? "true" : "false");
+      tog.textContent = open ? "▾" : "▸";
+    });
     $("share-orders").addEventListener("change", (e) => {
       const block = e.target.closest(".share-order");
       if (block && e.target.hasAttribute("data-share-order")) {
         block.querySelectorAll("[data-share-line]").forEach((el) => {
           el.checked = e.target.checked;
         });
+        if (e.target.checked) {
+          block.classList.remove("collapsed");
+          const tog = block.querySelector("[data-share-toggle]");
+          if (tog) {
+            tog.setAttribute("aria-expanded", "true");
+            tog.textContent = "▾";
+          }
+        }
       }
       if (block && e.target.hasAttribute("data-share-line")) {
         const any = [...block.querySelectorAll("[data-share-line]")].some((el) => el.checked);
@@ -1256,10 +1542,21 @@
     });
     $("share-copy").addEventListener("click", copySharePng);
     $("share-save").addEventListener("click", saveSharePng);
-    $("recent-list").addEventListener("click", (e) => {
+    $("recent-list").addEventListener("click", async (e) => {
+      const rm = e.target.closest("[data-recent-remove]");
+      if (rm) {
+        e.preventDefault();
+        e.stopPropagation();
+        const row = rm.closest(".recent-item");
+        if (row?.dataset.path) await removeRecent(row.dataset.path);
+        return;
+      }
       const item = e.target.closest(".recent-item");
       if (!item || item.classList.contains("missing")) return;
       openPath(item.dataset.path);
+    });
+    document.querySelectorAll(".js-theme-toggle").forEach((btn) => {
+      btn.addEventListener("click", () => applyTheme(currentTheme() === "dark" ? "light" : "dark", true));
     });
     $("file-input").addEventListener("change", async (e) => {
       const file = e.target.files[0];
@@ -1394,6 +1691,13 @@
       } else if (g === "status" || g === "order_type") {
         if (!e.target.value) return;
         (order.lines || []).forEach((line) => {
+          if (g === "status" && statusLocked(line.status)) return;
+          line[g] = e.target.value;
+        });
+        markDirty();
+      } else if (g === "order_date" || g === "payment_date") {
+        if (e.type !== "change" || !e.target.value) return;
+        (order.lines || []).forEach((line) => {
           line[g] = e.target.value;
         });
         markDirty();
@@ -1419,6 +1723,7 @@
     const key = e.target.dataset.lk;
     if (EXPR_MAP[key]) {
       if (e.target.dataset.showing === "result") return;
+      commaToDot(e.target);
       line[key] = e.target.value;
       const v = evalExpr(e.target.value);
       e.target.dataset.expr = e.target.value;
@@ -1432,6 +1737,7 @@
       }
     } else {
       line[key] = e.target.type === "number" ? num(e.target.value) : e.target.value;
+      if (key === "product") ensureProduct(line.product);
     }
     applyPaidIfCovered(line);
     applyRowStatus(tr, line.status);
@@ -1478,7 +1784,8 @@
     const order = findOrder(card.dataset.order);
     const line = order?.lines.find((l) => l.id === tr.dataset.line);
     if (!line) return;
-    const raw = inp.value;
+    const raw = inp.value.includes(",") && DECIMAL_KEYS.has(key) ? inp.value.replaceAll(",", ".") : inp.value;
+    if (raw !== inp.value) inp.value = raw;
     line[key] = raw;
     inp.dataset.expr = raw;
     const v = evalExpr(raw);
@@ -1617,7 +1924,7 @@
   }
 
   function shareTotalsText(fields, cols, lines) {
-    if (!fields.includes("totals")) return "";
+    if (!fields.includes("totals") || shareNeedsMoneyFooter(cols)) return "";
     const tot = linesTotals(lines);
     const bits = [];
     if (fields.includes("total") || fields.includes("price") || !cols.length) bits.push(`Итого ${money(tot.after)}`);
@@ -1626,15 +1933,68 @@
     return bits.length ? bits.join(" · ") : `Позиций: ${lines.length}`;
   }
 
+  const SHARE_MONEY_COLS = new Set(["price", "total", "paid", "unpaid"]);
+
+  function shareNeedsMoneyFooter(cols) {
+    return (cols || []).some((c) => SHARE_MONEY_COLS.has(c.id));
+  }
+
+  function shareFooterValue(colId, lines) {
+    const tot = linesTotals(lines);
+    if (colId === "price") return money(tot.total);
+    if (colId === "total") return money(tot.after);
+    if (colId === "paid") return money(tot.paid);
+    if (colId === "unpaid") return money(tot.unpaid);
+    return "";
+  }
+
+  function shareFooterCells(cols, lines) {
+    if (!shareNeedsMoneyFooter(cols)) return null;
+    return cols.map((c) => (SHARE_MONEY_COLS.has(c.id) ? shareFooterValue(c.id, lines) : ""));
+  }
+
+  function shareColWidths(cols, linesList) {
+    const ctx = document.createElement("canvas").getContext("2d");
+    const cellPad = 24;
+    return cols.map((col) => {
+      ctx.font = "600 11px Segoe UI, sans-serif";
+      let w = ctx.measureText(String(col.label || "").toUpperCase()).width;
+      ctx.font = "13px Segoe UI, sans-serif";
+      (linesList || []).forEach((line) => {
+        w = Math.max(w, ctx.measureText(String(shareLineValue(line, col.id) || "—")).width);
+      });
+      ctx.font = "700 13px Segoe UI, sans-serif";
+      const foot = shareFooterCells(cols, linesList);
+      if (foot) {
+        const idx = cols.indexOf(col);
+        w = Math.max(w, ctx.measureText(String(foot[idx] || "")).width);
+      }
+      return Math.max(52, Math.ceil(w + cellPad));
+    });
+  }
+
+  function shareColStarts(widths, origin) {
+    const xs = [];
+    let x = origin;
+    widths.forEach((w) => {
+      xs.push(x);
+      x += w;
+    });
+    return xs;
+  }
+
   function renderShareOrdersPicker(focusOrderId) {
     const box = $("share-orders");
-    const orders = state.doc.orders || [];
+    const orders = [...(state.doc.orders || [])].sort((a, b) => orderNewestStamp(b).localeCompare(orderNewestStamp(a)));
     box.innerHTML = orders.length
       ? orders
           .map((order) => {
-            const on = !focusOrderId || focusOrderId === order.id;
-            return `<div class="share-order" data-order="${esc(order.id)}">
-          <label><input type="checkbox" data-share-order ${on ? "checked" : ""} /> ${esc(order.number || "—")} · ${esc(order.name || "без названия")}</label>
+            const on = !!(focusOrderId && focusOrderId === order.id);
+            return `<div class="share-order ${on ? "" : "collapsed"}" data-order="${esc(order.id)}">
+          <div class="share-order-head">
+            <button type="button" class="share-toggle" data-share-toggle title="Строки заказа" aria-expanded="${on ? "true" : "false"}">${on ? "▾" : "▸"}</button>
+            <label><input type="checkbox" data-share-order ${on ? "checked" : ""} /> ${esc(order.number || "—")} · ${esc(order.name || "без названия")}</label>
+          </div>
           <div class="share-lines">${(order.lines || [])
             .map(
               (line) =>
@@ -1645,6 +2005,9 @@
           })
           .join("")
       : `<div class="hint">Нет заказов</div>`;
+    if (focusOrderId) {
+      [...box.querySelectorAll(".share-order")].find((el) => el.dataset.order === focusOrderId)?.scrollIntoView({ block: "nearest" });
+    }
   }
 
   function openShare(order) {
@@ -1654,13 +2017,7 @@
       (f) => `<label><input type="checkbox" value="${f.id}" ${selected.includes(f.id) ? "checked" : ""} /> ${esc(f.label)}</label>`
     ).join("");
     renderShareOrdersPicker(order?.id || null);
-    if (order) {
-      $("share-title").value = [order.number, order.name].filter(Boolean).join(" · ");
-    } else if (!(state.doc.orders || []).length) {
-      $("share-title").value = "";
-    } else {
-      $("share-title").value = "";
-    }
+    $("share-title").value = order ? [order.number, order.name].filter(Boolean).join(" · ") : "";
     renderSharePreview();
     $("share-modal").classList.add("open");
   }
@@ -1686,32 +2043,42 @@
     const title = shareTitleText(blocks);
     const body = blocks.length
       ? blocks
-          .map(({ order, lines }) => {
+          .map(({ order, lines }, i) => {
             const meta = shareMetaItems(order, fields, hideLabels);
             const totalsText = shareTotalsText(fields, cols, lines);
+            const foot = shareFooterCells(cols, lines);
+            const colWidths = cols.length ? shareColWidths(cols, lines) : [];
             const table = cols.length
-              ? `<table style="width:100%;border-collapse:collapse;font-size:13px">${
-                  hideLabels
-                    ? ""
-                    : `<thead><tr>${cols
-                        .map(
-                          (c) =>
-                            `<th style="text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;background:#f8fafc;border-top:1px solid #e2e8f0">${esc(c.label)}</th>`
-                        )
-                        .join("")}</tr></thead>`
-                }<tbody>${lines
+              ? `<table style="width:max-content;border-collapse:collapse;font-size:13px;table-layout:fixed"><colgroup>${colWidths
+                  .map((w) => `<col style="width:${w}px">`)
+                  .join("")}</colgroup><thead><tr>${cols
+                  .map(
+                    (c) =>
+                      `<th style="text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;background:#f8fafc;border-top:1px solid #e2e8f0;white-space:nowrap">${esc(c.label)}</th>`
+                  )
+                  .join("")}</tr></thead><tbody>${lines
                   .map(
                     (line) =>
                       `<tr>${cols
-                        .map((c) => `<td style="text-align:left;padding:8px 10px;border-top:1px solid #e2e8f0">${esc(shareLineValue(line, c.id))}</td>`)
+                        .map((c) => `<td style="text-align:left;padding:8px 10px;border-top:1px solid #e2e8f0;white-space:nowrap">${esc(shareLineValue(line, c.id))}</td>`)
                         .join("")}</tr>`
                   )
-                  .join("")}</tbody></table>`
+                  .join("")}</tbody>${
+                  foot
+                    ? `<tfoot><tr>${foot
+                        .map(
+                          (v) =>
+                            `<td style="text-align:left;padding:10px;border-top:2px solid #0f766e;font-weight:700;background:#f1f5f9;white-space:nowrap">${esc(v)}</td>`
+                        )
+                        .join("")}</tr></tfoot>`
+                    : ""
+                }</table>`
               : "";
-            return `<div style="padding:0 0 12px">
-          ${meta.length ? `<div class="sp-meta" style="padding:10px 20px 6px;display:grid;gap:4px;font-size:13px;color:#334155">${meta.map((m) => `<div>${esc(m)}</div>`).join("")}</div>` : ""}
-          ${table || `<div style="padding:8px 20px;font-size:13px;color:#64748b">Таблица работ скрыта — включите колонки слева.</div>`}
-          ${totalsText ? `<div class="sp-foot" style="padding:10px 20px 4px;font-size:14px"><b>${esc(totalsText)}</b></div>` : ""}
+            const sep = i ? "border-top:2px solid #0f766e;margin-top:12px;padding-top:16px;" : "";
+            return `<div class="share-order-block" style="padding:0 20px 16px;${sep}">
+          ${meta.length ? `<div class="sp-meta" style="padding:0 0 10px;display:grid;gap:4px;font-size:13px;color:#334155">${meta.map((m) => `<div>${esc(m)}</div>`).join("")}</div>` : ""}
+          ${table || `<div style="padding:8px 0;font-size:13px;color:#64748b">Таблица работ скрыта — включите колонки слева.</div>`}
+          ${totalsText ? `<div class="sp-foot" style="padding:10px 0 4px;font-size:14px"><b>${esc(totalsText)}</b></div>` : ""}
         </div>`;
           })
           .join("")
@@ -1757,19 +2124,45 @@
     const cols = SHARE_FIELDS.filter((f) => f.kind === "col" && fields.includes(f.id));
     const title = shareTitleText(blocks);
     const stamp = `Сформировано ${new Date().toLocaleString("ru-RU")}`;
-    const width = 920;
-    const pad = 28;
+    const pad = 20;
     const rowH = 34;
-    const colCount = Math.max(cols.length, 1);
-    const colW = (width - pad * 2) / colCount;
+    const layouts = blocks.map(({ order, lines }) => {
+      const colWidths = cols.length ? shareColWidths(cols, lines) : [];
+      const tableW = colWidths.reduce((s, w) => s + w, 0);
+      return { order, lines, colWidths, tableW };
+    });
     const measure = document.createElement("canvas").getContext("2d");
+    let inner = Math.max(0, ...layouts.map((b) => b.tableW));
     measure.font = "700 20px Segoe UI, sans-serif";
-    const titleLines = wrapCanvasText(measure, title, width - pad * 2);
-    const headerH = 22 + titleLines.length * 26 + 18;
-    let bodyH = 0;
-    blocks.forEach(({ order, lines }) => {
+    inner = Math.max(inner, measure.measureText(title).width);
+    measure.font = "13px Segoe UI, sans-serif";
+    layouts.forEach(({ order, lines }) => {
+      shareMetaItems(order, fields, hideLabels).forEach((line) => {
+        inner = Math.max(inner, measure.measureText(line).width);
+      });
+      const totalsText = shareTotalsText(fields, cols, lines);
+      if (totalsText) {
+        measure.font = "700 14px Segoe UI, sans-serif";
+        inner = Math.max(inner, measure.measureText(totalsText).width);
+        measure.font = "13px Segoe UI, sans-serif";
+      }
+    });
+    if (!hideStamp) {
+      measure.font = "11px Segoe UI, sans-serif";
+      inner = Math.max(inner, measure.measureText(stamp).width);
+    }
+    const width = Math.ceil(pad * 2 + Math.max(inner, 80));
+    const headerH = 64;
+    let bodyH = 16;
+    layouts.forEach(({ order, lines }, bi) => {
       const meta = shareMetaItems(order, fields, hideLabels);
-      bodyH += (meta.length ? meta.length * 22 + 10 : 8) + (cols.length ? (hideLabels ? 0 : 32) + lines.length * rowH : 28) + (shareTotalsText(fields, cols, lines) ? 36 : 8) + 10;
+      const foot = shareFooterCells(cols, lines);
+      bodyH +=
+        (bi ? 36 : 0) +
+        (meta.length ? meta.length * 22 + 10 : 0) +
+        (cols.length ? 32 + lines.length * rowH + (foot ? rowH : 0) : 28) +
+        (shareTotalsText(fields, cols, lines) ? 36 : 0) +
+        16;
     });
     const height = headerH + bodyH + (hideStamp ? 16 : 36);
     const scale = 2;
@@ -1787,63 +2180,92 @@
     ctx.fillRect(0, 0, width, headerH);
     ctx.fillStyle = "#ffffff";
     ctx.font = "700 20px Segoe UI, sans-serif";
-    titleLines.forEach((line, i) => {
-      ctx.fillText(line, pad, 34 + i * 26);
-    });
-    let y = headerH + 18;
-    blocks.forEach(({ order, lines }, bi) => {
-      if (bi) y += 8;
+    ctx.fillText(title, pad, 40);
+    let y = headerH + 16;
+    layouts.forEach(({ order, lines, colWidths, tableW }, bi) => {
+      if (bi) {
+        y += 16;
+        ctx.strokeStyle = "#0f766e";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(pad, y);
+        ctx.lineTo(width - pad, y);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+        y += 20;
+      }
       const meta = shareMetaItems(order, fields, hideLabels);
       ctx.fillStyle = "#334155";
       ctx.font = "13px Segoe UI, sans-serif";
       meta.forEach((line) => {
-        ctx.fillText(fitCanvasText(ctx, line, width - pad * 2), pad, y);
+        ctx.fillText(line, pad, y + 14);
         y += 22;
       });
-      y += 6;
+      if (meta.length) y += 10;
       if (cols.length) {
-        if (!hideLabels) {
-          ctx.fillStyle = "#f8fafc";
-          ctx.fillRect(pad, y, width - pad * 2, 32);
-          ctx.fillStyle = "#64748b";
-          ctx.font = "600 11px Segoe UI, sans-serif";
-          cols.forEach((col, i) => {
-            ctx.fillText(fitCanvasText(ctx, col.label.toUpperCase(), colW - 12), pad + 8 + i * colW, y + 21);
-          });
-          y += 32;
-        }
+        const xs = shareColStarts(colWidths, pad);
+        ctx.fillStyle = "#f8fafc";
+        ctx.fillRect(pad, y, tableW, 32);
+        ctx.fillStyle = "#64748b";
+        ctx.font = "600 11px Segoe UI, sans-serif";
+        cols.forEach((col, i) => {
+          ctx.fillText(fitCanvasText(ctx, col.label.toUpperCase(), colWidths[i] - 12), xs[i] + 8, y + 21);
+        });
+        y += 32;
         ctx.font = "13px Segoe UI, sans-serif";
         lines.forEach((line, ri) => {
           if (ri % 2) {
             ctx.fillStyle = "#f8fafc";
-            ctx.fillRect(pad, y, width - pad * 2, rowH);
+            ctx.fillRect(pad, y, tableW, rowH);
           }
           ctx.strokeStyle = "#e2e8f0";
           ctx.beginPath();
           ctx.moveTo(pad, y);
-          ctx.lineTo(width - pad, y);
+          ctx.lineTo(pad + tableW, y);
           ctx.stroke();
           ctx.fillStyle = "#0f172a";
           cols.forEach((col, i) => {
-            const text = fitCanvasText(ctx, String(shareLineValue(line, col.id) || "—"), colW - 12);
+            const text = fitCanvasText(ctx, String(shareLineValue(line, col.id) || "—"), colWidths[i] - 12);
             ctx.save();
             ctx.beginPath();
-            ctx.rect(pad + i * colW, y, colW - 4, rowH);
+            ctx.rect(xs[i], y, colWidths[i] - 2, rowH);
             ctx.clip();
-            ctx.fillText(text, pad + 8 + i * colW, y + 22);
+            ctx.fillText(text, xs[i] + 8, y + 22);
             ctx.restore();
           });
           y += rowH;
         });
+        const foot = shareFooterCells(cols, lines);
+        if (foot) {
+          ctx.fillStyle = "#f1f5f9";
+          ctx.fillRect(pad, y, tableW, rowH);
+          ctx.strokeStyle = "#0f766e";
+          ctx.beginPath();
+          ctx.moveTo(pad, y);
+          ctx.lineTo(pad + tableW, y);
+          ctx.stroke();
+          ctx.fillStyle = "#0f172a";
+          ctx.font = "700 13px Segoe UI, sans-serif";
+          foot.forEach((v, i) => {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(xs[i], y, colWidths[i] - 2, rowH);
+            ctx.clip();
+            ctx.fillText(fitCanvasText(ctx, v, colWidths[i] - 12), xs[i] + 8, y + 22);
+            ctx.restore();
+          });
+          y += rowH;
+        }
       }
       const totalsText = shareTotalsText(fields, cols, lines);
       if (totalsText) {
-        y += 18;
+        y += 14;
         ctx.fillStyle = "#0f172a";
         ctx.font = "700 14px Segoe UI, sans-serif";
-        ctx.fillText(fitCanvasText(ctx, totalsText, width - pad * 2), pad, y);
-        y += 18;
+        ctx.fillText(totalsText, pad, y + 14);
+        y += 22;
       }
+      y += 16;
     });
     if (!hideStamp) {
       ctx.fillStyle = "#94a3b8";
@@ -1953,7 +2375,16 @@
       renderOrders();
     }
     if (act === "addline") {
-      order.lines.push(emptyLine());
+      const prev = (order.lines || [])[order.lines.length - 1];
+      const line = emptyLine();
+      if (prev) {
+        line.order_type = prev.order_type;
+        line.product = prev.product;
+        line.unit = prev.unit;
+        line.order_date = prev.order_date;
+        line.status = prev.status;
+      }
+      order.lines.push(line);
       markDirty();
       renderOrders();
     }
@@ -1979,11 +2410,13 @@
       const bootData = await apiGet("/api/bootstrap");
       state.desktop = true;
       state.autosave = !!bootData.autosave;
+      applyTheme(bootData.theme || "light", false);
       await renderRecent(bootData.recent);
       await apiPost("/api/dirty", { dirty: false });
     } catch {
       state.desktop = false;
       state.autosave = localStorage.getItem(LS_AUTOSAVE) === "true";
+      applyTheme(localStorage.getItem(LS_THEME) || "light", false);
       await renderRecent();
     }
     $("autosave").checked = state.autosave;

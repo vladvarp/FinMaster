@@ -19,6 +19,7 @@ DEFAULT_STATUSES = [
 
 DEFAULT_UNITS = ["шт.", "м²", "м", "мин"]
 DEFAULT_ORDER_TYPES = ["Производство", "Услуга", "Поставка", "Монтаж"]
+DEFAULT_PRODUCTS: list[str] = []
 
 
 def now_iso() -> str:
@@ -36,6 +37,7 @@ def empty_document(title: str = "Новый отчёт") -> dict[str, Any]:
         "statuses": [dict(item) for item in DEFAULT_STATUSES],
         "units": list(DEFAULT_UNITS),
         "order_types": list(DEFAULT_ORDER_TYPES),
+        "products": list(DEFAULT_PRODUCTS),
         "customers": [],
         "orders": [],
         "ui": {
@@ -71,6 +73,7 @@ def normalize_document(raw: Any) -> dict[str, Any]:
                     "name": name,
                     "color": str(item.get("color") or "#64748b"),
                     "is_paid": bool(item.get("is_paid")),
+                    "locked": bool(item.get("locked")),
                 }
             )
         if cleaned and not any(x.get("is_paid") for x in cleaned):
@@ -96,6 +99,19 @@ def normalize_document(raw: Any) -> dict[str, Any]:
     if isinstance(order_types, list) and order_types:
         base["order_types"] = [str(t).strip() for t in order_types if str(t).strip()]
 
+    products = raw.get("products")
+    if isinstance(products, list):
+        seen = set()
+        cleaned_products = []
+        for item in products:
+            name = str(item).strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            cleaned_products.append(name)
+        if cleaned_products:
+            base["products"] = cleaned_products
+
     customers = raw.get("customers")
     if isinstance(customers, list):
         base["customers"] = [c for c in customers if isinstance(c, dict)]
@@ -103,6 +119,22 @@ def normalize_document(raw: Any) -> dict[str, Any]:
     orders = raw.get("orders")
     if isinstance(orders, list):
         base["orders"] = [o for o in orders if isinstance(o, dict)]
+
+    if not isinstance(products, list):
+        seen = set()
+        harvested = []
+        for order in base["orders"]:
+            if not isinstance(order, dict):
+                continue
+            for line in order.get("lines") or []:
+                if not isinstance(line, dict):
+                    continue
+                name = str(line.get("product") or "").strip()
+                if name and name not in seen:
+                    seen.add(name)
+                    harvested.append(name)
+        if harvested:
+            base["products"] = harvested
 
     ui = raw.get("ui")
     if isinstance(ui, dict):

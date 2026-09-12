@@ -24,18 +24,19 @@ def config_path() -> str:
 def load_config() -> dict[str, Any]:
     path = config_path()
     if not os.path.exists(path):
-        return {"recent": [], "autosave": False, "last_dir": ""}
+        return {"recent": [], "autosave": False, "last_dir": "", "theme": "light"}
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
         if not isinstance(data, dict):
-            return {"recent": [], "autosave": False, "last_dir": ""}
+            return {"recent": [], "autosave": False, "last_dir": "", "theme": "light"}
         data.setdefault("recent", [])
         data.setdefault("autosave", False)
         data.setdefault("last_dir", "")
+        data.setdefault("theme", "light")
         return data
     except (OSError, json.JSONDecodeError):
-        return {"recent": [], "autosave": False, "last_dir": ""}
+        return {"recent": [], "autosave": False, "last_dir": "", "theme": "light"}
 
 
 def save_config(data: dict[str, Any]) -> None:
@@ -59,6 +60,21 @@ def add_recent(path: str, title: str = "") -> list[dict[str, Any]]:
     cfg["last_dir"] = os.path.dirname(path)
     save_config(cfg)
     return cfg["recent"]
+
+
+def remove_recent(path: str) -> list[dict[str, Any]]:
+    cfg = load_config()
+    cfg["recent"] = [item for item in cfg.get("recent", []) if item.get("path") != path]
+    save_config(cfg)
+    return cfg["recent"]
+
+
+def set_theme(theme: str) -> str:
+    value = "dark" if theme == "dark" else "light"
+    cfg = load_config()
+    cfg["theme"] = value
+    save_config(cfg)
+    return value
 
 
 def set_autosave(enabled: bool) -> None:

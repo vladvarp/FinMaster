@@ -1,6 +1,28 @@
 const FinCharts = (() => {
   const pad = { t: 18, r: 16, b: 36, l: 52 };
 
+  function cssVar(name, fallback) {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  }
+
+  function ink() {
+    return cssVar("--ink", "#0f172a");
+  }
+
+  function muted() {
+    return cssVar("--muted", "#64748b");
+  }
+
+  function card() {
+    return cssVar("--card", "#ffffff");
+  }
+
+  function grid() {
+    const theme = document.documentElement.getAttribute("data-theme");
+    return theme === "dark" ? "rgba(226, 232, 240, 0.08)" : "rgba(15, 23, 42, 0.08)";
+  }
+
   function size(canvas) {
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
@@ -22,8 +44,8 @@ const FinCharts = (() => {
   }
 
   function axisY(ctx, w, h, max, currency) {
-    ctx.strokeStyle = "rgba(15, 23, 42, 0.08)";
-    ctx.fillStyle = "#64748b";
+    ctx.strokeStyle = grid();
+    ctx.fillStyle = muted();
     ctx.font = "11px Segoe UI, sans-serif";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
@@ -55,7 +77,7 @@ const FinCharts = (() => {
     const n = Math.max(labels.length, 1);
     const innerW = w - pad.l - pad.r;
     const innerH = h - pad.t - pad.b;
-    ctx.fillStyle = "#64748b";
+    ctx.fillStyle = muted();
     ctx.font = "11px Segoe UI, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
@@ -105,7 +127,7 @@ const FinCharts = (() => {
         roundRect(ctx, x, y, barW - 2, Math.max(bh, 0), 4);
         ctx.fill();
       });
-      ctx.fillStyle = "#64748b";
+      ctx.fillStyle = muted();
       ctx.font = "11px Segoe UI, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
@@ -133,14 +155,14 @@ const FinCharts = (() => {
     });
     ctx.beginPath();
     ctx.arc(cx, cy, r * 0.58, 0, Math.PI * 2);
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle = card();
     ctx.fill();
-    ctx.fillStyle = "#0f172a";
+    ctx.fillStyle = ink();
     ctx.font = "600 16px Segoe UI, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(String(Math.round(total)), cx, cy - 8);
-    ctx.fillStyle = "#64748b";
+    ctx.fillStyle = muted();
     ctx.font = "11px Segoe UI, sans-serif";
     ctx.fillText("всего", cx, cy + 10);
 
@@ -149,7 +171,7 @@ const FinCharts = (() => {
       ctx.fillStyle = item.color || "#94a3b8";
       roundRect(ctx, w * 0.68, ly, 10, 10, 3);
       ctx.fill();
-      ctx.fillStyle = "#334155";
+      ctx.fillStyle = ink();
       ctx.font = "12px Segoe UI, sans-serif";
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";

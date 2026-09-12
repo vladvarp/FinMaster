@@ -52,6 +52,7 @@ def api_bootstrap():
             "recent": _recent_payload(),
             "autosave": bool(cfg.get("autosave")),
             "last_dir": cfg.get("last_dir") or "",
+            "theme": "dark" if cfg.get("theme") == "dark" else "light",
             "desktop": True,
         }
     )
@@ -71,6 +72,21 @@ def api_autosave():
     enabled = bool(data.get("enabled"))
     storage.set_autosave(enabled)
     return jsonify({"ok": True, "autosave": enabled})
+
+
+@app.post("/api/theme")
+def api_theme():
+    data = request.get_json(silent=True) or {}
+    theme = storage.set_theme(data.get("theme") or "light")
+    return jsonify({"ok": True, "theme": theme})
+
+
+@app.post("/api/recent/remove")
+def api_recent_remove():
+    data = request.get_json(silent=True) or {}
+    path = data.get("path") or ""
+    storage.remove_recent(path)
+    return jsonify({"ok": True, "recent": _recent_payload()})
 
 
 @app.post("/api/dialog/open")
