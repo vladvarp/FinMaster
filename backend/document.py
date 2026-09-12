@@ -19,7 +19,19 @@ DEFAULT_STATUSES = [
 
 DEFAULT_UNITS = ["шт.", "м²", "м", "мин"]
 DEFAULT_ORDER_TYPES = ["Производство", "Услуга", "Поставка", "Монтаж"]
-DEFAULT_PRODUCTS: list[str] = []
+DEFAULT_PRODUCTS: list[dict[str, str]] = []
+
+
+def _product_entry(item: Any, default_unit: str) -> dict[str, str] | None:
+    if isinstance(item, dict):
+        name = str(item.get("name") or "").strip()
+        unit = str(item.get("unit") or "").strip() or default_unit
+    else:
+        name = str(item or "").strip()
+        unit = default_unit
+    if not name:
+        return None
+    return {"name": name, "unit": unit}
 
 
 def now_iso() -> str:
@@ -100,15 +112,16 @@ def normalize_document(raw: Any) -> dict[str, Any]:
         base["order_types"] = [str(t).strip() for t in order_types if str(t).strip()]
 
     products = raw.get("products")
+    default_unit = base["units"][0] if base["units"] else "шт."
     if isinstance(products, list):
         seen = set()
         cleaned_products = []
         for item in products:
-            name = str(item).strip()
-            if not name or name in seen:
+            entry = _product_entry(item, default_unit)
+            if not entry or entry["name"] in seen:
                 continue
-            seen.add(name)
-            cleaned_products.append(name)
+            seen.add(entry["name"])
+            cleaned_products.append(entry)
         if cleaned_products:
             base["products"] = cleaned_products
 
@@ -132,7 +145,8 @@ def normalize_document(raw: Any) -> dict[str, Any]:
                 name = str(line.get("product") or "").strip()
                 if name and name not in seen:
                     seen.add(name)
-                    harvested.append(name)
+                    unit = str(line.get("unit") or "").strip() or default_unit
+                    harvested.append({"name": name, "unit": unit})
         if harvested:
             base["products"] = harvested
 

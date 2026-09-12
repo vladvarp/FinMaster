@@ -742,11 +742,57 @@
       .join("");
   }
 
-  function ensureProduct(name) {
+  function productEntry(item) {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      return { name: String(item.name || "").trim(), unit: String(item.unit || "").trim() };
+    }
+    return { name: String(item || "").trim(), unit: "" };
+  }
+
+  function normalizeProducts() {
+    if (!state.doc) return;
+    const units = state.doc.units || [];
+    const fallback = units[0] || "шт.";
+    const seen = new Set();
+    const next = [];
+    for (const item of state.doc.products || []) {
+      const { name, unit } = productEntry(item);
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      next.push({ name, unit: unit || fallback });
+    }
+    state.doc.products = next;
+  }
+
+  function catalogProductNames() {
+    return (state.doc.products || []).map((p) => p.name);
+  }
+
+  function defaultUnitForProduct(name) {
+    const n = String(name || "").trim();
+    const p = (state.doc.products || []).find((x) => x.name === n);
+    return p?.unit || "";
+  }
+
+  function applyLineUnit(tr, line, unit) {
+    if (!unit) return;
+    line.unit = unit;
+    const sel = tr.querySelector('[data-lk="unit"]');
+    if (!sel) return;
+    if (![...sel.options].some((opt) => opt.value === unit || opt.textContent === unit)) {
+      sel.insertAdjacentHTML("beforeend", `<option selected>${esc(unit)}</option>`);
+    }
+    sel.value = unit;
+  }
+
+  function ensureProduct(name, unitHint) {
     const n = String(name || "").trim();
     if (!n) return;
-    const list = state.doc.products || (state.doc.products = []);
-    if (!list.some((p) => p === n)) list.push(n);
+    normalizeProducts();
+    const list = state.doc.products;
+    if (list.some((p) => p.name === n)) return;
+    const fallback = String(unitHint || "").trim() || (state.doc.units || [])[0] || "шт.";
+    list.push({ name: n, unit: fallback });
   }
 
   function syncProductsFromOrders() {
@@ -788,7 +834,7 @@
     setSel("f-type", state.doc.order_types || []);
     setSel("f-unit", state.doc.units || []);
     $("customer-list").innerHTML = unique((state.doc.orders || []).map((o) => o.customer)).map((c) => `<option value="${esc(c)}">`).join("");
-    $("product-list").innerHTML = unique([...(state.doc.products || []), ...allRows().map((r) => r.line.product)]).map((c) => `<option value="${esc(c)}">`).join("");
+    $("product-list").innerHTML = unique([...catalogProductNames(), ...allRows().map((r) => r.line.product)]).map((c) => `<option value="${esc(c)}">`).join("");
   }
 
   function renderAnalytics() {
@@ -885,8 +931,12 @@
       .map((u, i) => `<div class="list-item" data-i="${i}"><button type="button" class="item-drag" title="Перетащить"><span></span></button><input data-tk value="${esc(u)}" /><button class="btn small danger" data-tact="del">Удалить</button></div>`)
       .join("");
     syncProductsFromOrders();
+    const units = state.doc.units || [];
     $("product-catalog").innerHTML = (state.doc.products || [])
-      .map((u, i) => `<div class="list-item" data-i="${i}"><button type="button" class="item-drag" title="Перетащить"><span></span></button><input data-pk value="${esc(u)}" /><button class="btn small danger" data-pact="del">Удалить</button></div>`)
+      .map((p, i) => {
+        const unitOpts = unique([p.unit, ...units]);
+        return `<div class="list-item" data-i="${i}"><button type="button" class="item-drag" title="Перетащить"><span></span></button><input data-pk value="${esc(p.name)}" /><select data-pu title="Ед. по умолчанию">${optionList(unitOpts, p.unit)}</select><button class="btn small danger" data-pact="del">Удалить</button></div>`;
+      })
       .join("");
   }
 
@@ -898,6 +948,7 @@
 
   function renderAll() {
     if (!state.doc) return;
+    normalizeProducts();
     updateChrome();
     fillFilterSelects();
     if (state.view === "dashboard") renderDashboard();
@@ -1309,7 +1360,13 @@
     });
     $("unit-list").addEventListener("input", (e) => {
       const i = Number(e.target.closest(".list-item").dataset.i);
-      if (e.target.hasAttribute("data-uk")) state.doc.units[i] = e.target.value;
+      if (!e.target.hasAttribute("data-uk")) return;
+      const prev = state.doc.units[i];
+      const val = e.target.value;
+      state.doc.units[i] = val;
+      (state.doc.products || []).forEach((p) => {
+        if (p.unit === prev) p.unit = val;
+      });
       markDirty();
     });
     $("unit-list").addEventListener("click", (e) => {
@@ -1345,13 +1402,31 @@
       if (e.target.hasAttribute("data-pk")) e.target.dataset.old = e.target.value;
     });
     $("product-catalog").addEventListener("input", (e) => {
+      const row = e.target.closest(".list-item");
+      if (!row) return;
+      const i = Number(row.dataset.i);
+      const item = state.doc.products[i];
+      if (!item) return;
+      if (e.target.hasAttribute("data-pk")) {
+        const old = e.target.dataset.old || "";
+        const val = e.target.value;
+        item.name = val;
+        renameProduct(old, val);
+        e.target.dataset.old = val;
+        markDirty();
+        return;
+      }
+      if (e.target.hasAttribute("data-pu")) {
+        item.unit = e.target.value;
+        markDirty();
+      }
+    });
+    $("product-catalog").addEventListener("change", (e) => {
+      if (!e.target.hasAttribute("data-pu")) return;
       const i = Number(e.target.closest(".list-item").dataset.i);
-      if (!e.target.hasAttribute("data-pk")) return;
-      const old = e.target.dataset.old || "";
-      const val = e.target.value;
-      state.doc.products[i] = val;
-      renameProduct(old, val);
-      e.target.dataset.old = val;
+      const item = state.doc.products[i];
+      if (!item) return;
+      item.unit = e.target.value;
       markDirty();
     });
     $("product-catalog").addEventListener("click", (e) => {
@@ -1362,7 +1437,10 @@
       }
     });
     $("btn-add-product").addEventListener("click", () => {
-      (state.doc.products || (state.doc.products = [])).push("Новый продукт");
+      (state.doc.products || (state.doc.products = [])).push({
+        name: "Новый продукт",
+        unit: (state.doc.units || [])[0] || "шт.",
+      });
       markDirty();
       renderCatalogs();
     });
@@ -1737,7 +1815,10 @@
       }
     } else {
       line[key] = e.target.type === "number" ? num(e.target.value) : e.target.value;
-      if (key === "product") ensureProduct(line.product);
+      if (key === "product") {
+        ensureProduct(line.product, line.unit);
+        applyLineUnit(tr, line, defaultUnitForProduct(line.product));
+      }
     }
     applyPaidIfCovered(line);
     applyRowStatus(tr, line.status);

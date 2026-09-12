@@ -453,6 +453,10 @@ table.data .num { font-variant-numeric: tabular-nums; font-family: var(--mono); 
   flex: 1;
   min-width: 0;
 }
+.list-item select[data-pu] {
+  width: 92px;
+  flex: 0 0 92px;
+}
 .list-item input[type="color"] {
   width: 42px;
   height: 34px;
@@ -1094,7 +1098,8 @@ html[data-theme="dark"] .modal-card .btn { color: var(--ink); }
 html[data-theme="dark"] .share-opt,
 html[data-theme="dark"] .filter-check,
 html[data-theme="dark"] .paid-toggle { color: var(--ink); }
-html[data-theme="dark"] .list-item input:not([type="color"]):not([type="radio"]) {
+html[data-theme="dark"] .list-item input:not([type="color"]):not([type="radio"]),
+html[data-theme="dark"] .list-item select[data-pu] {
   background: #1b2538;
   color: var(--ink);
   border: 1px solid var(--line);
