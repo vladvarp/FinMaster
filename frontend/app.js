@@ -14,6 +14,7 @@
     autosaveTimer: null,
     closeAfterSave: false,
     newAfterSave: false,
+    selectedCustomerId: null,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -43,8 +44,30 @@
     return Math.round((Number(n) || 0) * 100) / 100;
   }
 
+  function evalExpr(raw) {
+    const s = String(raw ?? "")
+      .trim()
+      .replaceAll("×", "*")
+      .replaceAll(",", ".");
+    if (!s) return 0;
+    const normalized = s.replace(/(\d)\s*[xX]\s*(\d)/g, "$1*$2");
+    if (!/^[\d+\-*/().\s]+$/.test(normalized)) return NaN;
+    try {
+      const value = Function(`"use strict"; return (${normalized});`)();
+      return typeof value === "number" && Number.isFinite(value) ? value : NaN;
+    } catch {
+      return NaN;
+    }
+  }
+
+  function qtyValue(line) {
+    const fromExpr = evalExpr(line.qty_expr ?? line.quantity);
+    if (Number.isFinite(fromExpr)) return fromExpr;
+    return num(line.quantity);
+  }
+
   function lineTotals(line) {
-    const qty = num(line.quantity);
+    const qty = qtyValue(line);
     const price = num(line.price);
     const discount = Math.min(100, Math.max(0, num(line.discount)));
     const total = round2(qty * price);
@@ -89,6 +112,7 @@
       order_types: ["Производство", "Услуга", "Поставка", "Монтаж"],
       customers: [],
       orders: [],
+      ui: { sidebar_collapsed: false, column_widths: {} },
     };
   }
 
@@ -98,6 +122,7 @@
       order_type: state.doc.order_types[0] || "",
       product: "",
       quantity: 1,
+      qty_expr: "1",
       unit: state.doc.units[0] || "шт.",
       price: 0,
       discount: 0,
@@ -198,6 +223,7 @@
     const autosaveEl = $("autosave");
     if (autosaveEl) autosaveEl.checked = !!state.autosave;
     document.title = `${state.dirty ? "• " : ""}${state.doc?.title || "FinMaster"} — FinMaster`;
+    applySidebar();
   }
 
   function showApp() {
@@ -383,6 +409,123 @@
     return values.map((v) => `<option ${v === selected ? "selected" : ""}>${esc(v)}</option>`).join("");
   }
 
+  const ORDER_COLS = [
+    ["order_type", "Тип заказа", 130],
+    ["product", "Продукт", 150],
+    ["qty_expr", "Кол-во", 90],
+    ["unit", "Ед.", 72],
+    ["price", "Цена", 90],
+    ["discount", "Скидка %", 80],
+    ["order_date", "Дата заказа", 170],
+    ["paid", "Оплачено", 90],
+    ["payment_date", "Дата оплаты", 170],
+    ["unpaid", "Не оплачено", 110],
+    ["total", "Итог", 120],
+    ["status", "Статус", 140],
+    ["actions", "", 44],
+  ];
+
+  function ensureUi() {
+    if (!state.doc.ui || typeof state.doc.ui !== "object") state.doc.ui = { sidebar_collapsed: false, column_widths: {} };
+    if (!state.doc.ui.column_widths || typeof state.doc.ui.column_widths !== "object") state.doc.ui.column_widths = {};
+    return state.doc.ui;
+  }
+
+  function colWidth(key, fallback) {
+    const w = Number(ensureUi().column_widths[key]);
+    return Math.max(52, Number.isFinite(w) && w > 0 ? w : fallback);
+  }
+
+  function colgroupHtml() {
+    return `<colgroup>${ORDER_COLS.map(([key, , w]) => `<col data-col="${key}" style="width:${colWidth(key, w)}px">`).join("")}</colgroup>`;
+  }
+
+  function orderHeadHtml() {
+    return ORDER_COLS.map(([key, label]) => `<th data-col="${key}">${label}${key === "actions" ? "" : `<span class="col-resizer" data-col="${key}"></span>`}</th>`).join("");
+  }
+
+  function applySidebar() {
+    const shell = $("app-shell");
+    if (!shell || !state.doc) return;
+    shell.classList.toggle("sidebar-collapsed", !!ensureUi().sidebar_collapsed);
+  }
+
+  function customerTenure(c) {
+    const dates = [];
+    for (const order of state.doc.orders || []) {
+      if (order.customer !== c.name) continue;
+      if (order.created_at) dates.push(order.created_at);
+      for (const line of order.lines || []) {
+        if (line.order_date) dates.push(line.order_date);
+      }
+    }
+    if (!dates.length) return "нет заказов";
+    dates.sort();
+    const first = new Date(dates[0]);
+    if (Number.isNaN(first.getTime())) return "нет заказов";
+    const days = Math.max(0, Math.floor((Date.now() - first.getTime()) / 86400000));
+    const years = Math.floor(days / 365);
+    const months = Math.floor((days % 365) / 30);
+    const started = first.toLocaleDateString("ru-RU");
+    if (years) return `с ${started} · ${years} г. ${months} мес.`;
+    if (months) return `с ${started} · ${months} мес.`;
+    return `с ${started} · ${days} дн.`;
+  }
+
+  function syncCustomersFromOrders() {
+    const list = state.doc.customers || (state.doc.customers = []);
+    list.forEach((c) => {
+      if (!c.id) c.id = uid();
+    });
+    (state.doc.orders || []).forEach((order) => {
+      const name = String(order.customer || "").trim();
+      if (!name) return;
+      if (!list.some((c) => c.name === name)) {
+        list.push({ id: uid(), name, organization: "", phone: "", email: "", address: "", rating: 0 });
+      }
+    });
+  }
+
+  function renderCustomers() {
+    const box = $("customers-panel");
+    if (!box || !state.doc) return;
+    syncCustomersFromOrders();
+    const list = state.doc.customers || [];
+    $("customer-list").innerHTML = unique(list.map((c) => c.name)).map((c) => `<option value="${esc(c)}">`).join("");
+    if (!list.length) {
+      box.innerHTML = `<div class="hint">Добавьте заказчика кнопкой «+» или укажите имя в заказе.</div>`;
+      return;
+    }
+    box.innerHTML = list
+      .map((c) => {
+        const open = state.selectedCustomerId === c.id ? "open" : "";
+        const n = (state.doc.orders || []).filter((o) => o.customer === c.name).length;
+        return `<article class="cust-card ${open}" data-cid="${esc(c.id)}">
+          <div class="cust-title" data-cact="toggle">
+            <div>
+              <b>${esc(c.name || "Без имени")}</b>
+              <div class="meta">${esc(c.organization || "частное лицо")} · ${n} зак. · рейтинг ${esc(c.rating || "—")}</div>
+              <div class="meta">${esc(customerTenure(c))}</div>
+            </div>
+            <button class="btn small danger" type="button" data-cact="delcust">✕</button>
+          </div>
+          <div class="fields">
+            <label>Имя</label><input data-cf="name" value="${esc(c.name || "")}" />
+            <label>Организация</label><input data-cf="organization" value="${esc(c.organization || "")}" />
+            <label>Телефон</label><input data-cf="phone" value="${esc(c.phone || "")}" />
+            <label>Почта</label><input data-cf="email" value="${esc(c.email || "")}" />
+            <label>Адрес</label><input data-cf="address" value="${esc(c.address || "")}" />
+            <label>Рейтинг</label>
+            <select data-cf="rating">${[0, 1, 2, 3, 4, 5]
+              .map((r) => `<option value="${r}" ${Number(c.rating) === r ? "selected" : ""}>${r ? "★".repeat(r) : "не задан"}</option>`)
+              .join("")}</select>
+            <div class="meta">Время совместной работы: ${esc(customerTenure(c))}</div>
+          </div>
+        </article>`;
+      })
+      .join("");
+  }
+
   function renderOrders() {
     const orders = filteredOrders();
     const summary = summarize(orders.flatMap((o) => (o.lines || []).map((line) => ({ order: o, line, totals: lineTotals(line) }))));
@@ -409,11 +552,9 @@
           </div>
           <div class="table-wrap">
             <table class="data">
+              ${colgroupHtml()}
               <thead>
-                <tr>
-                  <th>Тип заказа</th><th>Продукт</th><th>Кол-во</th><th>Ед.</th><th>Цена</th><th>Скидка %</th>
-                  <th>Дата заказа</th><th>Оплачено</th><th>Дата оплаты</th><th>Не оплачено</th><th>Итог</th><th>Статус</th><th></th>
-                </tr>
+                <tr>${orderHeadHtml()}</tr>
               </thead>
               <tbody>
                 ${(order.lines || [])
@@ -422,7 +563,7 @@
                     return `<tr data-line="${line.id}">
                       <td><select data-lk="order_type">${optionList(unique([line.order_type, ...types]), line.order_type)}</select></td>
                       <td><input data-lk="product" list="product-list" value="${esc(line.product)}" /></td>
-                      <td class="num"><input data-lk="quantity" type="number" min="0" step="0.01" value="${esc(line.quantity)}" /></td>
+                      <td class="num"><input data-lk="qty_expr" inputmode="decimal" placeholder="100*5" title="Можно формулу: 100*5 или (1+5)*10" value="${esc(line.qty_expr ?? line.quantity)}" /></td>
                       <td><select data-lk="unit">${optionList(unique([line.unit, ...units]), line.unit)}</select></td>
                       <td class="num"><input data-lk="price" type="number" min="0" step="0.01" value="${esc(line.price)}" /></td>
                       <td class="num"><input data-lk="discount" type="number" min="0" max="100" step="0.01" value="${esc(line.discount)}" /></td>
@@ -503,7 +644,7 @@
             ({ order, line, totals }) => `<tr>
             <td>${esc(order.number)}</td><td>${esc(order.customer)}</td><td>${esc(order.name)}</td>
             <td>${esc(line.order_type)}</td><td>${esc(line.product)}</td>
-            <td class="num">${esc(line.quantity)} ${esc(line.unit)}</td>
+            <td class="num">${esc(qtyValue(line))} ${esc(line.unit)}</td>
             <td class="num">${esc(money(totals.after))}</td>
             <td class="num">${esc(money(totals.paid))}</td>
             <td class="num">${esc(money(totals.unpaid))}</td>
@@ -541,25 +682,6 @@
     $("type-list").innerHTML = (state.doc.order_types || [])
       .map((u, i) => `<div class="list-item" data-i="${i}"><input data-tk value="${esc(u)}" /><button class="btn small danger" data-tact="del">Удалить</button></div>`)
       .join("");
-
-    const map = new Map();
-    (state.doc.customers || []).forEach((c) => map.set(c.name, { ...c }));
-    (state.doc.orders || []).forEach((o) => {
-      if (!o.customer) return;
-      if (!map.has(o.customer)) map.set(o.customer, { name: o.customer, phone: "", note: "" });
-    });
-    state.doc.customers = [...map.values()];
-    $("customer-catalog").innerHTML = state.doc.customers.length
-      ? `<table class="data"><thead><tr><th>Имя</th><th>Телефон</th><th>Заметка</th><th>Заказов</th></tr></thead><tbody>${state.doc.customers
-          .map((c) => {
-            const n = (state.doc.orders || []).filter((o) => o.customer === c.name).length;
-            return `<tr data-name="${esc(c.name)}"><td>${esc(c.name)}</td>
-              <td><input data-cust="phone" value="${esc(c.phone || "")}" /></td>
-              <td><input data-cust="note" value="${esc(c.note || "")}" /></td>
-              <td>${n}</td></tr>`;
-          })
-          .join("")}</tbody></table>`
-      : `<div class="empty">Заказчики появятся после ввода в заказах</div>`;
   }
 
   function toHex(color) {
@@ -576,6 +698,8 @@
     if (state.view === "orders") renderOrders();
     if (state.view === "analytics") renderAnalytics();
     if (state.view === "catalogs") renderCatalogs();
+    renderCustomers();
+    applySidebar();
   }
 
   function findOrder(id) {
@@ -887,12 +1011,81 @@
       markDirty();
       renderCatalogs();
     });
-    $("customer-catalog").addEventListener("input", (e) => {
-      const name = e.target.closest("tr")?.dataset.name;
-      const c = state.doc.customers.find((x) => x.name === name);
+    $("customers-panel").addEventListener("input", (e) => {
+      const card = e.target.closest("[data-cid]");
+      const cf = e.target.dataset.cf;
+      if (!card || !cf) return;
+      const c = (state.doc.customers || []).find((x) => x.id === card.dataset.cid);
       if (!c) return;
-      c[e.target.dataset.cust] = e.target.value;
+      if (cf === "name") {
+        const old = c.name;
+        c.name = e.target.value;
+        if (old && old !== c.name) {
+          (state.doc.orders || []).forEach((o) => {
+            if (o.customer === old) o.customer = c.name;
+          });
+        }
+        const title = card.querySelector("b");
+        if (title) title.textContent = c.name || "Без имени";
+      } else if (cf === "rating") {
+        c.rating = num(e.target.value);
+      } else {
+        c[cf] = e.target.value;
+      }
       markDirty();
+    });
+    $("customers-panel").addEventListener("click", (e) => {
+      const act = e.target.dataset.cact || e.target.closest("[data-cact]")?.dataset.cact;
+      const card = e.target.closest("[data-cid]");
+      if (!act || !card) return;
+      if (act === "toggle") {
+        if (e.target.closest("[data-cact='delcust']")) return;
+        state.selectedCustomerId = state.selectedCustomerId === card.dataset.cid ? null : card.dataset.cid;
+        renderCustomers();
+      }
+      if (act === "delcust") {
+        e.stopPropagation();
+        if (!confirm("Удалить заказчика из справочника? Заказы не удаляются.")) return;
+        state.doc.customers = (state.doc.customers || []).filter((x) => x.id !== card.dataset.cid);
+        markDirty();
+        renderCustomers();
+      }
+    });
+    $("btn-add-customer").addEventListener("click", () => {
+      const c = { id: uid(), name: "Новый заказчик", organization: "", phone: "", email: "", address: "", rating: 0 };
+      (state.doc.customers || (state.doc.customers = [])).push(c);
+      state.selectedCustomerId = c.id;
+      markDirty();
+      renderCustomers();
+    });
+    $("btn-toggle-sidebar").addEventListener("click", () => {
+      ensureUi().sidebar_collapsed = !ensureUi().sidebar_collapsed;
+      applySidebar();
+      markDirty();
+    });
+    $("orders-list").addEventListener("mousedown", (e) => {
+      const handle = e.target.closest(".col-resizer");
+      if (!handle) return;
+      e.preventDefault();
+      const key = handle.dataset.col;
+      const startX = e.clientX;
+      const startW = colWidth(key, 100);
+      handle.classList.add("dragging");
+      const move = (ev) => {
+        const w = Math.max(52, startW + ev.clientX - startX);
+        ensureUi().column_widths[key] = w;
+        document.querySelectorAll(`col[data-col="${key}"]`).forEach((col) => {
+          col.style.width = `${w}px`;
+        });
+      };
+      const up = () => {
+        handle.classList.remove("dragging");
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+        markDirty();
+      };
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
     });
 
     ["f-from", "f-to", "f-date-field", "f-group", "f-status", "f-type", "f-customer", "f-product", "f-unit", "f-min", "f-max", "f-unpaid", "f-blacklist", "c-a-from", "c-a-to", "c-b-from", "c-b-to"].forEach(
@@ -1059,6 +1252,10 @@
     if (e.target.dataset.k) {
       order[e.target.dataset.k] = e.target.value;
       if (e.target.dataset.k === "name" && !state.path) state.doc.title = e.target.value || state.doc.title;
+      if (e.target.dataset.k === "customer") {
+        syncCustomersFromOrders();
+        renderCustomers();
+      }
       markDirty();
       return;
     }
@@ -1068,6 +1265,11 @@
     if (!line || !e.target.dataset.lk) return;
     const key = e.target.dataset.lk;
     line[key] = e.target.type === "number" ? num(e.target.value) : e.target.value;
+    if (key === "qty_expr") {
+      const v = evalExpr(e.target.value);
+      e.target.classList.toggle("invalid", e.target.value.trim() !== "" && !Number.isFinite(v));
+      if (Number.isFinite(v)) line.quantity = round2(v);
+    }
     markDirty();
     const t = lineTotals(line);
     const cells = tr.querySelectorAll(".computed");

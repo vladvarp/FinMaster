@@ -37,37 +37,49 @@
   </div>
 
   <div class="app" id="app-shell" hidden>
-    <aside class="sidebar">
-      <div class="brand">
-        <svg width="38" height="38" viewBox="0 0 42 42" fill="none">
-          <rect width="42" height="42" rx="12" fill="#0f766e"/>
-          <path d="M12 28V14h7.5a4.5 4.5 0 010 9H12" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/>
-          <path d="M12 23h18M22 23v7" stroke="#99f6e4" stroke-width="2.4" stroke-linecap="round"/>
-        </svg>
-        <div>
-          <h1>FinMaster</h1>
-          <span>Учёт заказов</span>
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <button class="btn ghost icon" type="button" id="btn-toggle-sidebar" title="Свернуть / развернуть панель">☰</button>
+        <div class="brand">
+          <svg width="38" height="38" viewBox="0 0 42 42" fill="none">
+            <rect width="42" height="42" rx="12" fill="#0f766e"/>
+            <path d="M12 28V14h7.5a4.5 4.5 0 010 9H12" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/>
+            <path d="M12 23h18M22 23v7" stroke="#99f6e4" stroke-width="2.4" stroke-linecap="round"/>
+          </svg>
+          <div class="brand-text">
+            <h1>FinMaster</h1>
+            <span>Учёт заказов</span>
+          </div>
         </div>
       </div>
-      <div class="file-box">
-        <div class="file-title">Текущий отчёт</div>
-        <div class="file-name"><span class="dirty-dot hidden" id="dirty-dot"></span><input id="report-title" value="Новый отчёт" /></div>
-        <div class="file-path" id="file-path">Файл ещё не сохранён</div>
+      <div class="sidebar-core">
+        <div class="file-box">
+          <div class="file-title">Текущий отчёт</div>
+          <div class="file-name"><span class="dirty-dot hidden" id="dirty-dot"></span><input id="report-title" value="Новый отчёт" /></div>
+          <div class="file-path" id="file-path">Файл ещё не сохранён</div>
+        </div>
+        <nav class="nav" id="nav">
+          <button data-view="dashboard" class="active" title="Дашборд"><span class="nav-ico">⌂</span><span class="nav-label">Дашборд</span></button>
+          <button data-view="orders" title="Заказы"><span class="nav-ico">☰</span><span class="nav-label">Заказы</span></button>
+          <button data-view="analytics" title="Аналитика"><span class="nav-ico">▦</span><span class="nav-label">Аналитика</span></button>
+          <button data-view="catalogs" title="Справочники"><span class="nav-ico">⚙</span><span class="nav-label">Справочники</span></button>
+        </nav>
+        <div class="side-actions">
+          <button class="btn ghost" id="btn-new">Новый</button>
+          <button class="btn ghost" id="btn-open">Открыть</button>
+          <button class="btn primary" id="btn-save">Сохранить</button>
+          <button class="btn ghost" id="btn-save-as">Сохранить как</button>
+          <label class="side-check"><input type="checkbox" id="autosave" /> <span>Автосохранение</span></label>
+          <div class="hint">Без галочки отчёт пишется только по кнопке «Сохранить». При закрытии с несохранёнными изменениями программа спросит подтверждение.</div>
+        </div>
       </div>
-      <nav class="nav" id="nav">
-        <button data-view="dashboard" class="active">Дашборд</button>
-        <button data-view="orders">Заказы</button>
-        <button data-view="analytics">Аналитика</button>
-        <button data-view="catalogs">Справочники</button>
-      </nav>
-      <div class="side-actions">
-        <button class="btn ghost" id="btn-new">Новый</button>
-        <button class="btn ghost" id="btn-open">Открыть</button>
-        <button class="btn primary" id="btn-save">Сохранить</button>
-        <button class="btn ghost" id="btn-save-as">Сохранить как</button>
-        <label class="side-check"><input type="checkbox" id="autosave" /> Автосохранение</label>
-        <div class="hint">Без галочки отчёт пишется только по кнопке «Сохранить». При закрытии с несохранёнными изменениями программа спросит подтверждение.</div>
-      </div>
+      <section class="customers-pane">
+        <div class="customers-head">
+          <h3>Заказчики</h3>
+          <button class="btn small ghost" type="button" id="btn-add-customer">+</button>
+        </div>
+        <div class="customers-scroll" id="customers-panel"></div>
+      </section>
     </aside>
 
     <main class="workspace">
@@ -212,11 +224,6 @@
               <h3>Типы заказа</h3>
               <div class="list-edit" id="type-list"></div>
               <button class="btn small" id="btn-add-type" style="margin-top:10px">+ Тип</button>
-            </div>
-            <div class="card">
-              <h3>Заказчики</h3>
-              <p class="hint" style="margin-top:0">Справочник заполняется из заказов. Можно указать телефон и заметку.</p>
-              <div class="table-wrap" id="customer-catalog"></div>
             </div>
           </div>
         </div>

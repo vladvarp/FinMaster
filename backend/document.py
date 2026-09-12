@@ -38,6 +38,10 @@ def empty_document(title: str = "Новый отчёт") -> dict[str, Any]:
         "order_types": list(DEFAULT_ORDER_TYPES),
         "customers": [],
         "orders": [],
+        "ui": {
+            "sidebar_collapsed": False,
+            "column_widths": {},
+        },
     }
 
 
@@ -85,5 +89,12 @@ def normalize_document(raw: Any) -> dict[str, Any]:
     orders = raw.get("orders")
     if isinstance(orders, list):
         base["orders"] = [o for o in orders if isinstance(o, dict)]
+
+    ui = raw.get("ui")
+    if isinstance(ui, dict):
+        base["ui"] = {
+            "sidebar_collapsed": bool(ui.get("sidebar_collapsed")),
+            "column_widths": ui.get("column_widths") if isinstance(ui.get("column_widths"), dict) else {},
+        }
 
     return base
