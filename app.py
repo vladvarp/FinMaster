@@ -8,16 +8,19 @@ import time
 import webbrowser
 from typing import Any
 
-from flask import Flask, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
 
-from backend.document import empty_document, normalize_document, now_iso
 from backend import storage
+from backend.dialogs import open_report_dialog, save_csv_dialog, save_report_dialog
+from backend.document import normalize_document, now_iso
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 FRONTEND = os.path.join(ROOT, "frontend")
-FILE_TYPES = ("Отчёты FinMaster (*.fmaster;*.json)", "Все файлы (*.*)")
 
 app = Flask(__name__, static_folder=FRONTEND, static_url_path="")
+WINDOW = None
+FORCE_CLOSE = False
+DIRTY = False
 
 
 @app.get("/")
@@ -30,118 +33,129 @@ def static_files(filename: str):
     return send_from_directory(FRONTEND, filename)
 
 
-class FinMasterApi:
-    def __init__(self) -> None:
-        self.force_close = False
+def _recent_payload() -> list[dict[str, Any]]:
+    cfg = storage.load_config()
+    recent = []
+    for item in cfg.get("recent", []):
+        path = item.get("path")
+        if not path:
+            continue
+        recent.append({**item, "exists": os.path.exists(path)})
+    return recent
 
-    def get_bootstrap(self) -> dict[str, Any]:
-        cfg = storage.load_config()
-        recent = []
-        for item in cfg.get("recent", []):
-            path = item.get("path")
-            if not path:
-                continue
-            exists = os.path.exists(path)
-            recent.append({**item, "exists": exists})
-        return {
-            "recent": recent,
+
+@app.get("/api/bootstrap")
+def api_bootstrap():
+    cfg = storage.load_config()
+    return jsonify(
+        {
+            "recent": _recent_payload(),
             "autosave": bool(cfg.get("autosave")),
             "last_dir": cfg.get("last_dir") or "",
-            "native": True,
+            "desktop": True,
         }
+    )
 
-    def new_document(self) -> dict[str, Any]:
-        return empty_document()
 
-    def open_dialog(self) -> dict[str, Any] | None:
-        import webview
+@app.post("/api/dirty")
+def api_dirty():
+    global DIRTY
+    data = request.get_json(silent=True) or {}
+    DIRTY = bool(data.get("dirty"))
+    return jsonify({"ok": True, "dirty": DIRTY})
 
-        window = webview.windows[0]
-        directory = storage.load_config().get("last_dir") or ""
-        result = window.create_file_dialog(
-            webview.OPEN_DIALOG,
-            directory=directory or None,
-            allow_multiple=False,
-            file_types=FILE_TYPES,
-        )
-        if not result:
-            return None
-        path = result[0]
-        return self.open_path(path)
 
-    def open_path(self, path: str) -> dict[str, Any]:
-        if not path or not os.path.exists(path):
-            raise FileNotFoundError("Файл отчёта не найден.")
-        raw = json.loads(storage.read_text(path))
-        doc = normalize_document(raw)
-        recent = storage.add_recent(path, doc.get("title") or "")
-        return {"path": os.path.abspath(path), "document": doc, "recent": recent}
+@app.post("/api/autosave")
+def api_autosave():
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get("enabled"))
+    storage.set_autosave(enabled)
+    return jsonify({"ok": True, "autosave": enabled})
 
-    def save_dialog(self, suggested: str = "Отчёт.fmaster") -> str | None:
-        import webview
 
-        window = webview.windows[0]
-        directory = storage.load_config().get("last_dir") or ""
-        name = suggested if suggested.lower().endswith(".fmaster") else f"{suggested}.fmaster"
-        result = window.create_file_dialog(
-            webview.SAVE_DIALOG,
-            directory=directory or None,
-            save_filename=name,
-            file_types=("Отчёт FinMaster (*.fmaster)",),
-        )
-        if not result:
-            return None
-        path = result if isinstance(result, str) else result[0]
-        if path and not os.path.splitext(path)[1]:
-            path += ".fmaster"
-        return path
+@app.post("/api/dialog/open")
+def api_dialog_open():
+    path = open_report_dialog(storage.load_config().get("last_dir") or "")
+    if not path:
+        return jsonify({"cancelled": True})
+    return jsonify(_open_path(path))
 
-    def write_document(self, path: str, document: dict[str, Any]) -> dict[str, Any]:
-        if not path:
-            raise ValueError("Не указан путь файла.")
-        doc = normalize_document(document)
-        doc["modified_at"] = now_iso()
-        storage.atomic_write(path, json.dumps(doc, ensure_ascii=False, indent=2))
-        recent = storage.add_recent(path, doc.get("title") or "")
-        return {"path": os.path.abspath(path), "document": doc, "recent": recent}
 
-    def set_autosave(self, enabled: bool) -> bool:
-        storage.set_autosave(bool(enabled))
-        return bool(enabled)
+@app.post("/api/open-path")
+def api_open_path():
+    data = request.get_json(silent=True) or {}
+    path = data.get("path") or ""
+    try:
+        return jsonify(_open_path(path))
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
 
-    def export_dialog(self, suggested: str = "Экспорт.csv") -> str | None:
-        import webview
 
-        window = webview.windows[0]
-        directory = storage.load_config().get("last_dir") or ""
-        result = window.create_file_dialog(
-            webview.SAVE_DIALOG,
-            directory=directory or None,
-            save_filename=suggested,
-            file_types=("CSV (*.csv)", "Все файлы (*.*)"),
-        )
-        if not result:
-            return None
-        return result if isinstance(result, str) else result[0]
+def _open_path(path: str) -> dict[str, Any]:
+    if not path or not os.path.exists(path):
+        raise FileNotFoundError("Файл отчёта не найден.")
+    raw = json.loads(storage.read_text(path))
+    doc = normalize_document(raw)
+    recent = storage.add_recent(path, doc.get("title") or "")
+    return {"path": os.path.abspath(path), "document": doc, "recent": recent, "cancelled": False}
 
-    def write_text(self, path: str, content: str) -> bool:
-        storage.atomic_write(path, content)
-        return True
 
-    def confirm_close(self) -> bool:
-        """Ask JS whether the window may close. JS returns true/false synchronously if clean."""
-        import webview
+@app.post("/api/dialog/save")
+def api_dialog_save():
+    data = request.get_json(silent=True) or {}
+    suggested = data.get("suggested") or "Отчёт.fmaster"
+    path = save_report_dialog(suggested, storage.load_config().get("last_dir") or "")
+    if not path:
+        return jsonify({"cancelled": True})
+    return jsonify({"path": path, "cancelled": False})
 
-        window = webview.windows[0]
-        result = window.evaluate_js("window.__finmasterCanClose && window.__finmasterCanClose()")
-        return bool(result)
 
-    def destroy_window(self) -> None:
-        import webview
+@app.post("/api/dialog/export")
+def api_dialog_export():
+    data = request.get_json(silent=True) or {}
+    suggested = data.get("suggested") or "Экспорт.csv"
+    path = save_csv_dialog(suggested, storage.load_config().get("last_dir") or "")
+    if not path:
+        return jsonify({"cancelled": True})
+    return jsonify({"path": path, "cancelled": False})
 
-        self.force_close = True
-        for window in list(webview.windows):
-            window.destroy()
+
+@app.post("/api/write")
+def api_write():
+    data = request.get_json(silent=True) or {}
+    path = data.get("path") or ""
+    document = data.get("document")
+    if not path:
+        return jsonify({"error": "Не указан путь файла."}), 400
+    doc = normalize_document(document)
+    doc["modified_at"] = now_iso()
+    storage.atomic_write(path, json.dumps(doc, ensure_ascii=False, indent=2))
+    recent = storage.add_recent(path, doc.get("title") or "")
+    return jsonify({"path": os.path.abspath(path), "document": doc, "recent": recent})
+
+
+@app.post("/api/write-text")
+def api_write_text():
+    data = request.get_json(silent=True) or {}
+    path = data.get("path") or ""
+    content = data.get("content") or ""
+    if not path:
+        return jsonify({"error": "Не указан путь файла."}), 400
+    storage.atomic_write(path, content)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/quit")
+def api_quit():
+    global FORCE_CLOSE, DIRTY
+    FORCE_CLOSE = True
+    DIRTY = False
+    window = WINDOW
+    if window is not None:
+        threading.Timer(0.05, window.destroy).start()
+    return jsonify({"ok": True})
 
 
 def pick_port() -> int:
@@ -157,6 +171,8 @@ def run_server(port: int) -> None:
 
 
 def main() -> None:
+    global WINDOW, FORCE_CLOSE, DIRTY
+
     port = pick_port()
     url = f"http://127.0.0.1:{port}/"
     thread = threading.Thread(target=run_server, args=(port,), daemon=True)
@@ -183,11 +199,9 @@ def main() -> None:
         except KeyboardInterrupt:
             return
 
-    api = FinMasterApi()
-    window = webview.create_window(
+    WINDOW = webview.create_window(
         "FinMaster — учёт заказов",
         url,
-        js_api=api,
         width=1440,
         height=920,
         min_size=(1180, 740),
@@ -195,18 +209,25 @@ def main() -> None:
     )
 
     def on_closing():
-        if api.force_close:
+        # Never call evaluate_js on this stack: WebView2 deadlocks the window.
+        if FORCE_CLOSE or not DIRTY:
             return True
-        try:
-            dirty = window.evaluate_js("window.__finmasterIsDirty && window.__finmasterIsDirty()")
-        except Exception:
-            return True
-        if not dirty:
-            return True
-        window.evaluate_js("window.__finmasterAskClose && window.__finmasterAskClose()")
+        window = WINDOW
+
+        def ask():
+            time.sleep(0.2)
+            try:
+                window.evaluate_js("window.__finmasterAskClose && window.__finmasterAskClose()")
+            except Exception:
+                try:
+                    window.destroy()
+                except Exception:
+                    pass
+
+        threading.Thread(target=ask, daemon=True).start()
         return False
 
-    window.events.closing += on_closing
+    WINDOW.events.closing += on_closing
     webview.start()
 
 

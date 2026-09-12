@@ -8,7 +8,7 @@
     path: null,
     dirty: false,
     autosave: false,
-    native: false,
+    desktop: false,
     view: "dashboard",
     search: "",
     autosaveTimer: null,
@@ -121,21 +121,30 @@
     };
   }
 
-  async function waitNative(ms = 1800) {
-    if (window.pywebview?.api) return true;
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(!!window.pywebview?.api), ms);
-      window.addEventListener("pywebviewready", () => {
-        clearTimeout(timer);
-        resolve(true);
-      });
-    });
+  async function apiGet(path) {
+    const res = await fetch(path);
+    if (!res.ok) throw new Error(res.statusText);
+    return res.json();
   }
 
-  async function native(name, ...args) {
-    const fn = window.pywebview?.api?.[name];
-    if (!fn) throw new Error("NO_NATIVE");
-    return fn.apply(window.pywebview.api, args);
+  async function apiPost(path, body) {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    return data;
+  }
+
+  async function syncDirty() {
+    if (!state.desktop) return;
+    try {
+      await apiPost("/api/dirty", { dirty: !!state.dirty });
+    } catch {
+      /* ignore */
+    }
   }
 
   function toast(text) {
@@ -165,6 +174,7 @@
     state.dirty = true;
     state.doc.modified_at = new Date().toISOString();
     updateChrome();
+    syncDirty();
     if (state.autosave) {
       clearTimeout(state.autosaveTimer);
       state.autosaveTimer = setTimeout(() => save({ silent: true }), 800);
@@ -174,6 +184,7 @@
   function setClean() {
     state.dirty = false;
     updateChrome();
+    syncDirty();
   }
 
   function updateChrome() {
@@ -588,16 +599,8 @@
     renderAll();
   }
 
-  async function createNew() {
-    if (state.native) {
-      try {
-        state.doc = await native("new_document");
-      } catch {
-        state.doc = emptyDoc();
-      }
-    } else {
-      state.doc = emptyDoc();
-    }
+  function createNew() {
+    state.doc = emptyDoc();
     state.path = null;
     setClean();
     showApp();
@@ -605,14 +608,15 @@
   }
 
   async function openFromDialog() {
-    if (state.native) {
+    if (state.desktop) {
       try {
-        const res = await native("open_dialog");
-        if (!res) return;
+        const res = await apiPost("/api/dialog/open", {});
+        if (res.cancelled) return;
         applyLoaded(res);
         return;
       } catch (err) {
         toast(String(err.message || err));
+        $("file-input").click();
         return;
       }
     }
@@ -631,9 +635,9 @@
   }
 
   async function openPath(path) {
-    if (state.native) {
+    if (state.desktop) {
       try {
-        applyLoaded(await native("open_path", path));
+        applyLoaded(await apiPost("/api/open-path", { path }));
       } catch (err) {
         toast("Не удалось открыть файл. Возможно, он перемещён.");
       }
@@ -645,7 +649,7 @@
   async function save({ as = false, silent = false } = {}) {
     if (!state.doc) return false;
     try {
-      if (state.native) {
+      if (state.desktop) {
         let path = state.path;
         if (as || !path) {
           if (silent && !path) {
@@ -655,10 +659,11 @@
             }
             return false;
           }
-          path = await native("save_dialog", `${state.doc.title || "Отчёт"}.fmaster`);
-          if (!path) return false;
+          const picked = await apiPost("/api/dialog/save", { suggested: `${state.doc.title || "Отчёт"}.fmaster` });
+          if (picked.cancelled || !picked.path) return false;
+          path = picked.path;
         }
-        const res = await native("write_document", path, state.doc);
+        const res = await apiPost("/api/write", { path, document: state.doc });
         state.doc = res.document;
         state.path = res.path;
         if (res.recent) renderRecent(res.recent);
@@ -720,11 +725,11 @@
       lines.push(vals.join(";"));
     });
     const csv = "\ufeff" + lines.join("\n");
-    if (state.native) {
+    if (state.desktop) {
       try {
-        const path = await native("export_dialog", `${state.doc.title || "Экспорт"}.csv`);
-        if (!path) return;
-        await native("write_text", path, csv);
+        const picked = await apiPost("/api/dialog/export", { suggested: `${state.doc.title || "Экспорт"}.csv` });
+        if (picked.cancelled || !picked.path) return;
+        await apiPost("/api/write-text", { path: picked.path, content: csv });
         toast("CSV сохранён");
         return;
       } catch (err) {
@@ -737,9 +742,9 @@
   async function renderRecent(list) {
     let items = list;
     if (!items) {
-      if (state.native) {
+      if (state.desktop) {
         try {
-          const boot = await native("get_bootstrap");
+          const boot = await apiGet("/api/bootstrap");
           items = boot.recent || [];
           state.autosave = !!boot.autosave;
         } catch {
@@ -808,9 +813,9 @@
     $("order-sort").addEventListener("change", () => renderOrders());
     $("autosave").addEventListener("change", async (e) => {
       state.autosave = e.target.checked;
-      if (state.native) {
+      if (state.desktop) {
         try {
-          await native("set_autosave", state.autosave);
+          await apiPost("/api/autosave", { enabled: state.autosave });
         } catch {
           /* ignore */
         }
@@ -923,8 +928,6 @@
     $("btn-save-as").addEventListener("click", () => save({ as: true }));
     $("btn-open").addEventListener("click", () => maybeOpen(openFromDialog));
     $("btn-new").addEventListener("click", onNew);
-    $("btn-start-new").addEventListener("click", () => createNew());
-    $("btn-start-open").addEventListener("click", openFromDialog);
     $("btn-home").addEventListener("click", () => {
       if (state.dirty) {
         state._home = true;
@@ -970,12 +973,14 @@
         showStart();
         return;
       }
-      if (state.native) {
+      if (state.desktop) {
         try {
-          await native("destroy_window");
+          await apiPost("/api/quit", {});
         } catch {
           window.close();
         }
+      } else {
+        window.close();
       }
     });
     $("close-save").addEventListener("click", async () => {
@@ -992,7 +997,8 @@
         await createNew();
         return;
       }
-      if (state.native) await native("destroy_window");
+      if (state.desktop) await apiPost("/api/quit", {});
+      else window.close();
     });
 
     $("new-cancel").addEventListener("click", () => $("new-modal").classList.remove("open"));
@@ -1111,22 +1117,34 @@
   }
 
   async function boot() {
-    bind();
-    state.native = await waitNative();
-    if (state.native) {
-      try {
-        const bootData = await native("get_bootstrap");
-        state.autosave = !!bootData.autosave;
-        await renderRecent(bootData.recent);
-      } catch {
-        await renderRecent([]);
-      }
-    } else {
+    try {
+      bind();
+    } catch (err) {
+      console.error(err);
+    }
+    try {
+      const bootData = await apiGet("/api/bootstrap");
+      state.desktop = true;
+      state.autosave = !!bootData.autosave;
+      await renderRecent(bootData.recent);
+      await apiPost("/api/dirty", { dirty: false });
+    } catch {
+      state.desktop = false;
       state.autosave = localStorage.getItem(LS_AUTOSAVE) === "true";
       await renderRecent();
     }
     $("autosave").checked = state.autosave;
   }
+
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("#btn-start-new")) {
+      e.preventDefault();
+      createNew();
+    } else if (e.target.closest("#btn-start-open")) {
+      e.preventDefault();
+      openFromDialog();
+    }
+  });
 
   boot();
 })();
