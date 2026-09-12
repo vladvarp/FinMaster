@@ -63,6 +63,7 @@
           <button data-view="orders" title="Заказы"><span class="nav-ico">☰</span><span class="nav-label">Заказы</span></button>
           <button data-view="analytics" title="Аналитика"><span class="nav-ico">▦</span><span class="nav-label">Аналитика</span></button>
           <button data-view="catalogs" title="Справочники"><span class="nav-ico">⚙</span><span class="nav-label">Справочники</span></button>
+          <button data-view="customers" title="Заказчики"><span class="nav-ico">◉</span><span class="nav-label">Заказчики</span></button>
         </nav>
         <div class="side-actions">
           <button class="btn ghost" id="btn-new">Новый</button>
@@ -73,13 +74,6 @@
           <div class="hint">Без галочки отчёт пишется только по кнопке «Сохранить». При закрытии с несохранёнными изменениями программа спросит подтверждение.</div>
         </div>
       </div>
-      <section class="customers-pane">
-        <div class="customers-head">
-          <h3>Заказчики</h3>
-          <button class="btn small ghost" type="button" id="btn-add-customer">+</button>
-        </div>
-        <div class="customers-scroll" id="customers-panel"></div>
-      </section>
     </aside>
 
     <main class="workspace">
@@ -225,6 +219,18 @@
               <div class="list-edit" id="type-list"></div>
               <button class="btn small" id="btn-add-type" style="margin-top:10px">+ Тип</button>
             </div>
+          </div>
+        </div>
+
+        <div class="view" id="view-customers">
+          <div class="toolbar">
+            <div class="left">
+              <button class="btn primary" type="button" id="btn-add-customer">+ Заказчик</button>
+            </div>
+            <div class="right hint">Время совместной работы считается с даты первого заказа.</div>
+          </div>
+          <div class="card">
+            <div class="table-wrap" id="customers-panel"></div>
           </div>
         </div>
       </section>

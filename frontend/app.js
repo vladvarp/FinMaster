@@ -61,18 +61,22 @@
   }
 
   function qtyValue(line) {
-    const fromExpr = evalExpr(line.qty_expr ?? line.quantity);
-    if (Number.isFinite(fromExpr)) return fromExpr;
-    return num(line.quantity);
+    return numExpr(line, "qty_expr", "quantity");
+  }
+
+  function numExpr(line, exprKey, numKey) {
+    const raw = line[exprKey] != null && String(line[exprKey]).trim() !== "" ? line[exprKey] : line[numKey];
+    const v = evalExpr(raw);
+    return Number.isFinite(v) ? v : num(line[numKey]);
   }
 
   function lineTotals(line) {
     const qty = qtyValue(line);
-    const price = num(line.price);
-    const discount = Math.min(100, Math.max(0, num(line.discount)));
+    const price = Math.max(0, numExpr(line, "price_expr", "price"));
+    const discount = Math.min(100, Math.max(0, numExpr(line, "discount_expr", "discount")));
     const total = round2(qty * price);
     const after = round2(total * (1 - discount / 100));
-    const paid = Math.max(0, num(line.paid));
+    const paid = Math.max(0, numExpr(line, "paid_expr", "paid"));
     const unpaid = round2(Math.max(0, after - paid));
     return { total, after, paid, unpaid, discount };
   }
@@ -125,9 +129,12 @@
       qty_expr: "1",
       unit: state.doc.units[0] || "шт.",
       price: 0,
+      price_expr: "0",
       discount: 0,
+      discount_expr: "0",
       order_date: nowLocal(),
       paid: 0,
+      paid_expr: "0",
       payment_date: "",
       status: state.doc.statuses[0]?.name || "Новый заказ",
     };
@@ -405,6 +412,53 @@
       : `<div class="empty">Заказов ещё нет</div>`;
   }
 
+  const EXPR_MAP = {
+    qty_expr: "quantity",
+    price_expr: "price",
+    discount_expr: "discount",
+    paid_expr: "paid",
+  };
+
+  function exprRaw(line, exprKey) {
+    const numKey = EXPR_MAP[exprKey];
+    const raw = line[exprKey];
+    if (raw != null && String(raw).trim() !== "") return String(raw);
+    return String(line[numKey] ?? "");
+  }
+
+  function formatQty(n) {
+    const r = round2(n);
+    return Number.isInteger(r) ? String(r) : String(r);
+  }
+
+  function isFormula(expr) {
+    return /[+\-*/()×xX]/.test(String(expr || ""));
+  }
+
+  function shownExpr(line, exprKey) {
+    const expr = exprRaw(line, exprKey);
+    const v = evalExpr(expr);
+    if (isFormula(expr) && Number.isFinite(v)) return formatQty(v);
+    return expr;
+  }
+
+  function exprInput(line, exprKey, extra = "") {
+    const raw = exprRaw(line, exprKey);
+    const formula = isFormula(raw);
+    return `<input data-lk="${exprKey}" class="expr-field" inputmode="decimal" placeholder="1+2*6" ${extra}
+      value="${esc(shownExpr(line, exprKey))}" data-expr="${esc(raw)}" data-showing="${formula ? "result" : "expr"}"
+      title="Можно формулу. Клик — правка, вне фокуса — результат." />`;
+  }
+
+  function statusColor(name) {
+    return statusMeta(name).color || "#64748b";
+  }
+
+  function applyRowStatus(tr, statusName) {
+    if (!tr) return;
+    tr.style.setProperty("--status-color", statusColor(statusName));
+  }
+
   function optionList(values, selected) {
     return values.map((v) => `<option ${v === selected ? "selected" : ""}>${esc(v)}</option>`).join("");
   }
@@ -493,37 +547,27 @@
     const list = state.doc.customers || [];
     $("customer-list").innerHTML = unique(list.map((c) => c.name)).map((c) => `<option value="${esc(c)}">`).join("");
     if (!list.length) {
-      box.innerHTML = `<div class="hint">Добавьте заказчика кнопкой «+» или укажите имя в заказе.</div>`;
+      box.innerHTML = `<div class="empty">Нет заказчиков. Нажмите «+ Заказчик» или укажите имя в заказе.</div>`;
       return;
     }
-    box.innerHTML = list
-      .map((c) => {
-        const open = state.selectedCustomerId === c.id ? "open" : "";
-        const n = (state.doc.orders || []).filter((o) => o.customer === c.name).length;
-        return `<article class="cust-card ${open}" data-cid="${esc(c.id)}">
-          <div class="cust-title" data-cact="toggle">
-            <div>
-              <b>${esc(c.name || "Без имени")}</b>
-              <div class="meta">${esc(c.organization || "частное лицо")} · ${n} зак. · рейтинг ${esc(c.rating || "—")}</div>
-              <div class="meta">${esc(customerTenure(c))}</div>
-            </div>
-            <button class="btn small danger" type="button" data-cact="delcust">✕</button>
-          </div>
-          <div class="fields">
-            <label>Имя</label><input data-cf="name" value="${esc(c.name || "")}" />
-            <label>Организация</label><input data-cf="organization" value="${esc(c.organization || "")}" />
-            <label>Телефон</label><input data-cf="phone" value="${esc(c.phone || "")}" />
-            <label>Почта</label><input data-cf="email" value="${esc(c.email || "")}" />
-            <label>Адрес</label><input data-cf="address" value="${esc(c.address || "")}" />
-            <label>Рейтинг</label>
-            <select data-cf="rating">${[0, 1, 2, 3, 4, 5]
-              .map((r) => `<option value="${r}" ${Number(c.rating) === r ? "selected" : ""}>${r ? "★".repeat(r) : "не задан"}</option>`)
-              .join("")}</select>
-            <div class="meta">Время совместной работы: ${esc(customerTenure(c))}</div>
-          </div>
-        </article>`;
-      })
-      .join("");
+    box.innerHTML = `<table class="data cust-table"><thead><tr>
+        <th>Имя</th><th>Организация</th><th>Телефон</th><th>Почта</th><th>Адрес</th><th>Рейтинг</th><th>Совместная работа</th><th>Заказов</th><th></th>
+      </tr></thead><tbody>${list
+        .map((c) => {
+          const n = (state.doc.orders || []).filter((o) => o.customer === c.name).length;
+          return `<tr data-cid="${esc(c.id)}">
+            <td><input data-cf="name" value="${esc(c.name || "")}" /></td>
+            <td><input data-cf="organization" value="${esc(c.organization || "")}" /></td>
+            <td><input data-cf="phone" value="${esc(c.phone || "")}" /></td>
+            <td><input data-cf="email" value="${esc(c.email || "")}" /></td>
+            <td><input data-cf="address" value="${esc(c.address || "")}" /></td>
+            <td><div class="rating-wrap"><input type="range" min="0" max="5" step="1" data-cf="rating" value="${esc(c.rating || 0)}" /><span class="rating-label">${Number(c.rating) ? "★".repeat(Number(c.rating)) : "—"}</span></div></td>
+            <td class="meta">${esc(customerTenure(c))}</td>
+            <td>${n}</td>
+            <td><button class="btn small danger" type="button" data-cact="delcust">Удалить</button></td>
+          </tr>`;
+        })
+        .join("")}</tbody></table>`;
   }
 
   function renderOrders() {
@@ -560,15 +604,15 @@
                 ${(order.lines || [])
                   .map((line) => {
                     const t = lineTotals(line);
-                    return `<tr data-line="${line.id}">
+                    return `<tr data-line="${line.id}" class="line-row" style="--status-color:${esc(statusColor(line.status))}">
                       <td><select data-lk="order_type">${optionList(unique([line.order_type, ...types]), line.order_type)}</select></td>
                       <td><input data-lk="product" list="product-list" value="${esc(line.product)}" /></td>
-                      <td class="num"><input data-lk="qty_expr" inputmode="decimal" placeholder="100*5" title="Можно формулу: 100*5 или (1+5)*10" value="${esc(line.qty_expr ?? line.quantity)}" /></td>
+                      <td class="num">${exprInput(line, "qty_expr")}</td>
                       <td><select data-lk="unit">${optionList(unique([line.unit, ...units]), line.unit)}</select></td>
-                      <td class="num"><input data-lk="price" type="number" min="0" step="0.01" value="${esc(line.price)}" /></td>
-                      <td class="num"><input data-lk="discount" type="number" min="0" max="100" step="0.01" value="${esc(line.discount)}" /></td>
+                      <td class="num">${exprInput(line, "price_expr")}</td>
+                      <td class="num">${exprInput(line, "discount_expr")}</td>
                       <td><input data-lk="order_date" type="datetime-local" value="${esc((line.order_date || "").slice(0, 16))}" /></td>
-                      <td class="num"><input data-lk="paid" type="number" min="0" step="0.01" value="${esc(line.paid)}" /></td>
+                      <td class="num">${exprInput(line, "paid_expr")}</td>
                       <td><input data-lk="payment_date" type="datetime-local" value="${esc((line.payment_date || "").slice(0, 16))}" /></td>
                       <td class="num computed">${esc(money(t.unpaid))}</td>
                       <td class="num computed">${esc(money(t.after))}<div style="color:#94a3b8;font-weight:500;font-size:11px">до скидки ${esc(money(t.total))}</div></td>
@@ -698,7 +742,12 @@
     if (state.view === "orders") renderOrders();
     if (state.view === "analytics") renderAnalytics();
     if (state.view === "catalogs") renderCatalogs();
-    renderCustomers();
+    if (state.view === "customers") renderCustomers();
+    else {
+      syncCustomersFromOrders();
+      const list = state.doc.customers || [];
+      $("customer-list").innerHTML = unique(list.map((c) => c.name)).map((c) => `<option value="${esc(c)}">`).join("");
+    }
     applySidebar();
   }
 
@@ -954,6 +1003,8 @@
     $("orders-list").addEventListener("input", onOrderInput);
     $("orders-list").addEventListener("change", onOrderInput);
     $("orders-list").addEventListener("click", onOrderClick);
+    $("orders-list").addEventListener("focusin", onExprFocus);
+    $("orders-list").addEventListener("focusout", onExprBlur);
 
     $("status-list").addEventListener("input", (e) => {
       const row = e.target.closest(".list-item");
@@ -1025,31 +1076,24 @@
             if (o.customer === old) o.customer = c.name;
           });
         }
-        const title = card.querySelector("b");
-        if (title) title.textContent = c.name || "Без имени";
       } else if (cf === "rating") {
         c.rating = num(e.target.value);
+        const lab = e.target.closest(".rating-wrap")?.querySelector(".rating-label");
+        if (lab) lab.textContent = c.rating ? "★".repeat(c.rating) : "—";
       } else {
         c[cf] = e.target.value;
       }
       markDirty();
     });
     $("customers-panel").addEventListener("click", (e) => {
-      const act = e.target.dataset.cact || e.target.closest("[data-cact]")?.dataset.cact;
-      const card = e.target.closest("[data-cid]");
-      if (!act || !card) return;
-      if (act === "toggle") {
-        if (e.target.closest("[data-cact='delcust']")) return;
-        state.selectedCustomerId = state.selectedCustomerId === card.dataset.cid ? null : card.dataset.cid;
-        renderCustomers();
-      }
-      if (act === "delcust") {
-        e.stopPropagation();
-        if (!confirm("Удалить заказчика из справочника? Заказы не удаляются.")) return;
-        state.doc.customers = (state.doc.customers || []).filter((x) => x.id !== card.dataset.cid);
-        markDirty();
-        renderCustomers();
-      }
+      const btn = e.target.closest("[data-cact='delcust']");
+      if (!btn) return;
+      const row = btn.closest("[data-cid]");
+      if (!row) return;
+      if (!confirm("Удалить заказчика из справочника? Заказы не удаляются.")) return;
+      state.doc.customers = (state.doc.customers || []).filter((x) => x.id !== row.dataset.cid);
+      markDirty();
+      renderCustomers();
     });
     $("btn-add-customer").addEventListener("click", () => {
       const c = { id: uid(), name: "Новый заказчик", organization: "", phone: "", email: "", address: "", rating: 0 };
@@ -1254,7 +1298,8 @@
       if (e.target.dataset.k === "name" && !state.path) state.doc.title = e.target.value || state.doc.title;
       if (e.target.dataset.k === "customer") {
         syncCustomersFromOrders();
-        renderCustomers();
+        const list = state.doc.customers || [];
+        $("customer-list").innerHTML = unique(list.map((c) => c.name)).map((c) => `<option value="${esc(c)}">`).join("");
       }
       markDirty();
       return;
@@ -1264,13 +1309,28 @@
     const line = order.lines.find((l) => l.id === tr.dataset.line);
     if (!line || !e.target.dataset.lk) return;
     const key = e.target.dataset.lk;
-    line[key] = e.target.type === "number" ? num(e.target.value) : e.target.value;
-    if (key === "qty_expr") {
+    if (EXPR_MAP[key]) {
+      if (e.target.dataset.showing === "result") return;
+      line[key] = e.target.value;
       const v = evalExpr(e.target.value);
+      e.target.dataset.expr = e.target.value;
       e.target.classList.toggle("invalid", e.target.value.trim() !== "" && !Number.isFinite(v));
-      if (Number.isFinite(v)) line.quantity = round2(v);
+      if (Number.isFinite(v)) {
+        const numKey = EXPR_MAP[key];
+        let n = round2(v);
+        if (numKey === "discount") n = Math.min(100, Math.max(0, n));
+        if (numKey === "price" || numKey === "paid") n = Math.max(0, n);
+        line[numKey] = n;
+      }
+    } else {
+      line[key] = e.target.type === "number" ? num(e.target.value) : e.target.value;
     }
+    if (key === "status") applyRowStatus(tr, line.status);
     markDirty();
+    refreshComputed(card, tr, order, line);
+  }
+
+  function refreshComputed(card, tr, order, line) {
     const t = lineTotals(line);
     const cells = tr.querySelectorAll(".computed");
     if (cells[0]) cells[0].textContent = money(t.unpaid);
@@ -1280,6 +1340,53 @@
     const tot = orderTotals(order);
     const foot = card.querySelector(".totals");
     if (foot) foot.innerHTML = `Итог <b>${esc(money(tot.after))}</b> · оплачено <b>${esc(money(tot.paid))}</b> · не оплачено <b>${esc(money(tot.unpaid))}</b>`;
+  }
+
+  function onExprFocus(e) {
+    const inp = e.target;
+    const key = inp.dataset?.lk;
+    if (!EXPR_MAP[key] || inp.dataset.showing !== "result") return;
+    inp.dataset.showing = "expr";
+    inp.value = inp.dataset.expr || "";
+    queueMicrotask(() => {
+      try {
+        inp.select();
+      } catch {
+        /* ignore */
+      }
+    });
+  }
+
+  function onExprBlur(e) {
+    const inp = e.target;
+    const key = inp.dataset?.lk;
+    if (!EXPR_MAP[key]) return;
+    const card = inp.closest("[data-order]");
+    const tr = inp.closest("[data-line]");
+    if (!card || !tr) return;
+    const order = findOrder(card.dataset.order);
+    const line = order?.lines.find((l) => l.id === tr.dataset.line);
+    if (!line) return;
+    const raw = inp.value;
+    line[key] = raw;
+    inp.dataset.expr = raw;
+    const v = evalExpr(raw);
+    inp.classList.toggle("invalid", raw.trim() !== "" && !Number.isFinite(v));
+    if (Number.isFinite(v)) {
+      const numKey = EXPR_MAP[key];
+      let n = round2(v);
+      if (numKey === "discount") n = Math.min(100, Math.max(0, n));
+      if (numKey === "price" || numKey === "paid") n = Math.max(0, n);
+      line[numKey] = n;
+      if (isFormula(raw)) {
+        inp.dataset.showing = "result";
+        inp.value = formatQty(n);
+      } else {
+        inp.dataset.showing = "expr";
+      }
+    }
+    refreshComputed(card, tr, order, line);
+    markDirty();
   }
 
   function onOrderClick(e) {
