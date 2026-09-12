@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FinMaster</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 42 42'%3E%3Crect width='42' height='42' rx='12' fill='%230f766e'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="start" id="start-screen">
+    <div class="start-inner">
+      <div class="start-hero">
+        <div>
+          <div class="brand" style="padding:0 0 12px">
+            <svg width="42" height="42" viewBox="0 0 42 42" fill="none">
+              <rect width="42" height="42" rx="12" fill="#0f766e"/>
+              <path d="M12 28V14h7.5a4.5 4.5 0 010 9H12" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/>
+              <path d="M12 23h18M22 23v7" stroke="#99f6e4" stroke-width="2.4" stroke-linecap="round"/>
+            </svg>
+            <div>
+              <h1>FinMaster</h1>
+              <span>Бухгалтерский учёт заказов</span>
+            </div>
+          </div>
+          <h2>Рабочие отчёты</h2>
+          <p>Создайте новый файл отчёта или откройте недавний — как книгу Excel. Все заказы, оплаты и аналитика хранятся в одном файле.</p>
+        </div>
+        <div class="start-actions">
+          <button class="btn primary" id="btn-start-new">Новый отчёт</button>
+          <button class="btn" id="btn-start-open">Открыть файл</button>
+        </div>
+      </div>
+      <h3 style="margin:0 0 12px;color:#cbd5e1">Недавно открытые</h3>
+      <div class="recent-list" id="recent-list"></div>
+    </div>
+  </div>
+
+  <div class="app" id="app-shell" hidden>
+    <aside class="sidebar">
+      <div class="brand">
+        <svg width="38" height="38" viewBox="0 0 42 42" fill="none">
+          <rect width="42" height="42" rx="12" fill="#0f766e"/>
+          <path d="M12 28V14h7.5a4.5 4.5 0 010 9H12" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/>
+          <path d="M12 23h18M22 23v7" stroke="#99f6e4" stroke-width="2.4" stroke-linecap="round"/>
+        </svg>
+        <div>
+          <h1>FinMaster</h1>
+          <span>Учёт заказов</span>
+        </div>
+      </div>
+      <div class="file-box">
+        <div class="file-title">Текущий отчёт</div>
+        <div class="file-name"><span class="dirty-dot hidden" id="dirty-dot"></span><input id="report-title" value="Новый отчёт" /></div>
+        <div class="file-path" id="file-path">Файл ещё не сохранён</div>
+      </div>
+      <nav class="nav" id="nav">
+        <button data-view="dashboard" class="active">Дашборд</button>
+        <button data-view="orders">Заказы</button>
+        <button data-view="analytics">Аналитика</button>
+        <button data-view="catalogs">Справочники</button>
+      </nav>
+      <div class="side-actions">
+        <button class="btn ghost" id="btn-new">Новый</button>
+        <button class="btn ghost" id="btn-open">Открыть</button>
+        <button class="btn primary" id="btn-save">Сохранить</button>
+        <button class="btn ghost" id="btn-save-as">Сохранить как</button>
+        <label class="side-check"><input type="checkbox" id="autosave" /> Автосохранение</label>
+        <div class="hint">Без галочки отчёт пишется только по кнопке «Сохранить». При закрытии с несохранёнными изменениями программа спросит подтверждение.</div>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div class="top-left">
+          <div class="search">
+            <span class="ico">⌕</span>
+            <input id="global-search" placeholder="Поиск по номеру, заказчику, названию, продукту…" />
+          </div>
+        </div>
+        <div class="top-right">
+          <button class="btn" id="btn-home">К списку отчётов</button>
+          <button class="btn" id="btn-export">Экспорт CSV</button>
+        </div>
+      </header>
+      <section class="content">
+        <div class="view active" id="view-dashboard">
+          <div class="kpis" id="kpi-row"></div>
+          <div class="grid-2">
+            <div class="card">
+              <h3>Выручка по дням</h3>
+              <div class="chart-box"><canvas id="chart-dash-line"></canvas></div>
+            </div>
+            <div class="card">
+              <h3>Статусы</h3>
+              <div class="chart-box"><canvas id="chart-dash-pie"></canvas></div>
+            </div>
+          </div>
+          <div class="grid-2" style="margin-top:12px">
+            <div class="card">
+              <h3>Требуют внимания</h3>
+              <div id="alerts"></div>
+            </div>
+            <div class="card">
+              <h3>Последние заказы</h3>
+              <div class="table-wrap" id="recent-orders"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="view" id="view-orders">
+          <div class="toolbar">
+            <div class="left">
+              <button class="btn primary" id="btn-add-order">+ Заказ</button>
+              <select id="order-sort" class="btn">
+                <option value="date-desc">Сначала новые</option>
+                <option value="date-asc">Сначала старые</option>
+                <option value="number">По номеру</option>
+                <option value="customer">По заказчику</option>
+                <option value="amount-desc">По сумме ↓</option>
+              </select>
+            </div>
+            <div class="right" id="orders-summary"></div>
+          </div>
+          <div id="orders-list"></div>
+        </div>
+
+        <div class="view" id="view-analytics">
+          <div class="card" style="margin-bottom:12px">
+            <h3>Фильтры мониторинга</h3>
+            <div class="filters">
+              <div class="field"><label>Дата с</label><input type="datetime-local" id="f-from" /></div>
+              <div class="field"><label>Дата по</label><input type="datetime-local" id="f-to" /></div>
+              <div class="field"><label>Поле даты</label>
+                <select id="f-date-field">
+                  <option value="order_date">Дата заказа</option>
+                  <option value="payment_date">Дата оплаты</option>
+                </select>
+              </div>
+              <div class="field"><label>Группировка</label>
+                <select id="f-group">
+                  <option value="day">По дням</option>
+                  <option value="week">По неделям</option>
+                  <option value="month">По месяцам</option>
+                  <option value="hour">По часам</option>
+                </select>
+              </div>
+              <div class="field"><label>Статус</label><select id="f-status"><option value="">Все</option></select></div>
+              <div class="field"><label>Тип заказа</label><select id="f-type"><option value="">Все</option></select></div>
+              <div class="field"><label>Заказчик</label><input id="f-customer" list="customer-list" /></div>
+              <div class="field"><label>Продукт</label><input id="f-product" /></div>
+              <div class="field"><label>Ед. изм.</label><select id="f-unit"><option value="">Все</option></select></div>
+              <div class="field"><label>Сумма от</label><input type="number" id="f-min" step="0.01" /></div>
+              <div class="field"><label>Сумма до</label><input type="number" id="f-max" step="0.01" /></div>
+              <div class="check-row">
+                <label><input type="checkbox" id="f-unpaid" /> Только долги</label>
+                <label><input type="checkbox" id="f-blacklist" /> Чёрный список</label>
+                <button class="btn small" id="btn-preset-month">Этот месяц</button>
+                <button class="btn small" id="btn-preset-week">7 дней</button>
+                <button class="btn small" id="btn-filters-reset">Сбросить</button>
+              </div>
+            </div>
+          </div>
+          <div class="compare">
+            <div class="card">
+              <h3>Период A</h3>
+              <div class="filters" style="grid-template-columns:1fr 1fr">
+                <div class="field"><label>С</label><input type="datetime-local" id="c-a-from" /></div>
+                <div class="field"><label>По</label><input type="datetime-local" id="c-a-to" /></div>
+              </div>
+              <div id="cmp-a"></div>
+            </div>
+            <div class="card">
+              <h3>Период B</h3>
+              <div class="filters" style="grid-template-columns:1fr 1fr">
+                <div class="field"><label>С</label><input type="datetime-local" id="c-b-from" /></div>
+                <div class="field"><label>По</label><input type="datetime-local" id="c-b-to" /></div>
+              </div>
+              <div id="cmp-b"></div>
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="card">
+              <h3>Динамика</h3>
+              <div class="chart-box"><canvas id="chart-an-line"></canvas></div>
+            </div>
+            <div class="card">
+              <h3>Сравнение периодов</h3>
+              <div class="chart-box"><canvas id="chart-an-bar"></canvas></div>
+            </div>
+          </div>
+          <div class="card" style="margin-top:12px">
+            <h3>Найденные позиции</h3>
+            <div class="table-wrap" id="analytics-table"></div>
+          </div>
+        </div>
+
+        <div class="view" id="view-catalogs">
+          <div class="catalog-grid">
+            <div class="card">
+              <h3>Статусы заказа</h3>
+              <p class="hint" style="margin-top:0">Можно переименовать, перекрасить, добавить и удалить. Удаление не трогает уже проставленные статусы в заказах.</p>
+              <div class="list-edit" id="status-list"></div>
+              <button class="btn small" id="btn-add-status" style="margin-top:10px">+ Статус</button>
+            </div>
+            <div class="card">
+              <h3>Единицы измерения</h3>
+              <div class="list-edit" id="unit-list"></div>
+              <button class="btn small" id="btn-add-unit" style="margin-top:10px">+ Единица</button>
+            </div>
+            <div class="card">
+              <h3>Типы заказа</h3>
+              <div class="list-edit" id="type-list"></div>
+              <button class="btn small" id="btn-add-type" style="margin-top:10px">+ Тип</button>
+            </div>
+            <div class="card">
+              <h3>Заказчики</h3>
+              <p class="hint" style="margin-top:0">Справочник заполняется из заказов. Можно указать телефон и заметку.</p>
+              <div class="table-wrap" id="customer-catalog"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <datalist id="customer-list"></datalist>
+  <datalist id="product-list"></datalist>
+
+  <div class="modal" id="close-modal">
+    <div class="modal-card">
+      <h3>Сохранить отчёт?</h3>
+      <p>Есть несохранённые изменения. Если закрыть без сохранения, они будут потеряны.</p>
+      <div class="modal-actions">
+        <button class="btn" id="close-cancel">Отмена</button>
+        <button class="btn danger" id="close-discard">Не сохранять</button>
+        <button class="btn primary" id="close-save">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="new-modal">
+    <div class="modal-card">
+      <h3>Создать новый отчёт?</h3>
+      <p>Текущий файл будет закрыт. Несохранённые изменения нужно сохранить заранее.</p>
+      <div class="modal-actions">
+        <button class="btn" id="new-cancel">Отмена</button>
+        <button class="btn" id="new-save">Сохранить и создать</button>
+        <button class="btn primary" id="new-discard">Создать без сохранения</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <input type="file" id="file-input" accept=".fmaster,.json" hidden />
+
+  <script src="/charts.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
