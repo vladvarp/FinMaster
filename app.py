@@ -75,7 +75,7 @@ def guard_remote_clients():
 
 @app.get("/")
 def index():
-    return send_from_directory(FRONTEND, "index.html")
+    return _no_cache(send_from_directory(FRONTEND, "index.html"))
 
 
 def _no_cache(response):
@@ -98,7 +98,7 @@ def favicon():
 @app.get("/<path:filename>")
 def static_files(filename: str):
     response = send_from_directory(FRONTEND, filename)
-    if filename in {"mobile.js", "mobile.css", "mobile.html"}:
+    if filename in {"mobile.js", "mobile.css", "mobile.html", "app.js", "cloud.js", "styles.css", "charts.js"}:
         return _no_cache(response)
     return response
 
@@ -732,10 +732,48 @@ def main() -> None:
         width=1440,
         height=920,
         min_size=(1180, 740),
+        maximized=storage.window_maximized(),
         background_color="#0b1220",
     )
 
+    def remember_maximized(value: bool) -> None:
+        try:
+            storage.set_window_maximized(value)
+        except Exception:
+            pass
+
+    def persist_window_state() -> None:
+        try:
+            native = getattr(WINDOW, "native", None)
+            state = getattr(native, "WindowState", None) if native is not None else None
+            if state is not None:
+                remember_maximized(str(state) in ("Maximized", "2"))
+                return
+            if hasattr(WINDOW, "maximized"):
+                remember_maximized(bool(WINDOW.maximized))
+        except Exception:
+            pass
+
+    try:
+        WINDOW.events.maximized += lambda: remember_maximized(True)
+        WINDOW.events.restored += lambda: remember_maximized(False)
+    except Exception:
+        pass
+
+    try:
+        def restore_window_state() -> None:
+            if storage.window_maximized():
+                try:
+                    WINDOW.maximize()
+                except Exception:
+                    pass
+
+        WINDOW.events.loaded += restore_window_state
+    except Exception:
+        pass
+
     def on_closing():
+        persist_window_state()
         # Never call evaluate_js on this stack: WebView2 deadlocks the window.
         if FORCE_CLOSE or not DIRTY:
             return True

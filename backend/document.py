@@ -24,6 +24,30 @@ DEFAULT_PRODUCTS: list[dict[str, str]] = []
 DEFAULT_PAYMENT_TERMS = 14
 DEFAULT_CASH_HORIZON = 30
 CASH_HORIZONS = (14, 30, 60, 90)
+CLOUD_LAYOUTS = ("galaxy", "orbit", "timeline", "constellation")
+CLOUD_COLOR_MODES = ("status", "customer", "debt", "type")
+CLOUD_SIZE_MODES = ("amount", "debt", "quantity", "equal")
+
+
+def _cloud_ui(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, Any] = {}
+    if raw.get("layout") in CLOUD_LAYOUTS:
+        out["layout"] = raw["layout"]
+    if raw.get("color") in CLOUD_COLOR_MODES:
+        out["color"] = raw["color"]
+    if raw.get("size") in CLOUD_SIZE_MODES:
+        out["size"] = raw["size"]
+    if isinstance(raw.get("labels"), bool):
+        out["labels"] = raw["labels"]
+    if isinstance(raw.get("motion"), bool):
+        out["motion"] = raw["motion"]
+    if isinstance(raw.get("heat"), bool):
+        out["heat"] = raw["heat"]
+    if isinstance(raw.get("debtOnly"), bool):
+        out["debtOnly"] = raw["debtOnly"]
+    return out
 
 
 def _int_in_range(value: Any, default: int, low: int, high: int) -> int:
@@ -71,6 +95,7 @@ def empty_document(title: str = "Новый отчёт") -> dict[str, Any]:
             "share_theme": "teal",
             "payment_terms": DEFAULT_PAYMENT_TERMS,
             "cash_horizon": DEFAULT_CASH_HORIZON,
+            "cloud": {},
         },
     }
 
@@ -174,6 +199,7 @@ def normalize_document(raw: Any) -> dict[str, Any]:
             "share_theme": str(ui.get("share_theme") or "teal"),
             "payment_terms": _int_in_range(ui.get("payment_terms"), DEFAULT_PAYMENT_TERMS, 0, 365),
             "cash_horizon": _int_in_range(ui.get("cash_horizon"), DEFAULT_CASH_HORIZON, 14, 90),
+            "cloud": _cloud_ui(ui.get("cloud")),
         }
         if base["ui"]["cash_horizon"] not in CASH_HORIZONS:
             base["ui"]["cash_horizon"] = DEFAULT_CASH_HORIZON

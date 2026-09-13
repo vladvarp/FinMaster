@@ -19,7 +19,59 @@
     orderFilter: "all",
     focusOrderId: null,
     cash: { filter: "all", day: "", bucket: "", customer: "" },
+    cloud: null,
   };
+
+  const LS_CLOUD = "finmaster.cloud";
+  const CLOUD_LAYOUTS = ["galaxy", "orbit", "timeline", "constellation"];
+  const CLOUD_COLOR_MODES = ["status", "customer", "debt", "type"];
+  const CLOUD_SIZE_MODES = ["amount", "debt", "quantity", "equal"];
+
+  function sanitizeCloudPrefs(raw) {
+    if (!raw || typeof raw !== "object") return {};
+    const out = {};
+    if (CLOUD_LAYOUTS.includes(raw.layout)) out.layout = raw.layout;
+    if (CLOUD_COLOR_MODES.includes(raw.color)) out.color = raw.color;
+    if (CLOUD_SIZE_MODES.includes(raw.size)) out.size = raw.size;
+    if (typeof raw.labels === "boolean") out.labels = raw.labels;
+    if (typeof raw.motion === "boolean") out.motion = raw.motion;
+    if (typeof raw.heat === "boolean") out.heat = raw.heat;
+    if (typeof raw.debtOnly === "boolean") out.debtOnly = raw.debtOnly;
+    return out;
+  }
+
+  function loadStoredCloud() {
+    try {
+      return sanitizeCloudPrefs(JSON.parse(localStorage.getItem(LS_CLOUD) || "null"));
+    } catch {
+      return {};
+    }
+  }
+
+  function persistCloudPrefs() {
+    const s = cloudState();
+    const payload = {
+      layout: s.layout,
+      color: s.color,
+      size: s.size,
+      labels: !!s.labels,
+      motion: s.motion !== false,
+      heat: !!s.heat,
+      debtOnly: !!s.debtOnly,
+    };
+    try {
+      localStorage.setItem(LS_CLOUD, JSON.stringify(payload));
+    } catch {
+      /* ignore */
+    }
+    if (state.doc) ensureUi().cloud = payload;
+  }
+
+  function adoptCloudFromDocument() {
+    const saved = sanitizeCloudPrefs(state.doc?.ui?.cloud);
+    if (Object.keys(saved).length) Object.assign(cloudState(), saved);
+    persistCloudPrefs();
+  }
 
   const $ = (id) => document.getElementById(id);
 
@@ -238,7 +290,7 @@
       products: [],
       customers: [],
       orders: [],
-      ui: { sidebar_collapsed: false, column_widths: {}, share_fields: [], share_theme: "teal" },
+      ui: { sidebar_collapsed: false, column_widths: {}, share_fields: [], share_theme: "teal", cloud: {} },
     };
   }
 
@@ -1956,6 +2008,479 @@
     $("cash-debtors")?.addEventListener("click", onCashDebtorsClick);
   }
 
+  /* ==== Облако заказов: интерактивный граф ==== */
+  const CLOUD_COLORS = ["#0f766e", "#2563eb", "#7c3aed", "#d97706", "#db2777", "#0891b2", "#059669", "#e11d48", "#4f46e5", "#ca8a04"];
+  let orderCloud = null;
+
+  function cloudState() {
+    if (!state.cloud) {
+      state.cloud = {
+        query: "",
+        layout: "galaxy",
+        color: "status",
+        size: "amount",
+        debtOnly: false,
+        labels: true,
+        motion: true,
+        heat: false,
+        ...loadStoredCloud(),
+      };
+    }
+    return state.cloud;
+  }
+
+  function cloudHash(text) {
+    let h = 0;
+    for (const ch of String(text || "Без значения")) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0;
+    return Math.abs(h);
+  }
+
+  function cloudCategoryColor(value) {
+    return CLOUD_COLORS[cloudHash(value) % CLOUD_COLORS.length];
+  }
+
+  function cloudNodeColor(kind, item) {
+    const mode = cloudState().color;
+    if (kind === "customer") return mode === "debt" ? (item.debt > 0.005 ? "#dc2626" : "#059669") : cloudCategoryColor(item.customer);
+    if (mode === "customer") return cloudCategoryColor(item.customer);
+    if (mode === "type") return cloudCategoryColor(item.type || "Без типа");
+    if (mode === "debt") {
+      if (item.debt <= 0.005) return "#059669";
+      if (item.paid > 0.005) return "#f59e0b";
+      return "#dc2626";
+    }
+    return statusMeta(item.status || "Без статуса").color;
+  }
+
+  function cloudRadius(kind, item, maxima) {
+    if (kind === "customer") {
+      const factor = Math.min(1.45, Math.sqrt(Math.max(0, item.value) / Math.max(1, maxima.value)));
+      return 17 + factor * 13;
+    }
+    if (kind === "order") {
+      const factor = Math.min(1.25, Math.sqrt(Math.max(0, item.value) / Math.max(1, maxima.value)));
+      return 10 + factor * 10;
+    }
+    const mode = cloudState().size;
+    if (mode === "equal") return 6;
+    const key = mode === "debt" ? "debt" : mode === "quantity" ? "quantity" : "value";
+    const factor = Math.sqrt(Math.max(0, item[key]) / Math.max(1, maxima[key]));
+    return 4.5 + factor * 9.5;
+  }
+
+  function cloudGraphData() {
+    const query = cloudState().query.trim().toLocaleLowerCase("ru");
+    const debtOnly = cloudState().debtOnly;
+    const orderRows = [];
+    (state.doc.orders || []).forEach((order) => {
+      const orderText = [order.number, order.name, order.customer, order.notes].join(" ").toLocaleLowerCase("ru");
+      const lines = (order.lines || []).filter((line) => {
+        const t = lineTotals(line);
+        if (debtOnly && t.unpaid <= 0.005) return false;
+        if (!query || orderText.includes(query)) return true;
+        return [line.product, line.order_type, line.status, line.unit].join(" ").toLocaleLowerCase("ru").includes(query);
+      });
+      if (lines.length) orderRows.push({ order, lines });
+    });
+
+    const maxima = { value: 1, debt: 1, quantity: 1 };
+    orderRows.forEach(({ lines }) => lines.forEach((line) => {
+      const t = lineTotals(line);
+      maxima.value = Math.max(maxima.value, t.after);
+      maxima.debt = Math.max(maxima.debt, t.unpaid);
+      maxima.quantity = Math.max(maxima.quantity, Math.abs(qtyValue(line)));
+    }));
+
+    const customers = new Map();
+    orderRows.forEach(({ order, lines }) => {
+      const name = String(order.customer || "Без заказчика").trim() || "Без заказчика";
+      if (!customers.has(name)) customers.set(name, { customer: name, orders: [], value: 0, paid: 0, debt: 0, positions: 0 });
+      const c = customers.get(name);
+      c.orders.push(order);
+      lines.forEach((line) => {
+        const t = lineTotals(line);
+        c.value += t.after;
+        c.paid += t.paid;
+        c.debt += t.unpaid;
+        c.positions += 1;
+      });
+    });
+
+    const nodes = [];
+    const edges = [];
+    customers.forEach((c) => {
+      const id = `customer:${c.customer}`;
+      nodes.push({
+        id,
+        kind: "customer",
+        label: c.customer,
+        customer: c.customer,
+        value: c.value,
+        paid: c.paid,
+        debt: c.debt,
+        count: c.orders.length,
+        positions: c.positions,
+        color: cloudNodeColor("customer", c),
+        radius: cloudRadius("customer", c, maxima),
+      });
+    });
+
+    orderRows.forEach(({ order, lines }) => {
+      const customer = String(order.customer || "Без заказчика").trim() || "Без заказчика";
+      const totals = lines.reduce((acc, line) => {
+        const t = lineTotals(line);
+        acc.value += t.after;
+        acc.paid += t.paid;
+        acc.debt += t.unpaid;
+        return acc;
+      }, { value: 0, paid: 0, debt: 0 });
+      const first = lines.find((line) => line.order_date) || lines[0];
+      const statuses = unique(lines.map((line) => line.status).filter(Boolean));
+      const types = unique(lines.map((line) => line.order_type).filter(Boolean));
+      const orderNode = {
+        id: `order:${order.id}`,
+        rawId: order.id,
+        kind: "order",
+        parent: `customer:${customer}`,
+        label: `${order.number || "—"} · ${order.name || "Без названия"}`,
+        number: order.number || "—",
+        name: order.name || "Без названия",
+        customer,
+        status: statuses.length === 1 ? statuses[0] : "Смешанные статусы",
+        statuses,
+        type: types.length === 1 ? types[0] : "Несколько типов",
+        value: totals.value,
+        paid: totals.paid,
+        debt: totals.debt,
+        count: lines.length,
+        time: first?.order_date ? new Date(first.order_date).getTime() : NaN,
+      };
+      orderNode.color = cloudNodeColor("order", orderNode);
+      orderNode.radius = cloudRadius("order", orderNode, maxima);
+      nodes.push(orderNode);
+      edges.push({ source: orderNode.parent, target: orderNode.id, kind: "customer" });
+
+      lines.forEach((line, index) => {
+        const t = lineTotals(line);
+        const lineNode = {
+          id: `line:${order.id}:${line.id}`,
+          rawId: line.id,
+          orderId: order.id,
+          kind: "line",
+          parent: orderNode.id,
+          label: line.product || line.order_type || `Позиция ${index + 1}`,
+          product: line.product || "Без продукта",
+          type: line.order_type || "Без типа",
+          status: line.status || "Без статуса",
+          customer,
+          orderNumber: order.number || "—",
+          orderName: order.name || "Без названия",
+          value: t.after,
+          paid: t.paid,
+          debt: t.unpaid,
+          quantity: Math.abs(qtyValue(line)),
+          unit: line.unit || "",
+          discount: t.discount,
+          orderDate: line.order_date || "",
+          paymentDate: line.payment_date || "",
+          time: line.order_date ? new Date(line.order_date).getTime() : orderNode.time,
+        };
+        lineNode.color = cloudNodeColor("line", lineNode);
+        lineNode.radius = cloudRadius("line", lineNode, maxima);
+        nodes.push(lineNode);
+        edges.push({ source: orderNode.id, target: lineNode.id, kind: "line" });
+      });
+    });
+    return { nodes, edges, orderRows, customers };
+  }
+
+  function cloudPercent(paid, value) {
+    return value > 0.005 ? Math.min(100, Math.round((paid / value) * 100)) : 0;
+  }
+
+  function renderCloudKpis(graph) {
+    const orderNodes = graph.nodes.filter((node) => node.kind === "order");
+    const lineNodes = graph.nodes.filter((node) => node.kind === "line");
+    const value = lineNodes.reduce((sum, node) => sum + node.value, 0);
+    const debt = lineNodes.reduce((sum, node) => sum + node.debt, 0);
+    const paid = lineNodes.reduce((sum, node) => sum + node.paid, 0);
+    $("cloud-kpis").innerHTML = `
+      <div><span>Заказы</span><b>${orderNodes.length}</b></div>
+      <div><span>Позиции</span><b>${lineNodes.length}</b></div>
+      <div><span>Оборот</span><b>${esc(money(value))}</b></div>
+      <div class="${debt > 0.005 ? "debt" : ""}"><span>Долг</span><b>${esc(money(debt))}</b><small>${cloudPercent(paid, value)}% собрано</small></div>`;
+  }
+
+  function renderCloudLegend(graph) {
+    const mode = cloudState().color;
+    let items;
+    if (mode === "debt") {
+      items = [["Оплачено", "#059669"], ["Частично", "#f59e0b"], ["Не оплачено", "#dc2626"]];
+    } else {
+      const key = mode === "customer" ? "customer" : mode === "type" ? "type" : "status";
+      const map = new Map();
+      graph.nodes.filter((node) => node.kind === "line").forEach((node) => {
+        const name = node[key] || "Без значения";
+        if (!map.has(name)) map.set(name, node.color);
+      });
+      items = [...map.entries()].slice(0, 9);
+    }
+    $("cloud-legend").innerHTML = [
+      `<span class="cloud-legend-kind"><i class="customer"></i>заказчик</span>`,
+      `<span class="cloud-legend-kind"><i class="order"></i>заказ</span>`,
+      `<span class="cloud-legend-kind"><i class="line"></i>позиция</span>`,
+      `<span class="cloud-legend-link trunk" title="Стрелка и бегущие штрихи показывают направление">заказчик → заказ</span>`,
+      `<span class="cloud-legend-link branch" title="От заказа к его позициям">заказ → позиция</span>`,
+      `<span class="cloud-legend-link bridge" title="Пунктир между близкими заказчиками">связь заказчиков</span>`,
+      ...items.map(([label, color]) => `<span title="${esc(label)}"><i style="background:${esc(color)}"></i>${esc(label)}</span>`),
+    ].join("");
+  }
+
+  function cloudMetric(label, value, danger = false) {
+    return `<div class="cloud-detail-metric${danger ? " danger" : ""}"><span>${esc(label)}</span><b>${esc(value)}</b></div>`;
+  }
+
+  function renderCloudInspector(node) {
+    const box = $("cloud-inspector");
+    if (!box) return;
+    if (!node) {
+      box.innerHTML = `<div class="cloud-inspector-idle">
+        <div class="cloud-scan"><span></span></div>
+        <strong>Выберите объект</strong>
+        <p>Наведите на узел для быстрой справки. Нажмите, чтобы зафиксировать подробности.</p>
+      </div>`;
+      return;
+    }
+    const kind = node.kind === "customer" ? "Заказчик" : node.kind === "order" ? "Заказ" : "Позиция";
+    let meta = "";
+    let metrics = "";
+    let actions = "";
+    if (node.kind === "customer") {
+      meta = `${node.count} ${ordWord(node.count)} · ${node.positions} ${posWord(node.positions)}`;
+      metrics = cloudMetric("Оборот", money(node.value)) + cloudMetric("Оплачено", money(node.paid)) + cloudMetric("Долг", money(node.debt), node.debt > 0.005);
+      actions = `<button class="btn primary" type="button" data-cloud-customer="${esc(node.customer)}">Показать только связи</button>
+        <button class="btn" type="button" data-cloud-focus="${esc(node.id)}">Центрировать</button>`;
+    } else if (node.kind === "order") {
+      meta = `${esc(node.customer)} · ${node.count} ${posWord(node.count)}`;
+      metrics = cloudMetric("Сумма", money(node.value)) + cloudMetric("Оплачено", money(node.paid)) + cloudMetric("Долг", money(node.debt), node.debt > 0.005);
+      actions = `<button class="btn primary" type="button" data-cloud-open="${esc(node.rawId)}">Открыть заказ</button>
+        <button class="btn" type="button" data-cloud-snapshot="${esc(node.rawId)}">Снимок</button>
+        <button class="btn" type="button" data-cloud-focus="${esc(node.id)}">Центрировать</button>`;
+    } else {
+      meta = `${esc(node.orderNumber)} · ${esc(node.orderName)}`;
+      metrics = cloudMetric("Сумма", money(node.value)) + cloudMetric("Оплачено", money(node.paid)) + cloudMetric("Долг", money(node.debt), node.debt > 0.005);
+      actions = `<button class="btn primary" type="button" data-cloud-open="${esc(node.orderId)}">Открыть заказ</button>
+        <button class="btn" type="button" data-cloud-focus="${esc(node.id)}">Центрировать</button>`;
+    }
+    const progress = cloudPercent(node.paid, node.value);
+    box.innerHTML = `<div class="cloud-detail">
+      <div class="cloud-detail-top"><span class="cloud-detail-dot" style="--node:${esc(node.color)}"></span><span>${kind}</span></div>
+      <h3>${esc(node.label)}</h3>
+      <p>${meta}</p>
+      <div class="cloud-detail-metrics">${metrics}</div>
+      <div class="cloud-progress"><span style="width:${progress}%"></span></div>
+      <div class="cloud-progress-label"><span>Собираемость</span><b>${progress}%</b></div>
+      ${node.status ? `<div class="cloud-detail-row"><span>Статус</span><b>${esc(node.status)}</b></div>` : ""}
+      ${node.type ? `<div class="cloud-detail-row"><span>Тип</span><b>${esc(node.type)}</b></div>` : ""}
+      ${node.quantity != null ? `<div class="cloud-detail-row"><span>Количество</span><b>${esc(String(node.quantity))} ${esc(node.unit || "")}</b></div>` : ""}
+      ${node.orderDate ? `<div class="cloud-detail-row"><span>Дата заказа</span><b>${esc(cashDateText(parseDay(node.orderDate)))}</b></div>` : ""}
+      <div class="cloud-detail-actions">${actions}</div>
+    </div>`;
+  }
+
+  function renderCloudTooltip(node, point) {
+    const tip = $("cloud-tooltip");
+    if (!tip) return;
+    if (!node || !point) {
+      tip.hidden = true;
+      return;
+    }
+    const kind = node.kind === "customer" ? "Заказчик" : node.kind === "order" ? "Заказ" : "Позиция";
+    tip.innerHTML = `<small>${kind}</small><b>${esc(node.label)}</b><span>${esc(money(node.value))}${node.debt > 0.005 ? ` · долг ${esc(money(node.debt))}` : ""}</span>`;
+    tip.hidden = false;
+    const wrap = $("cloud-canvas-wrap").getBoundingClientRect();
+    const tw = tip.offsetWidth || 220;
+    const th = tip.offsetHeight || 72;
+    tip.style.left = `${Math.max(10, Math.min(wrap.width - tw - 10, point.x + 16))}px`;
+    tip.style.top = `${Math.max(10, Math.min(wrap.height - th - 10, point.y + 16))}px`;
+  }
+
+  function ensureOrderCloud() {
+    if (orderCloud || !window.FinOrderCloud || !$("cloud-canvas")) return orderCloud;
+    orderCloud = window.FinOrderCloud.create({
+      canvas: $("cloud-canvas"),
+      minimap: $("cloud-minimap"),
+      onHover: renderCloudTooltip,
+      onSelect: renderCloudInspector,
+      onOpen: (node) => {
+        const id = node.kind === "order" ? node.rawId : node.kind === "line" ? node.orderId : null;
+        if (id) gotoOrder(id);
+      },
+      onTransform: ({ zoom }) => {
+        if ($("cloud-zoom-value")) $("cloud-zoom-value").textContent = `${Math.round(zoom * 100)}%`;
+      },
+    });
+    return orderCloud;
+  }
+
+  function syncCloudControls() {
+    const s = cloudState();
+    if ($("cloud-search") && document.activeElement !== $("cloud-search")) $("cloud-search").value = s.query;
+    if ($("cloud-layout")) $("cloud-layout").value = s.layout;
+    if ($("cloud-color")) $("cloud-color").value = s.color;
+    if ($("cloud-size")) $("cloud-size").value = s.size;
+    if ($("cloud-debt")) $("cloud-debt").checked = !!s.debtOnly;
+    $("cloud-labels")?.setAttribute("aria-pressed", String(s.labels !== false));
+    $("cloud-motion")?.setAttribute("aria-pressed", String(s.motion !== false));
+    $("cloud-heat")?.setAttribute("aria-pressed", String(!!s.heat));
+    $("cloud-heat")?.classList.toggle("active", !!s.heat);
+    if ($("cloud-motion")) $("cloud-motion").textContent = s.motion === false ? "Ⅱ" : "◉";
+  }
+
+  function renderCloud() {
+    syncCloudControls();
+    const graph = cloudGraphData();
+    renderCloudKpis(graph);
+    renderCloudLegend(graph);
+    const empty = !$("cloud-canvas") || graph.nodes.length === 0;
+    $("cloud-empty").hidden = !empty;
+    $("cloud-canvas").classList.toggle("is-empty", empty);
+    if (empty) {
+      const hasOrders = (state.doc.orders || []).length > 0;
+      const title = $("cloud-empty").querySelector("strong");
+      const note = $("cloud-empty").querySelector(":scope > span");
+      const add = $("cloud-add-order");
+      if (title) title.textContent = hasOrders ? "Совпадений не найдено" : "Облако пока пусто";
+      if (note) note.textContent = hasOrders ? "Измените запрос или выключите фильтр долгов." : "Добавьте первый заказ — связи появятся здесь автоматически.";
+      if (add) add.hidden = hasOrders;
+    }
+    const engine = ensureOrderCloud();
+    engine?.update(graph, {
+      layout: cloudState().layout,
+      labels: cloudState().labels,
+      motion: cloudState().motion,
+      heat: cloudState().heat,
+      query: cloudState().query,
+    });
+    $("cloud-tech").textContent = `${graph.nodes.length} узлов · ${graph.edges.length} связей · MST-созвездия · тепловое ядро`;
+  }
+
+  function bindCloud() {
+    let searchTimer = 0;
+    $("cloud-search")?.addEventListener("input", (e) => {
+      cloudState().query = e.target.value;
+      renderCloud();
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => orderCloud?.fit(), 180);
+    });
+    $("cloud-layout")?.addEventListener("change", (e) => {
+      cloudState().layout = e.target.value;
+      persistCloudPrefs();
+      orderCloud?.setOptions({ layout: e.target.value });
+      setTimeout(() => orderCloud?.fit(), 140);
+    });
+    $("cloud-color")?.addEventListener("change", (e) => {
+      cloudState().color = e.target.value;
+      persistCloudPrefs();
+      renderCloud();
+    });
+    $("cloud-size")?.addEventListener("change", (e) => {
+      cloudState().size = e.target.value;
+      persistCloudPrefs();
+      renderCloud();
+    });
+    $("cloud-debt")?.addEventListener("change", (e) => {
+      cloudState().debtOnly = e.target.checked;
+      persistCloudPrefs();
+      renderCloud();
+      setTimeout(() => orderCloud?.fit(), 100);
+    });
+    $("cloud-labels")?.addEventListener("click", (e) => {
+      cloudState().labels = !cloudState().labels;
+      persistCloudPrefs();
+      e.currentTarget.setAttribute("aria-pressed", String(cloudState().labels));
+      orderCloud?.setOptions({ labels: cloudState().labels });
+    });
+    $("cloud-motion")?.addEventListener("click", (e) => {
+      cloudState().motion = !cloudState().motion;
+      persistCloudPrefs();
+      e.currentTarget.setAttribute("aria-pressed", String(cloudState().motion));
+      e.currentTarget.textContent = cloudState().motion ? "◉" : "Ⅱ";
+      orderCloud?.setOptions({ motion: cloudState().motion });
+    });
+    $("cloud-heat")?.addEventListener("click", (e) => {
+      cloudState().heat = !cloudState().heat;
+      persistCloudPrefs();
+      e.currentTarget.setAttribute("aria-pressed", String(cloudState().heat));
+      e.currentTarget.classList.toggle("active", cloudState().heat);
+      orderCloud?.setOptions({ heat: cloudState().heat });
+    });
+    $("cloud-tour")?.addEventListener("click", () => {
+      if (!orderCloud?.startTour()) toast("Для автотура нужны заказы или долги");
+      else toast("Автотур по очагам долга · Esc остановить");
+    });
+    $("cloud-fit")?.addEventListener("click", () => orderCloud?.fit());
+    $("cloud-zoom-in")?.addEventListener("click", () => orderCloud?.zoomAt(1.22, orderCloud.width / 2, orderCloud.height / 2));
+    $("cloud-zoom-out")?.addEventListener("click", () => orderCloud?.zoomAt(1 / 1.22, orderCloud.width / 2, orderCloud.height / 2));
+    $("cloud-fullscreen")?.addEventListener("click", () => toggleCloudFullscreen());
+    $("cloud-exit-fs")?.addEventListener("click", () => toggleCloudFullscreen(false));
+    $("cloud-add-order")?.addEventListener("click", () => {
+      state.doc.orders.push(emptyOrder());
+      markDirty();
+      gotoOrder(state.doc.orders[state.doc.orders.length - 1].id);
+    });
+    $("cloud-inspector")?.addEventListener("click", (e) => {
+      const open = e.target.closest("[data-cloud-open]");
+      const snapshot = e.target.closest("[data-cloud-snapshot]");
+      const customer = e.target.closest("[data-cloud-customer]");
+      const focus = e.target.closest("[data-cloud-focus]");
+      if (open) gotoOrder(open.dataset.cloudOpen);
+      else if (snapshot) openShare(findOrder(snapshot.dataset.cloudSnapshot));
+      else if (focus) orderCloud?.focus(focus.dataset.cloudFocus);
+      else if (customer) {
+        cloudState().query = customer.dataset.cloudCustomer;
+        $("cloud-search").value = cloudState().query;
+        renderCloud();
+        setTimeout(() => orderCloud?.fit(), 100);
+      }
+    });
+    document.addEventListener("fullscreenchange", syncCloudFullscreen);
+    document.addEventListener("webkitfullscreenchange", syncCloudFullscreen);
+  }
+
+  function cloudFullscreenElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+
+  function cloudFullscreenOn() {
+    return cloudFullscreenElement() === $("cloud-stage");
+  }
+
+  async function toggleCloudFullscreen(force) {
+    const stage = $("cloud-stage");
+    if (!stage) return;
+    try {
+      if (force === false || (force == null && cloudFullscreenOn())) {
+        const exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (exit) await exit.call(document);
+      } else if (!cloudFullscreenOn()) {
+        const enter = stage.requestFullscreen || stage.webkitRequestFullscreen;
+        if (enter) await enter.call(stage);
+      }
+    } catch {
+      toast("Полноэкранный режим недоступен в этом окне");
+    }
+  }
+
+  function syncCloudFullscreen() {
+    const on = cloudFullscreenOn();
+    $("cloud-stage")?.classList.toggle("is-fullscreen", on);
+    $("cloud-fullscreen")?.classList.toggle("active", on);
+    $("cloud-fullscreen")?.setAttribute("title", on ? "Вернуться в окно" : "Развернуть карту");
+    $("cloud-exit-fs")?.setAttribute("aria-hidden", String(!on));
+    requestAnimationFrame(() => orderCloud?.resize?.());
+  }
+
   function renderCatalogs() {
     $("status-list").innerHTML = (state.doc.statuses || [])
       .map(
@@ -2006,6 +2531,7 @@
     if (state.view === "orders") renderOrders();
     if (state.view === "analytics") renderAnalytics();
     if (state.view === "cashflow") renderCashflow();
+    if (state.view === "cloud") renderCloud();
     if (state.view === "catalogs") renderCatalogs();
     if (state.view === "customers") renderCustomers();
     else {
@@ -2021,6 +2547,7 @@
   }
 
   function setView(name) {
+    if (name !== "cloud") orderCloud?.stopTour();
     state.view = name;
     document.querySelectorAll(".nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
     document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
@@ -2040,6 +2567,7 @@
 
   function createNew() {
     state.doc = emptyDoc();
+    persistCloudPrefs();
     state.path = null;
     historyReset();
     setClean();
@@ -2066,6 +2594,7 @@
   function applyLoaded(res) {
     state.doc = res.document;
     state.path = res.path;
+    adoptCloudFromDocument();
     historyReset();
     if (res.recent) renderRecent(res.recent);
     else if (res.path) pushLocalRecent(res.path, res.document.title);
@@ -2090,6 +2619,7 @@
 
   async function save({ as = false, silent = false } = {}) {
     if (!state.doc) return false;
+    persistCloudPrefs();
     try {
       if (state.desktop) {
         let path = state.path;
@@ -2282,6 +2812,7 @@
       if (btn) setView(btn.dataset.view);
     });
     bindCashflow();
+    bindCloud();
     $("global-search").addEventListener("input", (e) => {
       state.search = e.target.value;
       renderAll();
@@ -2772,6 +3303,7 @@
         const text = await file.text();
         state.doc = JSON.parse(text);
         state.path = file.name;
+        adoptCloudFromDocument();
         historyReset();
         pushLocalRecent(file.name, state.doc.title);
         setClean();
@@ -2844,6 +3376,11 @@
         return;
       }
       if (e.key === "Escape") {
+        if (cloudFullscreenOn()) {
+          e.preventDefault();
+          toggleCloudFullscreen(false);
+          return;
+        }
         if (paletteIsOpen()) {
           closePalette();
           return;
@@ -2854,6 +3391,11 @@
           return;
         }
         if ($("remote-modal").classList.contains("open")) $("remote-modal").classList.remove("open");
+      }
+      if (state.view === "cloud" && e.key === "/" && !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) {
+        e.preventDefault();
+        $("cloud-search")?.focus();
+        return;
       }
       if (!ctrl) return;
       if (code === "KeyK" || (e.shiftKey && code === "KeyP")) {
@@ -2898,7 +3440,7 @@
     });
 
     window.addEventListener("resize", () => {
-      if (state.doc && (state.view === "dashboard" || state.view === "analytics")) renderAll();
+      if (state.doc && (state.view === "dashboard" || state.view === "analytics" || state.view === "cloud")) renderAll();
     });
   }
 
@@ -3406,7 +3948,8 @@
     }
   }
 
-  function openShare(order) {
+  function openShare(orderOrId) {
+    const order = typeof orderOrId === "string" ? findOrder(orderOrId) : orderOrId;
     const saved = ensureUi().share_fields;
     const selected = saved && saved.length ? saved : SHARE_PRESETS.work;
     $("share-fields").innerHTML = SHARE_FIELDS.map(
@@ -4001,6 +4544,7 @@
       { group: "Разделы", ico: "☰", title: "Заказы", sub: "таблицы заказов и позиций", run: () => setView("orders") },
       { group: "Разделы", ico: "▦", title: "Аналитика", sub: "фильтры, сравнение периодов", run: () => setView("analytics") },
       { group: "Разделы", ico: "₽", title: "Касса", sub: "платёжный календарь и дебиторка", run: () => setView("cashflow") },
+      { group: "Разделы", ico: "✣", title: "Облако заказов", sub: "живая карта заказов и позиций", run: () => setView("cloud") },
       { group: "Разделы", ico: "◉", title: "Заказчики", sub: "контакты и рейтинг", run: () => setView("customers") },
       { group: "Разделы", ico: "⚙", title: "Справочники", sub: "статусы, единицы, продукты", run: () => setView("catalogs") },
 
@@ -4106,6 +4650,41 @@
           setView("analytics");
           $("f-unpaid").checked = true;
           renderAnalytics();
+        },
+      },
+      {
+        group: "Облако",
+        ico: "➤",
+        title: "Облако: автотур по долгам",
+        sub: "пролететь по самым крупным очагам",
+        run: () => {
+          setView("cloud");
+          requestAnimationFrame(() => {
+            if (!orderCloud?.startTour()) toast("Для автотура нужны заказы или долги");
+          });
+        },
+      },
+      {
+        group: "Облако",
+        ico: "♨",
+        title: "Облако: тепловая карта долга",
+        run: () => {
+          cloudState().heat = true;
+          persistCloudPrefs();
+          setView("cloud");
+          $("cloud-heat")?.setAttribute("aria-pressed", "true");
+          $("cloud-heat")?.classList.add("active");
+        },
+      },
+      {
+        group: "Облако",
+        ico: "✦",
+        title: "Облако: созвездия работ",
+        run: () => {
+          cloudState().layout = "constellation";
+          persistCloudPrefs();
+          setView("cloud");
+          if ($("cloud-layout")) $("cloud-layout").value = "constellation";
         },
       },
     ];

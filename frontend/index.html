@@ -73,6 +73,7 @@
 
           <button data-view="analytics" title="Аналитика"><span class="nav-ico">▦</span><span class="nav-label">Аналитика</span></button>
           <button data-view="cashflow" title="Касса: платёжный календарь и дебиторка"><span class="nav-ico">₽</span><span class="nav-label">Касса</span></button>
+          <button data-view="cloud" title="Облако заказов: интерактивная карта связей"><span class="nav-ico">✣</span><span class="nav-label">Облако</span></button>
           <button data-view="customers" title="Заказчики"><span class="nav-ico">◉</span><span class="nav-label">Заказчики</span></button>
           <button data-view="catalogs" title="Справочники"><span class="nav-ico">⚙</span><span class="nav-label">Справочники</span></button>
         
@@ -295,6 +296,95 @@
           <div class="card" style="margin-top:12px">
             <h3>Кто должен <span class="insights-sub">дисциплина — средняя задержка оплаты относительно срока</span></h3>
             <div class="table-wrap" id="cash-debtors"></div>
+          </div>
+        </div>
+
+        <div class="view cloud-view" id="view-cloud">
+          <div class="cloud-head">
+            <div>
+              <div class="cloud-eyebrow">LIVE RELATIONSHIP ENGINE</div>
+              <h2>Облако заказов <span class="cloud-live"><i></i> живая физика</span></h2>
+              <p>Интерактивная карта всех заказов и подзаказов: кластеры, орбиты, финансовая ось и созвездия. Тяните узлы, летите по карте и находите очаги долга.</p>
+            </div>
+            <div class="cloud-kpis" id="cloud-kpis"></div>
+          </div>
+
+          <div class="cloud-toolbar" aria-label="Настройки облака заказов">
+            <label class="cloud-search">
+              <span>⌕</span>
+              <input type="search" id="cloud-search" placeholder="Номер, заказчик, работа, продукт…" autocomplete="off" />
+              <kbd>/</kbd>
+            </label>
+            <label class="cloud-control">
+              <span>Геометрия</span>
+              <select id="cloud-layout">
+                <option value="galaxy">Умные кластеры</option>
+                <option value="orbit">Орбиты заказов</option>
+                <option value="timeline">Финансовая ось</option>
+                <option value="constellation">Созвездия работ</option>
+              </select>
+            </label>
+            <label class="cloud-control">
+              <span>Цвет</span>
+              <select id="cloud-color">
+                <option value="status">По статусу</option>
+                <option value="customer">По заказчику</option>
+                <option value="debt">По оплате</option>
+                <option value="type">По типу</option>
+              </select>
+            </label>
+            <label class="cloud-control">
+              <span>Размер</span>
+              <select id="cloud-size">
+                <option value="amount">По сумме</option>
+                <option value="debt">По долгу</option>
+                <option value="quantity">По количеству</option>
+                <option value="equal">Одинаковый</option>
+              </select>
+            </label>
+            <label class="cloud-switch" title="Оставить только позиции с долгом">
+              <input type="checkbox" id="cloud-debt" />
+              <span></span>
+              Только долг
+            </label>
+            <button class="btn cloud-icon-btn" type="button" id="cloud-labels" aria-pressed="true" title="Показать или скрыть подписи">Aa</button>
+            <button class="btn cloud-icon-btn" type="button" id="cloud-motion" aria-pressed="true" title="Запустить или остановить физику">◉</button>
+            <button class="btn cloud-icon-btn" type="button" id="cloud-heat" aria-pressed="false" title="Тепловая карта долга">♨</button>
+            <button class="btn cloud-icon-btn" type="button" id="cloud-tour" title="Автотур по очагам долга">➤</button>
+            <button class="btn cloud-icon-btn" type="button" id="cloud-fit" title="Показать всё">⊙</button>
+            <button class="btn cloud-icon-btn" type="button" id="cloud-fullscreen" title="Развернуть карту">⛶</button>
+          </div>
+
+          <div class="cloud-stage" id="cloud-stage">
+            <div class="cloud-canvas-wrap" id="cloud-canvas-wrap">
+              <canvas id="cloud-canvas" tabindex="0" aria-label="Интерактивная карта заказов и позиций"></canvas>
+              <div class="cloud-empty" id="cloud-empty" hidden>
+                <div class="cloud-empty-orbit"><i></i><i></i><i></i></div>
+                <strong>Облако пока пусто</strong>
+                <span>Добавьте первый заказ — связи появятся здесь автоматически.</span>
+                <button class="btn primary" type="button" id="cloud-add-order">+ Создать заказ</button>
+              </div>
+              <div class="cloud-tooltip" id="cloud-tooltip" hidden></div>
+              <div class="cloud-hint"><b>Стрелка</b> заказчик → заказ → позиция · <b>колесо</b> масштаб · <b>drag</b> карта · <b>узел</b> сдвинуть · <b>двойной клик</b> открыть · <b>T</b> автотур · <b>Esc</b> свернуть карту</div>
+              <button type="button" class="cloud-exit-fs" id="cloud-exit-fs" title="Вернуться в обычный режим">↙ Вернуться в окно</button>
+              <div class="cloud-zoom">
+                <button type="button" id="cloud-zoom-in" aria-label="Приблизить">+</button>
+                <span id="cloud-zoom-value">100%</span>
+                <button type="button" id="cloud-zoom-out" aria-label="Отдалить">−</button>
+              </div>
+              <canvas class="cloud-minimap" id="cloud-minimap" width="180" height="112" aria-hidden="true"></canvas>
+            </div>
+            <aside class="cloud-inspector" id="cloud-inspector">
+              <div class="cloud-inspector-idle">
+                <div class="cloud-scan"><span></span></div>
+                <strong>Выберите объект</strong>
+                <p>Наведите на узел для быстрой справки. Нажмите, чтобы зафиксировать подробности.</p>
+              </div>
+            </aside>
+          </div>
+          <div class="cloud-footer">
+            <div class="cloud-legend" id="cloud-legend"></div>
+            <div class="cloud-tech" id="cloud-tech">адаптивная физика · MST-созвездия · тепловое ядро · живая детализация</div>
           </div>
         </div>
 
@@ -586,6 +676,10 @@
           <h4>Ячейки</h4>
           <div class="help-row"><span>Формулы в кол-ве, цене, скидке</span><span><kbd>2+3*4</kbd></span></div>
           <div class="help-row"><span>Запятая превращается в точку</span><span><kbd>2,5</kbd> → <kbd>2.5</kbd></span></div>
+          <h4>Облако</h4>
+          <div class="help-row"><span>Поиск по карте</span><span><kbd>/</kbd></span></div>
+          <div class="help-row"><span>Показать всё / автотур</span><span><kbd>F</kbd> / <kbd>T</kbd></span></div>
+          <div class="help-row"><span>Открыть выбранный узел</span><span><kbd>Enter</kbd></span></div>
         </div>
       </div>
       <div class="modal-actions">
@@ -598,6 +692,7 @@
   <input type="file" id="file-input" accept=".fmaster,.json" hidden />
 
   <script src="/charts.js"></script>
+  <script src="/cloud.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -37,6 +37,7 @@ def load_config() -> dict[str, Any]:
         data.setdefault("autosave", False)
         data.setdefault("last_dir", "")
         data.setdefault("theme", "light")
+        data.setdefault("window_maximized", False)
         return data
     except (OSError, json.JSONDecodeError):
         return {"recent": [], "autosave": False, "last_dir": "", "theme": "light"}
@@ -78,6 +79,16 @@ def set_theme(theme: str) -> str:
     cfg["theme"] = value
     save_config(cfg)
     return value
+
+
+def window_maximized() -> bool:
+    return bool(load_config().get("window_maximized"))
+
+
+def set_window_maximized(enabled: bool) -> None:
+    cfg = load_config()
+    cfg["window_maximized"] = bool(enabled)
+    save_config(cfg)
 
 
 def set_autosave(enabled: bool) -> None:
