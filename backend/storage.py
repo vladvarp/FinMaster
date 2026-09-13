@@ -156,7 +156,9 @@ def save_remote_settings(**updates: Any) -> dict[str, Any]:
                 data["telegram_offset"] = 0
             data["telegram_bot_token"] = bot
     if "telegram_chat_id" in updates:
-        data["telegram_chat_id"] = str(updates["telegram_chat_id"] or "").strip()
+        chat = str(updates["telegram_chat_id"] or "").strip()
+        if chat:
+            data["telegram_chat_id"] = chat
     if "telegram_offset" in updates:
         try:
             data["telegram_offset"] = max(0, int(updates["telegram_offset"] or 0))

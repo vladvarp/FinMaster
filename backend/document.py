@@ -21,6 +21,18 @@ DEFAULT_UNITS = ["шт.", "м²", "м", "мин"]
 DEFAULT_ORDER_TYPES = ["Производство", "Услуга", "Поставка", "Монтаж"]
 DEFAULT_PRODUCTS: list[dict[str, str]] = []
 
+DEFAULT_PAYMENT_TERMS = 14
+DEFAULT_CASH_HORIZON = 30
+CASH_HORIZONS = (14, 30, 60, 90)
+
+
+def _int_in_range(value: Any, default: int, low: int, high: int) -> int:
+    try:
+        number = int(round(float(value)))
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, number))
+
 
 def _product_entry(item: Any, default_unit: str) -> dict[str, str] | None:
     if isinstance(item, dict):
@@ -57,6 +69,8 @@ def empty_document(title: str = "Новый отчёт") -> dict[str, Any]:
             "column_widths": {},
             "share_fields": [],
             "share_theme": "teal",
+            "payment_terms": DEFAULT_PAYMENT_TERMS,
+            "cash_horizon": DEFAULT_CASH_HORIZON,
         },
     }
 
@@ -158,6 +172,10 @@ def normalize_document(raw: Any) -> dict[str, Any]:
             "column_widths": ui.get("column_widths") if isinstance(ui.get("column_widths"), dict) else {},
             "share_fields": ui.get("share_fields") if isinstance(ui.get("share_fields"), list) else [],
             "share_theme": str(ui.get("share_theme") or "teal"),
+            "payment_terms": _int_in_range(ui.get("payment_terms"), DEFAULT_PAYMENT_TERMS, 0, 365),
+            "cash_horizon": _int_in_range(ui.get("cash_horizon"), DEFAULT_CASH_HORIZON, 14, 90),
         }
+        if base["ui"]["cash_horizon"] not in CASH_HORIZONS:
+            base["ui"]["cash_horizon"] = DEFAULT_CASH_HORIZON
 
     return base

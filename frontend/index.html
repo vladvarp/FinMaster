@@ -40,7 +40,7 @@
           <button class="btn js-theme-toggle" type="button" title="Тема">Тема</button>
         </div>
       </div>
-      <h3 style="margin:0 0 12px;color:#cbd5e1">Недавно открытые</h3>
+          <h3 class="start-recent-title">Недавно открытые</h3>
       <div class="recent-list" id="recent-list"></div>
     </div>
   </div>
@@ -72,6 +72,7 @@
           <button data-view="dashboard" class="active" title="Дашборд"><span class="nav-ico">⌂</span><span class="nav-label">Дашборд</span></button>
 
           <button data-view="analytics" title="Аналитика"><span class="nav-ico">▦</span><span class="nav-label">Аналитика</span></button>
+          <button data-view="cashflow" title="Касса: платёжный календарь и дебиторка"><span class="nav-ico">₽</span><span class="nav-label">Касса</span></button>
           <button data-view="customers" title="Заказчики"><span class="nav-ico">◉</span><span class="nav-label">Заказчики</span></button>
           <button data-view="catalogs" title="Справочники"><span class="nav-ico">⚙</span><span class="nav-label">Справочники</span></button>
         
@@ -244,6 +245,56 @@
           <div class="card" style="margin-top:12px">
             <h3>Найденные позиции</h3>
             <div class="table-wrap" id="analytics-table"></div>
+          </div>
+        </div>
+
+        <div class="view" id="view-cashflow">
+          <div class="toolbar">
+            <div class="left">
+              <div class="cash-term">
+                <label for="cash-terms">Срок оплаты</label>
+                <input type="number" id="cash-terms" min="0" max="365" step="1" />
+                <span>дней от даты заказа</span>
+              </div>
+              <select id="cash-horizon" class="btn" title="Горизонт прогноза поступлений">
+                <option value="14">Прогноз на 14 дней</option>
+                <option value="30">Прогноз на 30 дней</option>
+                <option value="60">Прогноз на 60 дней</option>
+                <option value="90">Прогноз на 90 дней</option>
+              </select>
+              <button class="btn" type="button" id="cash-copy">Копировать сводку</button>
+            </div>
+            <div class="right hint" id="cash-note"></div>
+          </div>
+          <div class="kpis" id="cash-kpi"></div>
+          <div class="grid-2">
+            <div class="card">
+              <h3>Прогноз поступлений <span class="insights-sub">накопительно: по сроку оплаты и с учётом платёжной дисциплины заказчиков</span></h3>
+              <div class="chart-box"><canvas id="chart-cash-line"></canvas></div>
+            </div>
+            <div class="card">
+              <h3>Долг по заказчикам</h3>
+              <div class="chart-box"><canvas id="chart-cash-pie"></canvas></div>
+            </div>
+          </div>
+          <div class="grid-2" style="margin-top:12px">
+            <div class="card">
+              <h3>Платёжный календарь <span class="insights-sub">нажмите день, чтобы отфильтровать реестр</span></h3>
+              <div id="cash-calendar"></div>
+            </div>
+            <div class="card">
+              <h3>Старение дебиторки</h3>
+              <div id="cash-aging"></div>
+            </div>
+          </div>
+          <div class="card" style="margin-top:12px">
+            <h3>Реестр дебиторки <span class="insights-sub">оплата одной кнопкой, напоминание — в буфер обмена</span></h3>
+            <div class="chips" id="cash-chips"></div>
+            <div class="table-wrap" id="cash-table"></div>
+          </div>
+          <div class="card" style="margin-top:12px">
+            <h3>Кто должен <span class="insights-sub">дисциплина — средняя задержка оплаты относительно срока</span></h3>
+            <div class="table-wrap" id="cash-debtors"></div>
           </div>
         </div>
 

@@ -175,30 +175,47 @@ class RemoteSession:
 
     # ---------- клиенты ----------
 
+    def _bump(self) -> None:
+        self.version += 1
+        self._cond.notify_all()
+
+    def _prune_locked(self) -> bool:
+        now = time.time()
+        stale = [cid for cid, c in self._clients.items() if now - c.get("seen", 0) > CLIENT_TTL]
+        for cid in stale:
+            self._clients.pop(cid, None)
+        return bool(stale)
+
     def touch(self, cid: str, kind: str = "mobile", name: str = "") -> None:
         if not cid:
             return
         now = time.time()
         with self._cond:
+            is_new = cid not in self._clients
             client = self._clients.setdefault(cid, {"kind": kind, "name": name, "since": now})
             client["seen"] = now
             client["kind"] = kind or client.get("kind") or "mobile"
             if name:
                 client["name"] = name
+            pruned = self._prune_locked()
+            if is_new or pruned:
+                self._bump()
 
     def drop(self, cid: str) -> None:
         with self._cond:
             if self._clients.pop(cid, None) is not None:
-                self.version += 1
-                self._cond.notify_all()
+                self._bump()
 
     def _live_clients(self) -> list[dict[str, Any]]:
-        now = time.time()
-        stale = [cid for cid, c in self._clients.items() if now - c.get("seen", 0) > CLIENT_TTL]
-        for cid in stale:
-            self._clients.pop(cid, None)
+        self._prune_locked()
         return [
-            {"id": cid, "kind": c.get("kind", "mobile"), "name": c.get("name", ""), "since": c.get("since", 0)}
+            {
+                "id": cid,
+                "kind": c.get("kind", "mobile"),
+                "name": c.get("name", ""),
+                "since": c.get("since", 0),
+                "seen": c.get("seen", 0),
+            }
             for cid, c in self._clients.items()
         ]
 
@@ -234,10 +251,15 @@ class RemoteSession:
         deadline = time.time() + timeout
         with self._cond:
             while self.version <= since and self.enabled:
+                if self._prune_locked():
+                    self._bump()
+                    break
                 left = deadline - time.time()
                 if left <= 0:
-                    return {"version": self.version, "changed": False, "enabled": self.enabled}
-                self._cond.wait(left)
+                    snap = self._snapshot(False)
+                    snap["changed"] = False
+                    return snap
+                self._cond.wait(min(left, 4.0))
             snap = self._snapshot(True)
             snap["changed"] = True
             return snap

@@ -86,52 +86,121 @@ def send_html(
     _call(token, "sendMessage", payload)
 
 
-def welcome_text() -> str:
+def _status(info: Any) -> dict[str, Any]:
+    if isinstance(info, dict):
+        return info
+    return {"url": str(info or ""), "access": bool(info), "ngrok": False}
+
+
+def is_internet(info: Any, url: str = "") -> bool:
+    flags = _status(info)
+    link = str(url or flags.get("url") or "")
+    return bool(flags.get("ngrok") and ("ngrok" in link.lower() or link.startswith("https://")))
+
+
+def channel_block(info: Any, url: str = "") -> str:
+    flags = _status(info)
+    if not flags.get("access"):
+        return (
+            "🚫 <b>ВХОД ЗАКРЫТ</b>\n"
+            "на компьютере выключен доступ с телефона"
+        )
+    if is_internet(flags, url):
+        return (
+            "🌐 <b>ИНТЕРНЕТ</b>\n"
+            "можно открыть из любой сети — Wi‑Fi, 4G, другая квартира"
+        )
+    extra = ""
+    if flags.get("ngrok"):
+        extra = "\nтуннель включён, но ссылка пока локальная"
     return (
+        "📶 <b>ЛОКАЛЬНАЯ СЕТЬ</b>\n"
+        "только та же Wi‑Fi, что и компьютер\n"
+        "с мобильного интернета <b>не откроется</b>"
+        + extra
+    )
+
+
+def toggle_warnings(info: Any) -> list[str]:
+    flags = _status(info)
+    notes: list[str] = []
+    if not flags.get("access"):
+        notes.append(
+            "Откройте FinMaster → <b>Телефон</b> и включите тумблер доступа."
+        )
+    elif not flags.get("ngrok"):
+        notes.append(
+            "Чтобы зайти не из домашнего Wi‑Fi, включите тумблер <b>Через интернет (ngrok)</b>."
+        )
+    return notes
+
+
+def welcome_text(info: Any = None) -> str:
+    flags = _status(info)
+    text = (
         "<b>FinMaster</b>\n"
         "учёт заказов с телефона\n\n"
-        "Нажмите <b>Получить ссылку</b> — пришлю вход на компьютер.\n"
-        "Кнопка <b>Открыть FinMaster</b> сразу откроет актуальную страницу.\n\n"
-        "<i>Компьютер должен быть включён. Если заходите не из домашнего Wi‑Fi — включите ngrok в окне «Телефон».</i>"
+        f"{channel_block(flags)}\n\n"
+        "Нажмите <b>Получить ссылку</b> — пришлю вход на компьютер."
     )
+    warns = toggle_warnings(flags)
+    if warns:
+        text += "\n\n" + "\n\n".join(warns)
+    return text
 
 
-def access_text(url: str) -> str:
-    link = str(url or "").strip()
+def access_text(url: str, info: Any = None) -> str:
+    flags = _status(info)
+    link = str(url or flags.get("url") or "").strip()
+    banner = channel_block(flags, link)
+    warns = toggle_warnings(flags)
+    if not flags.get("access"):
+        return (
+            f"{banner}\n\n"
+            + "\n\n".join(warns)
+            + "\n\nПосле включения нажмите «Получить ссылку» ещё раз."
+        )
     if not link:
         return (
-            "<b>Пока нет ссылки</b>\n\n"
-            "Откройте на компьютере FinMaster → <b>Телефон</b> и включите доступ.\n"
-            "После этого нажмите «Получить ссылку» ещё раз."
+            f"{banner}\n\n"
+            "Пока нет ссылки. Проверьте окно <b>Телефон</b> на компьютере."
+            + ("\n\n" + "\n\n".join(warns) if warns else "")
         )
-    kind = "через интернет" if "ngrok" in link.lower() or link.startswith("https://") else "по локальной сети"
-    return (
-        "<b>Ссылка готова</b>\n"
-        f"вход {kind}\n\n"
-        "Нажмите кнопку ниже — откроется мобильный FinMaster.\n\n"
-        f"<code>{link}</code>\n\n"
-        "<i>Если кнопка не сработала, скопируйте адрес из серой строки.</i>"
+    if is_internet(flags, link):
+        how = "Откроется из любой сети."
+    else:
+        how = "Откроется только в той же Wi‑Fi."
+    text = (
+        f"{banner}\n\n"
+        f"<b>Ссылка готова.</b> {how}\n"
+        "Кнопка ниже — «Открыть FinMaster».\n\n"
+        f"<code>{link}</code>"
     )
+    if warns:
+        text += "\n\n" + "\n\n".join(warns)
+    return text
 
 
-def send_welcome(token: str, chat_id: str) -> None:
-    send_html(token, chat_id, welcome_text(), _menu_keyboard())
+def send_welcome(token: str, chat_id: str, info: Any = None) -> None:
+    send_html(token, chat_id, welcome_text(info), _menu_keyboard())
 
 
-def send_access(token: str, chat_id: str, url: str) -> None:
-    link = str(url or "").strip()
-    markup = _open_keyboard(link) if link.startswith(("http://", "https://")) else _ask_keyboard()
-    send_html(token, chat_id, access_text(link), markup, preview=False)
+def send_access(token: str, chat_id: str, url: str, info: Any = None) -> None:
+    flags = _status(info)
+    link = str(url or flags.get("url") or "").strip()
+    can_open = bool(flags.get("access")) and link.startswith(("http://", "https://"))
+    markup = _open_keyboard(link) if can_open else _ask_keyboard()
+    send_html(token, chat_id, access_text(link, flags), markup, preview=False)
 
 
-def send_link(token: str, chat_id: str, url: str) -> str:
+def send_link(token: str, chat_id: str, url: str, info: Any = None) -> str:
     token = str(token or "").strip()
     if not token:
         raise RuntimeError("Вставьте токен бота от @BotFather.")
     cid = str(chat_id or "").strip()
     if not cid:
         raise RuntimeError("Напишите боту /start — chat id подставится сам. Или вставьте его вручную.")
-    send_access(token, cid, url)
+    send_access(token, cid, url, info)
     return cid
 
 
@@ -161,7 +230,7 @@ class TelegramBot:
         self._error = ""
         self._running = False
         self._thread: threading.Thread | None = None
-        self._on_request: Callable[[str], str] | None = None
+        self._on_request: Callable[[str], Any] | None = None
         self._on_offset: Callable[[int], None] | None = None
         self._skip = True
 
@@ -176,7 +245,7 @@ class TelegramBot:
         self,
         token: str,
         offset: int = 0,
-        on_request: Callable[[str], str] | None = None,
+        on_request: Callable[[str], Any] | None = None,
         on_offset: Callable[[int], None] | None = None,
     ) -> None:
         token = str(token or "").strip()
@@ -216,15 +285,15 @@ class TelegramBot:
             except Exception:
                 pass
 
-    def _url_for(self, chat_id: str) -> str:
+    def _status_for(self, chat_id: str) -> dict[str, Any]:
         with self._lock:
             cb = self._on_request
         if not cb:
-            return ""
+            return {"url": "", "access": False, "ngrok": False}
         try:
-            return cb(str(chat_id)) or ""
+            return _status(cb(str(chat_id)))
         except Exception:
-            return ""
+            return {"url": "", "access": False, "ngrok": False}
 
     def _loop(self) -> None:
         while True:
@@ -280,16 +349,17 @@ class TelegramBot:
             text = str(msg.get("text") or "").strip()
             low = text.lower()
             if low in {"/start", "/help", "меню", "start"}:
-                send_welcome(token, str(cid))
+                send_welcome(token, str(cid), self._status_for(str(cid)))
             elif low in ASK_TEXTS or low.startswith("/link"):
-                send_access(token, str(cid), self._url_for(str(cid)))
+                info = self._status_for(str(cid))
+                send_access(token, str(cid), str(info.get("url") or ""), info)
             else:
-                send_html(
-                    token,
-                    str(cid),
-                    "Нажмите кнопку, чтобы получить вход в FinMaster.",
-                    _ask_keyboard(),
-                )
+                info = self._status_for(str(cid))
+                warns = toggle_warnings(info)
+                text = f"{channel_block(info)}\n\nНажмите кнопку, чтобы получить ссылку."
+                if warns:
+                    text = text + "\n\n" + "\n\n".join(warns)
+                send_html(token, str(cid), text, _ask_keyboard())
             with self._lock:
                 self._error = ""
         except RuntimeError as exc:
@@ -312,7 +382,8 @@ class TelegramBot:
                 pass
         if cid is None or data != "link":
             return
-        send_access(token, str(cid), self._url_for(str(cid)))
+        info = self._status_for(str(cid))
+        send_access(token, str(cid), str(info.get("url") or ""), info)
 
 
 BOT = TelegramBot()

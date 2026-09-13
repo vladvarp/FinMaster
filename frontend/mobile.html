@@ -9,7 +9,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>FinMaster — телефон</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/mobile.css?v=12" />
+    <link rel="stylesheet" href="/mobile.css?v=14" />
   </head>
   <body>
     <header class="topbar">
@@ -55,6 +55,9 @@
 
       <!-- Сводка -->
       <section class="screen" id="screen-stats" hidden>
+        <div class="chips" id="stats-period"></div>
+        <div class="chips" id="stats-filter"></div>
+        <div class="chips wrap" id="stats-status"></div>
         <div id="stats-body"></div>
       </section>
 
@@ -108,6 +111,6 @@
     </div>
 
     <div class="toast" id="toast"></div>
-    <script src="/mobile.js?v=12"></script>
+    <script src="/mobile.js?v=14"></script>
   </body>
 </html>

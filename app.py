@@ -125,16 +125,19 @@ def _qr_svg(url: str) -> str:
         return ""
 
 
-def _telegram_live_url(chat_id: str = "") -> str:
-    """Включает доступ при запросе из бота и возвращает свежую ссылку."""
+def _telegram_live_url(chat_id: str = "") -> dict[str, Any]:
+    """Возвращает ссылку и состояние тумблеров. Выключенный доступ сам не поднимает."""
     settings = storage.remote_settings()
     if chat_id and chat_id != settings.get("telegram_chat_id"):
         settings = storage.save_remote_settings(telegram_chat_id=str(chat_id))
-    if not REMOTE.enabled:
-        REMOTE.start(settings["token"])
-    if settings.get("ngrok"):
-        _ensure_tunnel(settings)
-    return str(_remote_public().get("url") or "")
+    access_on = bool(REMOTE.enabled)
+    ngrok_on = bool(settings.get("ngrok"))
+    url = ""
+    if access_on:
+        if ngrok_on:
+            _ensure_tunnel(settings)
+        url = str(_remote_public().get("url") or "")
+    return {"url": url, "access": access_on, "ngrok": ngrok_on}
 
 
 def _start_telegram(settings: dict[str, Any] | None = None) -> None:
@@ -438,7 +441,9 @@ def api_remote_ngrok():
     data = request.get_json(silent=True) or {}
     updates: dict[str, Any] = {}
     if "authtoken" in data:
-        updates["ngrok_token"] = str(data.get("authtoken") or "")
+        token = str(data.get("authtoken") or "").strip()
+        if token:
+            updates["ngrok_token"] = token
     if "enabled" in data:
         updates["ngrok"] = bool(data.get("enabled"))
         if updates["ngrok"]:
@@ -465,9 +470,13 @@ def api_remote_telegram():
     data = request.get_json(silent=True) or {}
     updates: dict[str, Any] = {}
     if "token" in data:
-        updates["telegram_bot_token"] = str(data.get("token") or "")
+        token = str(data.get("token") or "").strip()
+        if token:
+            updates["telegram_bot_token"] = token
     if "chat_id" in data:
-        updates["telegram_chat_id"] = str(data.get("chat_id") or "")
+        chat = str(data.get("chat_id") or "").strip()
+        if chat:
+            updates["telegram_chat_id"] = chat
     settings = storage.save_remote_settings(**updates) if updates else storage.remote_settings()
     _start_telegram(settings)
     if data.get("send"):
@@ -481,6 +490,7 @@ def api_remote_telegram():
                 str(settings.get("telegram_bot_token") or ""),
                 str(data.get("chat_id") or settings.get("telegram_chat_id") or ""),
                 str(payload.get("url") or ""),
+                {"access": True, "ngrok": bool(settings.get("ngrok")), "url": payload.get("url") or ""},
             )
             if chat_id and chat_id != settings.get("telegram_chat_id"):
                 storage.save_remote_settings(telegram_chat_id=chat_id)
@@ -555,6 +565,9 @@ def api_remote_pull():
     if kind == "mobile" and cid:
         storage.remember_device(cid, name, request.remote_addr or "")
     snap = REMOTE.wait(since)
+    if "clients" not in snap:
+        snap["clients"] = REMOTE.clients()
+    snap["devices"] = storage.remote_settings().get("devices") or []
     return jsonify(snap)
 
 

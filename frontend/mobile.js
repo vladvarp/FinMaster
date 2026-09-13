@@ -26,6 +26,7 @@
     headOpen: false,
     query: "",
     filter: "all",
+    stats: { period: "all", filter: "all", status: "" },
     sort: "date-desc",
     pending: null,
     pushTimer: null,
@@ -825,9 +826,89 @@
 
   /* ================= сводка ================= */
 
+  function dayKeyOf(d) {
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+
+  function matchesStatsPeriod(iso, period) {
+    if (!period || period === "all") return true;
+    const stamp = String(iso || "");
+    if (!stamp) return false;
+    const now = new Date();
+    if (period === "today") return stamp.slice(0, 10) === dayKeyOf(now);
+    if (period === "week") {
+      const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+      return stamp >= `${dayKeyOf(from)}T00:00`;
+    }
+    if (period === "month") return stamp.startsWith(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
+    if (period === "year") return stamp.startsWith(String(now.getFullYear()));
+    return true;
+  }
+
+  function statsChip(id, label, count, current, attr) {
+    const extra = count == null ? "" : `<b>${count}</b>`;
+    return `<button type="button" class="chip ${current === id ? "active" : ""}" ${attr}="${esc(id)}">${label}${extra}</button>`;
+  }
+
+  function renderStatsChips(rows, list) {
+    if (!$("stats-period") || !$("stats-filter") || !$("stats-status")) return;
+    const periodCounts = { all: rows.length };
+    ["today", "week", "month", "year"].forEach((id) => {
+      periodCounts[id] = rows.filter(({ line }) => matchesStatsPeriod(line.order_date, id)).length;
+    });
+    $("stats-period").innerHTML = [
+      ["all", "Все даты"],
+      ["today", "Сегодня"],
+      ["week", "7 дней"],
+      ["month", "Месяц"],
+      ["year", "Год"],
+    ]
+      .map(([id, label]) => statsChip(id, label, periodCounts[id], state.stats.period, "data-stats-period"))
+      .join("");
+
+    const filterCounts = {
+      all: list.length,
+      debt: list.filter((o) => matchesFilter(o, "debt")).length,
+      paid: list.filter((o) => matchesFilter(o, "paid")).length,
+    };
+    $("stats-filter").innerHTML = [
+      ["all", "Все заказы"],
+      ["debt", "С долгом"],
+      ["paid", "Оплачены"],
+    ]
+      .map(([id, label]) => statsChip(id, label, filterCounts[id], state.stats.filter, "data-stats-filter"))
+      .join("");
+
+    const statuses = state.doc?.statuses || [];
+    const statusCounts = { "": rows.length };
+    statuses.forEach((s) => {
+      statusCounts[s.name] = rows.filter(({ line }) => line.status === s.name).length;
+    });
+    $("stats-status").innerHTML =
+      statsChip("", "Все статусы", statusCounts[""], state.stats.status, "data-stats-status") +
+      statuses
+        .map((s) => statsChip(s.name, s.name, statusCounts[s.name] || 0, state.stats.status, "data-stats-status"))
+        .join("");
+  }
+
+  function statsRows() {
+    const list = orders().filter((o) => matchesFilter(o, state.stats.filter));
+    return list
+      .flatMap((order) => (order.lines || []).map((line) => ({ order, line })))
+      .filter(({ line }) => {
+        if (state.stats.status && line.status !== state.stats.status) return false;
+        return matchesStatsPeriod(line.order_date, state.stats.period);
+      });
+  }
+
   function renderStats() {
-    const list = orders();
-    const all = list.flatMap((o) => (o.lines || []).map((l) => ({ line: l, order: o })));
+    const all = statsRows();
+    renderStatsChips(
+      orders().flatMap((order) => (order.lines || []).map((line) => ({ order, line }))),
+      orders()
+    );
+    const list = [...new Set(all.map((r) => r.order))];
     const agg = all.reduce(
       (acc, { line }) => {
         const t = lineTotals(line);
@@ -848,9 +929,11 @@
 
     const byCustomer = {};
     list.forEach((o) => {
-      const t = orderTotals(o);
+      const t = all
+        .filter((r) => r.order.id === o.id)
+        .reduce((acc, { line }) => acc + lineTotals(line).after, 0);
       const key = o.customer || "Без заказчика";
-      byCustomer[key] = (byCustomer[key] || 0) + t.after;
+      byCustomer[key] = (byCustomer[key] || 0) + t;
     });
     const top = Object.entries(byCustomer)
       .sort((a, b) => b[1] - a[1])
@@ -866,11 +949,15 @@
       if (String(line.order_date || "").startsWith(monthKey)) monthSum += lineTotals(line).after;
     });
 
-    const debtors = list
-      .map((o) => ({ order: o, t: orderTotals(o) }))
-      .filter(({ t }) => t.unpaid > 0.005)
-      .sort((a, b) => b.t.unpaid - a.t.unpaid)
-      .slice(0, 5);
+    const debtMap = new Map();
+    all.forEach(({ order, line }) => {
+      const unpaid = lineTotals(line).unpaid;
+      if (unpaid <= 0.005) return;
+      const cur = debtMap.get(order.id) || { order, unpaid: 0 };
+      cur.unpaid += unpaid;
+      debtMap.set(order.id, cur);
+    });
+    const debtors = [...debtMap.values()].sort((a, b) => b.unpaid - a.unpaid).slice(0, 8);
 
     $("stats-body").innerHTML = `
       <div class="kpis">
@@ -930,13 +1017,16 @@
         debtors.length
           ? debtors
               .map(
-                ({ order, t }) => `<article class="line-row" data-open="${esc(order.id)}" style="--tint:var(--danger)">
-                  <span class="lr-index">${esc(order.number || "—")}</span>
-                  <div class="lr-main">
-                    <strong>${esc(order.customer || "Без заказчика")}</strong>
-                    <small>${esc(order.number || "—")} · ${esc(order.name || "без названия")}</small>
+                ({ order, unpaid }) => `<article class="card order-item" data-open="${esc(order.id)}" style="--tint:var(--danger)">
+                  <div class="oi-top">
+                    <span class="oi-num">${esc(order.number || "—")}</span>
+                    <span class="oi-sep">—</span>
+                    <span class="oi-customer">${esc(order.name || "без названия")}</span>
                   </div>
-                  <div class="lr-right"><b class="debt">${esc(money(t.unpaid))}</b><span class="lr-go">›</span></div>
+                  <div class="oi-name">${esc(order.customer || "Без заказчика")}</div>
+                  <div class="oi-foot">
+                    <span class="sum debt">долг ${esc(money(unpaid))}</span>
+                  </div>
                 </article>`
               )
               .join("")
@@ -1919,6 +2009,24 @@
         renderOrders();
         return;
       }
+      const statsPeriod = e.target.closest("[data-stats-period]");
+      if (statsPeriod) {
+        state.stats.period = statsPeriod.dataset.statsPeriod;
+        renderStats();
+        return;
+      }
+      const statsFilter = e.target.closest("[data-stats-filter]");
+      if (statsFilter) {
+        state.stats.filter = statsFilter.dataset.statsFilter;
+        renderStats();
+        return;
+      }
+      const statsStatus = e.target.closest("[data-stats-status]");
+      if (statsStatus) {
+        state.stats.status = statsStatus.dataset.statsStatus;
+        renderStats();
+        return;
+      }
       if (e.target.closest("#order-fold")) {
         state.headOpen = !state.headOpen;
         document.querySelector("#order-head .fold")?.classList.toggle("closed", !state.headOpen);
@@ -2221,6 +2329,13 @@
           new Blob([JSON.stringify({ document: state.doc, cid: state.cid })], { type: "application/json" })
         );
       }
+    });
+    window.addEventListener("pagehide", () => {
+      if (!state.token || !state.cid) return;
+      navigator.sendBeacon?.(
+        `/api/remote/leave?t=${encodeURIComponent(state.token)}`,
+        new Blob([JSON.stringify({ cid: state.cid })], { type: "application/json" })
+      );
     });
 
     document.addEventListener("visibilitychange", () => {
