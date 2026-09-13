@@ -1351,6 +1351,69 @@ kbd {
 .history-group .btn:disabled { opacity: 0.35; }
 
 /* ==== Инсайты ==== */
+.dash-focus {
+  margin-bottom: 14px;
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.16), var(--shadow);
+}
+.focus-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.focus-head b { font-size: 18px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.focus-tag {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.focus-name { font-weight: 600; }
+.focus-cust { color: var(--muted); font-size: 13px; }
+.focus-acts { margin-left: auto; display: flex; gap: 8px; }
+.focus-sums {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.focus-sum {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-2);
+}
+.focus-sum span {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.focus-sum b { font-size: 17px; font-variant-numeric: tabular-nums; }
+.focus-sum.ok b { color: var(--ok); }
+.focus-sum.warn b { color: var(--danger); }
+.focus-notes {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-left: 3px solid var(--accent-2);
+  border-radius: 0 10px 10px 0;
+  background: var(--bg-2);
+  color: var(--muted);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+@media (max-width: 1100px) {
+  .focus-sums { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .insights-card { margin-bottom: 12px; }
 .insights-sub {
   font-weight: 500;
@@ -1762,17 +1825,52 @@ html[data-theme="dark"] .fin-tip { box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5); }
   cursor: pointer;
 }
 .remote-autostart input { width: 16px; height: 16px; accent-color: var(--accent); }
-.remote-ngrok-box {
-  display: none;
-  margin: 0 0 12px;
-  padding: 10px 12px;
+.remote-fold {
+  margin: 0 0 10px;
   border-radius: 12px;
   border: 1px solid var(--line);
   background: var(--bg-2);
+  overflow: hidden;
 }
-.remote-ngrok-box.show { display: block; }
-.remote-ngrok-box .field { margin-bottom: 8px; }
-.remote-ngrok-box .field span {
+.remote-fold-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.remote-fold-ico { color: var(--muted); transition: transform 0.16s ease; }
+.remote-fold.collapsed .remote-fold-ico { transform: rotate(-90deg); }
+.remote-fold.collapsed .remote-fold-body { display: none; }
+.remote-fold-body { padding: 0 12px 12px; }
+.remote-ngrok-box,
+.remote-tg-box,
+.remote-fold .remote-clients {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+.remote-ngrok-box { display: block; }
+.remote-ngrok-box .field,
+.remote-tg-box .field { margin-bottom: 8px; }
+.remote-tg-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.remote-tg-box .field small {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  opacity: 0.85;
+}
+.remote-ngrok-box .field span,
+.remote-tg-box .field span {
   display: block;
   font-size: 11px;
   font-weight: 650;

@@ -113,7 +113,14 @@ def remote_settings() -> dict[str, Any]:
         "ngrok": bool(raw.get("ngrok")),
         "ngrok_token": str(raw.get("ngrok_token") or "").strip(),
         "via": str(raw.get("via") or "lan"),
+        "telegram_bot_token": str(raw.get("telegram_bot_token") or "").strip(),
+        "telegram_chat_id": str(raw.get("telegram_chat_id") or "").strip(),
+        "telegram_offset": 0,
     }
+    try:
+        out["telegram_offset"] = max(0, int(raw.get("telegram_offset") or 0))
+    except (TypeError, ValueError):
+        out["telegram_offset"] = 0
     if raw.get("token") != token or raw.get("port") != port or not isinstance(cfg.get("remote"), dict):
         cfg["remote"] = out
         save_config(cfg)
@@ -142,6 +149,19 @@ def save_remote_settings(**updates: Any) -> dict[str, Any]:
             data["ngrok_token"] = token_value
     if "via" in updates:
         data["via"] = "ngrok" if updates["via"] == "ngrok" else "lan"
+    if "telegram_bot_token" in updates:
+        bot = str(updates["telegram_bot_token"] or "").strip()
+        if bot:
+            if bot != data.get("telegram_bot_token"):
+                data["telegram_offset"] = 0
+            data["telegram_bot_token"] = bot
+    if "telegram_chat_id" in updates:
+        data["telegram_chat_id"] = str(updates["telegram_chat_id"] or "").strip()
+    if "telegram_offset" in updates:
+        try:
+            data["telegram_offset"] = max(0, int(updates["telegram_offset"] or 0))
+        except (TypeError, ValueError):
+            pass
     cfg["remote"] = data
     save_config(cfg)
     return data

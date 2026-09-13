@@ -17,6 +17,7 @@
     selectedCustomerId: null,
     shareOrderId: null,
     orderFilter: "all",
+    focusOrderId: null,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -63,6 +64,17 @@
     const redoBtn = $("btn-redo");
     if (undoBtn) undoBtn.disabled = history.index <= 0;
     if (redoBtn) redoBtn.disabled = history.index >= history.stack.length - 1;
+    publishHistoryFlags();
+  }
+
+  function publishHistoryFlags() {
+    if (!state.desktop) return;
+    clearTimeout(history.flagsTimer);
+    history.flagsTimer = setTimeout(() => {
+      apiPost("/api/remote/publish", {
+        history: { undo: history.index > 0, redo: history.index < history.stack.length - 1 },
+      }).catch(() => {});
+    }, 300);
   }
 
   function historyGo(step) {
@@ -430,6 +442,17 @@
     return (state.doc.statuses || []).find((s) => s.name === name) || { name, color: "#64748b" };
   }
 
+  function focusedOrder() {
+    if (!state.focusOrderId) return null;
+    return (state.doc?.orders || []).find((o) => o.id === state.focusOrderId) || null;
+  }
+
+  function dashRows() {
+    const order = focusedOrder();
+    if (!order) return allRows();
+    return (order.lines || []).map((line) => ({ order, line, totals: lineTotals(line) }));
+  }
+
   function matchesSearch(order, line, q) {
     if (!q) return true;
     const blob = [order.number, order.customer, order.name, order.notes, line?.product, line?.order_type, line?.status]
@@ -553,7 +576,7 @@
   }
 
   function renderKpis() {
-    const rows = allRows();
+    const rows = dashRows();
     const s = summarize(rows);
     const active = rows.filter(({ line }) => !/отмен|аннул|черн/i.test(line.status));
     const as = summarize(active);
@@ -608,7 +631,7 @@
   function renderInsights() {
     const box = $("insights");
     if (!box) return;
-    const rows = allRows();
+    const rows = dashRows();
     if (!rows.length) {
       box.innerHTML = `<div class="empty">Добавьте первый заказ — здесь появятся выводы по выручке, долгам и заказчикам.</div>`;
       return;
@@ -716,9 +739,10 @@
   }
 
   function renderDashboard() {
+    renderDashFocus();
     renderKpis();
     renderInsights();
-    const rows = allRows();
+    const rows = dashRows();
     const byDay = {};
     rows.forEach(({ line, totals }) => {
       const k = groupKey(line.order_date, "day");
@@ -751,12 +775,72 @@
           .join("")
       : `<div class="empty">Пока нет долгов и стоп-листов — отличный знак.</div>`;
 
-    const last = [...(state.doc.orders || [])].slice(-8).reverse();
+    const focus = focusedOrder();
+    const last = focus ? [focus] : [...(state.doc.orders || [])].slice(-8).reverse();
     $("recent-orders").innerHTML = last.length
       ? `<table class="data"><thead><tr><th>№</th><th>Заказчик</th><th>Название</th><th>Итог</th></tr></thead><tbody>${last
           .map((o) => `<tr><td>${esc(o.number)}</td><td>${esc(o.customer)}</td><td>${esc(o.name)}</td><td class="num">${esc(money(orderTotals(o).after))}</td></tr>`)
           .join("")}</tbody></table>`
       : `<div class="empty">Заказов ещё нет</div>`;
+  }
+
+  function renderDashFocus() {
+    const box = $("dash-focus");
+    if (!box) return;
+    const order = focusedOrder();
+    const sub = $("insights-sub");
+    if (!order) {
+      box.hidden = true;
+      box.innerHTML = "";
+      if (sub) sub.textContent = "считаются по всем заказам отчёта";
+      return;
+    }
+    if (sub) sub.textContent = `только заказ №${order.number || "—"}`;
+    const t = orderTotals(order);
+    const lines = order.lines || [];
+    box.hidden = false;
+    box.innerHTML = `
+      <div class="focus-head">
+        <span class="focus-tag">с телефона</span>
+        <b>№${esc(order.number || "—")}</b>
+        <span class="focus-name">${esc(order.name || "без названия")}</span>
+        <span class="focus-cust">${esc(order.customer || "без заказчика")}</span>
+        <div class="focus-acts">
+          <button class="btn small" type="button" id="focus-open">Открыть в заказах</button>
+          <button class="btn small" type="button" id="focus-clear">Весь отчёт</button>
+        </div>
+      </div>
+      <div class="focus-sums">
+        <div class="focus-sum"><span>Позиций</span><b>${lines.length}</b></div>
+        <div class="focus-sum"><span>К оплате</span><b>${esc(money(t.after))}</b></div>
+        <div class="focus-sum ok"><span>Оплачено</span><b>${esc(money(t.paid))}</b></div>
+        <div class="focus-sum ${t.unpaid > 0.005 ? "warn" : ""}"><span>Долг</span><b>${esc(money(t.unpaid))}</b></div>
+      </div>
+      <div class="table-wrap">
+        <table class="data"><thead><tr><th>Тип</th><th>Позиция</th><th class="num">Кол-во</th><th class="num">Цена</th><th class="num">Итог</th><th class="num">Долг</th><th>Статус</th></tr></thead>
+        <tbody>${
+          lines.length
+            ? lines
+                .map((line) => {
+                  const lt = lineTotals(line);
+                  return `<tr><td>${esc(line.order_type || "—")}</td><td>${esc(line.product || "—")}</td>
+                  <td class="num">${esc(`${qtyValue(line)} ${line.unit || ""}`.trim())}</td>
+                  <td class="num">${esc(money(numExpr(line, "price_expr", "price")))}</td>
+                  <td class="num">${esc(money(lt.after))}</td>
+                  <td class="num">${lt.unpaid > 0.005 ? esc(money(lt.unpaid)) : "—"}</td>
+                  <td><span class="pill" style="background:${statusMeta(line.status).color}">${esc(line.status || "—")}</span></td></tr>`;
+                })
+                .join("")
+            : `<tr><td colspan="7">В заказе нет позиций</td></tr>`
+        }</tbody></table>
+      </div>
+      ${order.notes ? `<div class="focus-notes">${esc(order.notes)}</div>` : ""}`;
+  }
+
+  function setFocusOrder(id) {
+    state.focusOrderId = id || null;
+    if (state.view === "dashboard") renderDashboard();
+    else setView("dashboard");
   }
 
   const EXPR_MAP = {
@@ -1555,6 +1639,14 @@
       setView("orders");
     });
     $("btn-share-many").addEventListener("click", () => openShare(null));
+    $("dash-focus")?.addEventListener("click", (e) => {
+      if (e.target.closest("#focus-clear")) setFocusOrder(null);
+      else if (e.target.closest("#focus-open")) {
+        const id = state.focusOrderId;
+        state.focusOrderId = null;
+        if (id) gotoOrder(id);
+      }
+    });
     $("order-sort").addEventListener("change", () => renderOrders());
     $("autosave").addEventListener("change", async (e) => {
       state.autosave = e.target.checked;
@@ -2967,38 +3059,25 @@
 
     blocks.forEach(({ order, lines }, bi) => {
       if (bi) out.push("");
-      const pairs = shareMetaPairs(order, fields);
-      if (pairs.length) {
+      const meta = shareMetaItems(order, fields, hideLabels);
+      if (meta.length) {
         out.push("");
-        if (hideLabels) {
-          pairs.forEach(([, value]) => out.push(value || "—"));
-        } else {
-          const lw = Math.max(...pairs.map(([label]) => visLen(label)));
-          pairs.forEach(([label, value]) => out.push(`${padVis(label, lw)}   ${value || "—"}`));
-        }
+        meta.forEach((line) => out.push(line));
       }
 
       if (cols.length) {
         const foot = shareFooterCells(cols, lines);
-        const lw = Math.max(8, ...cols.map((c) => visLen(c.label)));
-        lines.forEach((line, i) => {
-          out.push("");
-          const head = [shareLineValue(line, "order_type"), shareLineValue(line, "product")].filter((v) => v && v !== "—").join(" · ");
-          out.push(head || `Позиция ${i + 1}`);
-          cols.forEach((c) => {
-            if (c.id === "order_type" && head) return;
-            if (c.id === "product" && head && shareLineValue(line, "order_type") && shareLineValue(line, "product")) return;
-            const val = shareLineValue(line, c.id);
-            out.push(hideLabels ? val : `${padVis(c.label, lw)}  ${val}`);
-          });
+        const rows = [
+          cols.map((c) => c.label),
+          ...lines.map((line) => cols.map((c) => String(shareLineValue(line, c.id) || "—"))),
+        ];
+        if (foot && foot.some(Boolean)) rows.push(foot.map((v) => v || ""));
+        const widths = cols.map((_, i) => Math.max(1, ...rows.map((row) => visLen(row[i]))));
+        out.push("");
+        rows.forEach((row, ri) => {
+          out.push(row.map((cell, i) => padVis(cell, widths[i])).join("  "));
+          if (ri === 0) out.push(widths.map((w) => "─".repeat(w)).join("  "));
         });
-        if (foot && foot.some(Boolean)) {
-          out.push("");
-          cols.forEach((c, i) => {
-            if (!foot[i]) return;
-            out.push(hideLabels ? foot[i] : `${padVis(c.label, lw)}  ${foot[i]}`);
-          });
-        }
       }
 
       const totalsText = shareTotalsText(fields, cols, lines);
@@ -3564,6 +3643,8 @@
     version: 0,
     cid: `desktop-${Math.random().toString(16).slice(2, 8)}`,
     lastCommand: 0,
+    lastNav: 0,
+    docVersion: 0,
     publishTimer: null,
     polling: false,
     applying: false,
@@ -3598,6 +3679,10 @@
     if (typeof data.ngrok_ready === "boolean") remote.ngrokReady = data.ngrok_ready;
     if (typeof data.ngrok_installed === "boolean") remote.ngrokInstalled = data.ngrok_installed;
     if (data.tunnel) remote.tunnel = data.tunnel;
+    if (typeof data.telegram_ready === "boolean") remote.telegramReady = data.telegram_ready;
+    if ("telegram_chat_id" in data) remote.telegramChatId = data.telegram_chat_id || "";
+    if (typeof data.telegram_listening === "boolean") remote.telegramListening = data.telegram_listening;
+    if ("telegram_error" in data) remote.telegramError = data.telegram_error || "";
   }
 
   function renderRemoteIps() {
@@ -3620,6 +3705,8 @@
     if (!box) return;
     const live = new Set((remote.clients || []).filter((c) => c.kind === "mobile").map((c) => c.id));
     const devices = remote.devices || [];
+    const title = $("remote-devices-title");
+    if (title) title.textContent = devices.length ? `Устройства · ${devices.length}` : "Устройства";
     if (!devices.length) {
       box.innerHTML = `<div class="remote-empty">Запомненных устройств нет — отсканируйте QR или откройте ссылку с телефона.</div>`;
       return;
@@ -3651,12 +3738,29 @@
     renderRemoteDevices();
     const auto = $("remote-autostart");
     if (auto) auto.checked = !!remote.autostart;
-    const ngrokBox = $("remote-ngrok-box");
     const ngrokChk = $("remote-ngrok");
     if (ngrokChk) ngrokChk.checked = !!remote.ngrok;
-    ngrokBox?.classList.toggle("show", !!remote.ngrok);
     const tokenInput = $("remote-ngrok-token");
     if (tokenInput && remote.ngrokReady && !tokenInput.value) tokenInput.placeholder = "токен сохранён — можно не вводить заново";
+    const tgToken = $("remote-tg-token");
+    if (tgToken && remote.telegramReady && !tgToken.value) tgToken.placeholder = "токен сохранён — можно не вводить заново";
+    const tgChat = $("remote-tg-chat");
+    if (tgChat && remote.telegramChatId && !tgChat.value) tgChat.value = remote.telegramChatId;
+    const tgStatus = $("remote-tg-status");
+    if (tgStatus && !tgStatus.dataset.hold) {
+      tgStatus.className = "remote-ngrok-status";
+      if (remote.telegramError) {
+        tgStatus.classList.add("err");
+        tgStatus.textContent = remote.telegramError;
+      } else if (remote.telegramListening) {
+        tgStatus.classList.add("ok");
+        tgStatus.textContent = "Бот слушает. Напишите /start или нажмите «Получить ссылку» — пришлёт кнопку «Открыть FinMaster».";
+      } else if (remote.telegramReady) {
+        tgStatus.textContent = "Токен сохранён. Нажмите «Запомнить токен», если бот ещё не отвечает.";
+      } else {
+        tgStatus.textContent = "Вставьте токен от @BotFather и нажмите «Запомнить токен».";
+      }
+    }
     const ngrokStatus = $("remote-ngrok-status");
     if (ngrokStatus) {
       const tun = remote.tunnel || {};
@@ -3725,6 +3829,7 @@
           document: state.doc,
           path: state.path,
           dirty: state.dirty,
+          history: { undo: history.index > 0, redo: history.index < history.stack.length - 1 },
         });
         if (res.version) remote.version = res.version;
       } catch {
@@ -3743,11 +3848,23 @@
         remote.clients = data.clients || [];
         remoteBadge();
         if ($("remote-modal").classList.contains("open")) renderRemoteModal();
+        if (typeof data.doc_version === "number" && data.origin === "desktop") remote.docVersion = data.doc_version;
         if (data.command && data.command.id > remote.lastCommand) {
           remote.lastCommand = data.command.id;
           await runRemoteCommand(data.command);
-        } else if (data.changed && data.document && data.origin && data.origin !== "desktop") {
+        } else if (
+          data.changed &&
+          data.document &&
+          data.origin &&
+          data.origin !== "desktop" &&
+          (data.doc_version || 0) > remote.docVersion
+        ) {
+          remote.docVersion = data.doc_version || 0;
           applyRemoteDoc(data.document);
+        }
+        if (data.nav && data.nav.seq > remote.lastNav) {
+          remote.lastNav = data.nav.seq;
+          applyRemoteNav(data.nav);
         }
       } catch {
         await new Promise((r) => setTimeout(r, 2000));
@@ -3774,6 +3891,22 @@
     toast("Изменения с телефона применены");
   }
 
+  function applyRemoteNav(nav) {
+    if (!nav || !nav.view || !state.doc) return;
+    if (nav.view === "order" && nav.order_id) {
+      const order = (state.doc.orders || []).find((o) => o.id === nav.order_id);
+      if (!order) return;
+      setFocusOrder(order.id);
+      toast(`Телефон открыл заказ №${order.number || "—"}`);
+      return;
+    }
+    const hadFocus = !!state.focusOrderId;
+    state.focusOrderId = null;
+    if (nav.view === "orders") setView("orders");
+    else if (nav.view === "stats" || nav.view === "snapshot") setView("dashboard");
+    else if (hadFocus && state.view === "dashboard") renderDashboard();
+  }
+
   function flushRemoteDoc() {
     if (!remote.deferred) return;
     const doc = remote.deferred;
@@ -3789,6 +3922,10 @@
     } else if (cmd.type === "open" && cmd.path) {
       await openPath(cmd.path);
       toast("Отчёт открыт по команде с телефона");
+    } else if (cmd.type === "undo" || cmd.type === "redo") {
+      const back = cmd.type === "undo";
+      const ok = historyGo(back ? -1 : 1);
+      if (ok) toast(back ? "Действие отменено с телефона" : "Действие возвращено с телефона");
     } else if (cmd.type === "new") {
       state.doc = emptyDoc();
       state.path = "";
@@ -3822,6 +3959,8 @@
     $("remote-close")?.addEventListener("click", closeRemoteModal);
     $("remote-modal")?.addEventListener("click", (e) => {
       if (e.target === $("remote-modal")) closeRemoteModal();
+      const head = e.target.closest(".remote-fold-head");
+      if (head) head.closest(".remote-fold")?.classList.toggle("collapsed");
     });
     $("remote-ips")?.addEventListener("click", async (e) => {
       const btn = e.target.closest("[data-ip], [data-via]");
@@ -3836,7 +3975,7 @@
     });
     $("remote-ngrok")?.addEventListener("change", async (e) => {
       const on = e.target.checked;
-      $("remote-ngrok-box")?.classList.toggle("show", on);
+      if (on) $("remote-ngrok-box")?.closest(".remote-fold")?.classList.remove("collapsed");
       if (!on) {
         try {
           renderRemoteModal(await apiPost("/api/remote/ngrok", { enabled: false }));
@@ -3846,6 +3985,32 @@
         }
       }
     });
+    const postTelegram = async (send) => {
+      const status = $("remote-tg-status");
+      const token = $("remote-tg-token")?.value || "";
+      const chat = $("remote-tg-chat")?.value || "";
+      if (status) {
+        status.dataset.hold = "1";
+        status.className = "remote-ngrok-status";
+        status.textContent = send ? "Отправляю…" : "Сохраняю токен…";
+      }
+      try {
+        if (send && !remote.enabled) await remoteStart();
+        const data = await apiPost("/api/remote/telegram", { token, chat_id: chat, send });
+        renderRemoteModal(data);
+        toast(send ? "Ссылка отправлена в Telegram" : "Токен запомнен — бот будет отвечать сам");
+      } catch (err) {
+        if (status) {
+          status.className = "remote-ngrok-status err";
+          status.textContent = err.message || String(err);
+        }
+        toast(`Telegram: ${err.message || err}`);
+      } finally {
+        if (status) delete status.dataset.hold;
+      }
+    };
+    $("remote-tg-save")?.addEventListener("click", () => postTelegram(false));
+    $("remote-tg-send")?.addEventListener("click", () => postTelegram(true));
     $("remote-ngrok-save")?.addEventListener("click", async () => {
       const token = $("remote-ngrok-token")?.value || "";
       try {

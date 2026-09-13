@@ -15,6 +15,8 @@ from backend.dialogs import open_report_dialog, save_csv_dialog, save_png_dialog
 from backend.document import normalize_document, now_iso
 from backend.remote import SESSION as REMOTE
 from backend.remote import lan_candidates
+from backend.telegram import BOT as TELEGRAM
+from backend.telegram import send_link as telegram_send_link
 from backend.tunnel import TUNNEL
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -123,6 +125,32 @@ def _qr_svg(url: str) -> str:
         return ""
 
 
+def _telegram_live_url(chat_id: str = "") -> str:
+    """Включает доступ при запросе из бота и возвращает свежую ссылку."""
+    settings = storage.remote_settings()
+    if chat_id and chat_id != settings.get("telegram_chat_id"):
+        settings = storage.save_remote_settings(telegram_chat_id=str(chat_id))
+    if not REMOTE.enabled:
+        REMOTE.start(settings["token"])
+    if settings.get("ngrok"):
+        _ensure_tunnel(settings)
+    return str(_remote_public().get("url") or "")
+
+
+def _start_telegram(settings: dict[str, Any] | None = None) -> None:
+    cfg = settings or storage.remote_settings()
+    token = str(cfg.get("telegram_bot_token") or "")
+    if not token:
+        TELEGRAM.stop()
+        return
+    TELEGRAM.start(
+        token,
+        int(cfg.get("telegram_offset") or 0),
+        on_request=_telegram_live_url,
+        on_offset=lambda value: storage.save_remote_settings(telegram_offset=value),
+    )
+
+
 def _ensure_tunnel(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = settings or storage.remote_settings()
     snap = TUNNEL.snapshot()
@@ -173,6 +201,10 @@ def _remote_public(ip: str | None = None, via: str | None = None) -> dict[str, A
         "clients": REMOTE.clients(),
         "ngrok": bool(settings.get("ngrok")),
         "ngrok_ready": bool(settings.get("ngrok_token")),
+        "telegram_ready": bool(settings.get("telegram_bot_token")),
+        "telegram_chat_id": str(settings.get("telegram_chat_id") or ""),
+        "telegram_listening": bool(TELEGRAM.snapshot().get("listening")),
+        "telegram_error": TELEGRAM.snapshot().get("error") or "",
         "ngrok_installed": bool(tunnel.get("available")),
         "tunnel": {
             "wanted": bool(settings.get("ngrok")),
@@ -425,6 +457,41 @@ def api_remote_ngrok():
     return jsonify(payload)
 
 
+@app.post("/api/remote/telegram")
+def api_remote_telegram():
+    """Сохраняет токен бота и шлёт актуальную ссылку в Telegram."""
+    if not _is_local():
+        return jsonify({"error": "Доступ запрещён."}), 403
+    data = request.get_json(silent=True) or {}
+    updates: dict[str, Any] = {}
+    if "token" in data:
+        updates["telegram_bot_token"] = str(data.get("token") or "")
+    if "chat_id" in data:
+        updates["telegram_chat_id"] = str(data.get("chat_id") or "")
+    settings = storage.save_remote_settings(**updates) if updates else storage.remote_settings()
+    _start_telegram(settings)
+    if data.get("send"):
+        if not REMOTE.enabled:
+            REMOTE.start(settings["token"])
+        if settings.get("ngrok"):
+            _ensure_tunnel(settings)
+        payload = _remote_public()
+        try:
+            chat_id = telegram_send_link(
+                str(settings.get("telegram_bot_token") or ""),
+                str(data.get("chat_id") or settings.get("telegram_chat_id") or ""),
+                str(payload.get("url") or ""),
+            )
+            if chat_id and chat_id != settings.get("telegram_chat_id"):
+                storage.save_remote_settings(telegram_chat_id=chat_id)
+                payload = _remote_public()
+        except RuntimeError as exc:
+            return jsonify({**payload, "error": str(exc)}), 400
+    payload = _remote_public()
+    payload["ok"] = True
+    return jsonify(payload)
+
+
 @app.post("/api/remote/stop")
 def api_remote_stop():
     REMOTE.stop()
@@ -463,7 +530,15 @@ def api_remote_publish():
     if not REMOTE.enabled:
         return jsonify({"ok": False, "enabled": False})
     data = request.get_json(silent=True) or {}
-    version = REMOTE.publish(data.get("document"), data.get("path") or "", "desktop", bool(data.get("dirty")))
+    if not isinstance(data.get("document"), dict):
+        return jsonify({"ok": True, "version": REMOTE.set_history(data.get("history"))})
+    version = REMOTE.publish(
+        data.get("document"),
+        data.get("path") or "",
+        "desktop",
+        bool(data.get("dirty")),
+        data.get("history"),
+    )
     return jsonify({"ok": True, "version": version})
 
 
@@ -519,7 +594,7 @@ def api_remote_command():
         return jsonify({"error": "Сессия закрыта."}), 409
     data = request.get_json(silent=True) or {}
     kind = str(data.get("type") or "")
-    if kind not in {"save", "open", "new"}:
+    if kind not in {"save", "open", "new", "undo", "redo"}:
         return jsonify({"error": "Неизвестная команда."}), 400
     payload: dict[str, Any] = {}
     if kind == "open":
@@ -528,6 +603,19 @@ def api_remote_command():
             return jsonify({"error": "Файл не найден."}), 404
         payload["path"] = os.path.abspath(path)
     version = REMOTE.issue_command(kind, **payload)
+    return jsonify({"ok": True, "version": version})
+
+
+@app.post("/api/remote/nav")
+def api_remote_nav():
+    """Телефон открыл экран или заказ — компьютер показывает то же самое."""
+    if not REMOTE.enabled:
+        return jsonify({"error": "Сессия закрыта."}), 409
+    data = request.get_json(silent=True) or {}
+    view = str(data.get("view") or "")
+    if view not in {"orders", "order", "stats", "files", "snapshot"}:
+        return jsonify({"error": "Неизвестный экран."}), 400
+    version = REMOTE.set_nav(view, str(data.get("order_id") or ""), str(data.get("cid") or ""))
     return jsonify({"ok": True, "version": version})
 
 
@@ -545,6 +633,7 @@ def api_quit():
     DIRTY = False
     REMOTE.stop()
     TUNNEL.stop()
+    TELEGRAM.stop()
     window = WINDOW
     if window is not None:
         threading.Timer(0.05, window.destroy).start()
@@ -609,6 +698,8 @@ def main() -> None:
 
     if settings.get("autostart") and settings.get("ngrok"):
         threading.Thread(target=lambda: _ensure_tunnel(settings), daemon=True).start()
+    if settings.get("telegram_bot_token"):
+        threading.Thread(target=lambda: _start_telegram(settings), daemon=True).start()
 
     try:
         import webview

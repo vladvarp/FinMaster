@@ -121,9 +121,10 @@
       </header>
       <section class="content">
         <div class="view active" id="view-dashboard">
+          <div class="card dash-focus" id="dash-focus" hidden></div>
           <div class="kpis" id="kpi-row"></div>
           <div class="card insights-card">
-            <h3>Инсайты <span class="insights-sub">считаются по всем заказам отчёта</span></h3>
+            <h3>Инсайты <span class="insights-sub" id="insights-sub">считаются по всем заказам отчёта</span></h3>
             <div class="insights" id="insights"></div>
           </div>
           <div class="grid-2">
@@ -408,15 +409,54 @@
             <input type="checkbox" id="remote-ngrok" />
             Через интернет (ngrok)
           </label>
-          <div class="remote-ngrok-box" id="remote-ngrok-box">
-            <label class="field">
+          <div class="remote-fold collapsed" data-remote-fold>
+            <button type="button" class="remote-fold-head">
               <span>Токен ngrok</span>
-              <input type="password" id="remote-ngrok-token" placeholder="2abc… из dashboard.ngrok.com" autocomplete="off" />
-            </label>
-            <button type="button" class="btn small" id="remote-ngrok-save">Сохранить и включить</button>
-            <div class="remote-ngrok-status" id="remote-ngrok-status"></div>
+              <span class="remote-fold-ico">▾</span>
+            </button>
+            <div class="remote-fold-body">
+              <div class="remote-ngrok-box show" id="remote-ngrok-box">
+                <label class="field">
+                  <span>Токен ngrok</span>
+                  <input type="password" id="remote-ngrok-token" placeholder="2abc… из dashboard.ngrok.com" autocomplete="off" />
+                </label>
+                <button type="button" class="btn small" id="remote-ngrok-save">Сохранить и включить</button>
+                <div class="remote-ngrok-status" id="remote-ngrok-status"></div>
+              </div>
+            </div>
           </div>
-          <div class="remote-clients" id="remote-clients">Запомненных устройств нет</div>
+          <div class="remote-fold collapsed" data-remote-fold>
+            <button type="button" class="remote-fold-head">
+              <span>Telegram</span>
+              <span class="remote-fold-ico">▾</span>
+            </button>
+            <div class="remote-fold-body">
+              <div class="remote-tg-box">
+                <label class="field">
+                  <span>Токен Telegram-бота</span>
+                  <input type="password" id="remote-tg-token" placeholder="123456:AAF… из @BotFather" autocomplete="off" />
+                </label>
+                <label class="field">
+                  <span>Chat id <small>(необязательно — заполнится, когда напишете боту)</small></span>
+                  <input type="text" id="remote-tg-chat" placeholder="например 123456789" autocomplete="off" />
+                </label>
+                <div class="remote-tg-actions">
+                  <button type="button" class="btn small" id="remote-tg-save">Запомнить токен</button>
+                  <button type="button" class="btn small primary" id="remote-tg-send">Отправить ссылку сейчас</button>
+                </div>
+                <div class="remote-ngrok-status" id="remote-tg-status"></div>
+              </div>
+            </div>
+          </div>
+          <div class="remote-fold collapsed" data-remote-fold>
+            <button type="button" class="remote-fold-head">
+              <span id="remote-devices-title">Устройства</span>
+              <span class="remote-fold-ico">▾</span>
+            </button>
+            <div class="remote-fold-body">
+              <div class="remote-clients" id="remote-clients">Запомненных устройств нет</div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="modal-actions">
@@ -458,6 +498,7 @@
         <p>Под QR есть чипы <b>Интернет</b> и локальные IP — ими выбираете, куда ведёт код.</p>
         <p>На бесплатном ngrok адрес часто меняется после перезапуска программы. Тогда снова скопируйте ссылку. При первом открытии ngrok может показать свою страницу-предупреждение — нажмите Visit Site.</p>
         <p>Токен хранится только на этом компьютере. «Новая ссылка» сбрасывает старые закладки. Запрос через туннель не открывает рабочий стол — телефон видит только мобильный интерфейс.</p>
+        <p>Создайте бота у @BotFather и вставьте токен — он запоминается на этом компьютере. В Telegram нажмите /start, затем «Получить ссылку»: бот пришлёт кнопку <b>Открыть FinMaster</b> с актуальной ссылкой.</p>
       </div>
       <div class="modal-actions">
         <button class="btn primary" type="button" id="remote-guide-close">Понятно</button>

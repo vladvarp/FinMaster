@@ -78,7 +78,11 @@ class RemoteSession:
         self.dirty = False
         self.origin = ""
         self.command: dict[str, Any] | None = None
+        self.nav: dict[str, Any] = {"seq": 0, "view": "", "order_id": "", "cid": ""}
+        self.history: dict[str, bool] = {"undo": False, "redo": False}
+        self.doc_version = 0
         self._command_id = 0
+        self._nav_seq = 0
         self._clients: dict[str, dict[str, Any]] = {}
 
     # ---------- управление сессией ----------
@@ -89,6 +93,7 @@ class RemoteSession:
             self.token = str(token or self.token or secrets.token_urlsafe(12))
             self._clients = {}
             self.command = None
+            self.nav = {"seq": 0, "view": "", "order_id": "", "cid": ""}
             self.version += 1
             self._cond.notify_all()
             return self.token
@@ -100,6 +105,7 @@ class RemoteSession:
             self.path = ""
             self._clients = {}
             self.command = None
+            self.nav = {"seq": 0, "view": "", "order_id": "", "cid": ""}
             self.version += 1
             self._cond.notify_all()
 
@@ -113,21 +119,56 @@ class RemoteSession:
 
     # ---------- документ ----------
 
-    def publish(self, doc: Any, path: str, origin: str, dirty: bool = False) -> int:
+    def publish(
+        self,
+        doc: Any,
+        path: str,
+        origin: str,
+        dirty: bool = False,
+        history: Any = None,
+    ) -> int:
         with self._cond:
             if isinstance(doc, dict):
                 self.doc = doc
+            if isinstance(history, dict):
+                self.history = {"undo": bool(history.get("undo")), "redo": bool(history.get("redo"))}
             self.path = str(path or "")
             self.dirty = bool(dirty)
             self.origin = str(origin or "")
+            self.doc_version += 1
             self.version += 1
             self._cond.notify_all()
+            return self.version
+
+    def set_history(self, history: Any) -> int:
+        """Компьютер сообщает, есть ли что отменять — телефон гасит свои кнопки."""
+        with self._cond:
+            if isinstance(history, dict):
+                flags = {"undo": bool(history.get("undo")), "redo": bool(history.get("redo"))}
+                if flags != self.history:
+                    self.history = flags
+                    self.version += 1
+                    self._cond.notify_all()
             return self.version
 
     def issue_command(self, kind: str, **payload: Any) -> int:
         with self._cond:
             self._command_id += 1
             self.command = {"id": self._command_id, "type": kind, **payload}
+            self.version += 1
+            self._cond.notify_all()
+            return self.version
+
+    def set_nav(self, view: str, order_id: str = "", cid: str = "") -> int:
+        """Телефон сообщает, какой экран открыт, чтобы компьютер показал то же самое."""
+        with self._cond:
+            self._nav_seq += 1
+            self.nav = {
+                "seq": self._nav_seq,
+                "view": str(view or ""),
+                "order_id": str(order_id or ""),
+                "cid": str(cid or ""),
+            }
             self.version += 1
             self._cond.notify_all()
             return self.version
@@ -176,6 +217,9 @@ class RemoteSession:
             "dirty": self.dirty,
             "origin": self.origin,
             "command": self.command,
+            "nav": self.nav,
+            "history": self.history,
+            "doc_version": self.doc_version,
             "clients": self._live_clients(),
         }
         if with_doc:
