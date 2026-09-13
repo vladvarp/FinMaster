@@ -248,6 +248,7 @@ def api_bootstrap():
     return jsonify(
         {
             "recent": _recent_payload(),
+            "library": storage.list_library_reports(),
             "autosave": bool(cfg.get("autosave")),
             "last_dir": cfg.get("last_dir") or "",
             "theme": "dark" if cfg.get("theme") == "dark" else "light",
@@ -286,6 +287,59 @@ def api_recent_remove():
     path = data.get("path") or ""
     storage.remove_recent(path)
     return jsonify({"ok": True, "recent": _recent_payload()})
+
+
+@app.get("/api/library")
+def api_library():
+    return jsonify(storage.list_library_reports())
+
+
+def _delete_library_file(path: str) -> dict[str, Any]:
+    full = storage.delete_library_report(path)
+    closed = storage.same_path(REMOTE.path, full)
+    if closed:
+        REMOTE.clear_document()
+    library = storage.list_library_reports()
+    recent = _recent_payload()
+    if REMOTE.enabled:
+        REMOTE.issue_command("delete", path=full, closed=closed, library=library, recent=recent)
+    return {
+        "ok": True,
+        "path": full,
+        "closed": closed,
+        "library": library,
+        "recent": recent,
+    }
+
+
+@app.post("/api/library/delete")
+def api_library_delete():
+    if not _is_local():
+        return jsonify({"error": "Удалять с телефона можно через сессию."}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify(_delete_library_file(str(data.get("path") or "")))
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except OSError as exc:
+        return jsonify({"error": f"Не удалось удалить файл: {exc}"}), 500
+
+
+@app.post("/api/open-folder")
+def api_open_folder():
+    if not _is_local():
+        return jsonify({"error": "Папку можно открыть только на компьютере."}), 403
+    path = storage.default_reports_dir()
+    try:
+        if os.name == "nt":
+            os.startfile(path)
+        else:
+            webbrowser.open(path)
+    except OSError as exc:
+        return jsonify({"error": str(exc)}), 500
+    return jsonify({"ok": True, "path": os.path.abspath(path)})
 
 
 @app.post("/api/dialog/open")
@@ -594,8 +648,8 @@ def api_remote_pull():
     if "clients" not in snap:
         snap["clients"] = REMOTE.clients()
     snap["devices"] = storage.remote_settings().get("devices") or []
-    if kind == "mobile":
-        snap["recent"] = _recent_payload()
+    snap["recent"] = _recent_payload()
+    snap["library"] = storage.list_library_reports()
     return jsonify(snap)
 
 
@@ -604,6 +658,7 @@ def api_remote_session():
     """Стартовые данные мобильного клиента."""
     snap = REMOTE.snapshot(with_doc=True)
     snap["recent"] = _recent_payload()
+    snap["library"] = storage.list_library_reports()
     snap["desktop_online"] = bool(REMOTE.clients("desktop"))
     cid = request.args.get("cid") or ""
     name = request.args.get("name") or ""
@@ -637,7 +692,7 @@ def api_remote_command():
         return jsonify({"error": "Сессия закрыта."}), 409
     data = request.get_json(silent=True) or {}
     kind = str(data.get("type") or "")
-    if kind not in {"save", "open", "new", "undo", "redo"}:
+    if kind not in {"save", "open", "new", "undo", "redo", "delete"}:
         return jsonify({"error": "Неизвестная команда."}), 400
     payload: dict[str, Any] = {}
     if kind == "open":
@@ -645,6 +700,16 @@ def api_remote_command():
         if not path or not os.path.exists(path):
             return jsonify({"error": "Файл не найден."}), 404
         payload["path"] = os.path.abspath(path)
+    if kind == "delete":
+        try:
+            result = _delete_library_file(str(data.get("path") or ""))
+        except FileNotFoundError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except OSError as exc:
+            return jsonify({"error": f"Не удалось удалить файл: {exc}"}), 500
+        return jsonify({**result, "version": REMOTE.version})
     if kind == "new":
         title = storage.safe_report_title(str(data.get("title") or "Новый отчёт"))
         path = storage.default_report_path(title)
@@ -748,35 +813,58 @@ def run_server(port: int) -> None:
     app.run(host="0.0.0.0", port=port, threaded=True, use_reloader=False)
 
 
-def main() -> None:
+def main(splash=None) -> None:
     global WINDOW, FORCE_CLOSE, DIRTY, SERVER_PORT
+
+    def report(text: str, progress: float | None = None) -> None:
+        if splash is not None:
+            splash.step(text, progress)
+
+    report("Чтение настроек…", 38)
+    cfg = storage.load_config()
+    recent = cfg.get("recent") or []
+    report(f"Недавних отчётов: {len(recent)}", 42)
 
     port = pick_port()
     SERVER_PORT = port
+    report(f"Свободный порт {port}", 48)
     settings = storage.remote_settings()
     if settings.get("autostart"):
+        report("Включаю доступ с телефона…", 52)
         REMOTE.start(settings["token"])
     url = f"http://127.0.0.1:{port}/"
+    report("Запуск локального сервера…", 58)
     thread = threading.Thread(target=run_server, args=(port,), daemon=True)
     thread.start()
 
-    for _ in range(50):
+    ready = False
+    for i in range(50):
         try:
             import urllib.request
 
             urllib.request.urlopen(url, timeout=0.2)
+            ready = True
             break
         except Exception:
+            report("Ожидание ответа сервера…", min(58 + i, 86))
             time.sleep(0.1)
+    if ready:
+        report("Сервер готов", 88)
+    else:
+        report("Сервер ещё поднимается…", 88)
 
     if settings.get("autostart") and settings.get("ngrok"):
+        report("Подключение интернет-туннеля…", 90)
         threading.Thread(target=lambda: _ensure_tunnel(settings), daemon=True).start()
     if settings.get("telegram_bot_token"):
+        report("Запуск Telegram-бота…", 92)
         threading.Thread(target=lambda: _start_telegram(settings), daemon=True).start()
 
     try:
         import webview
     except ImportError:
+        if splash is not None:
+            splash.close()
         print("pywebview не установлен — открываю системный браузер.")
         print("Для отдельного окна выполните: pip install -r requirements.txt")
         webbrowser.open(url)
@@ -786,6 +874,7 @@ def main() -> None:
         except KeyboardInterrupt:
             return
 
+    report("Открываю окно…", 96)
     WINDOW = webview.create_window(
         "FinMaster — учёт заказов",
         url,
@@ -856,8 +945,21 @@ def main() -> None:
     start_opts = {}
     if os.path.exists(ICON_PATH):
         start_opts["icon"] = ICON_PATH
+    report("Готово", 100)
+    if splash is not None:
+        time.sleep(0.2)
+        splash.close()
     webview.start(**start_opts)
 
 
 if __name__ == "__main__":
-    sys.exit(main() or 0)
+    from backend.splash import Splash, hide_console
+
+    hide_console()
+    boot = Splash(os.path.join(FRONTEND, "favicon.png"))
+    try:
+        boot.step("Запуск FinMaster…", 8)
+        sys.exit(main(boot) or 0)
+    except Exception as exc:
+        boot.fail(str(exc))
+        sys.exit(1)

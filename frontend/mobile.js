@@ -18,6 +18,7 @@
     path: "",
     dirty: false,
     recent: [],
+    library: { path: "", items: [] },
     clients: [],
     history: { undo: false, redo: false },
     view: "orders",
@@ -377,6 +378,7 @@
       }
       applySnapshot(data, true);
       state.recent = data.recent || [];
+      if (data.library) state.library = data.library;
       if (!hasDocument()) {
         state.waitingForDoc = true;
         setView("files");
@@ -421,6 +423,7 @@
     if (typeof data.dirty === "boolean") state.dirty = data.dirty;
     if (Array.isArray(data.clients)) state.clients = data.clients;
     if (Array.isArray(data.recent)) state.recent = data.recent;
+    if (data.library && typeof data.library === "object") state.library = data.library;
     if (data.history && typeof data.history === "object") state.history = data.history;
     updateHead();
     if (!data.document) {
@@ -2094,26 +2097,37 @@
 
   /* ================= отчёты и устройство ================= */
 
+  function fileCardHtml(item, canDelete = false) {
+    let actions = "";
+    if (item.path === state.path) actions += '<span class="pill" style="background:var(--accent-2)">открыт</span>';
+    else if (item.exists === false) actions += '<span class="pill" style="background:var(--muted)">нет файла</span>';
+    else actions += `<button type="button" class="btn small" data-open-file="${esc(item.path)}">Открыть</button>`;
+    if (canDelete) {
+      actions += `<button type="button" class="btn small danger-ghost" data-delete-file="${esc(item.path)}">Удалить</button>`;
+    }
+    return `<article class="card file-item ${item.path === state.path ? "current" : ""}">
+          <div class="fi-body">
+            <strong>${esc(item.title || item.name || item.path.split(/[\\/]/).pop())}</strong>
+            <small>${esc(item.name || item.path)}</small>
+          </div>
+          <div class="fi-actions">${actions}</div>
+        </article>`;
+  }
+
   function recentListHtml() {
     const recent = state.recent || [];
     if (!recent.length) return '<div class="empty">Недавних отчётов нет — создайте новый или откройте файл на компьютере.</div>';
-    return recent
-      .map(
-        (item) => `<article class="card file-item ${item.path === state.path ? "current" : ""}">
-          <div class="fi-body">
-            <strong>${esc(item.title || item.path.split(/[\\/]/).pop())}</strong>
-            <small>${esc(item.path)}</small>
-          </div>
-          ${
-            item.path === state.path
-              ? '<span class="pill" style="background:var(--accent-2)">открыт</span>'
-              : item.exists === false
-                ? '<span class="pill" style="background:var(--muted)">нет файла</span>'
-                : `<button type="button" class="btn small" data-open-file="${esc(item.path)}">Открыть</button>`
-          }
-        </article>`
-      )
-      .join("");
+    return recent.map((item) => fileCardHtml(item)).join("");
+  }
+
+  function libraryListHtml() {
+    const lib = state.library || {};
+    const items = lib.items || [];
+    const path = lib.path ? `<small class="muted" style="display:block;margin:-4px 0 10px;word-break:break-all">${esc(lib.path)}</small>` : "";
+    if (!items.length) {
+      return `${path}<div class="empty">Пока пусто — новые отчёты появятся здесь</div>`;
+    }
+    return path + items.map((item) => fileCardHtml(item, true)).join("");
   }
 
   function renderFiles() {
@@ -2140,6 +2154,8 @@
       </article>`;
     $("files-body").innerHTML = `
       ${openCard}
+      <h3 class="section">Папка FinMaster</h3>
+      <div class="list">${libraryListHtml()}</div>
       <h3 class="section">Недавние отчёты</h3>
       <div class="list">${recentListHtml()}</div>
       <h3 class="section">Это устройство</h3>
@@ -2184,6 +2200,7 @@
     try {
       const data = await api("/api/remote/session");
       state.recent = data.recent || [];
+      if (data.library) state.library = data.library;
       applySnapshot(data);
       if (state.view === "files") renderFiles();
     } catch {
@@ -2643,6 +2660,31 @@
       const openFile = e.target.closest("[data-open-file]");
       if (openFile) {
         if (await command("open", { path: openFile.dataset.openFile })) toast("Открываю на компьютере…");
+        return;
+      }
+      const delFile = e.target.closest("[data-delete-file]");
+      if (delFile) {
+        const path = delFile.dataset.deleteFile;
+        const name = String(path || "").split(/[\\/]/).pop() || "отчёт";
+        if (!confirm(`Удалить «${name}» из папки FinMaster? Файл попадёт в корзину на компьютере.`)) return;
+        try {
+          const res = await api("/api/remote/command", {
+            method: "POST",
+            body: JSON.stringify({ type: "delete", path }),
+          });
+          if (typeof res.version === "number") state.version = res.version;
+          if (res.library) state.library = res.library;
+          if (res.recent) state.recent = res.recent;
+          if (res.closed) {
+            state.doc = null;
+            state.path = "";
+            state.waitingForDoc = true;
+          }
+          renderFiles();
+          toast("Отчёт удалён");
+        } catch (err) {
+          toast(`Не удалось: ${err.message || err}`);
+        }
         return;
       }
       if (e.target.closest("#cmd-save")) {

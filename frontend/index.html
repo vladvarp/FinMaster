@@ -39,11 +39,28 @@
         <div class="start-actions">
           <button class="btn primary" type="button" id="btn-start-new" onclick="window.finmasterNew && window.finmasterNew()">Новый отчёт</button>
           <button class="btn" type="button" id="btn-start-open" onclick="window.finmasterOpen && window.finmasterOpen()">Открыть файл</button>
+          <button class="btn phone-btn js-open-remote" type="button" id="btn-start-remote" title="Управление с телефона">
+            <span class="phone-ico">▯</span><span>Телефон</span><span class="phone-live" hidden></span>
+          </button>
           <button class="btn js-theme-toggle" type="button" title="Тема">Тема</button>
         </div>
       </div>
+      <div class="start-lists">
+        <section class="start-col">
+          <div class="start-col-head">
+            <div>
+              <h3 class="start-recent-title">Папка FinMaster</h3>
+              <p class="start-folder-path" id="library-path"></p>
+            </div>
+            <button type="button" class="btn small" id="btn-open-library" hidden>Открыть папку</button>
+          </div>
+          <div class="recent-list" id="library-list"></div>
+        </section>
+        <section class="start-col">
           <h3 class="start-recent-title">Недавно открытые</h3>
-      <div class="recent-list" id="recent-list"></div>
+          <div class="recent-list" id="recent-list"></div>
+        </section>
+      </div>
     </div>
   </div>
 
@@ -114,7 +131,7 @@
             <button class="btn icon" type="button" id="btn-undo" title="Отменить (Ctrl+Z)" disabled>↶</button>
             <button class="btn icon" type="button" id="btn-redo" title="Повторить (Ctrl+Y)" disabled>↷</button>
           </div>
-          <button class="btn phone-btn" type="button" id="btn-remote" title="Управление с телефона">
+          <button class="btn phone-btn js-open-remote" type="button" id="btn-remote" title="Управление с телефона">
             <span class="phone-ico">▯</span><span>Телефон</span><span class="phone-live" id="phone-live" hidden></span>
           </button>
           <button class="btn js-theme-toggle" type="button" title="Тема">Тема</button>

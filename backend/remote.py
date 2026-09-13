@@ -140,6 +140,17 @@ class RemoteSession:
             self._cond.notify_all()
             return self.version
 
+    def clear_document(self) -> int:
+        with self._cond:
+            self.doc = None
+            self.path = ""
+            self.dirty = False
+            self.origin = ""
+            self.doc_version += 1
+            self.version += 1
+            self._cond.notify_all()
+            return self.version
+
     def set_history(self, history: Any) -> int:
         """Компьютер сообщает, есть ли что отменять — телефон гасит свои кнопки."""
         with self._cond:
@@ -157,6 +168,13 @@ class RemoteSession:
             self.command = {"id": self._command_id, "type": kind, **payload}
             self.version += 1
             self._cond.notify_all()
+            return self.version
+
+    def notify(self) -> int:
+        """Разбудить опрос клиентов, не меняя документ."""
+        with self._cond:
+            if self.enabled:
+                self._bump()
             return self.version
 
     def set_nav(

@@ -160,6 +160,7 @@
       this.selected = null;
       this.pointer = null;
       this.drag = null;
+      this.pendingCapture = null;
       this.hot = new Set();
       this.matches = new Set();
       this.frame = 0;
@@ -1262,8 +1263,8 @@
       this.stopTour();
       const point = this.eventPoint(e);
       const node = this.hit(point.wx, point.wy);
-      this.canvas.setPointerCapture(e.pointerId);
       this.pointer = point;
+      this.pendingCapture = e.pointerId;
       this.panVel.x = 0;
       this.panVel.y = 0;
       this.drag = node
@@ -1273,7 +1274,6 @@
         node.pinned = true;
         this.select(node);
       }
-      this.canvas.classList.add("is-dragging");
     }
 
     pointerMove(e) {
@@ -1281,7 +1281,18 @@
       if (this.drag && this.pointer) {
         const dx = point.sx - this.pointer.sx;
         const dy = point.sy - this.pointer.sy;
-        if (Math.abs(dx) + Math.abs(dy) > 3) this.drag.moved = true;
+        if (Math.abs(dx) + Math.abs(dy) > 3) {
+          this.drag.moved = true;
+          if (this.pendingCapture != null) {
+            try {
+              this.canvas.setPointerCapture(this.pendingCapture);
+            } catch {
+              /* already captured */
+            }
+            this.pendingCapture = null;
+            this.canvas.classList.add("is-dragging");
+          }
+        }
         if (this.drag.type === "pan") {
           this.camera.x = this.drag.x + dx;
           this.camera.y = this.drag.y + dy;
@@ -1314,6 +1325,7 @@
       }
       this.drag = null;
       this.pointer = null;
+      this.pendingCapture = null;
       this.canvas.classList.remove("is-dragging");
       try {
         this.canvas.releasePointerCapture(e.pointerId);

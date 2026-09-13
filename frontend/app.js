@@ -479,7 +479,34 @@
   function showStart() {
     $("start-screen").classList.remove("hidden");
     $("app-shell").hidden = true;
-    renderRecent();
+    renderStartLists();
+  }
+
+  function discardOpenReport() {
+    state.doc = emptyDoc();
+    state.path = "";
+    historyReset();
+    setClean();
+    showStart();
+  }
+
+  function samePath(a, b) {
+    const norm = (p) => String(p || "").replace(/\//g, "\\").toLowerCase();
+    return !!a && !!b && norm(a) === norm(b);
+  }
+
+  async function deleteLibraryFile(path) {
+    const name = String(path || "").split(/[\\/]/).pop() || "отчёт";
+    if (!confirm(`Удалить «${name}» из папки FinMaster? Файл попадёт в корзину.`)) return;
+    try {
+      const res = await apiPost("/api/library/delete", { path });
+      if (res.library) renderLibrary(res.library);
+      if (res.recent) renderRecentItems(res.recent);
+      if (res.closed || samePath(state.path, path)) discardOpenReport();
+      toast("Отчёт удалён");
+    } catch (err) {
+      toast(String(err.message || "Не удалось удалить файл"));
+    }
   }
 
   function allRows() {
@@ -2779,22 +2806,13 @@
     downloadFile(`${state.doc.title || "Экспорт"}.csv`, csv);
   }
 
-  async function renderRecent(list) {
-    let items = list;
-    if (!items) {
-      if (state.desktop) {
-        try {
-          const boot = await apiGet("/api/bootstrap");
-          items = boot.recent || [];
-          state.autosave = !!boot.autosave;
-        } catch {
-          items = [];
-        }
-      } else {
-        items = localRecent();
-      }
-    }
+  function fileStamp(value) {
+    return String(value || "").replace("T", " ").slice(0, 19);
+  }
+
+  function renderRecentItems(items) {
     const box = $("recent-list");
+    if (!box) return;
     if (!items.length) {
       box.innerHTML = `<div class="recent-item missing"><div>Пока нет недавних отчётов</div></div>`;
       return;
@@ -2802,7 +2820,7 @@
     box.innerHTML = items
       .map((item) => {
         const missing = item.exists === false;
-        const date = (item.opened_at || "").replace("T", " ").slice(0, 19);
+        const date = fileStamp(item.opened_at);
         return `<div class="recent-item ${missing ? "missing" : ""}" data-path="${esc(item.path)}">
           <div><b>${esc(item.title || item.path)}</b><div class="meta">${esc(item.path)}</div></div>
           <div class="recent-side">
@@ -2812,6 +2830,66 @@
         </div>`;
       })
       .join("");
+  }
+
+  function renderLibrary(lib) {
+    const box = $("library-list");
+    const pathEl = $("library-path");
+    const openBtn = $("btn-open-library");
+    if (!box) return;
+    if (!lib) {
+      if (pathEl) pathEl.textContent = "";
+      if (openBtn) openBtn.hidden = true;
+      box.innerHTML = `<div class="recent-item missing"><div>Папка отчётов доступна в программе на компьютере</div></div>`;
+      return;
+    }
+    if (pathEl) pathEl.textContent = lib.path || "";
+    if (openBtn) openBtn.hidden = !state.desktop;
+    const items = lib.items || [];
+    if (!items.length) {
+      box.innerHTML = `<div class="recent-item missing"><div>Пока пусто — новые отчёты появятся здесь</div></div>`;
+      return;
+    }
+    box.innerHTML = items
+      .map((item) => {
+        const date = fileStamp(item.modified_at);
+        return `<div class="recent-item" data-path="${esc(item.path)}">
+          <div><b>${esc(item.title || item.name || item.path)}</b><div class="meta">${esc(item.name || item.path)}</div></div>
+          <div class="recent-side">
+            <div class="meta">${esc(date)}</div>
+            <button type="button" class="recent-remove" data-library-delete title="Удалить отчёт в корзину">✕</button>
+          </div>
+        </div>`;
+      })
+      .join("");
+  }
+
+  async function renderStartLists(data) {
+    let payload = data;
+    if (!payload) {
+      if (state.desktop) {
+        try {
+          payload = await apiGet("/api/bootstrap");
+          state.autosave = !!payload.autosave;
+        } catch {
+          payload = {};
+        }
+      } else {
+        renderRecentItems(localRecent());
+        renderLibrary(null);
+        return;
+      }
+    }
+    renderRecentItems(payload.recent || []);
+    renderLibrary(payload.library || null);
+  }
+
+  async function renderRecent(list) {
+    if (list) {
+      renderRecentItems(list);
+      return;
+    }
+    await renderStartLists();
   }
 
   function askClose() {
@@ -3349,6 +3427,26 @@
     $("share-copy-text").addEventListener("click", copyShareText);
     $("share-copy").addEventListener("click", copySharePng);
     $("share-save").addEventListener("click", saveSharePng);
+    $("btn-open-library")?.addEventListener("click", async () => {
+      try {
+        await apiPost("/api/open-folder", {});
+      } catch (err) {
+        toast(String(err.message || "Не удалось открыть папку"));
+      }
+    });
+    $("library-list")?.addEventListener("click", (e) => {
+      const del = e.target.closest("[data-library-delete]");
+      if (del) {
+        e.preventDefault();
+        e.stopPropagation();
+        const row = del.closest(".recent-item");
+        if (row?.dataset.path) deleteLibraryFile(row.dataset.path);
+        return;
+      }
+      const item = e.target.closest(".recent-item");
+      if (!item || item.classList.contains("missing") || !item.dataset.path) return;
+      openPath(item.dataset.path);
+    });
     $("recent-list").addEventListener("click", async (e) => {
       const rm = e.target.closest("[data-recent-remove]");
       if (rm) {
@@ -5007,13 +5105,12 @@
 
   function remoteBadge() {
     const phones = remote.clients?.filter((c) => c.kind === "mobile").length || 0;
-    const live = $("phone-live");
-    if (live) {
+    document.querySelectorAll(".phone-live").forEach((live) => {
       live.hidden = !remote.enabled;
       live.textContent = phones ? String(phones) : "";
       live.classList.toggle("idle", remote.enabled && !phones);
-    }
-    $("btn-remote")?.classList.toggle("on", remote.enabled);
+    });
+    document.querySelectorAll(".phone-btn").forEach((btn) => btn.classList.toggle("on", remote.enabled));
   }
 
   function applyRemotePayload(data) {
@@ -5304,6 +5401,7 @@
           remote.lastNav = data.nav.seq;
           applyRemoteNav(data.nav);
         }
+        applyRemoteLists(data);
       } catch {
         await new Promise((r) => setTimeout(r, 2000));
       }
@@ -5337,7 +5435,12 @@
   }
 
   function applyRemoteNav(nav) {
-    if (!nav || !nav.view || !revealRemoteWorkspace()) return;
+    if (!nav || !nav.view) return;
+    if (nav.view === "files") {
+      if (!state.doc || $("app-shell")?.hidden) renderStartLists();
+      return;
+    }
+    if (!revealRemoteWorkspace()) return;
     if (nav.view === "order" && nav.order_id) {
       const order = (state.doc.orders || []).find((o) => o.id === nav.order_id);
       if (!order) return;
@@ -5395,24 +5498,44 @@
       showApp();
       setView("dashboard");
       toast("Новый отчёт создан с телефона");
+    } else if (cmd.type === "delete") {
+      applyRemoteLists(cmd);
+      if (cmd.closed || samePath(state.path, cmd.path)) {
+        discardOpenReport();
+        applyRemoteLists(cmd);
+        toast("Отчёт удалён");
+      }
+      return;
+    } else if (cmd.type === "close") {
+      discardOpenReport();
+      toast("Отчёт удалён");
+      return;
     }
     remotePublish();
   }
 
+  function applyRemoteLists(data) {
+    if (!data) return;
+    if (data.library) renderLibrary(data.library);
+    if (Array.isArray(data.recent)) renderRecentItems(data.recent);
+  }
+
   function bindRemote() {
-    $("btn-remote")?.addEventListener("click", async () => {
-      $("remote-modal").classList.add("open");
-      if (state.desktop) {
-        try {
-          renderRemoteModal(await apiGet("/api/remote/info"));
-        } catch {
+    document.querySelectorAll(".js-open-remote").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        $("remote-modal").classList.add("open");
+        if (state.desktop) {
+          try {
+            renderRemoteModal(await apiGet("/api/remote/info"));
+          } catch {
+            renderRemoteModal();
+          }
+        } else {
           renderRemoteModal();
         }
-      } else {
-        renderRemoteModal();
-      }
-      if (!remote.enabled) remoteStart();
-      remoteWatchStart();
+        if (!remote.enabled) remoteStart();
+        remoteWatchStart();
+      });
     });
     const closeRemoteModal = () => {
       remoteWatchStop();
@@ -5565,7 +5688,7 @@
       state.desktop = true;
       state.autosave = !!bootData.autosave;
       applyTheme(bootData.theme || "light", false);
-      await renderRecent(bootData.recent);
+      await renderStartLists(bootData);
       await apiPost("/api/dirty", { dirty: false });
       if (bootData.remote) {
         applyRemotePayload(bootData.remote);

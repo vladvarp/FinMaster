@@ -264,6 +264,110 @@ def default_reports_dir() -> str:
     return path
 
 
+def list_library_reports() -> dict[str, Any]:
+    folder = os.path.abspath(default_reports_dir())
+    items: list[dict[str, Any]] = []
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        names = []
+    for name in names:
+        if not name.lower().endswith(".fmaster"):
+            continue
+        path = os.path.join(folder, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            stamp = os.path.getmtime(path)
+        except OSError:
+            continue
+        items.append(
+            {
+                "path": os.path.abspath(path),
+                "title": os.path.splitext(name)[0],
+                "name": name,
+                "modified_at": datetime.fromtimestamp(stamp).astimezone().replace(microsecond=0).isoformat(),
+            }
+        )
+    items.sort(key=lambda item: item.get("modified_at") or "", reverse=True)
+    return {"path": folder, "items": items}
+
+
+def same_path(a: str, b: str) -> bool:
+    if not a or not b:
+        return False
+    left = os.path.normcase(os.path.abspath(a))
+    right = os.path.normcase(os.path.abspath(b))
+    return left == right
+
+
+def library_file_path(path: str) -> str:
+    folder = os.path.abspath(default_reports_dir())
+    full = os.path.abspath(path)
+    prefix = folder if folder.endswith(os.sep) else folder + os.sep
+    check = full if os.name != "nt" else full.lower()
+    root = prefix if os.name != "nt" else prefix.lower()
+    if not check.startswith(root):
+        raise ValueError("Можно удалять только файлы из папки FinMaster.")
+    if not full.lower().endswith(".fmaster"):
+        raise ValueError("Можно удалять только отчёты .fmaster.")
+    if not os.path.isfile(full):
+        raise FileNotFoundError("Файл не найден.")
+    return full
+
+
+def send_to_trash(path: str) -> None:
+    full = os.path.abspath(path)
+    if not os.path.exists(full):
+        raise FileNotFoundError("Файл не найден.")
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        class SHFILEOPSTRUCTW(ctypes.Structure):
+            _fields_ = [
+                ("hwnd", wintypes.HWND),
+                ("wFunc", wintypes.UINT),
+                ("pFrom", wintypes.LPCWSTR),
+                ("pTo", wintypes.LPCWSTR),
+                ("fFlags", wintypes.WORD),
+                ("fAnyOperationsAborted", wintypes.BOOL),
+                ("hNameMappings", ctypes.c_void_p),
+                ("lpszProgressTitle", wintypes.LPCWSTR),
+            ]
+
+        fo_delete = 3
+        fof_allowundo = 0x40
+        fof_noconfirmation = 0x10
+        fof_silent = 0x04
+        fof_noerrorui = 0x400
+        source = ctypes.create_unicode_buffer(full + "\0")
+        op = SHFILEOPSTRUCTW()
+        op.wFunc = fo_delete
+        op.pFrom = ctypes.cast(source, wintypes.LPCWSTR)
+        op.fFlags = fof_allowundo | fof_noconfirmation | fof_silent | fof_noerrorui
+        code = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+        if code != 0 or op.fAnyOperationsAborted:
+            raise OSError(f"Не удалось отправить в корзину (код {code}).")
+        return
+    for cmd in (("gio", "trash", full), ("trash-put", full), ("trash", full)):
+        try:
+            import subprocess
+
+            subprocess.run(cmd, check=True, capture_output=True)
+            return
+        except (FileNotFoundError, subprocess.CalledProcessError, OSError):
+            continue
+    os.remove(full)
+
+
+def delete_library_report(path: str) -> str:
+    full = library_file_path(path)
+    send_to_trash(full)
+    remove_recent(full)
+    return full
+
+
 def safe_report_title(title: str) -> str:
     name = re.sub(r'[\\/:*?"<>|]+', " ", str(title or "").strip())
     name = re.sub(r"\s+", " ", name).strip(" .")

@@ -609,14 +609,38 @@ table.data .num { font-variant-numeric: tabular-nums; font-family: var(--mono); 
 }
 .start.hidden { display: none; }
 .start-inner {
-  width: min(980px, calc(100% - 48px));
+  width: min(1100px, calc(100% - 48px));
   margin: 48px auto;
 }
 .start-hero { display: flex; justify-content: space-between; gap: 24px; align-items: flex-end; margin-bottom: 28px; }
 .start-hero h2 { margin: 0 0 8px; font-size: 36px; }
 .start-hero p { margin: 0; color: var(--muted); max-width: 520px; }
-.start-recent-title { margin: 0 0 12px; color: var(--muted); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
-.start-actions { display: flex; gap: 8px; }
+.start-recent-title { margin: 0 0 8px; color: var(--muted); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+.start-lists {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px 28px;
+  align-items: start;
+}
+.start-col-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.start-col-head .start-recent-title { margin-bottom: 4px; }
+.start-folder-path {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-all;
+  line-height: 1.4;
+}
+@media (max-width: 860px) {
+  .start-lists { grid-template-columns: 1fr; }
+}
+.start-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .start .brand span { color: var(--muted); }
 .recent-list { display: grid; gap: 8px; }
 .recent-item {
@@ -2419,6 +2443,7 @@ html[data-theme="dark"] .kpi:hover { box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
   min-height: 0;
   overflow: hidden;
   background: #f4f7f9;
+  -webkit-tap-highlight-color: transparent;
 }
 #cloud-canvas {
   display: block;
@@ -2427,6 +2452,15 @@ html[data-theme="dark"] .kpi:hover { box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
   outline: none;
   cursor: grab;
   touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#cloud-canvas:focus,
+#cloud-canvas:focus-visible,
+#cloud-canvas:active,
+.cloud-canvas-wrap:active,
+.cloud-stage:active {
+  outline: none;
+  filter: none;
 }
 #cloud-canvas.has-node { cursor: pointer; }
 #cloud-canvas.is-dragging { cursor: grabbing; }
@@ -2442,7 +2476,6 @@ html[data-theme="dark"] .kpi:hover { box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
   background: color-mix(in srgb, var(--card) 94%, transparent);
   color: var(--ink);
   box-shadow: 0 10px 32px rgba(15, 23, 42, 0.2);
-  backdrop-filter: blur(14px);
   pointer-events: none;
 }
 .cloud-tooltip small, .cloud-tooltip b, .cloud-tooltip span { display: block; }
@@ -2458,9 +2491,8 @@ html[data-theme="dark"] .kpi:hover { box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--muted);
-  background: color-mix(in srgb, var(--card) 88%, transparent);
+  background: color-mix(in srgb, var(--card) 92%, transparent);
   font-size: 9px;
-  backdrop-filter: blur(8px);
   pointer-events: none;
 }
 .cloud-hint b { color: var(--ink); font-weight: 650; }
@@ -2481,8 +2513,7 @@ html[data-theme="dark"] .kpi:hover { box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
   border: 1px solid var(--line);
   border-radius: 9px;
   overflow: hidden;
-  background: color-mix(in srgb, var(--card) 88%, transparent);
-  backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--card) 94%, transparent);
 }
 .cloud-zoom button {
   width: 30px;
