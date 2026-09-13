@@ -29,7 +29,8 @@ DIRTY = False
 SERVER_PORT = 0
 
 LOCAL_ADDRS = {"127.0.0.1", "::1", "localhost"}
-MOBILE_FILES = {"/m", "/mobile.html", "/mobile.js", "/mobile.css", "/favicon.ico", "/favicon.svg"}
+MOBILE_FILES = {"/m", "/mobile.html", "/mobile.js", "/mobile.css", "/favicon.ico", "/favicon.svg", "/favicon.png"}
+ICON_PATH = os.path.join(FRONTEND, "favicon.ico")
 
 
 def _is_tunneled() -> bool:
@@ -90,8 +91,17 @@ def mobile_index():
 
 
 @app.get("/favicon.ico")
+def favicon_ico():
+    return send_from_directory(FRONTEND, "favicon.ico", mimetype="image/x-icon")
+
+
+@app.get("/favicon.png")
+def favicon_png():
+    return send_from_directory(FRONTEND, "favicon.png", mimetype="image/png")
+
+
 @app.get("/favicon.svg")
-def favicon():
+def favicon_svg():
     return send_from_directory(FRONTEND, "favicon.svg", mimetype="image/svg+xml")
 
 
@@ -793,7 +803,10 @@ def main() -> None:
         return False
 
     WINDOW.events.closing += on_closing
-    webview.start()
+    start_opts = {}
+    if os.path.exists(ICON_PATH):
+        start_opts["icon"] = ICON_PATH
+    webview.start(**start_opts)
 
 
 if __name__ == "__main__":

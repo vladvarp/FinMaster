@@ -2436,40 +2436,21 @@ html[data-theme="dark"] .kpi:hover { box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
   left: 12px;
   bottom: 11px;
   padding: 6px 9px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  color: #7b899d;
-  background: rgba(8, 19, 31, 0.72);
+  color: var(--muted);
+  background: color-mix(in srgb, var(--card) 88%, transparent);
   font-size: 9px;
   backdrop-filter: blur(8px);
   pointer-events: none;
 }
-.cloud-hint b { color: #cbd5e1; font-weight: 650; }
-.cloud-exit-fs {
-  display: none;
-  position: absolute;
-  z-index: 12;
-  left: 12px;
-  top: 12px;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 14px;
-  border: 1px solid rgba(45, 212, 191, 0.45);
-  border-radius: 9px;
-  color: #f8fafc;
-  background: rgba(15, 118, 110, 0.92);
-  font-size: 13px;
-  font-weight: 650;
-  backdrop-filter: blur(8px);
-  cursor: pointer;
-  box-shadow: 0 8px 24px rgba(8, 19, 31, 0.35);
-}
-.cloud-exit-fs:hover { background: rgba(13, 148, 136, 0.96); border-color: transparent; }
+.cloud-hint b { color: var(--ink); font-weight: 650; }
+.cloud-exit-fs { display: none; }
 .cloud-stage.is-fullscreen .cloud-exit-fs,
 .cloud-stage:fullscreen .cloud-exit-fs,
 .cloud-stage:-webkit-full-screen .cloud-exit-fs {
-  display: inline-flex !important;
+  display: grid !important;
+  place-items: center;
 }
 .cloud-zoom {
   position: absolute;
@@ -2478,10 +2459,10 @@ html[data-theme="dark"] .kpi:hover { box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
   top: 12px;
   display: flex;
   align-items: center;
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  border: 1px solid var(--line);
   border-radius: 9px;
   overflow: hidden;
-  background: rgba(8, 19, 31, 0.78);
+  background: color-mix(in srgb, var(--card) 88%, transparent);
   backdrop-filter: blur(8px);
 }
 .cloud-zoom button {
@@ -2489,11 +2470,11 @@ html[data-theme="dark"] .kpi:hover { box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
   height: 30px;
   border: 0;
   background: transparent;
-  color: #dbeafe;
+  color: var(--ink);
   font-size: 17px;
 }
-.cloud-zoom button:hover { background: rgba(255,255,255,0.1); }
-.cloud-zoom span { width: 48px; color: #94a3b8; font: 9px var(--mono); text-align: center; }
+.cloud-zoom button:hover { background: var(--bg); }
+.cloud-zoom span { width: 48px; color: var(--muted); font: 9px var(--mono); text-align: center; }
 .cloud-minimap {
   position: absolute;
   z-index: 4;
@@ -2501,10 +2482,10 @@ html[data-theme="dark"] .kpi:hover { box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
   bottom: 12px;
   width: 180px;
   height: 112px;
-  border: 1px solid rgba(148, 163, 184, 0.25);
+  border: 1px solid var(--line);
   border-radius: 10px;
   opacity: 0.9;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+  box-shadow: var(--shadow);
   cursor: pointer;
 }
 .cloud-empty {
@@ -2655,6 +2636,18 @@ html[data-theme="dark"] .kpi:hover { box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
   grid-template-columns: minmax(0, 1fr) 320px;
 }
 html[data-theme="dark"] .cloud-canvas-wrap { background: #071018; }
+html[data-theme="dark"] .cloud-hint,
+html[data-theme="dark"] .cloud-zoom {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(8, 19, 31, 0.78);
+  color: #dbeafe;
+}
+html[data-theme="dark"] .cloud-hint { color: #94a3b8; }
+html[data-theme="dark"] .cloud-hint b { color: #e2e8f0; }
+html[data-theme="dark"] .cloud-zoom button:hover { background: rgba(255, 255, 255, 0.1); }
+html[data-theme="dark"] .cloud-zoom button { color: #dbeafe; }
+html[data-theme="dark"] .cloud-zoom span { color: #94a3b8; }
+html[data-theme="dark"] .cloud-minimap { border-color: rgba(148, 163, 184, 0.25); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); }
 html[data-theme="dark"] .cloud-control {
   background: #1b2538;
   border-color: var(--line);

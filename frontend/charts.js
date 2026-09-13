@@ -64,11 +64,6 @@ const FinCharts = (() => {
     return `rgb(${ch(r)}, ${ch(g)}, ${ch(b)})`;
   }
 
-  function contrastInk(hex) {
-    const [r, g, b] = hexToRgb(hex);
-    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62 ? "#0f172a" : "#ffffff";
-  }
-
   function niceMax(v) {
     if (!Number.isFinite(v) || v <= 0) return 1;
     const p = 10 ** Math.floor(Math.log10(v));
@@ -427,7 +422,7 @@ const FinCharts = (() => {
     }
     const grouped = scale === "group";
     const legendH = legend.length ? 26 : 0;
-    const pad = { t: 22 + legendH, r: 18, b: 30, l: grouped ? 18 : 58 };
+    const pad = { t: 38 + legendH, r: 18, b: 30, l: grouped ? 18 : 58 };
     const innerW = w - pad.l - pad.r;
     const innerH = h - pad.t - pad.b;
     const n = labels.length;
@@ -513,17 +508,11 @@ const FinCharts = (() => {
         ctx.shadowOffsetY = 0;
 
         const text = kind === "count" ? fmtCount(inst.target[di]?.[i] ?? 0) : fmtCompact(inst.target[di]?.[i] ?? 0);
-        ctx.font = "600 10px Segoe UI, sans-serif";
+        ctx.font = "650 11px Segoe UI, sans-serif";
         ctx.textAlign = "center";
-        if (bh > 26) {
-          ctx.fillStyle = contrastInk(color);
-          ctx.textBaseline = "top";
-          ctx.fillText(text, x + bw / 2, y + 6);
-        } else {
-          ctx.fillStyle = muted();
-          ctx.textBaseline = "bottom";
-          ctx.fillText(text, x + bw / 2, y - 4);
-        }
+        ctx.textBaseline = "bottom";
+        ctx.fillStyle = ink();
+        ctx.fillText(text, x + bw / 2, y - 5);
         bars.push({ i, di, x, y, w: bw, h: bh });
       });
 
