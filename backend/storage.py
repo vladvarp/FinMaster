@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 from datetime import datetime, timezone
 from typing import Any
 
 
 APP_NAME = "FinMaster"
 MAX_RECENT = 15
+MAX_DEVICES = 20
+DEFAULT_REMOTE_PORT = 17891
 
 
 def config_dir() -> str:
@@ -81,6 +84,85 @@ def set_autosave(enabled: bool) -> None:
     cfg = load_config()
     cfg["autosave"] = bool(enabled)
     save_config(cfg)
+
+
+def now_local_iso() -> str:
+    return datetime.now(timezone.utc).astimezone().replace(microsecond=0).isoformat()
+
+
+def remote_settings() -> dict[str, Any]:
+    cfg = load_config()
+    raw = cfg.get("remote")
+    if not isinstance(raw, dict):
+        raw = {}
+    token = str(raw.get("token") or "").strip()
+    if not token:
+        token = secrets.token_urlsafe(12)
+    try:
+        port = int(raw.get("port") or DEFAULT_REMOTE_PORT)
+    except (TypeError, ValueError):
+        port = DEFAULT_REMOTE_PORT
+    if port <= 0 or port > 65535:
+        port = DEFAULT_REMOTE_PORT
+    devices = [d for d in (raw.get("devices") or []) if isinstance(d, dict) and d.get("id")]
+    out = {
+        "token": token,
+        "port": port,
+        "autostart": bool(raw.get("autostart")),
+        "devices": devices[:MAX_DEVICES],
+    }
+    if raw.get("token") != token or raw.get("port") != port or not isinstance(cfg.get("remote"), dict):
+        cfg["remote"] = out
+        save_config(cfg)
+    return out
+
+
+def save_remote_settings(**updates: Any) -> dict[str, Any]:
+    cfg = load_config()
+    data = remote_settings()
+    if "token" in updates and updates["token"]:
+        data["token"] = str(updates["token"])
+    if "port" in updates:
+        try:
+            data["port"] = int(updates["port"])
+        except (TypeError, ValueError):
+            pass
+    if "autostart" in updates:
+        data["autostart"] = bool(updates["autostart"])
+    if "devices" in updates and isinstance(updates["devices"], list):
+        data["devices"] = [d for d in updates["devices"] if isinstance(d, dict) and d.get("id")][:MAX_DEVICES]
+    cfg["remote"] = data
+    save_config(cfg)
+    return data
+
+
+def remember_device(cid: str, name: str = "", ip: str = "") -> list[dict[str, Any]]:
+    cid = str(cid or "").strip()
+    if not cid:
+        return remote_settings()["devices"]
+    data = remote_settings()
+    devices = [d for d in data["devices"] if d.get("id") != cid]
+    prev = next((d for d in data["devices"] if d.get("id") == cid), {})
+    devices.insert(
+        0,
+        {
+            "id": cid,
+            "name": str(name or prev.get("name") or "Телефон").strip() or "Телефон",
+            "ip": str(ip or prev.get("ip") or ""),
+            "seen_at": now_local_iso(),
+        },
+    )
+    return save_remote_settings(devices=devices)["devices"]
+
+
+def forget_device(cid: str) -> list[dict[str, Any]]:
+    data = remote_settings()
+    devices = [d for d in data["devices"] if d.get("id") != cid]
+    return save_remote_settings(devices=devices)["devices"]
+
+
+def rotate_remote_token() -> dict[str, Any]:
+    return save_remote_settings(token=secrets.token_urlsafe(12), devices=[])
 
 
 def atomic_write(path: str, content: str) -> None:

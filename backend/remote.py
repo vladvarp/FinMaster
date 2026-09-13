@@ -83,10 +83,10 @@ class RemoteSession:
 
     # ---------- управление сессией ----------
 
-    def start(self) -> str:
+    def start(self, token: str = "") -> str:
         with self._cond:
             self.enabled = True
-            self.token = secrets.token_urlsafe(9)
+            self.token = str(token or self.token or secrets.token_urlsafe(12))
             self._clients = {}
             self.command = None
             self.version += 1
@@ -96,7 +96,6 @@ class RemoteSession:
     def stop(self) -> None:
         with self._cond:
             self.enabled = False
-            self.token = ""
             self.doc = None
             self.path = ""
             self._clients = {}
@@ -107,7 +106,10 @@ class RemoteSession:
     def check(self, token: str | None) -> bool:
         if not self.enabled or not self.token or not token:
             return False
-        return secrets.compare_digest(str(token), self.token)
+        got = str(token)
+        if len(got) != len(self.token):
+            return False
+        return secrets.compare_digest(got, self.token)
 
     # ---------- документ ----------
 

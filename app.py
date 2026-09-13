@@ -14,7 +14,7 @@ from backend import qr, storage
 from backend.dialogs import open_report_dialog, save_csv_dialog, save_png_dialog, save_report_dialog
 from backend.document import normalize_document, now_iso
 from backend.remote import SESSION as REMOTE
-from backend.remote import lan_candidates, lan_ip
+from backend.remote import lan_candidates
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 FRONTEND = os.path.join(ROOT, "frontend")
@@ -26,11 +26,22 @@ DIRTY = False
 SERVER_PORT = 0
 
 LOCAL_ADDRS = {"127.0.0.1", "::1", "localhost"}
-MOBILE_FILES = {"/m", "/mobile.html", "/mobile.js", "/mobile.css"}
+MOBILE_FILES = {"/m", "/mobile.html", "/mobile.js", "/mobile.css", "/favicon.ico", "/favicon.svg"}
 
 
 def _is_local() -> bool:
     return (request.remote_addr or "") in LOCAL_ADDRS
+
+
+def _is_public_asset(path: str) -> bool:
+    if path in MOBILE_FILES:
+        return True
+    name = path.rsplit("/", 1)[-1].lower()
+    return name.startswith("favicon") or name.startswith("apple-touch-icon") or name == "robots.txt"
+
+
+def _remote_token() -> str:
+    return str(request.headers.get("X-FM-Token") or request.args.get("t") or "")
 
 
 @app.before_request
@@ -38,16 +49,13 @@ def guard_remote_clients():
     """Телефон видит только мобильный интерфейс и только с действующим токеном."""
     if _is_local():
         return None
-    if not REMOTE.enabled:
-        return jsonify({"error": "Удалённый доступ выключен на компьютере."}), 403
     path = request.path
-    if path in MOBILE_FILES:
+    if _is_public_asset(path):
         return None
     if path.startswith("/api/remote/"):
-        token = request.headers.get("X-FM-Token") or request.args.get("t")
-        if not token:
-            token = (request.get_json(silent=True) or {}).get("token")
-        if not REMOTE.check(token):
+        if not REMOTE.enabled:
+            return jsonify({"error": "Удалённый доступ выключен на компьютере."}), 403
+        if not REMOTE.check(_remote_token()):
             return jsonify({"error": "Сессия недействительна — отсканируйте QR-код заново."}), 401
         return None
     return jsonify({"error": "Доступ запрещён."}), 403
@@ -58,14 +66,29 @@ def index():
     return send_from_directory(FRONTEND, "index.html")
 
 
+def _no_cache(response):
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
 @app.get("/m")
 def mobile_index():
-    return send_from_directory(FRONTEND, "mobile.html")
+    return _no_cache(send_from_directory(FRONTEND, "mobile.html"))
+
+
+@app.get("/favicon.ico")
+@app.get("/favicon.svg")
+def favicon():
+    return send_from_directory(FRONTEND, "favicon.svg", mimetype="image/svg+xml")
 
 
 @app.get("/<path:filename>")
 def static_files(filename: str):
-    return send_from_directory(FRONTEND, filename)
+    response = send_from_directory(FRONTEND, filename)
+    if filename in {"mobile.js", "mobile.css", "mobile.html"}:
+        return _no_cache(response)
+    return response
 
 
 def _recent_payload() -> list[dict[str, Any]]:
@@ -79,6 +102,27 @@ def _recent_payload() -> list[dict[str, Any]]:
     return recent
 
 
+def _remote_public(ip: str | None = None) -> dict[str, Any]:
+    settings = storage.remote_settings()
+    ips = lan_candidates()
+    chosen = ip if ip in ips else ips[0]
+    token = REMOTE.token or settings["token"]
+    url = f"http://{chosen}:{SERVER_PORT}/m?t={token}"
+    return {
+        "enabled": REMOTE.enabled,
+        "url": url,
+        "token": token,
+        "ip": chosen,
+        "ips": ips,
+        "port": SERVER_PORT,
+        "qr": qr.svg(url, module=6),
+        "version": REMOTE.version,
+        "autostart": bool(settings.get("autostart")),
+        "devices": settings.get("devices") or [],
+        "clients": REMOTE.clients(),
+    }
+
+
 @app.get("/api/bootstrap")
 def api_bootstrap():
     cfg = storage.load_config()
@@ -89,6 +133,7 @@ def api_bootstrap():
             "last_dir": cfg.get("last_dir") or "",
             "theme": "dark" if cfg.get("theme") == "dark" else "light",
             "desktop": True,
+            "remote": _remote_public(),
         }
     )
 
@@ -264,23 +309,13 @@ def api_clipboard_png():
 @app.post("/api/remote/start")
 def api_remote_start():
     data = request.get_json(silent=True) or {}
-    token = REMOTE.start()
+    settings = storage.save_remote_settings(autostart=True)
+    token = REMOTE.start(settings["token"])
     REMOTE.publish(data.get("document"), data.get("path") or "", "desktop", bool(data.get("dirty")))
-    ips = lan_candidates()
-    ip = str(data.get("ip") or "") if str(data.get("ip") or "") in ips else ips[0]
-    url = f"http://{ip}:{SERVER_PORT}/m?t={token}"
-    return jsonify(
-        {
-            "ok": True,
-            "url": url,
-            "token": token,
-            "ip": ip,
-            "ips": ips,
-            "port": SERVER_PORT,
-            "qr": qr.svg(url, module=6),
-            "version": REMOTE.version,
-        }
-    )
+    payload = _remote_public(str(data.get("ip") or "") or None)
+    payload["ok"] = True
+    payload["token"] = token
+    return jsonify(payload)
 
 
 @app.post("/api/remote/address")
@@ -289,26 +324,42 @@ def api_remote_address():
     if not REMOTE.enabled:
         return jsonify({"error": "Сессия не запущена."}), 409
     data = request.get_json(silent=True) or {}
-    ips = lan_candidates()
     ip = str(data.get("ip") or "")
-    if ip not in ips:
+    if ip not in lan_candidates():
         return jsonify({"error": "Неизвестный адрес."}), 400
-    url = f"http://{ip}:{SERVER_PORT}/m?t={REMOTE.token}"
-    return jsonify({"ok": True, "url": url, "ip": ip, "ips": ips, "qr": qr.svg(url, module=6)})
+    payload = _remote_public(ip)
+    payload["ok"] = True
+    return jsonify(payload)
 
 
 @app.post("/api/remote/stop")
 def api_remote_stop():
     REMOTE.stop()
-    return jsonify({"ok": True})
+    storage.save_remote_settings(autostart=False)
+    return jsonify({"ok": True, **_remote_public()})
+
+
+@app.post("/api/remote/rotate")
+def api_remote_rotate():
+    settings = storage.rotate_remote_token()
+    if REMOTE.enabled:
+        REMOTE.start(settings["token"])
+    payload = _remote_public()
+    payload["ok"] = True
+    return jsonify(payload)
+
+
+@app.post("/api/remote/forget")
+def api_remote_forget():
+    data = request.get_json(silent=True) or {}
+    devices = storage.forget_device(str(data.get("id") or ""))
+    return jsonify({"ok": True, "devices": devices})
 
 
 @app.get("/api/remote/info")
 def api_remote_info():
     snap = REMOTE.snapshot(with_doc=False)
-    snap["ip"] = lan_ip()
-    snap["ips"] = lan_candidates()
-    snap["port"] = SERVER_PORT
+    snap.update(_remote_public())
     return jsonify(snap)
 
 
@@ -332,6 +383,8 @@ def api_remote_pull():
     kind = request.args.get("kind") or "mobile"
     name = request.args.get("name") or ""
     REMOTE.touch(cid, kind, name)
+    if kind == "mobile" and cid:
+        storage.remember_device(cid, name, request.remote_addr or "")
     snap = REMOTE.wait(since)
     return jsonify(snap)
 
@@ -342,6 +395,11 @@ def api_remote_session():
     snap = REMOTE.snapshot(with_doc=True)
     snap["recent"] = _recent_payload()
     snap["desktop_online"] = bool(REMOTE.clients("desktop"))
+    cid = request.args.get("cid") or ""
+    name = request.args.get("name") or ""
+    if cid:
+        REMOTE.touch(cid, "mobile", name)
+        storage.remember_device(cid, name, request.remote_addr or "")
     return jsonify(snap)
 
 
@@ -398,12 +456,34 @@ def api_quit():
     return jsonify({"ok": True})
 
 
-def pick_port() -> int:
+def _port_free(port: int) -> bool:
     import socket
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("0.0.0.0", port))
+        except OSError:
+            return False
+    return True
+
+
+def pick_port() -> int:
+    import socket
+
+    settings = storage.remote_settings()
+    preferred = int(settings.get("port") or storage.DEFAULT_REMOTE_PORT)
+    candidates = [preferred] + [p for p in range(storage.DEFAULT_REMOTE_PORT, storage.DEFAULT_REMOTE_PORT + 12) if p != preferred]
+    for port in candidates:
+        if _port_free(port):
+            if port != settings.get("port"):
+                storage.save_remote_settings(port=port)
+            return port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("0.0.0.0", 0))
-        return int(sock.getsockname()[1])
+        port = int(sock.getsockname()[1])
+    storage.save_remote_settings(port=port)
+    return port
 
 
 def run_server(port: int) -> None:
@@ -416,6 +496,9 @@ def main() -> None:
 
     port = pick_port()
     SERVER_PORT = port
+    settings = storage.remote_settings()
+    if settings.get("autostart"):
+        REMOTE.start(settings["token"])
     url = f"http://127.0.0.1:{port}/"
     thread = threading.Thread(target=run_server, args=(port,), daemon=True)
     thread.start()

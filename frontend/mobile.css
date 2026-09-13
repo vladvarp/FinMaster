@@ -153,7 +153,25 @@ body {
   to { opacity: 1; transform: none; }
 }
 
-.search-wrap { margin-bottom: 10px; }
+.search-wrap {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.search-wrap input { flex: 1; min-width: 0; }
+.sort-btn {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+}
 
 input,
 select,
@@ -499,15 +517,16 @@ h3.section {
 
 /* ===== Оверлеи ===== */
 .blocker {
+  display: none;
   position: fixed;
   inset: 0;
   z-index: 60;
-  display: grid;
   place-items: center;
   padding: 24px;
   background: rgba(8, 14, 26, 0.72);
   backdrop-filter: blur(6px);
 }
+.blocker.is-on { display: grid; }
 
 .blocker-card {
   background: var(--card);
@@ -521,7 +540,8 @@ h3.section {
 .blocker-card h2 { margin: 0 0 8px; font-size: 18px; }
 .blocker-card p { margin: 0 0 16px; color: var(--muted); font-size: 14px; line-height: 1.5; }
 
-.sheet { position: fixed; inset: 0; z-index: 70; }
+.sheet { display: none; position: fixed; inset: 0; z-index: 70; }
+.sheet.is-on { display: block; }
 .sheet-back { position: absolute; inset: 0; background: rgba(8, 14, 26, 0.5); animation: fade 0.2s ease; }
 
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }

@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>FinMaster</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 42 42'%3E%3Crect width='42' height='42' rx='12' fill='%230f766e'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/styles.css" />
   <script>
@@ -384,7 +385,7 @@
   <div class="modal" id="remote-modal">
     <div class="modal-card remote-modal">
       <h3>Управление с телефона</h3>
-      <p>Наведите камеру телефона на код — откроется полноценный интерфейс отчёта в браузере. Все правки появляются здесь мгновенно.</p>
+      <p>Один раз отсканируйте код или откройте ссылку — устройство запомнится. Дальше заходите по той же закладке, без нового QR.</p>
       <div class="remote-layout">
         <div class="remote-qr-wrap">
           <div class="remote-qr" id="remote-qr"><div class="remote-qr-empty">Сессия не запущена</div></div>
@@ -396,17 +397,22 @@
             <span class="remote-dot"></span><span id="remote-state-text">Доступ выключен</span>
           </div>
           <ul class="remote-steps">
-            <li>Телефон и компьютер должны быть в одной сети Wi‑Fi.</li>
-            <li>Камера или любой сканер QR откроет ссылку в браузере.</li>
-            <li>Ссылка действует, пока окно программы открыто и доступ включён.</li>
-            <li>Если браузер не открывает адрес — разрешите Python в брандмауэре Windows для частной сети.</li>
+            <li>Телефон и компьютер — в одной сети Wi‑Fi.</li>
+            <li>После первого входа добавьте страницу в закладки браузера.</li>
+            <li>Ссылка постоянная: токен и порт не меняются, пока не нажмёте «Новая ссылка».</li>
+            <li>Если страница не открывается — разрешите Python в брандмауэре для частной сети.</li>
           </ul>
-          <div class="remote-clients" id="remote-clients">Подключённых устройств нет</div>
+          <label class="remote-autostart">
+            <input type="checkbox" id="remote-autostart" />
+            Включать доступ при запуске программы
+          </label>
+          <div class="remote-clients" id="remote-clients">Запомненных устройств нет</div>
         </div>
       </div>
       <div class="modal-actions">
         <button class="btn" type="button" id="remote-close">Закрыть</button>
         <button class="btn" type="button" id="remote-copy">Копировать ссылку</button>
+        <button class="btn" type="button" id="remote-rotate">Новая ссылка</button>
         <button class="btn danger" type="button" id="remote-stop" hidden>Выключить доступ</button>
         <button class="btn primary" type="button" id="remote-start">Включить доступ</button>
       </div>

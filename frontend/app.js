@@ -478,14 +478,7 @@
     }
     orders = orders.filter((o) => orderFilterMatch(o, state.orderFilter));
     const sort = $("order-sort")?.value || "date-desc";
-    const stamp = (o) => o.lines[0]?.order_date || o.created_at || "";
-    orders.sort((a, b) => {
-      if (sort === "date-asc") return stamp(a).localeCompare(stamp(b));
-      if (sort === "number") return String(a.number).localeCompare(String(b.number), "ru", { numeric: true });
-      if (sort === "customer") return String(a.customer).localeCompare(String(b.customer), "ru");
-      if (sort === "amount-desc") return orderTotals(b).after - orderTotals(a).after;
-      return stamp(b).localeCompare(stamp(a));
-    });
+    orders.sort((a, b) => compareOrders(a, b, sort));
     return orders;
   }
 
@@ -979,11 +972,16 @@
             <div class="field"><label>Номер заказа</label><input data-k="number" value="${esc(order.number)}" /></div>
             <div class="field"><label>Заказчик</label><input data-k="customer" list="customer-list" value="${esc(order.customer)}" /></div>
             <div class="field"><label>Название заказа</label><input data-k="name" value="${esc(order.name)}" /></div>
-            <div class="field" style="align-items:flex-end;flex-direction:row;gap:8px">
+            <div class="order-head-actions">
+              <button type="button" class="note-btn ${order.notes ? "has-note" : ""}" data-act="notes" title="Заметки к заказу" aria-label="Заметки к заказу">i</button>
               <button class="btn small" data-act="share">Снимок</button>
               <button class="btn small" data-act="dup">Дублировать</button>
               <button class="btn small danger" data-act="del">Удалить</button>
             </div>
+          </div>
+          <div class="order-notes">
+            <label>Заметки к заказу</label>
+            <textarea data-k="notes" rows="3" placeholder="Комментарий, договорённости, детали…">${esc(order.notes || "")}</textarea>
           </div>
           <div class="order-globals">
             <div class="field"><label>Тип всем строкам</label>
@@ -1116,6 +1114,14 @@
       if (d > best) best = d;
     }
     return best;
+  }
+
+  function compareOrders(a, b, sort) {
+    if (sort === "date-asc") return orderNewestStamp(a).localeCompare(orderNewestStamp(b));
+    if (sort === "number") return String(a.number || "").localeCompare(String(b.number || ""), "ru", { numeric: true });
+    if (sort === "customer") return String(a.customer || "").localeCompare(String(b.customer || ""), "ru");
+    if (sort === "amount-desc") return orderTotals(b).after - orderTotals(a).after;
+    return orderNewestStamp(b).localeCompare(orderNewestStamp(a));
   }
 
   function unique(arr) {
@@ -2201,6 +2207,9 @@
     }
     if (e.target.dataset.k) {
       order[e.target.dataset.k] = e.target.value;
+      if (e.target.dataset.k === "notes") {
+        card.querySelector(".note-btn")?.classList.toggle("has-note", !!String(e.target.value || "").trim());
+      }
       if (e.target.dataset.k === "name" && !state.path) state.doc.title = e.target.value || state.doc.title;
       if (e.target.dataset.k === "customer") {
         syncCustomersFromOrders();
@@ -3474,6 +3483,15 @@
     if (!act) return;
     const card = e.target.closest("[data-order]");
     const order = findOrder(card.dataset.order);
+    if (act === "notes") {
+      const panel = card.querySelector(".order-notes");
+      const btn = card.querySelector(".note-btn");
+      const open = !panel.classList.contains("open");
+      panel.classList.toggle("open", open);
+      btn.classList.toggle("open", open);
+      if (open) requestAnimationFrame(() => panel.querySelector("textarea")?.focus());
+      return;
+    }
     if (act === "share") {
       openShare(order);
       return;
@@ -3558,42 +3576,75 @@
     $("btn-remote")?.classList.toggle("on", remote.enabled);
   }
 
+  function applyRemotePayload(data) {
+    if (!data) return;
+    if (typeof data.enabled === "boolean") remote.enabled = data.enabled;
+    if (data.url) remote.url = data.url;
+    if (data.ip) remote.ip = data.ip;
+    if (data.ips) remote.ips = data.ips;
+    if (typeof data.version === "number") remote.version = data.version;
+    if (Array.isArray(data.clients)) remote.clients = data.clients;
+    if (Array.isArray(data.devices)) remote.devices = data.devices;
+    if (typeof data.autostart === "boolean") remote.autostart = data.autostart;
+    if (data.qr) remote.qr = data.qr;
+  }
+
   function renderRemoteIps() {
     const box = $("remote-ips");
     if (!box) return;
     const list = remote.ips || [];
-    box.hidden = !remote.enabled || list.length < 2;
+    box.hidden = list.length < 2;
     if (box.hidden) return;
     box.innerHTML = list
       .map((ip) => `<button type="button" data-ip="${ip}" class="${ip === remote.ip ? "active" : ""}">${ip}</button>`)
       .join("");
   }
 
+  function renderRemoteDevices() {
+    const box = $("remote-clients");
+    if (!box) return;
+    const live = new Set((remote.clients || []).filter((c) => c.kind === "mobile").map((c) => c.id));
+    const devices = remote.devices || [];
+    if (!devices.length) {
+      box.innerHTML = `<div class="remote-empty">Запомненных устройств нет — отсканируйте QR или откройте ссылку с телефона.</div>`;
+      return;
+    }
+    box.innerHTML = devices
+      .map((d) => {
+        const on = live.has(d.id);
+        const when = d.seen_at ? new Date(d.seen_at).toLocaleString("ru-RU") : "";
+        return `<div class="remote-device">
+          <div class="rd-body">
+            <strong>${esc(d.name || "Телефон")}</strong>
+            <small>${on ? '<span class="online">в сети</span> · ' : ""}${esc(d.ip || "")}${when ? ` · ${esc(when)}` : ""}</small>
+          </div>
+          <button type="button" class="btn small" data-forget="${esc(d.id)}">Забыть</button>
+        </div>`;
+      })
+      .join("");
+  }
+
   function renderRemoteModal(data) {
+    applyRemotePayload(data);
     const qrBox = $("remote-qr");
     const stateText = $("remote-state-text");
     const stateBox = $("remote-state");
+    if (remote.qr) qrBox.innerHTML = remote.qr;
+    else if (!remote.enabled) qrBox.innerHTML = '<div class="remote-qr-empty">Сессия не запущена</div>';
+    $("remote-url").textContent = remote.url || "—";
+    renderRemoteIps();
+    renderRemoteDevices();
+    const auto = $("remote-autostart");
+    if (auto) auto.checked = !!remote.autostart;
     if (remote.enabled) {
-      if (data?.qr) qrBox.innerHTML = data.qr;
-      if (data?.ips) remote.ips = data.ips;
-      if (data?.ip) remote.ip = data.ip;
-      $("remote-url").textContent = remote.url || "—";
-      renderRemoteIps();
       stateBox.classList.add("on");
       const phones = remote.clients?.filter((c) => c.kind === "mobile").length || 0;
-      stateText.textContent = phones ? `Подключено телефонов: ${phones}` : "Доступ включён — ждём телефон";
-      $("remote-clients").textContent = phones
-        ? "Изменения с телефона применяются здесь автоматически."
-        : "Отсканируйте код камерой телефона.";
+      stateText.textContent = phones ? `Сейчас в сети: ${phones}` : "Доступ включён — можно заходить по закладке";
       $("remote-start").hidden = true;
       $("remote-stop").hidden = false;
     } else {
-      qrBox.innerHTML = '<div class="remote-qr-empty">Сессия не запущена</div>';
-      $("remote-url").textContent = "—";
-      $("remote-ips").hidden = true;
       stateBox.classList.remove("on");
       stateText.textContent = "Доступ выключен";
-      $("remote-clients").textContent = "Подключённых устройств нет";
       $("remote-start").hidden = false;
       $("remote-stop").hidden = true;
     }
@@ -3605,20 +3656,10 @@
       toast("Удалённый доступ работает только в приложении на компьютере");
       return;
     }
-    if (!state.doc) {
-      toast("Сначала откройте или создайте отчёт");
-      return;
-    }
     try {
       const data = await apiPost("/api/remote/start", { document: state.doc, path: state.path, dirty: state.dirty });
-      remote.enabled = true;
-      remote.url = data.url;
-      remote.ip = data.ip;
-      remote.ips = data.ips || [];
-      remote.version = data.version || 0;
-      remote.clients = [];
       renderRemoteModal(data);
-      toast("Доступ с телефона включён");
+      toast("Доступ с телефона включён — ссылка постоянная");
       if (!remote.polling) remotePoll();
     } catch (err) {
       toast(`Не удалось включить доступ: ${err.message || err}`);
@@ -3627,14 +3668,12 @@
 
   async function remoteStop() {
     try {
-      await apiPost("/api/remote/stop", {});
+      const data = await apiPost("/api/remote/stop", {});
+      renderRemoteModal(data);
     } catch {
-      /* ignore */
+      remote.enabled = false;
+      renderRemoteModal();
     }
-    remote.enabled = false;
-    remote.url = "";
-    remote.clients = [];
-    renderRemoteModal();
     toast("Доступ с телефона выключен");
   }
 
@@ -3728,14 +3767,13 @@
       $("remote-modal").classList.add("open");
       if (state.desktop) {
         try {
-          const info = await apiGet("/api/remote/info");
-          remote.enabled = !!info.enabled;
-          remote.clients = info.clients || [];
+          renderRemoteModal(await apiGet("/api/remote/info"));
         } catch {
-          /* ignore */
+          renderRemoteModal();
         }
+      } else {
+        renderRemoteModal();
       }
-      renderRemoteModal();
       if (!remote.enabled) remoteStart();
     });
     $("remote-close")?.addEventListener("click", () => $("remote-modal").classList.remove("open"));
@@ -3758,6 +3796,32 @@
     });
     $("remote-start")?.addEventListener("click", remoteStart);
     $("remote-stop")?.addEventListener("click", remoteStop);
+    $("remote-rotate")?.addEventListener("click", async () => {
+      if (!confirm("Старая закладка на телефоне перестанет работать. Создать новую ссылку?")) return;
+      try {
+        const data = await apiPost("/api/remote/rotate", {});
+        renderRemoteModal(data);
+        toast("Ссылка обновлена — отсканируйте QR ещё раз");
+      } catch (err) {
+        toast(`Не удалось сменить ссылку: ${err.message || err}`);
+      }
+    });
+    $("remote-autostart")?.addEventListener("change", async (e) => {
+      if (e.target.checked) await remoteStart();
+      else await remoteStop();
+    });
+    $("remote-clients")?.addEventListener("click", async (e) => {
+      const btn = e.target.closest("[data-forget]");
+      if (!btn) return;
+      try {
+        const res = await apiPost("/api/remote/forget", { id: btn.dataset.forget });
+        remote.devices = res.devices || [];
+        renderRemoteDevices();
+        toast("Устройство забыто");
+      } catch (err) {
+        toast(`Не удалось забыть устройство: ${err.message || err}`);
+      }
+    });
     $("remote-copy")?.addEventListener("click", async () => {
       if (!remote.url) return;
       try {
@@ -3785,6 +3849,11 @@
       applyTheme(bootData.theme || "light", false);
       await renderRecent(bootData.recent);
       await apiPost("/api/dirty", { dirty: false });
+      if (bootData.remote) {
+        applyRemotePayload(bootData.remote);
+        remoteBadge();
+        if (remote.enabled && !remote.polling) remotePoll();
+      }
     } catch {
       state.desktop = false;
       state.autosave = localStorage.getItem(LS_AUTOSAVE) === "true";

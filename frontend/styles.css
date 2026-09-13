@@ -348,13 +348,78 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 }
 .order-head {
   display: grid;
-  grid-template-columns: 140px 1.1fr 1.3fr auto;
+  grid-template-columns: 140px minmax(0, 1.1fr) minmax(0, 1.3fr) max-content;
   gap: 8px;
   padding: 12px;
   background: linear-gradient(90deg, #f8fafc, #fff);
   border-bottom: 1px solid var(--line);
   align-items: end;
 }
+.order-head-actions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: max-content;
+}
+.order-head-actions .btn {
+  flex: 0 0 auto;
+  width: auto;
+}
+.note-btn {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+  font: italic 700 16px/1 Georgia, "Times New Roman", serif;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
+}
+.note-btn:hover { border-color: var(--accent-2); color: var(--accent); transform: translateY(-1px); }
+.note-btn.has-note {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.note-btn.open { box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.22); }
+.order-notes {
+  display: none;
+  padding: 10px 12px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #f8fafc;
+}
+.order-notes.open { display: block; }
+.order-notes label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.order-notes textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+.order-notes textarea:focus {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
+}
+
 .order-globals {
   display: grid;
   grid-template-columns: 1fr 120px 1fr auto;
@@ -644,6 +709,7 @@ table.data .num { font-variant-numeric: tabular-nums; font-family: var(--mono); 
   .kpis { grid-template-columns: repeat(2, 1fr); }
   .grid-2, .catalog-grid, .compare, .filters { grid-template-columns: 1fr 1fr; }
   .order-head { grid-template-columns: 1fr 1fr; }
+  .order-head-actions { grid-column: 1 / -1; justify-content: flex-end; }
 }
 
 .sidebar-head {
@@ -1149,6 +1215,10 @@ html[data-theme="dark"] .kpi { border: 1px solid var(--line); }
 html[data-theme="dark"] .order-head {
   background: linear-gradient(90deg, #1b2538, #151d2e);
 }
+html[data-theme="dark"] .note-btn { background: #1b2538; color: #cbd5e1; border-color: var(--line); }
+html[data-theme="dark"] .note-btn.has-note { background: var(--accent); color: #fff; border-color: var(--accent); }
+html[data-theme="dark"] .order-notes { background: #121a2b; }
+html[data-theme="dark"] .order-notes textarea { background: #1b2538; color: var(--ink); }
 html[data-theme="dark"] .order-globals,
 html[data-theme="dark"] table.data th,
 html[data-theme="dark"] table.data tfoot td,
@@ -1559,11 +1629,11 @@ html[data-theme="dark"] .fin-tip { box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5); }
   to { transform: none; opacity: 1; }
 }
 
-.remote-modal { max-width: 720px; }
+.modal-card.remote-modal { width: min(920px, calc(100vw - 32px)); max-width: 920px; }
 .remote-layout {
   display: grid;
-  grid-template-columns: 240px 1fr;
-  gap: 20px;
+  grid-template-columns: 260px 1fr;
+  gap: 24px;
   align-items: start;
   margin-top: 14px;
 }
@@ -1634,6 +1704,16 @@ html[data-theme="dark"] .fin-tip { box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5); }
   font-size: 13px;
   line-height: 1.75;
 }
+.remote-autostart {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.remote-autostart input { width: 16px; height: 16px; accent-color: var(--accent); }
 .remote-clients {
   padding: 10px 12px;
   border-radius: 12px;
@@ -1642,6 +1722,20 @@ html[data-theme="dark"] .fin-tip { box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5); }
   font-size: 13px;
   color: var(--muted);
 }
+.remote-device {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+}
+.remote-device:first-child { border-top: none; padding-top: 0; }
+.remote-device .rd-body { flex: 1; min-width: 0; }
+.remote-device strong { display: block; font-size: 13px; }
+.remote-device small { color: var(--muted); font-size: 11px; }
+.remote-device .online { color: var(--ok); font-weight: 700; font-size: 11px; }
+.remote-empty { color: var(--muted); font-size: 13px; }
 @media (max-width: 720px) {
   .remote-layout { grid-template-columns: 1fr; }
 }

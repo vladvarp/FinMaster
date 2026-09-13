@@ -4,6 +4,8 @@
   const $ = (id) => document.getElementById(id);
   const LS_TOKEN = "finmaster.remote.token";
   const LS_THEME = "finmaster.mobile.theme";
+  const LS_NAME = "finmaster.remote.name";
+  const LS_CID = "finmaster.remote.cid";
   const moneyFmt = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const state = {
@@ -19,6 +21,7 @@
     orderId: null,
     query: "",
     filter: "all",
+    sort: "date-desc",
     pending: null,
     pushTimer: null,
     pushing: false,
@@ -144,16 +147,29 @@
 
   /* ================= сеть ================= */
 
+  function guessDeviceName() {
+    const ua = navigator.userAgent || "";
+    if (/iPhone|iPad/.test(ua)) return "iPhone";
+    if (/Android/.test(ua)) return "Android";
+    return "Телефон";
+  }
+
+  function deviceName() {
+    return localStorage.getItem(LS_NAME) || guessDeviceName();
+  }
+
   async function api(path, options = {}) {
     const sep = path.includes("?") ? "&" : "?";
-    const res = await fetch(`${path}${sep}t=${encodeURIComponent(state.token)}`, {
+    const extra = `t=${encodeURIComponent(state.token)}&cid=${encodeURIComponent(state.cid)}&name=${encodeURIComponent(deviceName())}`;
+    const res = await fetch(`${path}${sep}${extra}`, {
       ...options,
       headers: { "Content-Type": "application/json", "X-FM-Token": state.token, ...(options.headers || {}) },
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401 || res.status === 403) {
-      blocked("Сессия закрыта", data.error || "Откройте на компьютере «Телефон» и отсканируйте QR-код заново.");
-      throw new Error(data.error || "forbidden");
+      const reason = data.error || "Откройте на компьютере «Телефон» и отсканируйте QR-код заново.";
+      blocked("Сессия закрыта", reason);
+      throw new Error(reason);
     }
     if (!res.ok) throw new Error(data.error || res.statusText);
     return data;
@@ -163,18 +179,34 @@
     state.stopped = true;
     $("blocker-title").textContent = title;
     $("blocker-text").textContent = text;
+    $("blocker").classList.add("is-on");
     $("blocker").hidden = false;
+  }
+
+  function unblocked() {
+    state.stopped = false;
+    $("blocker").classList.remove("is-on");
+    $("blocker").hidden = true;
   }
 
   async function boot() {
     const params = new URLSearchParams(location.search);
     const fromUrl = params.get("t");
     state.token = fromUrl || localStorage.getItem(LS_TOKEN) || "";
-    state.cid = localStorage.getItem("finmaster.remote.cid") || uid();
-    localStorage.setItem("finmaster.remote.cid", state.cid);
+    state.cid = localStorage.getItem(LS_CID) || uid();
+    localStorage.setItem(LS_CID, state.cid);
+    if (!localStorage.getItem(LS_NAME)) localStorage.setItem(LS_NAME, guessDeviceName());
     if (fromUrl) {
       localStorage.setItem(LS_TOKEN, fromUrl);
-      history.replaceState(null, "", "/m");
+      const url = new URL(location.href);
+      if (url.searchParams.get("t") !== fromUrl) {
+        url.searchParams.set("t", fromUrl);
+        history.replaceState(null, "", url.pathname + url.search);
+      }
+    } else if (state.token && !params.get("t")) {
+      const url = new URL(location.href);
+      url.searchParams.set("t", state.token);
+      history.replaceState(null, "", url.pathname + url.search);
     }
     if (!state.token) {
       blocked("Нет доступа", "Отсканируйте QR-код в окне «Телефон» на компьютере.");
@@ -182,6 +214,12 @@
     }
     try {
       const data = await api("/api/remote/session");
+      unblocked();
+      try {
+        localStorage.setItem("finmaster.remote.url", location.href);
+      } catch {
+        /* ignore */
+      }
       applySnapshot(data, true);
       state.recent = data.recent || [];
       setSync("ok", "подключено");
@@ -193,13 +231,16 @@
 
   async function pollLoop() {
     while (!state.stopped) {
+      const before = state.version;
       try {
         const data = await api(`/api/remote/pull?since=${state.version}&cid=${encodeURIComponent(state.cid)}&kind=mobile`);
         if (data.enabled === false) {
           blocked("Сессия завершена", "На компьютере выключили удалённый доступ.");
           return;
         }
+        if (typeof data.version === "number") state.version = Math.max(state.version, data.version);
         if (data.changed) applySnapshot(data);
+        if (state.version <= before) await sleep(400);
       } catch (err) {
         if (state.stopped) return;
         setSync("err", "нет связи с компьютером");
@@ -209,12 +250,13 @@
   }
 
   function applySnapshot(data, initial = false) {
-    if (typeof data.version === "number") state.version = data.version;
+    if (typeof data.version === "number") state.version = Math.max(state.version, data.version);
     if (typeof data.path === "string") state.path = data.path;
     if (typeof data.dirty === "boolean") state.dirty = data.dirty;
     if (Array.isArray(data.clients)) state.clients = data.clients;
     updateHead();
-    if (!data.document || data.origin === state.cid) return;
+    if (!data.document) return;
+    if (!initial && data.origin === state.cid) return;
     if (!initial && (state.pushTimer || state.pushing)) return;
     if (!initial && isTyping()) {
       state.pending = data.document;
@@ -334,9 +376,44 @@
     return true;
   }
 
+  function orderNewestStamp(order) {
+    let best = order.created_at || "";
+    for (const line of order.lines || []) {
+      const d = line.order_date || "";
+      if (d > best) best = d;
+    }
+    return best;
+  }
+
+  const SORT_OPTIONS = [
+    { value: "date-desc", label: "Сначала новые" },
+    { value: "date-asc", label: "Сначала старые" },
+    { value: "number", label: "По номеру" },
+    { value: "customer", label: "По заказчику" },
+    { value: "amount-desc", label: "По сумме" },
+  ];
+
+  function compareOrders(a, b, sort) {
+    if (sort === "date-asc") return orderNewestStamp(a).localeCompare(orderNewestStamp(b));
+    if (sort === "number") return String(a.number || "").localeCompare(String(b.number || ""), "ru", { numeric: true });
+    if (sort === "customer") return String(a.customer || "").localeCompare(String(b.customer || ""), "ru");
+    if (sort === "amount-desc") return orderTotals(b).after - orderTotals(a).after;
+    return orderNewestStamp(b).localeCompare(orderNewestStamp(a));
+  }
+
   function visibleOrders() {
     const q = state.query.trim().toLowerCase();
-    return orders().filter((o) => matchesQuery(o, q) && matchesFilter(o, state.filter));
+    return orders()
+      .filter((o) => matchesQuery(o, q) && matchesFilter(o, state.filter))
+      .sort((a, b) => compareOrders(a, b, state.sort));
+  }
+
+  function updateSortBtn() {
+    const btn = $("btn-sort");
+    if (!btn) return;
+    const cur = SORT_OPTIONS.find((x) => x.value === state.sort) || SORT_OPTIONS[0];
+    btn.textContent = state.sort === "date-asc" ? "↑ старые" : state.sort === "amount-desc" ? "Σ сумма" : state.sort === "number" ? "№ номер" : state.sort === "customer" ? "Ая клиент" : "↓ новые";
+    btn.title = cur.label;
   }
 
   /* ================= отрисовка ================= */
@@ -395,6 +472,7 @@
 
   function renderOrders() {
     renderChips();
+    updateSortBtn();
     const list = visibleOrders();
     const box = $("orders-list");
     if (!list.length) {
@@ -625,10 +703,14 @@
               .join("")
           : '<div class="empty">Список пуст</div>'
       }</div>
-      <h3 class="section">Сессия</h3>
+      <h3 class="section">Это устройство</h3>
       <article class="card">
-        <div class="muted">Подключено устройств: ${state.clients.filter((c) => c.kind === "mobile").length}</div>
-        <div class="stack"><button type="button" class="btn wide danger-ghost" id="cmd-leave">Отключиться от компьютера</button></div>
+        <div class="field"><label>Имя на компьютере</label><input type="text" id="device-name" value="${esc(deviceName())}" /></div>
+        <div class="muted" style="margin:8px 0 0">Устройство запомнено. Добавьте эту страницу в закладки — QR больше не нужен.</div>
+        <div class="stack" style="margin-top:12px">
+          <button type="button" class="btn wide" id="cmd-copy-link">Скопировать постоянную ссылку</button>
+          <button type="button" class="btn wide danger-ghost" id="cmd-leave">Отключиться от компьютера</button>
+        </div>
       </article>`;
   }
 
@@ -657,6 +739,7 @@
       )
       .join("");
     $("sheet").hidden = false;
+    $("sheet").classList.add("is-on");
     $("sheet")._pick = (i) => {
       closeSheet();
       onPick(items[i]);
@@ -665,6 +748,7 @@
 
   function closeSheet() {
     $("sheet").hidden = true;
+    $("sheet").classList.remove("is-on");
   }
 
   /* ================= редактирование ================= */
@@ -737,8 +821,17 @@
   /* ================= события ================= */
 
   function bind() {
-    $("main").addEventListener("input", onEdit);
-    $("main").addEventListener("change", onEdit);
+    $("main").addEventListener("input", (e) => {
+      if (e.target.id === "device-name") {
+        localStorage.setItem(LS_NAME, e.target.value.trim() || guessDeviceName());
+        return;
+      }
+      onEdit(e);
+    });
+    $("main").addEventListener("change", (e) => {
+      if (e.target.id === "device-name") return;
+      onEdit(e);
+    });
     document.addEventListener("focusout", () => setTimeout(flushPending, 120));
 
     $("main").addEventListener("click", async (e) => {
@@ -799,11 +892,19 @@
         if (await command("new")) toast("Создаю новый отчёт…");
         return;
       }
+      if (e.target.closest("#cmd-copy-link")) {
+        const link = location.href;
+        navigator.clipboard?.writeText(link).then(
+          () => toast("Ссылка скопирована — сохраните в закладки"),
+          () => toast(link)
+        );
+        return;
+      }
       if (e.target.closest("#cmd-leave")) {
         state.stopped = true;
         api("/api/remote/leave", { method: "POST", body: JSON.stringify({ cid: state.cid }) }).catch(() => {});
         localStorage.removeItem(LS_TOKEN);
-        blocked("Отключено", "Чтобы подключиться снова, отсканируйте QR-код на компьютере.");
+        blocked("Отключено", "Чтобы подключиться снова, откройте закладку или отсканируйте QR-код.");
       }
     });
 
@@ -843,6 +944,18 @@
     $("search").addEventListener("input", (e) => {
       state.query = e.target.value;
       renderOrders();
+    });
+
+    $("btn-sort").addEventListener("click", () => {
+      openSheet(
+        "Сортировка заказов",
+        SORT_OPTIONS,
+        state.sort,
+        (item) => {
+          state.sort = item.value;
+          renderOrders();
+        }
+      );
     });
 
     $("tabbar").addEventListener("click", (e) => {
