@@ -45,6 +45,9 @@
     device: null,
     deviceFactsOpen: false,
     waitingForDoc: false,
+    exprField: "",
+    exprInput: null,
+    exprSystemKb: false,
   };
 
   /* ================= утилиты ================= */
@@ -62,9 +65,33 @@
   }
 
   const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const EXPR_MIRROR = { qty_expr: "quantity", price_expr: "price", discount_expr: "discount", paid_expr: "paid" };
+
+  function isFormula(expr) {
+    return /[+\-*/()×xX÷]/.test(String(expr || ""));
+  }
+
+  function formatExprResult(n) {
+    const r = round2(n);
+    return Number.isInteger(r) ? String(r) : String(r);
+  }
+
+  function exprRaw(line, field) {
+    const raw = line[field];
+    if (raw != null && String(raw).trim() !== "") return String(raw);
+    const numKey = EXPR_MIRROR[field];
+    return String((numKey && line[numKey]) ?? "");
+  }
+
+  function shownExprValue(line, field) {
+    const expr = exprRaw(line, field);
+    const v = evalExpr(expr);
+    if (isFormula(expr) && Number.isFinite(v)) return formatExprResult(v);
+    return expr;
+  }
 
   function evalExpr(raw) {
-    const s = String(raw ?? "").trim().replaceAll("×", "*").replaceAll(",", ".");
+    const s = String(raw ?? "").trim().replaceAll("×", "*").replaceAll("÷", "/").replaceAll(",", ".");
     if (!s) return 0;
     const normalized = s.replace(/(\d)\s*[xX]\s*(\d)/g, "$1*$2");
     if (!/^[\d+\-*/().\s]+$/.test(normalized)) return NaN;
@@ -289,7 +316,12 @@
       blocked("Сессия закрыта", reason);
       throw new Error(reason);
     }
-    if (!res.ok) throw new Error(data.error || res.statusText);
+    if (!res.ok) {
+      const err = new Error(data.error || res.statusText);
+      err.code = data.code || "";
+      err.suggested = data.suggested || "";
+      throw err;
+    }
     return data;
   }
 
@@ -461,6 +493,34 @@
     } catch (err) {
       toast(`Не удалось: ${err.message || err}`);
       return false;
+    }
+  }
+
+  async function createNewReport() {
+    if (state.dirty && !confirm("Создать новый отчёт? Несохранённые правки нужно сохранить заранее.")) return;
+    const typed = prompt("Название нового отчёта:", "Новый отчёт");
+    if (typed == null) return;
+    let title = typed.trim() || "Новый отчёт";
+    for (;;) {
+      try {
+        const res = await api("/api/remote/command", {
+          method: "POST",
+          body: JSON.stringify({ type: "new", title }),
+        });
+        state.version = res.version;
+        toast(`Создаю «${res.title || title}»…`);
+        return;
+      } catch (err) {
+        if (err.code === "exists") {
+          const next = prompt(`Файл «${title}» уже есть в Документы\\FinMaster.\nВведите другое имя:`, err.suggested || `${title} 2`);
+          if (next == null) return;
+          title = next.trim();
+          if (!title) return;
+          continue;
+        }
+        toast(`Не удалось: ${err.message || err}`);
+        return;
+      }
     }
   }
 
@@ -840,8 +900,14 @@
 
   function closeEditor() {
     state.editLineId = null;
+    hideExprPad();
+    state.exprField = "";
+    state.exprInput = null;
+    state.exprSystemKb = false;
     $("editor").hidden = true;
     $("editor").classList.remove("is-on");
+    const card = $("editor").querySelector(".sheet-card");
+    if (card) card.style.bottom = "";
     document.body.classList.remove("locked");
     if (state.view === "order") renderOrder();
     flushPending();
@@ -873,25 +939,24 @@
       </div>
 
       <label class="big-label">Количество</label>
-      <div class="stepper">
-        <button type="button" class="step" data-step="-1">−</button>
-        <input type="text" inputmode="decimal" class="big-input" value="${esc(line.qty_expr ?? line.quantity ?? "")}" ${a("qty_expr")} />
-        <button type="button" class="step" data-step="1">+</button>
+      <div class="qty-row">
+        ${exprFieldHtml(line, "qty_expr", a("qty_expr"), "1+2×6")}
         ${selectHtml(state.doc.units, line.unit, `${a("unit")} class="unit-select"`)}
       </div>
+      <div class="hint">Можно 2×6+1 — цифры и знаки на панели внизу</div>
 
       <label class="big-label">Цена за единицу</label>
-      <input type="text" inputmode="decimal" class="big-input" value="${esc(line.price_expr ?? line.price ?? "")}" ${a("price_expr")} />
-      <div class="hint">Можно писать выражение: <code>2*350</code> или <code>1200+80</code></div>
+      ${exprFieldHtml(line, "price_expr", a("price_expr"), "2×350")}
+      <div class="hint">После ввода видно сумму, при нажатии снова — выражение</div>
 
       <label class="big-label">Скидка, %</label>
-      <input type="text" inputmode="decimal" class="big-input" value="${esc(line.discount_expr ?? line.discount ?? "")}" ${a("discount_expr")} />
+      ${exprFieldHtml(line, "discount_expr", a("discount_expr"), "0")}
       <div class="chips inline">${DISCOUNTS.map(
         (d) => `<button type="button" class="chip ${Math.round(t.discount) === d ? "active" : ""}" data-discount="${d}">${d}%</button>`
       ).join("")}</div>
 
       <label class="big-label">Оплачено</label>
-      <input type="text" inputmode="decimal" class="big-input" value="${esc(line.paid_expr ?? line.paid ?? "")}" ${a("paid_expr")} />
+      ${exprFieldHtml(line, "paid_expr", a("paid_expr"), "0")}
       <div class="chips inline">
         <button type="button" class="chip" data-paid="full">Оплачено полностью</button>
         <button type="button" class="chip" data-paid="half">Половина</button>
@@ -923,6 +988,10 @@
         <button type="button" class="btn wide" id="ed-dup">Дублировать позицию</button>
         <button type="button" class="btn wide danger-ghost" id="ed-del">Удалить позицию</button>
       </div>`;
+    if (state.exprField && !$("expr-pad")?.hidden) {
+      state.exprInput = document.querySelector(`#editor-body input[data-f="${state.exprField}"]`);
+      refreshExprPadResult();
+    }
   }
 
   function editorSumsHtml(t) {
@@ -939,15 +1008,193 @@
     const box = $("ed-sums");
     if (!line || !box) return;
     box.innerHTML = editorSumsHtml(lineTotals(line));
+    refreshExprPadResult();
   }
 
   function setLineNumber(line, exprKey, value) {
     line[exprKey] = String(value);
-    const mirror = MIRROR[exprKey];
+    const mirror = EXPR_MIRROR[exprKey];
     if (mirror) {
       const v = evalExpr(line[exprKey]);
       line[mirror] = Number.isFinite(v) ? round2(v) : 0;
     }
+  }
+
+  const EXPR_KEYS = [
+    ["1", "1", ""],
+    ["2", "2", ""],
+    ["3", "3", ""],
+    ["+", "+", "op"],
+    ["(", "(", "op"],
+    ["4", "4", ""],
+    ["5", "5", ""],
+    ["6", "6", ""],
+    ["−", "-", "op"],
+    [")", ")", "op"],
+    ["7", "7", ""],
+    ["8", "8", ""],
+    ["9", "9", ""],
+    ["×", "*", "op"],
+    ["⌫", "back", "util"],
+    ["0", "0", ""],
+    [".", ".", ""],
+    ["00", "00", ""],
+    ["÷", "/", "op"],
+    ["C", "clear", "util"],
+  ];
+
+  function fillExprPad() {
+    const grid = $("expr-pad-grid");
+    if (!grid || grid.childElementCount) return;
+    grid.innerHTML = EXPR_KEYS.map(
+      ([label, op, kind]) =>
+        `<button type="button" class="expr-pad-key ${kind}" data-expr-op="${op}">${label}</button>`
+    ).join("");
+  }
+
+  function exprTargetInput() {
+    if (state.exprInput?.isConnected) return state.exprInput;
+    if (!state.exprField) return null;
+    state.exprInput = document.querySelector(`#editor-body input[data-f="${state.exprField}"]`);
+    return state.exprInput;
+  }
+
+  function exprResultText(field, raw, line) {
+    const s = String(raw ?? "").trim();
+    if (!s) return "2 × 6 + 1";
+    const v = evalExpr(s);
+    if (!Number.isFinite(v)) return "неверное выражение";
+    if (field === "qty_expr") {
+      const q = Math.round(v * 1000) / 1000;
+      return `= ${q} ${line?.unit || ""}`.trim();
+    }
+    if (field === "discount_expr") return `= ${round2(v)}%`;
+    return `= ${money(v)}`;
+  }
+
+  function refreshExprPadResult() {
+    const box = $("expr-pad-result");
+    if (!box) return;
+    const input = exprTargetInput();
+    const line = findLine(currentOrder(), state.editLineId);
+    const field = input?.dataset?.f || state.exprField;
+    const raw = input?.value ?? line?.[field] ?? "";
+    const text = exprResultText(field, raw, line);
+    box.textContent = text;
+    box.classList.toggle("bad", text === "неверное выражение");
+  }
+
+  function exprFieldHtml(line, field, attrs, placeholder) {
+    const raw = exprRaw(line, field);
+    const formula = isFormula(raw) && Number.isFinite(evalExpr(raw));
+    return `<input type="text" inputmode="none" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" class="big-input expr-input${formula ? " is-result" : ""}" placeholder="${esc(placeholder)}" value="${esc(formula ? shownExprValue(line, field) : raw)}" data-expr="${esc(raw)}" data-showing="${formula ? "result" : "expr"}" ${attrs} />`;
+  }
+
+  function markExprValidity(input) {
+    if (!input) return;
+    const raw = String(input.dataset.showing === "result" ? input.dataset.expr ?? "" : input.value ?? "").trim();
+    input.classList.toggle("invalid", raw !== "" && !Number.isFinite(evalExpr(raw)));
+  }
+
+  function revealExpr(input) {
+    if (!input || input.dataset.showing !== "result") return;
+    input.dataset.showing = "expr";
+    input.value = input.dataset.expr || "";
+    input.classList.remove("is-result");
+    markExprValidity(input);
+  }
+
+  function collapseExpr(input) {
+    if (!input?.dataset?.f) return;
+    const raw = String(input.dataset.showing === "result" ? input.dataset.expr ?? "" : input.value ?? "").replaceAll(",", ".");
+    if (input.dataset.showing !== "result") input.dataset.expr = raw;
+    const v = evalExpr(raw);
+    markExprValidity(input);
+    if (Number.isFinite(v) && isFormula(raw)) {
+      input.dataset.showing = "result";
+      input.value = formatExprResult(v);
+      input.classList.add("is-result");
+    } else {
+      input.dataset.showing = "expr";
+      if (input.value !== raw) input.value = raw;
+      input.classList.remove("is-result");
+    }
+  }
+
+  function applyExprToken(input, token) {
+    if (!input || !token) return;
+    revealExpr(input);
+    input.dataset.showing = "expr";
+    input.classList.remove("is-result");
+    const value = String(input.value ?? "");
+    const start = input.selectionStart ?? value.length;
+    const end = input.selectionEnd ?? start;
+    let next = value;
+    let pos = start;
+    if (token === "clear") {
+      next = "";
+      pos = 0;
+    } else if (token === "back") {
+      if (start !== end) {
+        next = value.slice(0, start) + value.slice(end);
+        pos = start;
+      } else if (start > 0) {
+        next = value.slice(0, start - 1) + value.slice(end);
+        pos = start - 1;
+      } else {
+        return;
+      }
+    } else {
+      next = value.slice(0, start) + token + value.slice(end);
+      pos = start + token.length;
+    }
+    input.value = next;
+    input.dataset.expr = next;
+    input.focus();
+    try {
+      input.setSelectionRange(pos, pos);
+    } catch {
+      /* some mobile browsers ignore selection on unfocused inputs */
+    }
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    markExprValidity(input);
+  }
+
+  function showExprPad(input) {
+    if (!input) return;
+    revealExpr(input);
+    state.exprInput = input;
+    state.exprField = input.dataset.f || "";
+    if (state.exprSystemKb) {
+      input.setAttribute("inputmode", "text");
+      input.removeAttribute("readonly");
+      return;
+    }
+    fillExprPad();
+    const pad = $("expr-pad");
+    if (pad) pad.hidden = false;
+    $("editor")?.classList.add("expr-open");
+    input.setAttribute("inputmode", "none");
+    refreshExprPadResult();
+    requestAnimationFrame(() => {
+      input.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }
+
+  function hideExprPad() {
+    const pad = $("expr-pad");
+    if (pad) pad.hidden = true;
+    $("editor")?.classList.remove("expr-open");
+  }
+
+  function useSystemExprKeyboard() {
+    state.exprSystemKb = true;
+    hideExprPad();
+    const input = exprTargetInput();
+    if (!input) return;
+    input.setAttribute("inputmode", "text");
+    input.removeAttribute("readonly");
+    input.focus();
   }
 
   function editorJump(step) {
@@ -1971,6 +2218,8 @@
   /* ================= шторки ================= */
 
   function openSheet(title, items, current, onPick) {
+    $("sheet").classList.remove("is-menu");
+    $("sheet-title").hidden = false;
     $("sheet-title").textContent = title;
     $("sheet-list").innerHTML = items
       .map(
@@ -1992,33 +2241,80 @@
 
   function closeSheet() {
     $("sheet").hidden = true;
-    $("sheet").classList.remove("is-on");
+    $("sheet").classList.remove("is-on", "is-menu");
+    $("sheet-title").hidden = false;
+    $("sheet")._menu = null;
+  }
+
+  function menuHtml() {
+    const dark = document.documentElement.getAttribute("data-theme") === "dark";
+    const full = fullscreenOn();
+    const tiles = [
+      ["snapshot", "◨", "Снимок"],
+      ["new", "+", "Новый отчёт"],
+      ["link", "↗", "Ссылка"],
+      ["device", "◈", "Отчёты"],
+    ];
+    return `
+      <div class="menu-panel">
+        <div class="menu-head">
+          <div class="menu-title">Меню</div>
+          <div class="menu-tools">
+            <button type="button" class="menu-sq ${full ? "on" : ""}" data-menu="fullscreen" aria-label="${full ? "Выйти из полного экрана" : "Полный экран"}">
+              <b>${full ? "↙" : "⛶"}</b>
+            </button>
+            <button type="button" class="menu-sq" data-menu="theme" aria-label="${dark ? "Светлая тема" : "Тёмная тема"}">
+              <b>${dark ? "☀" : "☾"}</b>
+            </button>
+          </div>
+        </div>
+        <button type="button" class="menu-save ${state.dirty ? "dirty" : ""}" data-menu="save">
+          <strong>${state.dirty ? "Сохранить изменения" : "Сохранить"}</strong>
+          ${state.dirty ? "<small>есть несохранённые правки</small>" : "<small>на компьютере</small>"}
+        </button>
+        <div class="menu-grid">
+          ${tiles
+            .map(
+              ([id, ico, label]) =>
+                `<button type="button" class="menu-tile" data-menu="${id}"><b>${ico}</b><span>${label}</span></button>`
+            )
+            .join("")}
+        </div>
+      </div>`;
+  }
+
+  function renderMenu() {
+    if (!$("sheet").classList.contains("is-menu")) return;
+    $("sheet-list").innerHTML = menuHtml();
   }
 
   function openMenu() {
-    const items = [
-      { value: "save", label: "Сохранить на компьютере", hint: state.dirty ? "есть несохранённые правки" : "" },
-      { value: "fullscreen", label: fullscreenOn() ? "Выйти из полного экрана" : "Полный экран" },
-      { value: "snapshot", label: "Снимок для заказчика" },
-      { value: "theme", label: document.documentElement.getAttribute("data-theme") === "dark" ? "Светлая тема" : "Тёмная тема" },
-      { value: "new", label: "Создать новый отчёт" },
-      { value: "link", label: "Скопировать постоянную ссылку" },
-      { value: "device", label: "Отчёты и устройство" },
-    ];
-    openSheet("Меню", items, "", async (item) => {
-      if (item.value === "save") {
-        await push();
-        if (await command("save")) toast("Отчёт сохраняется на компьютере");
-      } else if (item.value === "fullscreen") toggleFullscreen();
-      else if (item.value === "snapshot") setView("snapshot");
-      else if (item.value === "theme") toggleTheme();
-      else if (item.value === "new") {
-        if (confirm("Создать новый отчёт на компьютере? Несохранённые правки нужно сохранить заранее.")) {
-          if (await command("new")) toast("Создаю новый отчёт…");
-        }
-      } else if (item.value === "link") copyLink();
-      else if (item.value === "device") setView("files");
-    });
+    $("sheet-title").hidden = true;
+    $("sheet").classList.add("is-on", "is-menu");
+    $("sheet").hidden = false;
+    $("sheet-list").innerHTML = menuHtml();
+    $("sheet")._menu = onMenuAction;
+  }
+
+  async function onMenuAction(value) {
+    if (value === "theme") {
+      toggleTheme();
+      renderMenu();
+      return;
+    }
+    if (value === "fullscreen") {
+      await toggleFullscreen();
+      renderMenu();
+      return;
+    }
+    closeSheet();
+    if (value === "save") {
+      await push();
+      if (await command("save")) toast("Отчёт сохраняется на компьютере");
+    } else if (value === "snapshot") setView("snapshot");
+    else if (value === "new") await createNewReport();
+    else if (value === "link") copyLink();
+    else if (value === "device") setView("files");
   }
 
   function toggleTheme() {
@@ -2038,7 +2334,7 @@
   /* ================= редактирование ================= */
 
   const DECIMAL_FIELDS = new Set(["qty_expr", "price_expr", "discount_expr", "paid_expr"]);
-  const MIRROR = { qty_expr: "quantity", price_expr: "price", discount_expr: "discount", paid_expr: "paid" };
+  const MIRROR = EXPR_MIRROR;
 
   function onEdit(e) {
     const el = e.target;
@@ -2058,6 +2354,7 @@
     if (el.dataset.l) {
       const line = findLine(order, el.dataset.l);
       if (!line) return;
+      if (DECIMAL_FIELDS.has(field) && el.dataset.showing === "result") return;
       let value = el.value;
       if (DECIMAL_FIELDS.has(field) && value.includes(",")) {
         const pos = el.selectionStart;
@@ -2066,6 +2363,7 @@
         if (pos != null) el.setSelectionRange(pos, pos);
       }
       line[field] = value;
+      if (DECIMAL_FIELDS.has(field)) el.dataset.expr = value;
       if (MIRROR[field]) {
         const v = evalExpr(value);
         line[MIRROR[field]] = Number.isFinite(v) ? round2(v) : 0;
@@ -2080,10 +2378,16 @@
         if (found?.price != null && !num(line.price)) {
           setLineNumber(line, "price_expr", found.price);
           const inp = document.querySelector(`input[data-l="${CSS.escape(line.id)}"][data-f="price_expr"]`);
-          if (inp) inp.value = String(found.price);
+          if (inp) {
+            inp.value = String(found.price);
+            inp.dataset.expr = String(found.price);
+            inp.dataset.showing = "expr";
+            inp.classList.remove("is-result");
+          }
         }
       }
       if (field === "paid_expr") autoPaidStatus(line);
+      if (DECIMAL_FIELDS.has(field)) markExprValidity(el);
       refreshEditorSums();
       refreshOrderRow(line.id);
     } else {
@@ -2118,6 +2422,57 @@
   /* ================= события ================= */
 
   function bind() {
+    fillExprPad();
+
+    const dockEditorToViewport = () => {
+      const editor = $("editor");
+      const card = editor?.querySelector(".sheet-card");
+      if (!card) return;
+      if (editor.hidden) {
+        card.style.bottom = "";
+        return;
+      }
+      const vv = window.visualViewport;
+      if (!vv) return;
+      const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      card.style.bottom = overlap ? `${overlap}px` : "";
+    };
+    window.visualViewport?.addEventListener("resize", dockEditorToViewport);
+    window.visualViewport?.addEventListener("scroll", dockEditorToViewport);
+
+    document.addEventListener("touchstart", (e) => {
+      const input = e.target.closest("#editor-body input.expr-input");
+      if (!input || state.exprSystemKb || document.activeElement === input) return;
+      input.setAttribute("readonly", "readonly");
+    }, true);
+
+    document.addEventListener("focusin", (e) => {
+      const input = e.target.closest("#editor-body input.expr-input");
+      if (input) {
+        if (state.exprField && state.exprField !== input.dataset.f) state.exprSystemKb = false;
+        showExprPad(input);
+        if (!state.exprSystemKb) {
+          requestAnimationFrame(() => input.removeAttribute("readonly"));
+        }
+        return;
+      }
+      if (e.target.closest("#expr-pad")) return;
+      if (e.target.closest("#editor") && !e.target.closest("input, select, textarea")) return;
+      hideExprPad();
+    });
+
+    $("expr-pad")?.addEventListener("pointerdown", (e) => {
+      const key = e.target.closest("[data-expr-op]");
+      if (!key) return;
+      e.preventDefault();
+      applyExprToken(exprTargetInput(), key.dataset.exprOp);
+    });
+
+    $("expr-pad-hide")?.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      useSystemExprKeyboard();
+    });
+
     document.addEventListener("input", (e) => {
       if (e.target.id === "device-name") {
         const value = e.target.value.trim();
@@ -2165,7 +2520,20 @@
       onEdit(e);
     });
 
-    document.addEventListener("focusout", () => setTimeout(flushPending, 150));
+    document.addEventListener("focusout", (e) => {
+      const input = e.target.closest?.("#editor-body input.expr-input");
+      if (input) {
+        const next = e.relatedTarget;
+        if (!next?.closest?.("#expr-pad")) {
+          setTimeout(() => {
+            if (document.activeElement === input) return;
+            if (document.activeElement?.closest?.("#expr-pad")) return;
+            collapseExpr(input);
+          }, 0);
+        }
+      }
+      setTimeout(flushPending, 150);
+    });
 
     $("main").addEventListener("click", async (e) => {
       const open = e.target.closest("[data-open]");
@@ -2283,7 +2651,7 @@
         return;
       }
       if (e.target.closest("#cmd-new")) {
-        if (await command("new")) toast("Создаю новый отчёт…");
+        await createNewReport();
         return;
       }
       if (e.target.closest("#device-info")) {
@@ -2321,19 +2689,6 @@
       const line = findLine(order, state.editLineId);
       if (!line) return;
 
-      const step = e.target.closest("[data-step]");
-      if (step) {
-        const delta = Number(step.dataset.step);
-        const next = Math.max(0, round2(lineTotals(line).qty + delta));
-        setLineNumber(line, "qty_expr", next);
-        const inp = document.querySelector(`input[data-l="${CSS.escape(line.id)}"][data-f="qty_expr"]`);
-        if (inp) inp.value = String(next);
-        refreshEditorSums();
-        refreshOrderRow(line.id);
-        touchDoc();
-        pushSoon();
-        return;
-      }
       const disc = e.target.closest("[data-discount]");
       if (disc) {
         setLineNumber(line, "discount_expr", Number(disc.dataset.discount));
@@ -2504,13 +2859,21 @@
         closeSheet();
         return;
       }
+      const menu = e.target.closest("[data-menu]");
+      if (menu) {
+        $("sheet")._menu?.(menu.dataset.menu);
+        return;
+      }
       const pick = e.target.closest("[data-pick]");
       if (pick) $("sheet")._pick?.(Number(pick.dataset.pick));
     });
 
-    document.addEventListener("fullscreenchange", () => {
+    const onFullscreen = () => {
       if (state.view === "files") renderFiles();
-    });
+      renderMenu();
+    };
+    document.addEventListener("fullscreenchange", onFullscreen);
+    document.addEventListener("webkitfullscreenchange", onFullscreen);
 
     window.addEventListener("beforeunload", () => {
       if (state.pushTimer) {

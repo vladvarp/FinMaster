@@ -13,7 +13,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 from backend import qr, storage
 from backend.dialogs import open_report_dialog, save_csv_dialog, save_png_dialog, save_report_dialog
-from backend.document import normalize_document, now_iso
+from backend.document import empty_document, normalize_document, now_iso
 from backend.remote import SESSION as REMOTE
 from backend.remote import lan_candidates
 from backend.telegram import BOT as TELEGRAM
@@ -645,6 +645,29 @@ def api_remote_command():
         if not path or not os.path.exists(path):
             return jsonify({"error": "Файл не найден."}), 404
         payload["path"] = os.path.abspath(path)
+    if kind == "new":
+        title = storage.safe_report_title(str(data.get("title") or "Новый отчёт"))
+        path = storage.default_report_path(title)
+        if os.path.exists(path):
+            return (
+                jsonify(
+                    {
+                        "error": "Файл с таким названием уже есть.",
+                        "code": "exists",
+                        "title": title,
+                        "suggested": storage.suggest_report_title(title),
+                    }
+                ),
+                409,
+            )
+        try:
+            doc = empty_document(title)
+            storage.atomic_write(path, json.dumps(doc, ensure_ascii=False, indent=2))
+            storage.add_recent(path, title)
+        except OSError as exc:
+            return jsonify({"error": f"Не удалось сохранить отчёт: {exc}"}), 500
+        version = REMOTE.issue_command("open", path=os.path.abspath(path))
+        return jsonify({"ok": True, "version": version, "path": os.path.abspath(path), "title": title})
     version = REMOTE.issue_command(kind, **payload)
     return jsonify({"ok": True, "version": version})
 

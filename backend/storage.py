@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 from datetime import datetime, timezone
 from typing import Any
@@ -231,6 +232,55 @@ def forget_device(cid: str) -> list[dict[str, Any]]:
 
 def rotate_remote_token() -> dict[str, Any]:
     return save_remote_settings(token=secrets.token_urlsafe(12), devices=[])
+
+
+def user_documents_dir() -> str:
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            buf = ctypes.create_unicode_buffer(260)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0 and buf.value:
+                return buf.value
+        except Exception:
+            pass
+        home = os.environ.get("USERPROFILE") or os.path.expanduser("~")
+        for name in ("Documents", "Документы"):
+            path = os.path.join(home, name)
+            if os.path.isdir(path):
+                return path
+        return os.path.join(home, "Documents")
+    xdg = os.environ.get("XDG_DOCUMENTS_DIR")
+    if xdg:
+        return os.path.expanduser(xdg)
+    home = os.path.expanduser("~")
+    docs = os.path.join(home, "Documents")
+    return docs if os.path.isdir(docs) else home
+
+
+def default_reports_dir() -> str:
+    path = os.path.join(user_documents_dir(), APP_NAME)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def safe_report_title(title: str) -> str:
+    name = re.sub(r'[\\/:*?"<>|]+', " ", str(title or "").strip())
+    name = re.sub(r"\s+", " ", name).strip(" .")
+    return name[:80] or "Новый отчёт"
+
+
+def default_report_path(title: str) -> str:
+    return os.path.join(default_reports_dir(), f"{safe_report_title(title)}.fmaster")
+
+
+def suggest_report_title(title: str) -> str:
+    base = safe_report_title(title)
+    stem = re.sub(r"\s+\d+$", "", base).strip() or base
+    n = 2
+    while os.path.exists(default_report_path(f"{stem} {n}")) and n < 200:
+        n += 1
+    return f"{stem} {n}"
 
 
 def atomic_write(path: str, content: str) -> None:

@@ -12,7 +12,7 @@
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/favicon.png" />
-    <link rel="stylesheet" href="/mobile.css?v=16" />
+    <link rel="stylesheet" href="/mobile.css?v=21" />
   </head>
   <body>
     <header class="topbar">
@@ -101,6 +101,13 @@
           <button type="button" class="btn small primary" id="ed-done">Готово</button>
         </div>
         <div class="editor-body" id="editor-body"></div>
+        <div class="expr-pad" id="expr-pad" hidden>
+          <div class="expr-pad-top">
+            <span class="expr-pad-result" id="expr-pad-result"></span>
+            <button type="button" class="expr-pad-hide" id="expr-pad-hide">Клавиатура</button>
+          </div>
+          <div class="expr-pad-grid" id="expr-pad-grid"></div>
+        </div>
       </div>
     </div>
 
@@ -114,6 +121,6 @@
     </div>
 
     <div class="toast" id="toast"></div>
-    <script src="/mobile.js?v=16"></script>
+    <script src="/mobile.js?v=22"></script>
   </body>
 </html>
