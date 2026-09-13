@@ -78,7 +78,7 @@ class RemoteSession:
         self.dirty = False
         self.origin = ""
         self.command: dict[str, Any] | None = None
-        self.nav: dict[str, Any] = {"seq": 0, "view": "", "order_id": "", "cid": ""}
+        self.nav: dict[str, Any] = {"seq": 0, "view": "", "order_id": "", "cid": "", "period": "", "filter": "", "status": ""}
         self.history: dict[str, bool] = {"undo": False, "redo": False}
         self.doc_version = 0
         self._command_id = 0
@@ -93,7 +93,7 @@ class RemoteSession:
             self.token = str(token or self.token or secrets.token_urlsafe(12))
             self._clients = {}
             self.command = None
-            self.nav = {"seq": 0, "view": "", "order_id": "", "cid": ""}
+            self.nav = {"seq": 0, "view": "", "order_id": "", "cid": "", "period": "", "filter": "", "status": ""}
             self.version += 1
             self._cond.notify_all()
             return self.token
@@ -105,7 +105,7 @@ class RemoteSession:
             self.path = ""
             self._clients = {}
             self.command = None
-            self.nav = {"seq": 0, "view": "", "order_id": "", "cid": ""}
+            self.nav = {"seq": 0, "view": "", "order_id": "", "cid": "", "period": "", "filter": "", "status": ""}
             self.version += 1
             self._cond.notify_all()
 
@@ -159,8 +159,18 @@ class RemoteSession:
             self._cond.notify_all()
             return self.version
 
-    def set_nav(self, view: str, order_id: str = "", cid: str = "") -> int:
-        """Телефон сообщает, какой экран открыт, чтобы компьютер показал то же самое."""
+    def set_nav(
+        self,
+        view: str,
+        order_id: str = "",
+        cid: str = "",
+        period: str = "",
+        order_filter: str = "",
+        status: str = "",
+    ) -> int:
+        """Телефон сообщает, какой экран и какие фильтры сводки открыты."""
+        periods = {"all", "today", "week", "month", "year"}
+        filters = {"all", "debt", "paid"}
         with self._cond:
             self._nav_seq += 1
             self.nav = {
@@ -168,6 +178,9 @@ class RemoteSession:
                 "view": str(view or ""),
                 "order_id": str(order_id or ""),
                 "cid": str(cid or ""),
+                "period": period if period in periods else "all",
+                "filter": order_filter if order_filter in filters else "all",
+                "status": str(status or "")[:80],
             }
             self.version += 1
             self._cond.notify_all()

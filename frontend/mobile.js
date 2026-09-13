@@ -42,6 +42,9 @@
       title: "",
       fieldsOpen: false,
     },
+    device: null,
+    deviceFactsOpen: false,
+    waitingForDoc: false,
   };
 
   /* ================= утилиты ================= */
@@ -171,28 +174,114 @@
 
   /* ================= сеть ================= */
 
-  function guessDeviceName() {
+  function guessDeviceName(profile) {
+    const info = profile || state.device || {};
+    if (info.model) return info.model;
     const ua = navigator.userAgent || "";
-    if (/iPhone|iPad/.test(ua)) return "iPhone";
-    if (/Android/.test(ua)) return "Android";
+    if (/iPhone/.test(ua)) {
+      const ios = ua.match(/OS (\d+)[_.](\d+)/);
+      return ios ? `iPhone · iOS ${ios[1]}.${ios[2]}` : "iPhone";
+    }
+    if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return "iPad";
+    const android = ua.match(/Android[^;]*;\s*([^);]+)/);
+    if (android) {
+      const model = android[1].replace(/\s*Build\/.*$/i, "").replace(/^wv$/i, "").trim();
+      if (model && !/^Android$/i.test(model)) return model;
+    }
+    if (/Android/i.test(ua)) return "Android";
     return "Телефон";
   }
 
+  function customDeviceName() {
+    const raw = (localStorage.getItem(LS_NAME) || "").trim();
+    if (!raw || raw === "Телефон" || raw === "Android" || raw === "iPhone") return "";
+    return raw;
+  }
+
   function deviceName() {
-    return localStorage.getItem(LS_NAME) || guessDeviceName();
+    return customDeviceName() || guessDeviceName();
+  }
+
+  function devicePayload() {
+    const info = state.device || {};
+    return {
+      name: deviceName(),
+      model: info.model || "",
+      platform: info.platform || "",
+      platform_version: info.platformVersion || "",
+      brands: info.brands || "",
+      user_agent: navigator.userAgent || "",
+      language: navigator.language || "",
+      screen: `${window.screen?.width || 0}×${window.screen?.height || 0}`,
+      viewport: `${window.innerWidth}×${window.innerHeight}`,
+      pixel_ratio: String(window.devicePixelRatio || 1),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+    };
+  }
+
+  async function detectDeviceProfile() {
+    const ua = navigator.userAgent || "";
+    const uaData = navigator.userAgentData;
+    const info = {
+      model: "",
+      platform: navigator.platform || "",
+      platformVersion: "",
+      brands: "",
+      mobile: /Mobi|Android|iPhone|iPad/i.test(ua),
+    };
+    try {
+      if (uaData) {
+        info.mobile = !!uaData.mobile;
+        info.platform = uaData.platform || info.platform;
+        info.brands = (uaData.brands || [])
+          .map((b) => b.brand)
+          .filter((b) => b && !/not.?a.?brand/i.test(b) && b !== "Chromium")
+          .join(", ");
+        if (uaData.getHighEntropyValues) {
+          const high = await Promise.race([
+            uaData.getHighEntropyValues(["model", "platform", "platformVersion"]),
+            new Promise((resolve) => setTimeout(() => resolve({}), 700)),
+          ]);
+          info.model = String(high.model || "").trim();
+          info.platform = high.platform || info.platform;
+          info.platformVersion = String(high.platformVersion || "").trim();
+        }
+      }
+    } catch {
+      /* браузер не отдал модель */
+    }
+    if (!info.model) {
+      const guessed = guessDeviceName(info);
+      if (guessed !== "Телефон" && guessed !== "Android") info.model = guessed;
+    }
+    info.name = guessDeviceName(info);
+    state.device = info;
+    return info;
+  }
+
+  function deviceHeader() {
+    try {
+      const json = JSON.stringify(devicePayload());
+      return btoa(unescape(encodeURIComponent(json)));
+    } catch {
+      return "";
+    }
   }
 
   async function api(path, options = {}) {
     const sep = path.includes("?") ? "&" : "?";
     const extra = `t=${encodeURIComponent(state.token)}&cid=${encodeURIComponent(state.cid)}&name=${encodeURIComponent(deviceName())}`;
+    const headers = {
+      "Content-Type": "application/json",
+      "X-FM-Token": state.token,
+      "ngrok-skip-browser-warning": "1",
+      ...(options.headers || {}),
+    };
+    const device = deviceHeader();
+    if (device) headers["X-FM-Device"] = device;
     const res = await fetch(`${path}${sep}${extra}`, {
       ...options,
-      headers: {
-        "Content-Type": "application/json",
-        "X-FM-Token": state.token,
-        "ngrok-skip-browser-warning": "1",
-        ...(options.headers || {}),
-      },
+      headers,
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401 || res.status === 403) {
@@ -222,9 +311,14 @@
     const params = new URLSearchParams(location.search);
     const fromUrl = params.get("t");
     state.token = fromUrl || localStorage.getItem(LS_TOKEN) || "";
+    state.stopped = false;
     state.cid = localStorage.getItem(LS_CID) || uid();
     localStorage.setItem(LS_CID, state.cid);
-    if (!localStorage.getItem(LS_NAME)) localStorage.setItem(LS_NAME, guessDeviceName());
+    try {
+      await detectDeviceProfile();
+    } catch {
+      state.device = state.device || {};
+    }
     if (fromUrl) {
       localStorage.setItem(LS_TOKEN, fromUrl);
       const url = new URL(location.href);
@@ -251,6 +345,12 @@
       }
       applySnapshot(data, true);
       state.recent = data.recent || [];
+      if (!hasDocument()) {
+        state.waitingForDoc = true;
+        setView("files");
+      } else {
+        renderCurrent();
+      }
       setSync("ok", "подключено");
       navReport();
       pollLoop();
@@ -279,14 +379,25 @@
     }
   }
 
+  function hasDocument() {
+    return !!(state.doc && typeof state.doc === "object");
+  }
+
   function applySnapshot(data, initial = false) {
     if (typeof data.version === "number") state.version = Math.max(state.version, data.version);
     if (typeof data.path === "string") state.path = data.path;
     if (typeof data.dirty === "boolean") state.dirty = data.dirty;
     if (Array.isArray(data.clients)) state.clients = data.clients;
+    if (Array.isArray(data.recent)) state.recent = data.recent;
     if (data.history && typeof data.history === "object") state.history = data.history;
     updateHead();
-    if (!data.document) return;
+    if (!data.document) {
+      if (state.doc) state.doc = null;
+      state.waitingForDoc = true;
+      if (!initial && state.view !== "files") setView("files");
+      else if (!initial) renderCurrent();
+      return;
+    }
     const fresh = typeof data.doc_version === "number" ? data.doc_version > state.docVersion : true;
     if (typeof data.doc_version === "number") state.docVersion = Math.max(state.docVersion, data.doc_version);
     if (!initial && !fresh) return;
@@ -296,8 +407,14 @@
       state.pending = data.document;
       return;
     }
+    const wasEmpty = !state.doc;
     state.doc = data.document;
     if (!initial) setSync("ok", "обновлено с компьютера");
+    if (wasEmpty && state.waitingForDoc && state.view === "files") {
+      state.waitingForDoc = false;
+      setView("orders");
+      return;
+    }
     renderCurrent();
   }
 
@@ -351,7 +468,13 @@
     if (state.stopped || !state.token) return;
     const view = state.view;
     const orderId = view === "order" ? state.orderId || "" : "";
-    api("/api/remote/nav", { method: "POST", body: JSON.stringify({ view, order_id: orderId, cid: state.cid }) }).catch(() => {});
+    const payload = { view, order_id: orderId, cid: state.cid };
+    if (view === "stats") {
+      payload.period = state.stats.period || "all";
+      payload.filter = state.stats.filter || "all";
+      payload.status = state.stats.status || "";
+    }
+    api("/api/remote/nav", { method: "POST", body: JSON.stringify(payload) }).catch(() => {});
   }
 
   /* ================= модель ================= */
@@ -485,8 +608,12 @@
   /* ================= общая отрисовка ================= */
 
   function updateHead() {
-    $("head-title").textContent = state.doc?.title || "FinMaster";
-    const file = state.path ? state.path.split(/[\\/]/).pop() : "файл не сохранён";
+    $("head-title").textContent = hasDocument() ? state.doc.title || "FinMaster" : "Недавние отчёты";
+    const file = hasDocument()
+      ? state.path
+        ? state.path.split(/[\\/]/).pop()
+        : "файл не сохранён"
+      : "на компьютере ничего не открыто";
     const phones = state.clients.filter((c) => c.kind === "mobile").length;
     $("head-sub").textContent = `${state.dirty ? "• " : ""}${file}${phones > 1 ? ` · ${phones} телефона` : ""}`;
     $("btn-back").hidden = state.view !== "order";
@@ -512,6 +639,14 @@
     window.scrollTo({ top: 0 });
     renderCurrent();
     if (changed) navReport();
+  }
+
+  function requireDocument() {
+    if (hasDocument()) return true;
+    state.waitingForDoc = true;
+    if (state.view !== "files") setView("files");
+    else renderFiles();
+    return false;
   }
 
   function renderCurrent() {
@@ -549,6 +684,7 @@
   }
 
   function renderOrders() {
+    if (!requireDocument()) return;
     renderChips();
     updateSortBtn();
     const list = visibleOrders();
@@ -616,6 +752,7 @@
   }
 
   function renderOrder() {
+    if (!requireDocument()) return;
     const order = currentOrder();
     if (!order) {
       setView("orders");
@@ -903,6 +1040,7 @@
   }
 
   function renderStats() {
+    if (!requireDocument()) return;
     const all = statsRows();
     renderStatsChips(
       orders().flatMap((order) => (order.lines || []).map((line) => ({ order, line }))),
@@ -1262,6 +1400,7 @@
   }
 
   function renderSnapshot() {
+    if (!requireDocument()) return;
     const box = $("snapshot-body");
     const list = orders();
     if (!list.length) {
@@ -1708,11 +1847,32 @@
 
   /* ================= отчёты и устройство ================= */
 
+  function recentListHtml() {
+    const recent = state.recent || [];
+    if (!recent.length) return '<div class="empty">Недавних отчётов нет — создайте новый или откройте файл на компьютере.</div>';
+    return recent
+      .map(
+        (item) => `<article class="card file-item ${item.path === state.path ? "current" : ""}">
+          <div class="fi-body">
+            <strong>${esc(item.title || item.path.split(/[\\/]/).pop())}</strong>
+            <small>${esc(item.path)}</small>
+          </div>
+          ${
+            item.path === state.path
+              ? '<span class="pill" style="background:var(--accent-2)">открыт</span>'
+              : item.exists === false
+                ? '<span class="pill" style="background:var(--muted)">нет файла</span>'
+                : `<button type="button" class="btn small" data-open-file="${esc(item.path)}">Открыть</button>`
+          }
+        </article>`
+      )
+      .join("");
+  }
+
   function renderFiles() {
     const file = state.path ? state.path.split(/[\\/]/).pop() : "";
-    const recent = state.recent || [];
-    $("files-body").innerHTML = `
-      <article class="card">
+    const openCard = hasDocument()
+      ? `<article class="card">
         <div class="muted" style="margin-bottom:8px">Открыто на компьютере</div>
         <div class="grid-2">
           <div class="field"><label>Название отчёта</label><input type="text" data-d="title" value="${esc(state.doc?.title || "")}" /></div>
@@ -1725,39 +1885,52 @@
           }</button>
           <button type="button" class="btn wide" id="cmd-new">Создать новый отчёт</button>
         </div>
-      </article>
+      </article>`
+      : `<article class="card">
+        <strong>На компьютере нет открытого отчёта</strong>
+        <p class="muted" style="margin:8px 0 12px">Выберите недавний файл — он откроется в программе. Или создайте новый.</p>
+        <button type="button" class="btn primary wide" id="cmd-new">Создать новый отчёт</button>
+      </article>`;
+    $("files-body").innerHTML = `
+      ${openCard}
       <h3 class="section">Недавние отчёты</h3>
-      <div class="list">${
-        recent.length
-          ? recent
-              .map(
-                (item) => `<article class="card file-item ${item.path === state.path ? "current" : ""}">
-                  <div class="fi-body">
-                    <strong>${esc(item.title || item.path.split(/[\\/]/).pop())}</strong>
-                    <small>${esc(item.path)}</small>
-                  </div>
-                  ${
-                    item.path === state.path
-                      ? '<span class="pill" style="background:var(--accent-2)">открыт</span>'
-                      : item.exists === false
-                        ? '<span class="pill" style="background:var(--muted)">нет файла</span>'
-                        : `<button type="button" class="btn small" data-open-file="${esc(item.path)}">Открыть</button>`
-                  }
-                </article>`
-              )
-              .join("")
-          : '<div class="empty">Список пуст</div>'
-      }</div>
+      <div class="list">${recentListHtml()}</div>
       <h3 class="section">Это устройство</h3>
       <article class="card">
-        <div class="field last"><label>Имя на компьютере</label><input type="text" id="device-name" value="${esc(deviceName())}" /></div>
-        <div class="muted" style="margin:10px 0 0">Устройство запомнено. Добавьте страницу в закладки — QR больше не нужен.</div>
+        <div class="field last">
+          <label>Имя на компьютере</label>
+          <div class="name-row">
+            <input type="text" id="device-name" value="${esc(deviceName())}" placeholder="${esc(guessDeviceName())}" />
+            <button type="button" class="icon-btn ghost" id="device-info" aria-label="О устройстве" title="О устройстве">i</button>
+          </div>
+        </div>
+        <div class="device-facts" id="device-facts" ${state.deviceFactsOpen ? "" : "hidden"}>${deviceFactsHtml()}</div>
+        <div class="muted" style="margin:10px 0 0">Если имя не задано, компьютер берёт его из браузера. Добавьте страницу в закладки — QR больше не нужен.</div>
         <div class="stack">
           <button type="button" class="btn wide" id="cmd-fullscreen">${document.fullscreenElement ? "Выйти из полного экрана" : "Полный экран"}</button>
           <button type="button" class="btn wide" id="cmd-copy-link">Скопировать постоянную ссылку</button>
           <button type="button" class="btn wide danger-ghost" id="cmd-leave">Отключиться от компьютера</button>
         </div>
       </article>`;
+  }
+
+  function deviceFactsHtml() {
+    const p = devicePayload();
+    const rows = [
+      ["Имя", p.name],
+      ["Модель", p.model],
+      ["Система", [p.platform, p.platform_version].filter(Boolean).join(" ")],
+      ["Браузер", p.brands],
+      ["Язык", p.language],
+      ["Экран", p.screen],
+      ["Окно", p.viewport],
+      ["Плотность", p.pixel_ratio],
+      ["Часовой пояс", p.timezone],
+      ["User-Agent", p.user_agent],
+    ].filter(([, value]) => value);
+    return rows
+      .map(([label, value]) => `<div class="fact"><span>${esc(label)}</span><b>${esc(value)}</b></div>`)
+      .join("");
   }
 
   async function refreshRecent() {
@@ -1947,7 +2120,9 @@
   function bind() {
     document.addEventListener("input", (e) => {
       if (e.target.id === "device-name") {
-        localStorage.setItem(LS_NAME, e.target.value.trim() || guessDeviceName());
+        const value = e.target.value.trim();
+        if (value) localStorage.setItem(LS_NAME, value);
+        else localStorage.removeItem(LS_NAME);
         return;
       }
       if (e.target.id === "snap-title") {
@@ -2013,18 +2188,21 @@
       if (statsPeriod) {
         state.stats.period = statsPeriod.dataset.statsPeriod;
         renderStats();
+        navReport();
         return;
       }
       const statsFilter = e.target.closest("[data-stats-filter]");
       if (statsFilter) {
         state.stats.filter = statsFilter.dataset.statsFilter;
         renderStats();
+        navReport();
         return;
       }
       const statsStatus = e.target.closest("[data-stats-status]");
       if (statsStatus) {
         state.stats.status = statsStatus.dataset.statsStatus;
         renderStats();
+        navReport();
         return;
       }
       if (e.target.closest("#order-fold")) {
@@ -2106,6 +2284,15 @@
       }
       if (e.target.closest("#cmd-new")) {
         if (await command("new")) toast("Создаю новый отчёт…");
+        return;
+      }
+      if (e.target.closest("#device-info")) {
+        state.deviceFactsOpen = !state.deviceFactsOpen;
+        const box = $("device-facts");
+        if (box) {
+          box.hidden = !state.deviceFactsOpen;
+          box.innerHTML = deviceFactsHtml();
+        }
         return;
       }
       if (e.target.closest("#cmd-fullscreen")) {
@@ -2307,7 +2494,10 @@
       setView(tab);
     });
 
-    $("btn-retry").addEventListener("click", () => location.reload());
+    $("btn-retry").addEventListener("click", () => {
+      unblocked();
+      boot();
+    });
 
     $("sheet").addEventListener("click", (e) => {
       if (e.target.closest("[data-close-sheet]")) {
@@ -2331,7 +2521,7 @@
       }
     });
     window.addEventListener("pagehide", () => {
-      if (!state.token || !state.cid) return;
+      if (!state.token || !state.cid || !state.stopped) return;
       navigator.sendBeacon?.(
         `/api/remote/leave?t=${encodeURIComponent(state.token)}`,
         new Blob([JSON.stringify({ cid: state.cid })], { type: "application/json" })

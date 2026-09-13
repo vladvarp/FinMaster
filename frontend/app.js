@@ -18,6 +18,7 @@
     shareOrderId: null,
     orderFilter: "all",
     focusOrderId: null,
+    remoteStats: null,
     cash: { filter: "all", day: "", bucket: "", customer: "" },
     cloud: null,
   };
@@ -500,10 +501,51 @@
     return (state.doc?.orders || []).find((o) => o.id === state.focusOrderId) || null;
   }
 
+  function dashPeriodMatch(iso, period) {
+    if (!period || period === "all") return true;
+    const stamp = String(iso || "");
+    if (!stamp) return false;
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const dayKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    if (period === "today") return stamp.slice(0, 10) === dayKey;
+    if (period === "week") {
+      const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+      return stamp >= `${from.getFullYear()}-${pad(from.getMonth() + 1)}-${pad(from.getDate())}T00:00`;
+    }
+    if (period === "month") return stamp.startsWith(`${now.getFullYear()}-${pad(now.getMonth() + 1)}`);
+    if (period === "year") return stamp.startsWith(String(now.getFullYear()));
+    return true;
+  }
+
+  function remoteStatsActive() {
+    const f = state.remoteStats;
+    if (!f) return false;
+    return (f.period && f.period !== "all") || (f.filter && f.filter !== "all") || !!f.status;
+  }
+
+  function remoteStatsLabel() {
+    const f = state.remoteStats || {};
+    const parts = [];
+    const periods = { today: "сегодня", week: "7 дней", month: "этот месяц", year: "этот год" };
+    const filters = { debt: "с долгом", paid: "оплаченные" };
+    if (f.period && f.period !== "all") parts.push(periods[f.period] || f.period);
+    if (f.filter && f.filter !== "all") parts.push(filters[f.filter] || f.filter);
+    if (f.status) parts.push(f.status);
+    return parts.join(" · ") || "все заказы";
+  }
+
   function dashRows() {
     const order = focusedOrder();
-    if (!order) return allRows();
-    return (order.lines || []).map((line) => ({ order, line, totals: lineTotals(line) }));
+    let rows = order
+      ? (order.lines || []).map((line) => ({ order, line, totals: lineTotals(line) }))
+      : allRows();
+    const f = state.remoteStats;
+    if (!f || focusedOrder()) return rows;
+    if (f.filter && f.filter !== "all") rows = rows.filter(({ order: o }) => orderFilterMatch(o, f.filter));
+    if (f.status) rows = rows.filter(({ line }) => line.status === f.status);
+    if (f.period && f.period !== "all") rows = rows.filter(({ line }) => dashPeriodMatch(line.order_date, f.period));
+    return rows;
   }
 
   function matchesSearch(order, line, q) {
@@ -829,7 +871,19 @@
       : `<div class="empty">Пока нет долгов и стоп-листов — отличный знак.</div>`;
 
     const focus = focusedOrder();
-    const last = focus ? [focus] : [...(state.doc.orders || [])].slice(-8).reverse();
+    const last = focus
+      ? [focus]
+      : (() => {
+          const seen = [];
+          const ids = new Set();
+          for (const { order } of [...rows].reverse()) {
+            if (ids.has(order.id)) continue;
+            ids.add(order.id);
+            seen.push(order);
+            if (seen.length >= 8) break;
+          }
+          return seen.length ? seen : [...(state.doc.orders || [])].slice(-8).reverse();
+        })();
     $("recent-orders").innerHTML = last.length
       ? `<table class="data"><thead><tr><th>№</th><th>Заказчик</th><th>Название</th><th>Итог</th></tr></thead><tbody>${last
           .map((o) => `<tr><td>${esc(o.number)}</td><td>${esc(o.customer)}</td><td>${esc(o.name)}</td><td class="num">${esc(money(orderTotals(o).after))}</td></tr>`)
@@ -842,6 +896,20 @@
     if (!box) return;
     const order = focusedOrder();
     const sub = $("insights-sub");
+    if (!order && remoteStatsActive()) {
+      box.hidden = false;
+      box.innerHTML = `
+        <div class="focus-head">
+          <span class="focus-tag">с телефона</span>
+          <b>Сводка</b>
+          <span class="focus-name">${esc(remoteStatsLabel())}</span>
+          <div class="focus-acts">
+            <button class="btn small" type="button" id="focus-clear">Весь отчёт</button>
+          </div>
+        </div>`;
+      if (sub) sub.textContent = `фильтры сводки: ${remoteStatsLabel()}`;
+      return;
+    }
     if (!order) {
       box.hidden = true;
       box.innerHTML = "";
@@ -2829,8 +2897,10 @@
     });
     $("btn-share-many").addEventListener("click", () => openShare(null));
     $("dash-focus")?.addEventListener("click", (e) => {
-      if (e.target.closest("#focus-clear")) setFocusOrder(null);
-      else if (e.target.closest("#focus-open")) {
+      if (e.target.closest("#focus-clear")) {
+        state.remoteStats = null;
+        setFocusOrder(null);
+      } else if (e.target.closest("#focus-open")) {
         const id = state.focusOrderId;
         state.focusOrderId = null;
         if (id) gotoOrder(id);
@@ -3386,6 +3456,10 @@
           return;
         }
         if ($("help-modal").classList.contains("open")) $("help-modal").classList.remove("open");
+        if ($("device-info-modal")?.classList.contains("open")) {
+          $("device-info-modal").classList.remove("open");
+          return;
+        }
         if ($("remote-guide-modal")?.classList.contains("open")) {
           $("remote-guide-modal").classList.remove("open");
           return;
@@ -5035,18 +5109,55 @@
       .map((d) => {
         const on = live.has(d.id);
         const when = d.seen_at ? new Date(d.seen_at).toLocaleString("ru-RU") : "";
+        const model = d.info?.model && d.info.model !== d.name ? d.info.model : "";
         return `<div class="remote-device ${on ? "is-on" : "is-off"}">
           <span class="rd-dot" title="${on ? "в сети" : "не в сети"}"></span>
           <div class="rd-body">
             <strong>${esc(d.name || "Телефон")}</strong>
             <small>${on ? '<span class="online">в сети</span>' : '<span class="offline">не в сети</span>'}${
               d.ip ? ` · ${esc(d.ip)}` : ""
-            }${when ? ` · ${esc(when)}` : ""}</small>
+            }${model ? ` · ${esc(model)}` : ""}${when ? ` · ${esc(when)}` : ""}</small>
           </div>
+          <button type="button" class="btn small rd-info" data-device-info="${esc(d.id)}" title="О устройстве" aria-label="О устройстве">i</button>
           <button type="button" class="btn small" data-forget="${esc(d.id)}">Забыть</button>
         </div>`;
       })
       .join("");
+  }
+
+  function deviceInfoRows(device, online) {
+    const info = device.info || {};
+    const when = device.seen_at ? new Date(device.seen_at).toLocaleString("ru-RU") : "—";
+    return [
+      ["Имя", device.name || "Телефон"],
+      ["Статус", online ? "в сети" : "не в сети"],
+      ["Адрес", device.ip || "—"],
+      ["Был в сети", when],
+      ["Модель", info.model],
+      ["Система", [info.platform, info.platform_version].filter(Boolean).join(" ")],
+      ["Браузер", info.brands],
+      ["Язык", info.language],
+      ["Экран", info.screen],
+      ["Окно", info.viewport],
+      ["Плотность", info.pixel_ratio],
+      ["Часовой пояс", info.timezone],
+      ["User-Agent", info.user_agent],
+    ].filter(([, value]) => value);
+  }
+
+  function openDeviceInfo(id) {
+    const device = (remote.devices || []).find((d) => d.id === id);
+    if (!device) return;
+    const online = mobileClients().some((c) => c.id === id);
+    const body = $("device-info-body");
+    const title = $("device-info-title");
+    if (title) title.textContent = device.name || "Устройство";
+    if (body) {
+      body.innerHTML = deviceInfoRows(device, online)
+        .map(([label, value]) => `<div class="device-info-row"><span>${esc(label)}</span><b>${esc(value)}</b></div>`)
+        .join("");
+    }
+    $("device-info-modal")?.classList.add("open");
   }
 
   function renderRemoteModal(data) {
@@ -5200,6 +5311,12 @@
     remote.polling = false;
   }
 
+  function revealRemoteWorkspace() {
+    if (!state.doc) return false;
+    if ($("app-shell")?.hidden) showApp();
+    return true;
+  }
+
   function applyRemoteDoc(doc) {
     const active = document.activeElement;
     const typing = active && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName);
@@ -5211,6 +5328,7 @@
     historyCommit();
     state.doc = doc;
     state.dirty = true;
+    showApp();
     renderAll();
     syncDirty();
     historySchedule();
@@ -5219,19 +5337,35 @@
   }
 
   function applyRemoteNav(nav) {
-    if (!nav || !nav.view || !state.doc) return;
+    if (!nav || !nav.view || !revealRemoteWorkspace()) return;
     if (nav.view === "order" && nav.order_id) {
       const order = (state.doc.orders || []).find((o) => o.id === nav.order_id);
       if (!order) return;
+      state.remoteStats = null;
       setFocusOrder(order.id);
       toast(`Телефон открыл заказ №${order.number || "—"}`);
       return;
     }
     const hadFocus = !!state.focusOrderId;
     state.focusOrderId = null;
+    if (nav.view === "stats") {
+      const next = {
+        period: nav.period || "all",
+        filter: nav.filter || "all",
+        status: nav.status || "",
+      };
+      const changed = JSON.stringify(state.remoteStats) !== JSON.stringify(next);
+      state.remoteStats = next;
+      if (state.view === "dashboard") renderDashboard();
+      else setView("dashboard");
+      if (changed && remoteStatsActive()) toast(`Сводка с телефона: ${remoteStatsLabel()}`);
+      return;
+    }
+    state.remoteStats = null;
     if (nav.view === "orders") setView("orders");
-    else if (nav.view === "stats" || nav.view === "snapshot") setView("dashboard");
+    else if (nav.view === "snapshot") setView("dashboard");
     else if (hadFocus && state.view === "dashboard") renderDashboard();
+    else if (state.view === "dashboard") renderDashboard();
   }
 
   function flushRemoteDoc() {
@@ -5385,7 +5519,16 @@
       if (e.target.checked) await remoteStart();
       else await remoteStop();
     });
+    $("device-info-close")?.addEventListener("click", () => $("device-info-modal")?.classList.remove("open"));
+    $("device-info-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("device-info-modal")) $("device-info-modal").classList.remove("open");
+    });
     $("remote-clients")?.addEventListener("click", async (e) => {
+      const info = e.target.closest("[data-device-info]");
+      if (info) {
+        openDeviceInfo(info.dataset.deviceInfo);
+        return;
+      }
       const btn = e.target.closest("[data-forget]");
       if (!btn) return;
       try {

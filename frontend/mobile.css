@@ -407,6 +407,22 @@ html[data-theme="dark"] input[type="date"] { color-scheme: dark; }
 /* ===== Поля ===== */
 .field { margin-bottom: 12px; }
 .field.last { margin-bottom: 0; }
+.name-row { display: flex; align-items: center; gap: 8px; }
+.name-row input { flex: 1; min-width: 0; }
+.device-facts {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.device-facts .fact {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  font-size: 12px;
+}
+.device-facts .fact span { color: var(--muted); flex: 0 0 38%; }
+.device-facts .fact b { font-weight: 650; text-align: right; overflow-wrap: anywhere; }
 .field > label {
   display: block;
   font-size: 12px;

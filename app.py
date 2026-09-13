@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -55,6 +56,19 @@ def _is_public_asset(path: str) -> bool:
 
 def _remote_token() -> str:
     return str(request.headers.get("X-FM-Token") or request.args.get("t") or "")
+
+
+def _device_info() -> dict[str, Any]:
+    raw = (request.headers.get("X-FM-Device") or "").strip()
+    if not raw:
+        return {}
+    try:
+        if not raw.startswith("{"):
+            raw = base64.b64decode(raw).decode("utf-8")
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 @app.before_request
@@ -571,13 +585,17 @@ def api_remote_pull():
     cid = request.args.get("cid") or ""
     kind = request.args.get("kind") or "mobile"
     name = request.args.get("name") or ""
+    info = _device_info()
+    name = name or str(info.get("name") or "")
     REMOTE.touch(cid, kind, name)
     if kind == "mobile" and cid:
-        storage.remember_device(cid, name, request.remote_addr or "")
+        storage.remember_device(cid, name, request.remote_addr or "", info)
     snap = REMOTE.wait(since)
     if "clients" not in snap:
         snap["clients"] = REMOTE.clients()
     snap["devices"] = storage.remote_settings().get("devices") or []
+    if kind == "mobile":
+        snap["recent"] = _recent_payload()
     return jsonify(snap)
 
 
@@ -590,8 +608,10 @@ def api_remote_session():
     cid = request.args.get("cid") or ""
     name = request.args.get("name") or ""
     if cid:
+        info = _device_info()
+        name = name or str(info.get("name") or "")
         REMOTE.touch(cid, "mobile", name)
-        storage.remember_device(cid, name, request.remote_addr or "")
+        storage.remember_device(cid, name, request.remote_addr or "", info)
     return jsonify(snap)
 
 
@@ -638,7 +658,14 @@ def api_remote_nav():
     view = str(data.get("view") or "")
     if view not in {"orders", "order", "stats", "files", "snapshot"}:
         return jsonify({"error": "Неизвестный экран."}), 400
-    version = REMOTE.set_nav(view, str(data.get("order_id") or ""), str(data.get("cid") or ""))
+    version = REMOTE.set_nav(
+        view,
+        str(data.get("order_id") or ""),
+        str(data.get("cid") or ""),
+        period=str(data.get("period") or ""),
+        order_filter=str(data.get("filter") or ""),
+        status=str(data.get("status") or ""),
+    )
     return jsonify({"ok": True, "version": version})
 
 

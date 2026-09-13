@@ -180,13 +180,36 @@ def save_remote_settings(**updates: Any) -> dict[str, Any]:
     return data
 
 
-def remember_device(cid: str, name: str = "", ip: str = "") -> list[dict[str, Any]]:
+_DEVICE_INFO_KEYS = (
+    "model",
+    "platform",
+    "platform_version",
+    "brands",
+    "user_agent",
+    "language",
+    "screen",
+    "viewport",
+    "pixel_ratio",
+    "timezone",
+)
+
+
+def remember_device(cid: str, name: str = "", ip: str = "", info: Any = None) -> list[dict[str, Any]]:
     cid = str(cid or "").strip()
     if not cid:
         return remote_settings()["devices"]
     data = remote_settings()
     devices = [d for d in data["devices"] if d.get("id") != cid]
     prev = next((d for d in data["devices"] if d.get("id") == cid), {})
+    prev_info = prev.get("info") if isinstance(prev.get("info"), dict) else {}
+    incoming = info if isinstance(info, dict) else {}
+    merged = dict(prev_info)
+    for key in _DEVICE_INFO_KEYS:
+        value = incoming.get(key)
+        if value in (None, ""):
+            continue
+        limit = 400 if key == "user_agent" else 120
+        merged[key] = str(value).strip()[:limit]
     devices.insert(
         0,
         {
@@ -194,6 +217,7 @@ def remember_device(cid: str, name: str = "", ip: str = "") -> list[dict[str, An
             "name": str(name or prev.get("name") or "Телефон").strip() or "Телефон",
             "ip": str(ip or prev.get("ip") or ""),
             "seen_at": now_local_iso(),
+            "info": merged,
         },
     )
     return save_remote_settings(devices=devices)["devices"]

@@ -1971,6 +1971,25 @@ html[data-theme="dark"] .fin-tip { box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5); }
 }
 .remote-device.is-off { opacity: 0.72; }
 .remote-empty { color: var(--muted); font-size: 13px; }
+.rd-info {
+  width: 32px;
+  min-width: 32px;
+  padding: 0;
+  font-family: var(--mono);
+  font-weight: 700;
+}
+.device-info-body { display: grid; gap: 8px; margin: 4px 0 8px; }
+.device-info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.device-info-row:last-child { border-bottom: 0; }
+.device-info-row span { color: var(--muted); flex: 0 0 34%; }
+.device-info-row b { font-weight: 650; text-align: right; overflow-wrap: anywhere; }
 @media (max-width: 720px) {
   .remote-layout { grid-template-columns: 1fr; }
 }
