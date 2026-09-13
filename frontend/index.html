@@ -384,7 +384,10 @@
 
   <div class="modal" id="remote-modal">
     <div class="modal-card remote-modal">
-      <h3>Управление с телефона</h3>
+      <div class="modal-title-row">
+        <h3>Управление с телефона</h3>
+        <button type="button" class="info-btn" id="remote-guide-open" title="Как подключить телефон" aria-label="Как подключить телефон">i</button>
+      </div>
       <p>Один раз отсканируйте код или откройте ссылку — устройство запомнится. Дальше заходите по той же закладке, без нового QR.</p>
       <div class="remote-layout">
         <div class="remote-qr-wrap">
@@ -396,16 +399,23 @@
           <div class="remote-state" id="remote-state">
             <span class="remote-dot"></span><span id="remote-state-text">Доступ выключен</span>
           </div>
-          <ul class="remote-steps">
-            <li>Телефон и компьютер — в одной сети Wi‑Fi.</li>
-            <li>После первого входа добавьте страницу в закладки браузера.</li>
-            <li>Ссылка постоянная: токен и порт не меняются, пока не нажмёте «Новая ссылка».</li>
-            <li>Если страница не открывается — разрешите Python в брандмауэре для частной сети.</li>
-          </ul>
+          <p class="remote-hint">В одной Wi‑Fi достаточно локальной ссылки. Из любой сети включите ngrok — как это сделать, кнопка «i» сверху.</p>
           <label class="remote-autostart">
             <input type="checkbox" id="remote-autostart" />
             Включать доступ при запуске программы
           </label>
+          <label class="remote-autostart">
+            <input type="checkbox" id="remote-ngrok" />
+            Через интернет (ngrok)
+          </label>
+          <div class="remote-ngrok-box" id="remote-ngrok-box">
+            <label class="field">
+              <span>Токен ngrok</span>
+              <input type="password" id="remote-ngrok-token" placeholder="2abc… из dashboard.ngrok.com" autocomplete="off" />
+            </label>
+            <button type="button" class="btn small" id="remote-ngrok-save">Сохранить и включить</button>
+            <div class="remote-ngrok-status" id="remote-ngrok-status"></div>
+          </div>
           <div class="remote-clients" id="remote-clients">Запомненных устройств нет</div>
         </div>
       </div>
@@ -415,6 +425,42 @@
         <button class="btn" type="button" id="remote-rotate">Новая ссылка</button>
         <button class="btn danger" type="button" id="remote-stop" hidden>Выключить доступ</button>
         <button class="btn primary" type="button" id="remote-start">Включить доступ</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="remote-guide-modal">
+    <div class="modal-card remote-guide-modal">
+      <h3>Как подключить телефон</h3>
+      <p>Два способа: локальная сеть или интернет через ngrok.</p>
+      <div class="remote-guide-cols">
+        <section>
+          <h4>В одной сети Wi‑Fi</h4>
+          <ol>
+            <li>Нажмите «Включить доступ» — появится QR-код и локальная ссылка.</li>
+            <li>Наведите камеру телефона на код или откройте ссылку в браузере.</li>
+            <li>Добавьте страницу в закладки. Повторно сканировать не нужно: токен и порт постоянные.</li>
+            <li>Телефон и компьютер должны быть в одной Wi‑Fi. Если страница не открывается — разрешите Python в брандмауэре Windows для частной сети.</li>
+          </ol>
+        </section>
+        <section>
+          <h4>Через интернет — ngrok</h4>
+          <ol>
+            <li>Скачайте ngrok с <a href="https://ngrok.com/download" target="_blank" rel="noopener">ngrok.com/download</a>, распакуйте и добавьте программу в PATH.</li>
+            <li>Зарегистрируйтесь на ngrok.com и скопируйте <b>Your Authtoken</b> в кабинете.</li>
+            <li>Перезапустите FinMaster, откройте окно «Телефон» и включите «Через интернет (ngrok)».</li>
+            <li>Вставьте токен и нажмите «Сохранить и включить».</li>
+            <li>QR сменится на адрес вида <code>https://….ngrok-free.app/m?t=…</code>. Сохраните его в закладки телефона — так можно зайти из любой сети, пока компьютер включён.</li>
+          </ol>
+        </section>
+      </div>
+      <div class="remote-guide-notes">
+        <p>Под QR есть чипы <b>Интернет</b> и локальные IP — ими выбираете, куда ведёт код.</p>
+        <p>На бесплатном ngrok адрес часто меняется после перезапуска программы. Тогда снова скопируйте ссылку. При первом открытии ngrok может показать свою страницу-предупреждение — нажмите Visit Site.</p>
+        <p>Токен хранится только на этом компьютере. «Новая ссылка» сбрасывает старые закладки. Запрос через туннель не открывает рабочий стол — телефон видит только мобильный интерфейс.</p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn primary" type="button" id="remote-guide-close">Понятно</button>
       </div>
     </div>
   </div>

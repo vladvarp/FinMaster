@@ -15,6 +15,7 @@ from backend.dialogs import open_report_dialog, save_csv_dialog, save_png_dialog
 from backend.document import normalize_document, now_iso
 from backend.remote import SESSION as REMOTE
 from backend.remote import lan_candidates
+from backend.tunnel import TUNNEL
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 FRONTEND = os.path.join(ROOT, "frontend")
@@ -29,7 +30,16 @@ LOCAL_ADDRS = {"127.0.0.1", "::1", "localhost"}
 MOBILE_FILES = {"/m", "/mobile.html", "/mobile.js", "/mobile.css", "/favicon.ico", "/favicon.svg"}
 
 
+def _is_tunneled() -> bool:
+    """Запрос пришёл через ngrok: Flask видит 127.0.0.1, но это телефон из интернета."""
+    forwarded = request.headers.get("X-Forwarded-For") or request.headers.get("X-Forwarded-Host")
+    host = (request.headers.get("Host") or "").lower()
+    return bool(forwarded) or "ngrok" in host
+
+
 def _is_local() -> bool:
+    if _is_tunneled():
+        return False
     return (request.remote_addr or "") in LOCAL_ADDRS
 
 
@@ -102,24 +112,74 @@ def _recent_payload() -> list[dict[str, Any]]:
     return recent
 
 
-def _remote_public(ip: str | None = None) -> dict[str, Any]:
+def _mobile_url(base: str, token: str) -> str:
+    return f"{base.rstrip('/')}/m?t={token}"
+
+
+def _qr_svg(url: str) -> str:
+    try:
+        return qr.svg(url, module=6)
+    except Exception:
+        return ""
+
+
+def _ensure_tunnel(settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = settings or storage.remote_settings()
+    snap = TUNNEL.snapshot()
+    if not cfg.get("ngrok"):
+        return {**snap, "wanted": False}
+    if snap.get("url"):
+        return {**snap, "wanted": True}
+    try:
+        TUNNEL.start(SERVER_PORT, str(cfg.get("ngrok_token") or ""))
+        snap = TUNNEL.snapshot()
+        return {**snap, "wanted": True}
+    except Exception as exc:
+        return {**TUNNEL.snapshot(), "wanted": True, "error": str(exc)}
+
+
+def _remote_public(ip: str | None = None, via: str | None = None) -> dict[str, Any]:
     settings = storage.remote_settings()
     ips = lan_candidates()
     chosen = ip if ip in ips else ips[0]
     token = REMOTE.token or settings["token"]
-    url = f"http://{chosen}:{SERVER_PORT}/m?t={token}"
+    lan_url = _mobile_url(f"http://{chosen}:{SERVER_PORT}", token)
+    tunnel = TUNNEL.snapshot()
+    if settings.get("ngrok") and not tunnel.get("url") and REMOTE.enabled:
+        tunnel = _ensure_tunnel(settings)
+    public_base = str(tunnel.get("url") or "")
+    public_url = _mobile_url(public_base, token) if public_base else ""
+    mode = via or settings.get("via") or "lan"
+    if mode == "ngrok" and public_url:
+        url = public_url
+        mode = "ngrok"
+    else:
+        url = lan_url
+        mode = "lan"
     return {
         "enabled": REMOTE.enabled,
         "url": url,
+        "lan_url": lan_url,
+        "public_url": public_url,
+        "via": mode,
         "token": token,
         "ip": chosen,
         "ips": ips,
         "port": SERVER_PORT,
-        "qr": qr.svg(url, module=6),
+        "qr": _qr_svg(url),
         "version": REMOTE.version,
         "autostart": bool(settings.get("autostart")),
         "devices": settings.get("devices") or [],
         "clients": REMOTE.clients(),
+        "ngrok": bool(settings.get("ngrok")),
+        "ngrok_ready": bool(settings.get("ngrok_token")),
+        "ngrok_installed": bool(tunnel.get("available")),
+        "tunnel": {
+            "wanted": bool(settings.get("ngrok")),
+            "url": public_base,
+            "error": tunnel.get("error") or "",
+            "running": bool(tunnel.get("running")),
+        },
     }
 
 
@@ -324,17 +384,51 @@ def api_remote_address():
     if not REMOTE.enabled:
         return jsonify({"error": "Сессия не запущена."}), 409
     data = request.get_json(silent=True) or {}
+    via = str(data.get("via") or "")
     ip = str(data.get("ip") or "")
+    if via == "ngrok":
+        storage.save_remote_settings(via="ngrok")
+        payload = _remote_public(via="ngrok")
+        if not payload.get("public_url"):
+            return jsonify({"error": payload.get("tunnel", {}).get("error") or "Интернет-туннель ещё не готов."}), 409
+        payload["ok"] = True
+        return jsonify(payload)
     if ip not in lan_candidates():
         return jsonify({"error": "Неизвестный адрес."}), 400
-    payload = _remote_public(ip)
+    storage.save_remote_settings(via="lan")
+    payload = _remote_public(ip, via="lan")
     payload["ok"] = True
+    return jsonify(payload)
+
+
+@app.post("/api/remote/ngrok")
+def api_remote_ngrok():
+    data = request.get_json(silent=True) or {}
+    updates: dict[str, Any] = {}
+    if "authtoken" in data:
+        updates["ngrok_token"] = str(data.get("authtoken") or "")
+    if "enabled" in data:
+        updates["ngrok"] = bool(data.get("enabled"))
+        if updates["ngrok"]:
+            updates["via"] = "ngrok"
+        else:
+            updates["via"] = "lan"
+    settings = storage.save_remote_settings(**updates) if updates else storage.remote_settings()
+    if settings.get("ngrok") and REMOTE.enabled:
+        _ensure_tunnel(settings)
+    elif not settings.get("ngrok"):
+        TUNNEL.stop()
+    payload = _remote_public()
+    payload["ok"] = True
+    if settings.get("ngrok") and REMOTE.enabled and not payload.get("public_url"):
+        return jsonify({**payload, "error": payload.get("tunnel", {}).get("error") or "Не удалось поднять ngrok."}), 400
     return jsonify(payload)
 
 
 @app.post("/api/remote/stop")
 def api_remote_stop():
     REMOTE.stop()
+    TUNNEL.stop()
     storage.save_remote_settings(autostart=False)
     return jsonify({"ok": True, **_remote_public()})
 
@@ -450,6 +544,7 @@ def api_quit():
     FORCE_CLOSE = True
     DIRTY = False
     REMOTE.stop()
+    TUNNEL.stop()
     window = WINDOW
     if window is not None:
         threading.Timer(0.05, window.destroy).start()
@@ -511,6 +606,9 @@ def main() -> None:
             break
         except Exception:
             time.sleep(0.1)
+
+    if settings.get("autostart") and settings.get("ngrok"):
+        threading.Thread(target=lambda: _ensure_tunnel(settings), daemon=True).start()
 
     try:
         import webview

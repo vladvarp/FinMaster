@@ -163,7 +163,12 @@
     const extra = `t=${encodeURIComponent(state.token)}&cid=${encodeURIComponent(state.cid)}&name=${encodeURIComponent(deviceName())}`;
     const res = await fetch(`${path}${sep}${extra}`, {
       ...options,
-      headers: { "Content-Type": "application/json", "X-FM-Token": state.token, ...(options.headers || {}) },
+      headers: {
+        "Content-Type": "application/json",
+        "X-FM-Token": state.token,
+        "ngrok-skip-browser-warning": "1",
+        ...(options.headers || {}),
+      },
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401 || res.status === 403) {

@@ -110,6 +110,9 @@ def remote_settings() -> dict[str, Any]:
         "port": port,
         "autostart": bool(raw.get("autostart")),
         "devices": devices[:MAX_DEVICES],
+        "ngrok": bool(raw.get("ngrok")),
+        "ngrok_token": str(raw.get("ngrok_token") or "").strip(),
+        "via": str(raw.get("via") or "lan"),
     }
     if raw.get("token") != token or raw.get("port") != port or not isinstance(cfg.get("remote"), dict):
         cfg["remote"] = out
@@ -131,6 +134,14 @@ def save_remote_settings(**updates: Any) -> dict[str, Any]:
         data["autostart"] = bool(updates["autostart"])
     if "devices" in updates and isinstance(updates["devices"], list):
         data["devices"] = [d for d in updates["devices"] if isinstance(d, dict) and d.get("id")][:MAX_DEVICES]
+    if "ngrok" in updates:
+        data["ngrok"] = bool(updates["ngrok"])
+    if "ngrok_token" in updates:
+        token_value = str(updates["ngrok_token"] or "").strip()
+        if token_value:
+            data["ngrok_token"] = token_value
+    if "via" in updates:
+        data["via"] = "ngrok" if updates["via"] == "ngrok" else "lan"
     cfg["remote"] = data
     save_config(cfg)
     return data

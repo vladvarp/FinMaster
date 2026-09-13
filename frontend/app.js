@@ -2099,6 +2099,10 @@
           return;
         }
         if ($("help-modal").classList.contains("open")) $("help-modal").classList.remove("open");
+        if ($("remote-guide-modal")?.classList.contains("open")) {
+          $("remote-guide-modal").classList.remove("open");
+          return;
+        }
         if ($("remote-modal").classList.contains("open")) $("remote-modal").classList.remove("open");
       }
       if (!ctrl) return;
@@ -3587,17 +3591,28 @@
     if (Array.isArray(data.devices)) remote.devices = data.devices;
     if (typeof data.autostart === "boolean") remote.autostart = data.autostart;
     if (data.qr) remote.qr = data.qr;
+    if (data.lan_url) remote.lan_url = data.lan_url;
+    if ("public_url" in data) remote.public_url = data.public_url || "";
+    if (data.via) remote.via = data.via;
+    if (typeof data.ngrok === "boolean") remote.ngrok = data.ngrok;
+    if (typeof data.ngrok_ready === "boolean") remote.ngrokReady = data.ngrok_ready;
+    if (typeof data.ngrok_installed === "boolean") remote.ngrokInstalled = data.ngrok_installed;
+    if (data.tunnel) remote.tunnel = data.tunnel;
   }
 
   function renderRemoteIps() {
     const box = $("remote-ips");
     if (!box) return;
     const list = remote.ips || [];
-    box.hidden = list.length < 2;
-    if (box.hidden) return;
-    box.innerHTML = list
-      .map((ip) => `<button type="button" data-ip="${ip}" class="${ip === remote.ip ? "active" : ""}">${ip}</button>`)
-      .join("");
+    const chips = [];
+    if (remote.public_url) {
+      chips.push(`<button type="button" data-via="ngrok" class="${remote.via === "ngrok" ? "active" : ""}">Интернет</button>`);
+    }
+    list.forEach((ip) => {
+      chips.push(`<button type="button" data-ip="${ip}" class="${remote.via !== "ngrok" && ip === remote.ip ? "active" : ""}">${ip}</button>`);
+    });
+    box.hidden = chips.length < 2 && !remote.public_url;
+    box.innerHTML = chips.join("");
   }
 
   function renderRemoteDevices() {
@@ -3636,6 +3651,30 @@
     renderRemoteDevices();
     const auto = $("remote-autostart");
     if (auto) auto.checked = !!remote.autostart;
+    const ngrokBox = $("remote-ngrok-box");
+    const ngrokChk = $("remote-ngrok");
+    if (ngrokChk) ngrokChk.checked = !!remote.ngrok;
+    ngrokBox?.classList.toggle("show", !!remote.ngrok);
+    const tokenInput = $("remote-ngrok-token");
+    if (tokenInput && remote.ngrokReady && !tokenInput.value) tokenInput.placeholder = "токен сохранён — можно не вводить заново";
+    const ngrokStatus = $("remote-ngrok-status");
+    if (ngrokStatus) {
+      const tun = remote.tunnel || {};
+      ngrokStatus.className = "remote-ngrok-status";
+      if (!remote.ngrok) ngrokStatus.textContent = "";
+      else if (tun.error) {
+        ngrokStatus.classList.add("err");
+        ngrokStatus.textContent = tun.error;
+      } else if (remote.public_url) {
+        ngrokStatus.classList.add("ok");
+        ngrokStatus.textContent = "Туннель открыт. Сканируйте QR или сохраните ссылку в закладки — работает из любой сети.";
+      } else if (!remote.ngrokInstalled) {
+        ngrokStatus.classList.add("err");
+        ngrokStatus.textContent = "ngrok не установлен. Скачайте с ngrok.com и добавьте в PATH.";
+      } else {
+        ngrokStatus.textContent = "Туннель ещё не поднят — сохраните токен и включите доступ.";
+      }
+    }
     if (remote.enabled) {
       stateBox.classList.add("on");
       const phones = remote.clients?.filter((c) => c.kind === "mobile").length || 0;
@@ -3776,23 +3815,57 @@
       }
       if (!remote.enabled) remoteStart();
     });
-    $("remote-close")?.addEventListener("click", () => $("remote-modal").classList.remove("open"));
+    const closeRemoteModal = () => {
+      $("remote-guide-modal")?.classList.remove("open");
+      $("remote-modal")?.classList.remove("open");
+    };
+    $("remote-close")?.addEventListener("click", closeRemoteModal);
     $("remote-modal")?.addEventListener("click", (e) => {
-      if (e.target === $("remote-modal")) $("remote-modal").classList.remove("open");
+      if (e.target === $("remote-modal")) closeRemoteModal();
     });
     $("remote-ips")?.addEventListener("click", async (e) => {
-      const btn = e.target.closest("[data-ip]");
-      if (!btn || btn.dataset.ip === remote.ip) return;
+      const btn = e.target.closest("[data-ip], [data-via]");
+      if (!btn) return;
       try {
-        const data = await apiPost("/api/remote/address", { ip: btn.dataset.ip });
-        remote.url = data.url;
-        remote.ip = data.ip;
-        remote.ips = data.ips || remote.ips;
+        const data = await apiPost("/api/remote/address", btn.dataset.via === "ngrok" ? { via: "ngrok" } : { ip: btn.dataset.ip });
         renderRemoteModal(data);
-        toast(`Адрес переключён на ${data.ip}`);
+        toast(btn.dataset.via === "ngrok" ? "QR ведёт в интернет" : `Адрес переключён на ${data.ip}`);
       } catch (err) {
         toast(`Не удалось сменить адрес: ${err.message || err}`);
       }
+    });
+    $("remote-ngrok")?.addEventListener("change", async (e) => {
+      const on = e.target.checked;
+      $("remote-ngrok-box")?.classList.toggle("show", on);
+      if (!on) {
+        try {
+          renderRemoteModal(await apiPost("/api/remote/ngrok", { enabled: false }));
+          toast("Интернет-туннель выключен");
+        } catch (err) {
+          toast(err.message || String(err));
+        }
+      }
+    });
+    $("remote-ngrok-save")?.addEventListener("click", async () => {
+      const token = $("remote-ngrok-token")?.value || "";
+      try {
+        if (!remote.enabled) await remoteStart();
+        const data = await apiPost("/api/remote/ngrok", { enabled: true, authtoken: token });
+        renderRemoteModal(data);
+        toast(data.public_url ? "Интернет-ссылка готова" : "Туннель включён");
+      } catch (err) {
+        toast(`ngrok: ${err.message || err}`);
+        try {
+          renderRemoteModal(await apiGet("/api/remote/info"));
+        } catch {
+          /* ignore */
+        }
+      }
+    });
+    $("remote-guide-open")?.addEventListener("click", () => $("remote-guide-modal")?.classList.add("open"));
+    $("remote-guide-close")?.addEventListener("click", () => $("remote-guide-modal")?.classList.remove("open"));
+    $("remote-guide-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("remote-guide-modal")) $("remote-guide-modal").classList.remove("open");
     });
     $("remote-start")?.addEventListener("click", remoteStart);
     $("remote-stop")?.addEventListener("click", remoteStop);
