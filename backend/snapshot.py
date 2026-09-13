@@ -1,0 +1,536 @@
+"""Снимок заказа: текст и PNG — те же поля, темы и итоги, что на компьютере."""
+
+from __future__ import annotations
+
+import io
+from datetime import datetime, timezone
+from typing import Any
+
+from backend.finance import (
+    customer_org,
+    fmt_date,
+    line_totals,
+    lines_totals,
+    money,
+    num_expr,
+    qty_text,
+)
+
+
+FIELDS = [
+    {"id": "number", "label": "Номер заказа", "kind": "meta"},
+    {"id": "customer", "label": "Имя заказчика", "kind": "meta"},
+    {"id": "organization", "label": "Организация", "kind": "meta"},
+    {"id": "name", "label": "Название заказа", "kind": "meta"},
+    {"id": "order_type", "label": "Тип / работа", "kind": "col"},
+    {"id": "product", "label": "Продукт", "kind": "col"},
+    {"id": "quantity", "label": "Количество", "kind": "col"},
+    {"id": "order_date", "label": "Дата заказа", "kind": "col"},
+    {"id": "status", "label": "Статус", "kind": "col"},
+    {"id": "price", "label": "Цена", "kind": "col"},
+    {"id": "discount", "label": "Скидка", "kind": "col"},
+    {"id": "total", "label": "Сумма позиции", "kind": "col"},
+    {"id": "paid", "label": "Оплачено", "kind": "col"},
+    {"id": "unpaid", "label": "Не оплачено", "kind": "col"},
+    {"id": "payment_date", "label": "Дата оплаты", "kind": "col"},
+    {"id": "totals", "label": "Итоги заказа", "kind": "meta"},
+]
+FIELD_IDS = [item["id"] for item in FIELDS]
+FIELD_BY_ID = {item["id"]: item for item in FIELDS}
+
+PRESETS = {
+    "work": ["number", "name", "order_type", "product", "quantity", "status", "order_date"],
+    "invoice": [
+        "number",
+        "customer",
+        "organization",
+        "name",
+        "order_type",
+        "product",
+        "quantity",
+        "price",
+        "discount",
+        "total",
+        "paid",
+        "unpaid",
+        "totals",
+    ],
+    "short": ["number", "customer", "product", "quantity", "total", "totals"],
+    "full": list(FIELD_IDS),
+}
+PRESET_LABELS = {
+    "work": "Для работы",
+    "invoice": "Как счёт",
+    "short": "Коротко",
+    "full": "Все поля",
+}
+
+THEMES = {
+    "teal": {
+        "label": "Изумруд",
+        "head": ["#0f766e", "#115e59"],
+        "headInk": "#ffffff",
+        "accent": "#0f766e",
+        "bg": "#ffffff",
+        "ink": "#0f172a",
+        "meta": "#334155",
+        "line": "#e2e8f0",
+        "thBg": "#f8fafc",
+        "thInk": "#64748b",
+        "zebra": "#f8fafc",
+        "footBg": "#f1f5f9",
+        "note": "#94a3b8",
+    },
+    "graphite": {
+        "label": "Графит",
+        "head": ["#1e293b", "#0f172a"],
+        "headInk": "#ffffff",
+        "accent": "#334155",
+        "bg": "#ffffff",
+        "ink": "#0f172a",
+        "meta": "#334155",
+        "line": "#e2e8f0",
+        "thBg": "#f8fafc",
+        "thInk": "#64748b",
+        "zebra": "#f8fafc",
+        "footBg": "#f1f5f9",
+        "note": "#94a3b8",
+    },
+    "indigo": {
+        "label": "Индиго",
+        "head": ["#4f46e5", "#3730a3"],
+        "headInk": "#ffffff",
+        "accent": "#4f46e5",
+        "bg": "#ffffff",
+        "ink": "#111827",
+        "meta": "#3f3f5a",
+        "line": "#e4e7f5",
+        "thBg": "#f5f6fd",
+        "thInk": "#6366f1",
+        "zebra": "#f9f9fe",
+        "footBg": "#eef0fc",
+        "note": "#a5b4fc",
+    },
+    "gold": {
+        "label": "Золото",
+        "head": ["#c9a227", "#8a6d0f"],
+        "headInk": "#ffffff",
+        "accent": "#c9a227",
+        "bg": "#fffdf6",
+        "ink": "#1c1917",
+        "meta": "#44403c",
+        "line": "#ece3cd",
+        "thBg": "#faf5e6",
+        "thInk": "#a16207",
+        "zebra": "#fdfaf0",
+        "footBg": "#f7efdc",
+        "note": "#b8a67a",
+    },
+    "rose": {
+        "label": "Вишня",
+        "head": ["#be123c", "#881337"],
+        "headInk": "#ffffff",
+        "accent": "#be123c",
+        "bg": "#ffffff",
+        "ink": "#18181b",
+        "meta": "#3f3f46",
+        "line": "#f0dde2",
+        "thBg": "#fdf2f5",
+        "thInk": "#9f1239",
+        "zebra": "#fdf8f9",
+        "footBg": "#fbe8ed",
+        "note": "#d4a4b3",
+    },
+    "mono": {
+        "label": "Минимал",
+        "head": ["#ffffff", "#ffffff"],
+        "headInk": "#0f172a",
+        "headLine": True,
+        "accent": "#0f172a",
+        "bg": "#ffffff",
+        "ink": "#0f172a",
+        "meta": "#475569",
+        "line": "#e2e8f0",
+        "thBg": "#ffffff",
+        "thInk": "#94a3b8",
+        "zebra": "#fafafa",
+        "footBg": "#f8fafc",
+        "note": "#94a3b8",
+    },
+    "night": {
+        "label": "Ночь",
+        "head": ["#1e293b", "#0b1220"],
+        "headInk": "#ffffff",
+        "accent": "#2dd4bf",
+        "bg": "#0f172a",
+        "ink": "#e7eef8",
+        "meta": "#cbd5e1",
+        "line": "#25324a",
+        "thBg": "#16233b",
+        "thInk": "#94a3b8",
+        "zebra": "#131f36",
+        "footBg": "#16233b",
+        "note": "#64748b",
+    },
+}
+
+MONEY_COLS = {"price", "total", "paid", "unpaid"}
+
+
+def normalize_fields(fields: Any) -> list[str]:
+    ids = [str(item) for item in (fields or []) if str(item) in FIELD_BY_ID]
+    return ids or list(PRESETS["invoice"])
+
+
+def theme_key(name: str) -> str:
+    return name if name in THEMES else "teal"
+
+
+def line_value(line: dict[str, Any], field_id: str, currency: str) -> str:
+    tot = line_totals(line)
+    if field_id == "order_type":
+        return str(line.get("order_type") or "—")
+    if field_id == "product":
+        return str(line.get("product") or "—")
+    if field_id == "quantity":
+        return qty_text(line)
+    if field_id == "price":
+        return money(num_expr(line, "price_expr", "price"), currency)
+    if field_id == "discount":
+        return f"{num_expr(line, 'discount_expr', 'discount'):g} %"
+    if field_id == "total":
+        return money(tot["after"], currency)
+    if field_id == "paid":
+        return money(tot["paid"], currency)
+    if field_id == "unpaid":
+        return money(tot["unpaid"], currency)
+    if field_id == "order_date":
+        return fmt_date(line.get("order_date"))
+    if field_id == "payment_date":
+        return fmt_date(line.get("payment_date"))
+    if field_id == "status":
+        return str(line.get("status") or "—")
+    return "—"
+
+
+def meta_items(order: dict[str, Any], doc: dict[str, Any], fields: list[str], hide_labels: bool) -> list[str]:
+    pairs: list[tuple[str, str]] = []
+    if "number" in fields:
+        pairs.append(("№", str(order.get("number") or "—")))
+    if "name" in fields:
+        pairs.append(("Заказ", str(order.get("name") or "—")))
+    if "customer" in fields:
+        pairs.append(("Заказчик", str(order.get("customer") or "—")))
+    if "organization" in fields:
+        pairs.append(("Организация", customer_org(doc, str(order.get("customer") or "")) or "—"))
+    out: list[str] = []
+    for label, value in pairs:
+        if hide_labels:
+            out.append(value)
+        elif label == "№":
+            out.append(f"№ {value}")
+        else:
+            out.append(f"{label}: {value}")
+    return out
+
+
+def cols_of(fields: list[str]) -> list[dict[str, str]]:
+    return [item for item in FIELDS if item["kind"] == "col" and item["id"] in fields]
+
+
+def needs_money_footer(cols: list[dict[str, str]]) -> bool:
+    return any(item["id"] in MONEY_COLS for item in cols)
+
+
+def footer_cells(cols: list[dict[str, str]], lines: list[dict[str, Any]], currency: str) -> list[str] | None:
+    if not needs_money_footer(cols):
+        return None
+    tot = lines_totals(lines)
+    cells: list[str] = []
+    for col in cols:
+        if col["id"] == "price":
+            cells.append(money(tot["total"], currency))
+        elif col["id"] == "total":
+            cells.append(money(tot["after"], currency))
+        elif col["id"] == "paid":
+            cells.append(money(tot["paid"], currency))
+        elif col["id"] == "unpaid":
+            cells.append(money(tot["unpaid"], currency))
+        else:
+            cells.append("")
+    return cells
+
+
+def totals_text(fields: list[str], cols: list[dict[str, str]], lines: list[dict[str, Any]], currency: str) -> str:
+    if "totals" not in fields or needs_money_footer(cols):
+        return ""
+    tot = lines_totals(lines)
+    bits: list[str] = []
+    if "total" in fields or "price" in fields or not cols:
+        bits.append(f"Итого {money(tot['after'], currency)}")
+    if "paid" in fields:
+        bits.append(f"оплачено {money(tot['paid'], currency)}")
+    if "unpaid" in fields:
+        bits.append(f"остаток {money(tot['unpaid'], currency)}")
+    return " · ".join(bits) if bits else f"Позиций: {len(lines)}"
+
+
+def default_title(blocks: list[dict[str, Any]], custom: str = "") -> str:
+    typed = str(custom or "").strip()
+    if typed:
+        return typed
+    if len(blocks) == 1:
+        order = blocks[0]["order"]
+        return " · ".join(part for part in (str(order.get("number") or ""), str(order.get("name") or "")) if part) or "Снимок заказа"
+    if len(blocks) > 1:
+        return f"Заказы ({len(blocks)})"
+    return "Снимок заказа"
+
+
+def stamp_text() -> str:
+    now = datetime.now(timezone.utc).astimezone()
+    return f"Сформировано {now.strftime('%d.%m.%Y, %H:%M:%S')}"
+
+
+def _vis_len(text: str) -> int:
+    return len(text)
+
+
+def _pad(text: str, width: int) -> str:
+    extra = max(0, width - _vis_len(text))
+    return text + (" " * extra)
+
+
+def render_text(
+    doc: dict[str, Any],
+    blocks: list[dict[str, Any]],
+    fields: list[str],
+    hide_labels: bool = False,
+    hide_stamp: bool = False,
+    title: str = "",
+) -> str:
+    if not blocks:
+        raise ValueError("Выберите заказы и строки для снимка")
+    currency = str(doc.get("currency") or "₽")
+    fields = normalize_fields(fields)
+    cols = cols_of(fields)
+    out = [default_title(blocks, title)]
+    for index, block in enumerate(blocks):
+        if index:
+            out.append("")
+        order = block["order"]
+        lines = block["lines"]
+        meta = meta_items(order, doc, fields, hide_labels)
+        if meta:
+            out.append("")
+            out.extend(meta)
+        if cols:
+            foot = footer_cells(cols, lines, currency)
+            rows = [ [col["label"] for col in cols] ]
+            rows.extend([[line_value(line, col["id"], currency) or "—" for col in cols] for line in lines])
+            if foot and any(foot):
+                rows.append([cell or "" for cell in foot])
+            widths = [max(1, max(_vis_len(row[i]) for row in rows)) for i in range(len(cols))]
+            out.append("")
+            for row_i, row in enumerate(rows):
+                out.append("  ".join(_pad(row[i], widths[i]) for i in range(len(cols))))
+                if row_i == 0:
+                    out.append("  ".join("─" * widths[i] for i in range(len(cols))))
+        totals = totals_text(fields, cols, lines, currency)
+        if totals:
+            out.append("")
+            out.append(totals)
+    if not hide_stamp:
+        out.append("")
+        out.append(stamp_text())
+    return "\n".join(out).strip() + "\n"
+
+
+def _hex(color: str) -> tuple[int, int, int]:
+    raw = color.lstrip("#")
+    return int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16)
+
+
+def _fonts() -> tuple[Any, Any, Any, Any]:
+    from PIL import ImageFont
+
+    regular = bold = None
+    for path, kind in (
+        (r"C:\Windows\Fonts\segoeui.ttf", "regular"),
+        (r"C:\Windows\Fonts\segoeuib.ttf", "bold"),
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "regular"),
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "bold"),
+    ):
+        try:
+            font = ImageFont.truetype(path, 13)
+        except OSError:
+            continue
+        if kind == "regular" and regular is None:
+            regular = path
+        if kind == "bold" and bold is None:
+            bold = path
+    try:
+        body = ImageFont.truetype(regular, 13) if regular else ImageFont.load_default()
+        head = ImageFont.truetype(bold or regular, 20) if (bold or regular) else ImageFont.load_default()
+        th = ImageFont.truetype(bold or regular, 11) if (bold or regular) else ImageFont.load_default()
+        strong = ImageFont.truetype(bold or regular, 13) if (bold or regular) else ImageFont.load_default()
+        return head, body, th, strong
+    except OSError:
+        fallback = ImageFont.load_default()
+        return fallback, fallback, fallback, fallback
+
+
+def _text_w(font: Any, text: str) -> float:
+    if hasattr(font, "getlength"):
+        return float(font.getlength(text))
+    box = font.getbbox(text)
+    return float(box[2] - box[0])
+
+
+def _fit(font: Any, text: str, width: float) -> str:
+    if _text_w(font, text) <= width:
+        return text
+    cut = text
+    while cut and _text_w(font, cut + "…") > width:
+        cut = cut[:-1]
+    return (cut + "…") if cut else "…"
+
+
+def render_png(
+    doc: dict[str, Any],
+    blocks: list[dict[str, Any]],
+    fields: list[str],
+    theme_name: str = "teal",
+    hide_labels: bool = False,
+    hide_stamp: bool = False,
+    title: str = "",
+) -> bytes:
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError as exc:
+        raise RuntimeError("Для картинки нужна библиотека Pillow. Перезапустите FinMaster — она установится сама.") from exc
+    if not blocks:
+        raise ValueError("Выберите заказы и строки для снимка")
+    currency = str(doc.get("currency") or "₽")
+    fields = normalize_fields(fields)
+    cols = cols_of(fields)
+    theme = THEMES[theme_key(theme_name)]
+    heading = default_title(blocks, title)
+    stamp = stamp_text()
+    head_font, body_font, th_font, strong_font = _fonts()
+    pad = 20
+    row_h = 34
+    header_h = 64
+
+    def col_widths(lines: list[dict[str, Any]]) -> list[int]:
+        widths: list[int] = []
+        foot = footer_cells(cols, lines, currency)
+        for index, col in enumerate(cols):
+            width = _text_w(th_font, col["label"].upper())
+            for line in lines:
+                width = max(width, _text_w(body_font, line_value(line, col["id"], currency) or "—"))
+            if foot:
+                width = max(width, _text_w(strong_font, foot[index] or ""))
+            widths.append(max(52, int(width + 24)))
+        return widths
+
+    layouts = []
+    inner = _text_w(head_font, heading)
+    for block in blocks:
+        widths = col_widths(block["lines"]) if cols else []
+        table_w = sum(widths)
+        layouts.append({**block, "widths": widths, "table_w": table_w})
+        inner = max(inner, table_w)
+        for line in meta_items(block["order"], doc, fields, hide_labels):
+            inner = max(inner, _text_w(body_font, line))
+        totals = totals_text(fields, cols, block["lines"], currency)
+        if totals:
+            inner = max(inner, _text_w(strong_font, totals))
+    if not hide_stamp:
+        inner = max(inner, _text_w(th_font, stamp))
+    width = min(1600, max(80, int(pad * 2 + inner)))
+    body_h = 16
+    for index, block in enumerate(layouts):
+        meta = meta_items(block["order"], doc, fields, hide_labels)
+        foot = footer_cells(cols, block["lines"], currency)
+        body_h += (36 if index else 0)
+        body_h += (len(meta) * 22 + 10) if meta else 0
+        body_h += (32 + len(block["lines"]) * row_h + (row_h if foot else 0)) if cols else 28
+        body_h += 36 if totals_text(fields, cols, block["lines"], currency) else 0
+        body_h += 16
+    height = header_h + body_h + (16 if hide_stamp else 36)
+    image = Image.new("RGB", (width, height), _hex(theme["bg"]))
+    draw = ImageDraw.Draw(image)
+
+    def fill(x: float, y: float, w: float, h: float, color: str) -> None:
+        draw.rectangle([x, y, x + w, y + h], fill=_hex(color))
+
+    def line(x1: float, y1: float, x2: float, y2: float, color: str, thick: float = 1) -> None:
+        draw.line([(x1, y1), (x2, y2)], fill=_hex(color), width=max(1, int(thick)))
+
+    def text(x: float, y: float, value: str, font: Any, color: str) -> None:
+        draw.text((x, y), value, font=font, fill=_hex(color))
+
+    start, end = _hex(theme["head"][0]), _hex(theme["head"][1])
+    for x in range(width):
+        t = x / max(1, width - 1)
+        color = tuple(int(start[i] + (end[i] - start[i]) * t) for i in range(3))
+        draw.line([(x, 0), (x, header_h)], fill=color)
+    if theme.get("headLine"):
+        line(0, header_h - 1, width, header_h - 1, theme["accent"], 2)
+    text(pad, 24, heading, head_font, theme["headInk"])
+
+    y = header_h + 16
+    for index, block in enumerate(layouts):
+        if index:
+            y += 16
+            line(pad, y, width - pad, y, theme["accent"], 2)
+            y += 20
+        meta = meta_items(block["order"], doc, fields, hide_labels)
+        for item in meta:
+            text(pad, y, item, body_font, theme["meta"])
+            y += 22
+        if meta:
+            y += 10
+        if cols:
+            xs: list[int] = []
+            cursor = pad
+            for w in block["widths"]:
+                xs.append(cursor)
+                cursor += w
+            table_w = block["table_w"]
+            fill(pad, y, table_w, 32, theme["thBg"])
+            for i, col in enumerate(cols):
+                label = _fit(th_font, col["label"].upper(), block["widths"][i] - 12)
+                text(xs[i] + 8, y + 8, label, th_font, theme["thInk"])
+            y += 32
+            for row_i, row in enumerate(block["lines"]):
+                if row_i % 2:
+                    fill(pad, y, table_w, row_h, theme["zebra"])
+                line(pad, y, pad + table_w, y, theme["line"])
+                for i, col in enumerate(cols):
+                    cell = _fit(body_font, line_value(row, col["id"], currency) or "—", block["widths"][i] - 12)
+                    text(xs[i] + 8, y + 8, cell, body_font, theme["ink"])
+                y += row_h
+            foot = footer_cells(cols, block["lines"], currency)
+            if foot:
+                fill(pad, y, table_w, row_h, theme["footBg"])
+                line(pad, y, pad + table_w, y, theme["accent"])
+                for i, cell in enumerate(foot):
+                    if not cell:
+                        continue
+                    text(xs[i] + 8, y + 8, _fit(strong_font, cell, block["widths"][i] - 12), strong_font, theme["ink"])
+                y += row_h
+        totals = totals_text(fields, cols, block["lines"], currency)
+        if totals:
+            y += 14
+            text(pad, y, totals, strong_font, theme["ink"])
+            y += 22
+        y += 16
+    if not hide_stamp:
+        text(pad, height - 22, stamp, th_font, theme["note"])
+
+    image = image.resize((width * 2, height * 2), Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return buf.getvalue()

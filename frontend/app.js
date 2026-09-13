@@ -12,6 +12,7 @@
     view: "dashboard",
     search: "",
     autosaveTimer: null,
+    appFullscreen: false,
     closeAfterSave: false,
     newAfterSave: false,
     selectedCustomerId: null,
@@ -3013,6 +3014,15 @@
     $("btn-undo").addEventListener("click", undo);
     $("btn-redo").addEventListener("click", redo);
     $("btn-command").addEventListener("click", openPalette);
+    $("btn-fullscreen")?.addEventListener("click", () => toggleAppFullscreen());
+    document.addEventListener("fullscreenchange", () => {
+      if (state.desktop || cloudFullscreenOn()) return;
+      syncAppFullscreen(pageFullscreenOn());
+    });
+    document.addEventListener("webkitfullscreenchange", () => {
+      if (state.desktop || cloudFullscreenOn()) return;
+      syncAppFullscreen(pageFullscreenOn());
+    });
     $("btn-help").addEventListener("click", openHelp);
     $("help-close").addEventListener("click", () => $("help-modal").classList.remove("open"));
     $("help-modal").addEventListener("click", (e) => {
@@ -3543,10 +3553,20 @@
         openHelp();
         return;
       }
+      if (e.key === "F11") {
+        e.preventDefault();
+        toggleAppFullscreen();
+        return;
+      }
       if (e.key === "Escape") {
         if (cloudFullscreenOn()) {
           e.preventDefault();
           toggleCloudFullscreen(false);
+          return;
+        }
+        if (state.appFullscreen) {
+          e.preventDefault();
+          toggleAppFullscreen(false);
           return;
         }
         if (paletteIsOpen()) {
@@ -4745,6 +4765,7 @@
       { group: "Действия", ico: "⤓", title: "Сохранить как…", right: "Ctrl+Shift+S", run: () => save({ as: true }) },
       { group: "Действия", ico: "⌸", title: "Открыть отчёт", right: "Ctrl+O", run: () => maybeOpen(openFromDialog) },
       { group: "Действия", ico: "✧", title: "Создать новый отчёт", right: "Ctrl+N", run: onNew },
+      { group: "Действия", ico: "⛶", title: state.appFullscreen ? "Выйти из полного экрана" : "Полный экран", right: "F11", run: () => toggleAppFullscreen() },
       { group: "Действия", ico: "⎘", title: "Экспорт в CSV", sub: "все позиции отчёта", run: exportCsv },
       { group: "Действия", ico: "▣", title: "Снимок заказов", sub: "красивая картинка для заказчика", run: () => openShare(null) },
       { group: "Действия", ico: "↶", title: "Отменить действие", right: "Ctrl+Z", run: undo },
@@ -4984,6 +5005,53 @@
 
   function paletteIsOpen() {
     return $("palette").classList.contains("open");
+  }
+
+  function pageFullscreenOn() {
+    const el = document.fullscreenElement || document.webkitFullscreenElement;
+    return el === document.documentElement;
+  }
+
+  function syncAppFullscreen(on) {
+    state.appFullscreen = !!on;
+    const btn = $("btn-fullscreen");
+    if (!btn) return;
+    btn.classList.toggle("on", !!on);
+    btn.textContent = on ? "↙" : "⛶";
+    btn.setAttribute("title", on ? "Выйти из полного экрана (F11)" : "Полный экран (F11)");
+    btn.setAttribute("aria-label", on ? "Выйти из полного экрана" : "Полный экран");
+  }
+
+  async function toggleAppFullscreen(force) {
+    const want = force == null ? !state.appFullscreen : !!force;
+    if (state.desktop) {
+      try {
+        const res = await apiPost("/api/window/fullscreen", { on: want });
+        if (res.ok) {
+          syncAppFullscreen(!!res.fullscreen);
+          return;
+        }
+      } catch {
+        /* окно в браузере — ниже обычный полный экран страницы */
+      }
+    }
+    try {
+      if (!want && (pageFullscreenOn() || document.fullscreenElement || document.webkitFullscreenElement)) {
+        if (cloudFullscreenOn()) {
+          await toggleCloudFullscreen(false);
+          return;
+        }
+        const exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (exit) await exit.call(document);
+      } else if (want && !pageFullscreenOn()) {
+        const el = document.documentElement;
+        const enter = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (enter) await enter.call(el);
+      }
+    } catch {
+      toast("Полноэкранный режим недоступен");
+    }
+    syncAppFullscreen(pageFullscreenOn());
   }
 
   function openHelp() {
@@ -5282,7 +5350,7 @@
         tgStatus.textContent = remote.telegramError;
       } else if (remote.telegramListening) {
         tgStatus.classList.add("ok");
-        tgStatus.textContent = "Бот слушает. Напишите /start или нажмите «Получить ссылку» — пришлёт кнопку «Открыть FinMaster».";
+        tgStatus.textContent = "Бот слушает. Напишите /start — отчёты, заказы, снимки и ссылка на телефон.";
       } else if (remote.telegramReady) {
         tgStatus.textContent = "Токен сохранён. Нажмите «Запомнить токен», если бот ещё не отвечает.";
       } else {

@@ -264,6 +264,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .btn.danger { color: var(--danger); border-color: #fecaca; background: #fff5f5; }
 .btn.small { padding: 5px 8px; font-size: 12px; border-radius: 8px; }
 .btn.icon { width: 34px; height: 34px; padding: 0; display: grid; place-items: center; }
+.btn.icon.on { color: var(--accent); border-color: var(--accent-2); }
 
 .kpis {
   display: grid;

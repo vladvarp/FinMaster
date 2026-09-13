@@ -25,6 +25,7 @@ FRONTEND = os.path.join(ROOT, "frontend")
 
 app = Flask(__name__, static_folder=FRONTEND, static_url_path="")
 WINDOW = None
+WINDOW_FULLSCREEN = False
 FORCE_CLOSE = False
 DIRTY = False
 SERVER_PORT = 0
@@ -152,7 +153,7 @@ def _qr_svg(url: str) -> str:
 def _telegram_live_url(chat_id: str = "") -> dict[str, Any]:
     """Возвращает ссылку и состояние тумблеров. Выключенный доступ сам не поднимает."""
     settings = storage.remote_settings()
-    if chat_id and chat_id != settings.get("telegram_chat_id"):
+    if chat_id and not settings.get("telegram_chat_id"):
         settings = storage.save_remote_settings(telegram_chat_id=str(chat_id))
     access_on = bool(REMOTE.enabled)
     ngrok_on = bool(settings.get("ngrok"))
@@ -764,6 +765,38 @@ def api_remote_leave():
     return jsonify({"ok": True})
 
 
+def _window_is_fullscreen() -> bool:
+    window = WINDOW
+    native = getattr(window, "native", None) if window is not None else None
+    if native is not None and hasattr(native, "is_fullscreen"):
+        try:
+            return bool(native.is_fullscreen)
+        except Exception:
+            pass
+    return WINDOW_FULLSCREEN
+
+
+@app.post("/api/window/fullscreen")
+def api_window_fullscreen():
+    global WINDOW_FULLSCREEN
+    if not _is_local():
+        return jsonify({"error": "Только в окне программы."}), 403
+    window = WINDOW
+    if window is None or not hasattr(window, "toggle_fullscreen"):
+        return jsonify({"ok": False, "desktop": False, "fullscreen": False})
+    current = _window_is_fullscreen()
+    data = request.get_json(silent=True) or {}
+    want = data.get("on")
+    target = (not current) if want is None else bool(want)
+    if target != current:
+        try:
+            window.toggle_fullscreen()
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc), "fullscreen": current}), 500
+        WINDOW_FULLSCREEN = target
+    return jsonify({"ok": True, "desktop": True, "fullscreen": _window_is_fullscreen()})
+
+
 @app.post("/api/quit")
 def api_quit():
     global FORCE_CLOSE, DIRTY
@@ -814,7 +847,7 @@ def run_server(port: int) -> None:
 
 
 def main(splash=None) -> None:
-    global WINDOW, FORCE_CLOSE, DIRTY, SERVER_PORT
+    global WINDOW, WINDOW_FULLSCREEN, FORCE_CLOSE, DIRTY, SERVER_PORT
 
     def report(text: str, progress: float | None = None) -> None:
         if splash is not None:
@@ -884,6 +917,7 @@ def main(splash=None) -> None:
         maximized=storage.window_maximized(),
         background_color="#0b1220",
     )
+    WINDOW_FULLSCREEN = False
 
     def remember_maximized(value: bool) -> None:
         try:

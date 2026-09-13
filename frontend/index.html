@@ -137,6 +137,7 @@
           <button class="btn js-theme-toggle" type="button" title="Тема">Тема</button>
           <button class="btn" id="btn-home">К списку отчётов</button>
           <button class="btn" id="btn-export">Экспорт CSV</button>
+          <button class="btn icon" type="button" id="btn-fullscreen" title="Полный экран (F11)" aria-label="Полный экран">⛶</button>
           <button class="btn icon" type="button" id="btn-help" title="Горячие клавиши (F1)">?</button>
         </div>
       </header>
@@ -672,7 +673,7 @@
         <p>Под QR есть чипы <b>Интернет</b> и локальные IP — ими выбираете, куда ведёт код.</p>
         <p>На бесплатном ngrok адрес часто меняется после перезапуска программы. Тогда снова скопируйте ссылку. При первом открытии ngrok может показать свою страницу-предупреждение — нажмите Visit Site.</p>
         <p>Токен хранится только на этом компьютере. «Новая ссылка» сбрасывает старые закладки. Запрос через туннель не открывает рабочий стол — телефон видит только мобильный интерфейс.</p>
-        <p>Создайте бота у @BotFather и вставьте токен — он запоминается на этом компьютере. В Telegram нажмите /start, затем «Получить ссылку»: бот пришлёт кнопку <b>Открыть FinMaster</b> с актуальной ссылкой.</p>
+        <p>Создайте бота у @BotFather и вставьте токен — он запоминается на этом компьютере. В Telegram нажмите /start: бот открывает отчёты, заказы и снимки (картинка или текст) и по желанию присылает ссылку на телефон.</p>
       </div>
       <div class="modal-actions">
         <button class="btn primary" type="button" id="remote-guide-close">Понятно</button>
@@ -697,6 +698,7 @@
           <div class="help-row"><span>Повторить действие</span><span><kbd>Ctrl</kbd><kbd>Y</kbd></span></div>
           <div class="help-row"><span>Поиск по отчёту</span><span><kbd>Ctrl</kbd><kbd>F</kbd></span></div>
           <div class="help-row"><span>Эта подсказка</span><span><kbd>F1</kbd></span></div>
+          <div class="help-row"><span>Полный экран</span><span><kbd>F11</kbd></span></div>
         </div>
         <div class="help-col">
           <h4>Таблица заказа</h4>

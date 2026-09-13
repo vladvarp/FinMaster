@@ -1,8 +1,10 @@
-"""Telegram-бот: кнопки «Получить ссылку» и «Открыть FinMaster»."""
+"""Telegram-бот: отчёты, заказы, снимки и ссылка на телефон."""
 
 from __future__ import annotations
 
 import json
+import os
+import secrets
 import threading
 import time
 import urllib.error
@@ -10,8 +12,14 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable
 
+from backend import storage
+from backend.document import normalize_document
+from backend.finance import html_esc, money, order_totals, qty_text
+from backend.remote import SESSION as REMOTE
+from backend import snapshot as snapmod
 
-ASK_TEXTS = {
+
+ASK_LINK = {
     "получить ссылку",
     "ссылка",
     "link",
@@ -20,12 +28,21 @@ ASK_TEXTS = {
     "открыть",
     "открыть finmaster",
 }
+ASK_REPORTS = {"отчёты", "отчеты", "/reports", "/files"}
+ASK_ORDERS = {"заказы", "/orders"}
+ASK_MENU = {"/start", "/help", "меню", "start", "help"}
+
+PAGE = 6
 
 
 def _call(token: str, method: str, payload: dict[str, Any] | None = None, timeout: float = 15) -> dict[str, Any]:
     url = f"https://api.telegram.org/bot{urllib.parse.quote(token, safe=':-_')}/{method}"
     body = json.dumps(payload or {}).encode("utf-8")
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+    return _read(req, timeout)
+
+
+def _read(req: urllib.request.Request, timeout: float) -> dict[str, Any]:
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
@@ -41,31 +58,67 @@ def _call(token: str, method: str, payload: dict[str, Any] | None = None, timeou
         raise RuntimeError("Telegram вернул непонятный ответ.") from exc
     if not data.get("ok"):
         desc = str(data.get("description") or "ошибка Telegram")
-        if "unauthorized" in desc.lower():
+        low = desc.lower()
+        if "unauthorized" in low:
             raise RuntimeError("Токен бота неверный. Скопируйте его заново у @BotFather.")
-        if "chat not found" in desc.lower():
+        if "chat not found" in low:
             raise RuntimeError("Чат не найден. Напишите боту любое сообщение и повторите.")
+        if "message is not modified" in low:
+            return data
         raise RuntimeError(desc)
     return data
 
 
+def _call_file(
+    token: str,
+    method: str,
+    fields: dict[str, Any],
+    file_field: str,
+    filename: str,
+    data: bytes,
+    mime: str,
+) -> dict[str, Any]:
+    boundary = "----FM" + secrets.token_hex(8)
+    chunks: list[bytes] = []
+    for key, value in fields.items():
+        chunks.append(
+            (
+                f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n"
+            ).encode("utf-8")
+        )
+    chunks.append(
+        (
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
+            f"filename=\"{filename}\"\r\nContent-Type: {mime}\r\n\r\n"
+        ).encode("utf-8")
+    )
+    chunks.append(data)
+    chunks.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+    url = f"https://api.telegram.org/bot{urllib.parse.quote(token, safe=':-_')}/{method}"
+    req = urllib.request.Request(
+        url,
+        data=b"".join(chunks),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+    return _read(req, 45)
+
+
 def _menu_keyboard() -> dict[str, Any]:
     return {
-        "keyboard": [[{"text": "Получить ссылку"}]],
+        "keyboard": [[{"text": "Отчёты"}, {"text": "Заказы"}], [{"text": "Ссылка"}, {"text": "Меню"}]],
         "resize_keyboard": True,
         "is_persistent": True,
-        "input_field_placeholder": "Нажмите «Получить ссылку»",
+        "input_field_placeholder": "Отчёты, заказы или поиск",
     }
 
 
-def _open_keyboard(url: str) -> dict[str, Any]:
-    rows = [[{"text": "Открыть FinMaster", "url": url}]]
-    rows.append([{"text": "Обновить ссылку", "callback_data": "link"}])
+def _inline(rows: list[list[dict[str, str]]]) -> dict[str, Any]:
     return {"inline_keyboard": rows}
 
 
-def _ask_keyboard() -> dict[str, Any]:
-    return {"inline_keyboard": [[{"text": "Получить ссылку", "callback_data": "link"}]]}
+def _btn(text: str, data: str) -> dict[str, str]:
+    return {"text": text, "url": data} if data.startswith("http") else {"text": text, "callback_data": data}
 
 
 def send_html(
@@ -74,7 +127,8 @@ def send_html(
     text: str,
     markup: dict[str, Any] | None = None,
     preview: bool = False,
-) -> None:
+    message_id: int | None = None,
+) -> int | None:
     payload: dict[str, Any] = {
         "chat_id": chat_id,
         "text": text,
@@ -83,7 +137,36 @@ def send_html(
     }
     if markup:
         payload["reply_markup"] = markup
-    _call(token, "sendMessage", payload)
+    if message_id:
+        payload["message_id"] = message_id
+        try:
+            _call(token, "editMessageText", payload)
+            return message_id
+        except RuntimeError:
+            payload.pop("message_id", None)
+    data = _call(token, "sendMessage", payload)
+    result = data.get("result") if isinstance(data.get("result"), dict) else {}
+    mid = result.get("message_id")
+    return int(mid) if mid is not None else None
+
+
+def send_photo(token: str, chat_id: str, png: bytes, caption: str, filename: str) -> None:
+    _call_file(
+        token,
+        "sendPhoto",
+        {"chat_id": chat_id, "caption": caption[:1024]},
+        "photo",
+        filename,
+        png,
+        "image/png",
+    )
+
+
+def send_document(token: str, chat_id: str, body: bytes, filename: str, caption: str = "") -> None:
+    fields: dict[str, Any] = {"chat_id": chat_id}
+    if caption:
+        fields["caption"] = caption[:1024]
+    _call_file(token, "sendDocument", fields, "document", filename, body, "text/plain")
 
 
 def _status(info: Any) -> dict[str, Any]:
@@ -101,52 +184,31 @@ def is_internet(info: Any, url: str = "") -> bool:
 def channel_block(info: Any, url: str = "") -> str:
     flags = _status(info)
     if not flags.get("access"):
-        return (
-            "🚫 <b>ВХОД ЗАКРЫТ</b>\n"
-            "на компьютере выключен доступ с телефона"
-        )
+        return "🚫 <b>ВХОД С ТЕЛЕФОНА ЗАКРЫТ</b>\nотчёты в боте всё равно доступны, пока открыт FinMaster"
     if is_internet(flags, url):
-        return (
-            "🌐 <b>ИНТЕРНЕТ</b>\n"
-            "можно открыть из любой сети — Wi‑Fi, 4G, другая квартира"
-        )
-    extra = ""
-    if flags.get("ngrok"):
-        extra = "\nтуннель включён, но ссылка пока локальная"
-    return (
-        "📶 <b>ЛОКАЛЬНАЯ СЕТЬ</b>\n"
-        "только та же Wi‑Fi, что и компьютер\n"
-        "с мобильного интернета <b>не откроется</b>"
-        + extra
-    )
+        return "🌐 <b>ИНТЕРНЕТ</b>\nтелефон можно открыть из любой сети"
+    extra = "\nтуннель включён, но ссылка пока локальная" if flags.get("ngrok") else ""
+    return "📶 <b>ЛОКАЛЬНАЯ СЕТЬ</b>\nтелефон откроется только в той же Wi‑Fi" + extra
 
 
 def toggle_warnings(info: Any) -> list[str]:
     flags = _status(info)
     notes: list[str] = []
     if not flags.get("access"):
-        notes.append(
-            "Откройте FinMaster → <b>Телефон</b> и включите тумблер доступа."
-        )
+        notes.append("Чтобы открыть интерфейс на телефоне, включите тумблер доступа в окне <b>Телефон</b>.")
     elif not flags.get("ngrok"):
-        notes.append(
-            "Чтобы зайти не из домашнего Wi‑Fi, включите тумблер <b>Через интернет (ngrok)</b>."
-        )
+        notes.append("Чтобы зайти не из домашнего Wi‑Fi, включите тумблер <b>Через интернет (ngrok)</b>.")
     return notes
 
 
 def welcome_text(info: Any = None) -> str:
-    flags = _status(info)
-    text = (
+    return (
         "<b>FinMaster</b>\n"
-        "учёт заказов с телефона\n\n"
-        f"{channel_block(flags)}\n\n"
-        "Нажмите <b>Получить ссылку</b> — пришлю вход на компьютер."
+        "отчёты, заказы и снимки прямо здесь\n\n"
+        f"{channel_block(info)}\n\n"
+        "Кнопки внизу: <b>Отчёты</b>, <b>Заказы</b>, <b>Ссылка</b>.\n"
+        "В списке заказов можно написать имя или номер — найду."
     )
-    warns = toggle_warnings(flags)
-    if warns:
-        text += "\n\n" + "\n\n".join(warns)
-    return text
 
 
 def access_text(url: str, info: Any = None) -> str:
@@ -155,27 +217,11 @@ def access_text(url: str, info: Any = None) -> str:
     banner = channel_block(flags, link)
     warns = toggle_warnings(flags)
     if not flags.get("access"):
-        return (
-            f"{banner}\n\n"
-            + "\n\n".join(warns)
-            + "\n\nПосле включения нажмите «Получить ссылку» ещё раз."
-        )
+        return f"{banner}\n\n" + "\n\n".join(warns) + "\n\nПосле включения нажмите «Ссылка» ещё раз."
     if not link:
-        return (
-            f"{banner}\n\n"
-            "Пока нет ссылки. Проверьте окно <b>Телефон</b> на компьютере."
-            + ("\n\n" + "\n\n".join(warns) if warns else "")
-        )
-    if is_internet(flags, link):
-        how = "Откроется из любой сети."
-    else:
-        how = "Откроется только в той же Wi‑Fi."
-    text = (
-        f"{banner}\n\n"
-        f"<b>Ссылка готова.</b> {how}\n"
-        "Кнопка ниже — «Открыть FinMaster».\n\n"
-        f"<code>{link}</code>"
-    )
+        return f"{banner}\n\nПока нет ссылки. Проверьте окно <b>Телефон</b> на компьютере."
+    how = "Откроется из любой сети." if is_internet(flags, link) else "Откроется только в той же Wi‑Fi."
+    text = f"{banner}\n\n<b>Ссылка готова.</b> {how}\n\n<code>{html_esc(link)}</code>"
     if warns:
         text += "\n\n" + "\n\n".join(warns)
     return text
@@ -189,8 +235,14 @@ def send_access(token: str, chat_id: str, url: str, info: Any = None) -> None:
     flags = _status(info)
     link = str(url or flags.get("url") or "").strip()
     can_open = bool(flags.get("access")) and link.startswith(("http://", "https://"))
-    markup = _open_keyboard(link) if can_open else _ask_keyboard()
-    send_html(token, chat_id, access_text(link, flags), markup, preview=False)
+    rows = []
+    if can_open:
+        rows.append([_btn("Открыть FinMaster", link)])
+        rows.append([_btn("Обновить ссылку", "L")])
+    else:
+        rows.append([_btn("Получить ссылку", "L")])
+    rows.append([_btn("Отчёты", "R"), _btn("Заказы", "O")])
+    send_html(token, chat_id, access_text(link, flags), _inline(rows), preview=False)
 
 
 def send_link(token: str, chat_id: str, url: str, info: Any = None) -> str:
@@ -211,8 +263,10 @@ def setup_bot(token: str) -> None:
             "setMyCommands",
             {
                 "commands": [
-                    {"command": "start", "description": "Открыть меню"},
-                    {"command": "link", "description": "Получить ссылку на FinMaster"},
+                    {"command": "start", "description": "Меню"},
+                    {"command": "reports", "description": "Отчёты"},
+                    {"command": "orders", "description": "Заказы"},
+                    {"command": "link", "description": "Ссылка на телефон"},
                 ]
             },
         )
@@ -220,8 +274,87 @@ def setup_bot(token: str) -> None:
         pass
 
 
+def _recent_items() -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for item in storage.load_config().get("recent") or []:
+        if not isinstance(item, dict) or not item.get("path"):
+            continue
+        items.append({**item, "exists": os.path.exists(str(item.get("path")))})
+    return items
+
+
+def _library_items() -> list[dict[str, Any]]:
+    return list((storage.list_library_reports().get("items") or []))
+
+
+def _path_allowed(path: str) -> bool:
+    if not path or not str(path).lower().endswith(".fmaster") or not os.path.isfile(path):
+        return False
+    if REMOTE.path and storage.same_path(REMOTE.path, path):
+        return True
+    try:
+        storage.library_file_path(path)
+        return True
+    except (ValueError, FileNotFoundError, OSError):
+        return any(storage.same_path(str(item.get("path") or ""), path) for item in _recent_items())
+
+
+def _load_doc(path: str) -> tuple[dict[str, Any], bool]:
+    if REMOTE.enabled and isinstance(REMOTE.doc, dict) and storage.same_path(REMOTE.path, path):
+        return REMOTE.doc, True
+    raw = json.loads(storage.read_text(path))
+    return normalize_document(raw), False
+
+
+def _live_path() -> str:
+    return str(REMOTE.path or "") if REMOTE.enabled else ""
+
+
+def _order_label(order: dict[str, Any], currency: str) -> str:
+    tot = order_totals(order)
+    title = " · ".join(part for part in (str(order.get("number") or "—"), str(order.get("name") or "без названия")) if part)
+    if tot["unpaid"] > 0.005:
+        extra = f"долг {money(tot['unpaid'], currency)}"
+    else:
+        extra = "оплачен" if tot["after"] > 0.005 else money(tot["after"], currency)
+    return f"{title} · {extra}"
+
+
+def _clip(text: str, limit: int = 56) -> str:
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+class ChatSession:
+    def __init__(self) -> None:
+        self.screen = "home"
+        self.path = ""
+        self.live = False
+        self.filter = "all"
+        self.search = ""
+        self.rpage = 0
+        self.opage = 0
+        self.reports: list[str] = []
+        self.orders: list[str] = []
+        self.order_id = ""
+        self.awaiting = ""
+        self.message_id: int | None = None
+        self.snap: dict[str, Any] = self._fresh_snap()
+
+    def _fresh_snap(self) -> dict[str, Any]:
+        return {
+            "fields": list(snapmod.PRESETS["invoice"]),
+            "theme": "teal",
+            "hide_labels": False,
+            "hide_stamp": False,
+            "title": "",
+            "order_ids": [],
+            "skip": {},
+        }
+
+
 class TelegramBot:
-    """Длинный опрос: кнопки меню и актуальная ссылка «Открыть FinMaster»."""
+    """Опрос Telegram: меню, отчёты, заказы и снимки."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -233,13 +366,11 @@ class TelegramBot:
         self._on_request: Callable[[str], Any] | None = None
         self._on_offset: Callable[[int], None] | None = None
         self._skip = True
+        self._chats: dict[str, ChatSession] = {}
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
-            return {
-                "listening": self._running and bool(self._token),
-                "error": self._error,
-            }
+            return {"listening": self._running and bool(self._token), "error": self._error}
 
     def start(
         self,
@@ -295,6 +426,21 @@ class TelegramBot:
         except Exception:
             return {"url": "", "access": False, "ngrok": False}
 
+    def _chat(self, chat_id: str) -> ChatSession:
+        with self._lock:
+            session = self._chats.get(chat_id)
+            if session is None:
+                session = ChatSession()
+                self._chats[chat_id] = session
+            return session
+
+    def _authorized(self, chat_id: str) -> bool:
+        saved = str(storage.remote_settings().get("telegram_chat_id") or "")
+        if not saved:
+            storage.save_remote_settings(telegram_chat_id=str(chat_id))
+            return True
+        return saved == str(chat_id)
+
     def _loop(self) -> None:
         while True:
             token, offset, running = self._state()
@@ -347,24 +493,48 @@ class TelegramBot:
             if cid is None:
                 return
             text = str(msg.get("text") or "").strip()
-            low = text.lower()
-            if low in {"/start", "/help", "меню", "start"}:
-                send_welcome(token, str(cid), self._status_for(str(cid)))
-            elif low in ASK_TEXTS or low.startswith("/link"):
-                info = self._status_for(str(cid))
-                send_access(token, str(cid), str(info.get("url") or ""), info)
-            else:
-                info = self._status_for(str(cid))
-                warns = toggle_warnings(info)
-                text = f"{channel_block(info)}\n\nНажмите кнопку, чтобы получить ссылку."
-                if warns:
-                    text = text + "\n\n" + "\n\n".join(warns)
-                send_html(token, str(cid), text, _ask_keyboard())
+            self._on_text(token, str(cid), text)
             with self._lock:
                 self._error = ""
         except RuntimeError as exc:
             with self._lock:
                 self._error = str(exc)
+
+    def _on_text(self, token: str, chat_id: str, text: str) -> None:
+        low = text.lower()
+        info = self._status_for(chat_id)
+        if low in ASK_MENU or not text:
+            send_welcome(token, chat_id, info)
+            self._show(token, chat_id, "home")
+            return
+        if not self._authorized(chat_id):
+            send_html(
+                token,
+                chat_id,
+                "Этот бот уже привязан к другому чату. В FinMaster → Телефон очистите Chat id, если хотите сменить аккаунт.",
+            )
+            return
+        session = self._chat(chat_id)
+        if session.awaiting == "title":
+            session.snap["title"] = text[:80]
+            session.awaiting = ""
+            self._show(token, chat_id, "snap")
+            return
+        if low in ASK_LINK:
+            send_access(token, chat_id, str(info.get("url") or ""), info)
+            return
+        if low in ASK_REPORTS:
+            self._show(token, chat_id, "reports")
+            return
+        if low in ASK_ORDERS:
+            self._show(token, chat_id, "orders")
+            return
+        if session.screen in {"orders", "order", "home"} and text:
+            session.search = text
+            session.opage = 0
+            self._show(token, chat_id, "orders")
+            return
+        send_html(token, chat_id, "Нажмите <b>Отчёты</b>, <b>Заказы</b> или <b>Меню</b>.", _menu_keyboard())
 
     def _on_callback(self, token: str, query: dict[str, Any]) -> None:
         qid = str(query.get("id") or "")
@@ -372,18 +542,550 @@ class TelegramBot:
         chat = {}
         if isinstance(query.get("message"), dict) and isinstance(query["message"].get("chat"), dict):
             chat = query["message"]["chat"]
-        elif isinstance(query.get("from"), dict):
+            mid = query["message"].get("message_id")
+        else:
+            mid = None
+        if isinstance(query.get("from"), dict) and not chat:
             chat = {"id": query["from"].get("id")}
         cid = chat.get("id")
+        notice = ""
+        if data == "L":
+            notice = "Обновляю ссылку…"
+        elif data in {"SP", "ST"}:
+            notice = "Готовлю снимок…"
         if qid:
             try:
-                _call(token, "answerCallbackQuery", {"callback_query_id": qid, "text": "Обновляю ссылку…"})
+                payload = {"callback_query_id": qid}
+                if notice:
+                    payload["text"] = notice
+                _call(token, "answerCallbackQuery", payload)
             except RuntimeError:
                 pass
-        if cid is None or data != "link":
+        if cid is None:
             return
-        info = self._status_for(str(cid))
-        send_access(token, str(cid), str(info.get("url") or ""), info)
+        chat_id = str(cid)
+        if data == "L":
+            info = self._status_for(chat_id)
+            send_access(token, chat_id, str(info.get("url") or ""), info)
+            return
+        if not self._authorized(chat_id):
+            send_html(token, chat_id, "Этот бот уже привязан к другому чату.")
+            return
+        session = self._chat(chat_id)
+        if mid is not None:
+            session.message_id = int(mid)
+        self._dispatch(token, chat_id, data)
+
+    def _dispatch(self, token: str, chat_id: str, data: str) -> None:
+        session = self._chat(chat_id)
+        if data == "H":
+            self._show(token, chat_id, "home")
+        elif data == "R":
+            session.rpage = 0
+            self._show(token, chat_id, "reports")
+        elif data.startswith("Rp:"):
+            session.rpage = max(0, int(data[3:] or 0))
+            self._show(token, chat_id, "reports")
+        elif data.startswith("Ri:"):
+            self._open_report(token, chat_id, int(data[3:] or -1))
+        elif data == "O":
+            session.opage = 0
+            self._show(token, chat_id, "orders")
+        elif data.startswith("Op:"):
+            session.opage = max(0, int(data[3:] or 0))
+            self._show(token, chat_id, "orders")
+        elif data.startswith("Of:"):
+            session.filter = data[3:] if data[3:] in {"all", "debt", "paid"} else "all"
+            session.opage = 0
+            self._show(token, chat_id, "orders")
+        elif data == "Os":
+            session.search = ""
+            session.opage = 0
+            self._show(token, chat_id, "orders")
+        elif data.startswith("Oi:"):
+            self._open_order(token, chat_id, int(data[3:] or -1))
+        elif data == "D":
+            self._show(token, chat_id, "order")
+        elif data == "PC":
+            self._open_on_pc(token, chat_id)
+        elif data == "S":
+            self._prepare_snap(session)
+            self._show(token, chat_id, "snap")
+        elif data.startswith("Sp:"):
+            preset = data[3:]
+            if preset in snapmod.PRESETS:
+                session.snap["fields"] = list(snapmod.PRESETS[preset])
+            self._show(token, chat_id, "snap")
+        elif data.startswith("St:"):
+            session.snap["theme"] = snapmod.theme_key(data[3:])
+            self._show(token, chat_id, "snap")
+        elif data == "Shl":
+            session.snap["hide_labels"] = not session.snap.get("hide_labels")
+            self._show(token, chat_id, "snap")
+        elif data == "Shs":
+            session.snap["hide_stamp"] = not session.snap.get("hide_stamp")
+            self._show(token, chat_id, "snap")
+        elif data == "SF":
+            self._show(token, chat_id, "fields")
+        elif data.startswith("Sf:"):
+            self._toggle_field(session, int(data[3:] or -1))
+            self._show(token, chat_id, "fields")
+        elif data == "SN":
+            self._show(token, chat_id, "lines")
+        elif data.startswith("Sn:"):
+            self._toggle_line(session, int(data[3:] or -1))
+            self._show(token, chat_id, "lines")
+        elif data == "SA":
+            self._show(token, chat_id, "add")
+        elif data.startswith("Sa:"):
+            self._toggle_order(session, int(data[3:] or -1))
+            self._show(token, chat_id, "add")
+        elif data == "SC":
+            session.awaiting = "title"
+            send_html(token, chat_id, "Напишите заголовок снимка одним сообщением. Пустое не отправляйте — отмена через «Меню».")
+        elif data == "SX":
+            session.snap["title"] = ""
+            self._show(token, chat_id, "snap")
+        elif data == "SP":
+            self._send_snap(token, chat_id, "png")
+        elif data == "ST":
+            self._send_snap(token, chat_id, "text")
+        elif data == "B":
+            back = {"fields": "snap", "lines": "snap", "add": "snap", "snap": "order", "order": "orders", "orders": "home", "reports": "home"}.get(
+                session.screen, "home"
+            )
+            self._show(token, chat_id, back)
+        else:
+            self._show(token, chat_id, session.screen or "home")
+
+    def _open_report(self, token: str, chat_id: str, index: int) -> None:
+        session = self._chat(chat_id)
+        if index < 0 or index >= len(session.reports):
+            self._show(token, chat_id, "reports")
+            return
+        path = session.reports[index]
+        if not _path_allowed(path):
+            send_html(token, chat_id, "Этот файл открыть нельзя.")
+            return
+        session.path = path
+        session.order_id = ""
+        session.search = ""
+        session.filter = "all"
+        session.opage = 0
+        session.snap = session._fresh_snap()
+        self._show(token, chat_id, "orders")
+
+    def _open_order(self, token: str, chat_id: str, index: int) -> None:
+        session = self._chat(chat_id)
+        if index < 0 or index >= len(session.orders):
+            self._show(token, chat_id, "orders")
+            return
+        session.order_id = session.orders[index]
+        self._show(token, chat_id, "order")
+
+    def _open_on_pc(self, token: str, chat_id: str) -> None:
+        session = self._chat(chat_id)
+        if not session.path or not _path_allowed(session.path):
+            send_html(token, chat_id, "Сначала откройте отчёт в боте.")
+            return
+        if not REMOTE.enabled:
+            send_html(token, chat_id, "Включите доступ с телефона в окне «Телефон» — тогда компьютер откроет файл.")
+            return
+        REMOTE.issue_command("open", path=os.path.abspath(session.path))
+        send_html(token, chat_id, "Прошу компьютер открыть этот отчёт.")
+
+    def _prepare_snap(self, session: ChatSession) -> None:
+        doc, _ = self._doc_of(session)
+        ui = doc.get("ui") if isinstance(doc.get("ui"), dict) else {}
+        saved = ui.get("share_fields") if isinstance(ui.get("share_fields"), list) else []
+        if saved:
+            session.snap["fields"] = snapmod.normalize_fields(saved)
+        session.snap["theme"] = snapmod.theme_key(str(ui.get("share_theme") or session.snap.get("theme") or "teal"))
+        if session.order_id:
+            session.snap["order_ids"] = [session.order_id]
+        elif not session.snap.get("order_ids"):
+            session.snap["order_ids"] = list(session.orders[:1])
+        session.snap.setdefault("skip", {})
+        session.snap["title"] = session.snap.get("title") or ""
+
+    def _toggle_field(self, session: ChatSession, index: int) -> None:
+        if index < 0 or index >= len(snapmod.FIELD_IDS):
+            return
+        field = snapmod.FIELD_IDS[index]
+        fields = list(session.snap.get("fields") or [])
+        if field in fields:
+            fields = [item for item in fields if item != field]
+        else:
+            fields.append(field)
+        session.snap["fields"] = snapmod.normalize_fields(fields) or [field]
+
+    def _toggle_line(self, session: ChatSession, index: int) -> None:
+        doc, _ = self._doc_of(session)
+        order = self._find_order(doc, session.order_id)
+        lines = [line for line in (order.get("lines") or []) if isinstance(line, dict)]
+        if index < 0 or index >= len(lines):
+            return
+        line_id = str(lines[index].get("id") or f"i{index}")
+        skip: dict[str, list[str]] = session.snap.setdefault("skip", {})
+        current = set(skip.get(session.order_id) or [])
+        if line_id in current:
+            current.remove(line_id)
+        else:
+            current.add(line_id)
+        skip[session.order_id] = list(current)
+
+    def _toggle_order(self, session: ChatSession, index: int) -> None:
+        if index < 0 or index >= len(session.orders):
+            return
+        order_id = session.orders[index]
+        ids = list(session.snap.get("order_ids") or [])
+        if order_id in ids:
+            if len(ids) > 1:
+                ids = [item for item in ids if item != order_id]
+        else:
+            ids.append(order_id)
+        session.snap["order_ids"] = ids
+
+    def _doc_of(self, session: ChatSession) -> tuple[dict[str, Any], bool]:
+        path = session.path or _live_path()
+        if path and _path_allowed(path):
+            try:
+                doc, live = _load_doc(path)
+                session.path = path
+                session.live = live
+                return doc, live
+            except (OSError, ValueError, json.JSONDecodeError):
+                pass
+        if REMOTE.enabled and isinstance(REMOTE.doc, dict):
+            session.path = str(REMOTE.path or session.path)
+            session.live = True
+            return REMOTE.doc, True
+        return {"title": "", "currency": "₽", "orders": [], "customers": []}, False
+
+    def _find_order(self, doc: dict[str, Any], order_id: str) -> dict[str, Any]:
+        for order in doc.get("orders") or []:
+            if isinstance(order, dict) and str(order.get("id") or "") == str(order_id):
+                return order
+        return {}
+
+    def _filtered_orders(self, session: ChatSession, doc: dict[str, Any]) -> list[dict[str, Any]]:
+        found: list[dict[str, Any]] = []
+        needle = (session.search or "").strip().lower()
+        for order in doc.get("orders") or []:
+            if not isinstance(order, dict):
+                continue
+            tot = order_totals(order)
+            if session.filter == "debt" and tot["unpaid"] <= 0.005:
+                continue
+            if session.filter == "paid" and tot["unpaid"] > 0.005:
+                continue
+            if needle:
+                blob = " ".join(
+                    [
+                        str(order.get("number") or ""),
+                        str(order.get("name") or ""),
+                        str(order.get("customer") or ""),
+                        *[str(line.get("product") or "") for line in order.get("lines") or [] if isinstance(line, dict)],
+                    ]
+                ).lower()
+                if needle not in blob:
+                    continue
+            found.append(order)
+        found.sort(
+            key=lambda item: max(
+                [str(item.get("created_at") or "")]
+                + [str(line.get("order_date") or "") for line in item.get("lines") or [] if isinstance(line, dict)]
+            ),
+            reverse=True,
+        )
+        return found
+
+    def _snap_blocks(self, session: ChatSession, doc: dict[str, Any]) -> list[dict[str, Any]]:
+        blocks: list[dict[str, Any]] = []
+        skip = session.snap.get("skip") or {}
+        for order_id in session.snap.get("order_ids") or []:
+            order = self._find_order(doc, order_id)
+            if not order:
+                continue
+            banned = set(skip.get(order_id) or [])
+            lines = [
+                line
+                for i, line in enumerate(order.get("lines") or [])
+                if isinstance(line, dict) and str(line.get("id") or f"i{i}") not in banned
+            ]
+            if not lines and not banned:
+                lines = [line for line in (order.get("lines") or []) if isinstance(line, dict)]
+            if lines:
+                blocks.append({"order": order, "lines": lines})
+        return blocks
+
+    def _send_snap(self, token: str, chat_id: str, kind: str) -> None:
+        session = self._chat(chat_id)
+        doc, _ = self._doc_of(session)
+        blocks = self._snap_blocks(session, doc)
+        if not blocks:
+            send_html(token, chat_id, "Нечего снимать: включите хотя бы одну позицию.")
+            return
+        fields = snapmod.normalize_fields(session.snap.get("fields"))
+        title = str(session.snap.get("title") or "")
+        hide_labels = bool(session.snap.get("hide_labels"))
+        hide_stamp = bool(session.snap.get("hide_stamp"))
+        try:
+            if kind == "png":
+                png = snapmod.render_png(
+                    doc,
+                    blocks,
+                    fields,
+                    str(session.snap.get("theme") or "teal"),
+                    hide_labels,
+                    hide_stamp,
+                    title,
+                )
+                caption = snapmod.default_title(blocks, title)
+                send_photo(token, chat_id, png, caption, "finmaster-snapshot.png")
+            else:
+                text = snapmod.render_text(doc, blocks, fields, hide_labels, hide_stamp, title)
+                if len(text) < 3800:
+                    send_html(token, chat_id, f"<pre>{html_esc(text)}</pre>")
+                else:
+                    send_document(token, chat_id, text.encode("utf-8"), "finmaster-snapshot.txt", snapmod.default_title(blocks, title))
+        except Exception as exc:
+            send_html(token, chat_id, html_esc(str(exc) or "Не удалось собрать снимок."))
+
+    def _show(self, token: str, chat_id: str, screen: str) -> None:
+        session = self._chat(chat_id)
+        session.screen = screen
+        session.awaiting = ""
+        text, rows = self._screen(session, screen)
+        session.message_id = send_html(token, chat_id, text, _inline(rows) if rows else _menu_keyboard(), message_id=session.message_id)
+
+    def _screen(self, session: ChatSession, screen: str) -> tuple[str, list[list[dict[str, str]]]]:
+        if screen == "reports":
+            return self._screen_reports(session)
+        if screen == "orders":
+            return self._screen_orders(session)
+        if screen == "order":
+            return self._screen_order(session)
+        if screen == "snap":
+            return self._screen_snap(session)
+        if screen == "fields":
+            return self._screen_fields(session)
+        if screen == "lines":
+            return self._screen_lines(session)
+        if screen == "add":
+            return self._screen_add(session)
+        return self._screen_home(session)
+
+    def _screen_home(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
+        info = {"url": "", "access": REMOTE.enabled, "ngrok": False}
+        doc, live = self._doc_of(session)
+        title = str(doc.get("title") or "")
+        path = session.path or _live_path()
+        if title and path:
+            mark = "с несохранёнными правками на компьютере" if live else "с диска"
+            current = f"Сейчас: <b>{html_esc(title)}</b>\n{html_esc(os.path.basename(path))}\n<i>{mark}</i>"
+        else:
+            current = "Отчёт ещё не выбран — откройте файл из папки FinMaster."
+        text = f"{welcome_text(info)}\n\n{current}"
+        rows = [[_btn("Отчёты", "R"), _btn("Заказы", "O")], [_btn("Ссылка на телефон", "L")]]
+        return text, rows
+
+    def _screen_reports(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
+        lib = _library_items()
+        recent = [item for item in _recent_items() if item.get("exists") is not False]
+        seen: list[str] = []
+        merged: list[dict[str, Any]] = []
+        for item in lib + recent:
+            path = str(item.get("path") or "")
+            if not path or any(storage.same_path(path, other) for other in seen):
+                continue
+            seen.append(path)
+            merged.append(item)
+        session.reports = [str(item.get("path") or "") for item in merged]
+        pages = max(1, (len(merged) + PAGE - 1) // PAGE)
+        session.rpage = min(session.rpage, pages - 1)
+        chunk = merged[session.rpage * PAGE : session.rpage * PAGE + PAGE]
+        folder = storage.list_library_reports().get("path") or ""
+        lines = [f"<b>Отчёты</b>\nпапка <code>{html_esc(folder)}</code>"]
+        if not merged:
+            lines.append("\nПока пусто — сохраните .fmaster в эту папку или откройте файл на компьютере.")
+        rows: list[list[dict[str, str]]] = []
+        offset = session.rpage * PAGE
+        for i, item in enumerate(chunk):
+            title = item.get("title") or item.get("name") or os.path.basename(str(item.get("path") or ""))
+            mark = " · открыт" if session.path and storage.same_path(session.path, str(item.get("path") or "")) else ""
+            rows.append([_btn(_clip(f"{title}{mark}"), f"Ri:{offset + i}")])
+        nav: list[dict[str, str]] = []
+        if session.rpage > 0:
+            nav.append(_btn("‹", f"Rp:{session.rpage - 1}"))
+        if pages > 1:
+            nav.append(_btn(f"{session.rpage + 1}/{pages}", "R"))
+        if session.rpage < pages - 1:
+            nav.append(_btn("›", f"Rp:{session.rpage + 1}"))
+        if nav:
+            rows.append(nav)
+        rows.append([_btn("Заказы", "O"), _btn("Меню", "H")])
+        return "\n".join(lines), rows
+
+    def _screen_orders(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
+        doc, live = self._doc_of(session)
+        if not (session.path or _live_path() or doc.get("orders")):
+            return "Сначала выберите отчёт.", [[_btn("К отчётам", "R")]]
+        orders = self._filtered_orders(session, doc)
+        session.orders = [str(order.get("id") or "") for order in orders]
+        currency = str(doc.get("currency") or "₽")
+        debt = sum(order_totals(order)["unpaid"] for order in (doc.get("orders") or []) if isinstance(order, dict))
+        pages = max(1, (len(orders) + PAGE - 1) // PAGE)
+        session.opage = min(session.opage, pages - 1)
+        chunk = orders[session.opage * PAGE : session.opage * PAGE + PAGE]
+        filt = {"all": "все", "debt": "с долгом", "paid": "оплаченные"}[session.filter]
+        live_note = " · правки с компьютера" if live else ""
+        search = f"\nпоиск: <i>{html_esc(session.search)}</i>" if session.search else ""
+        text = (
+            f"<b>{html_esc(doc.get('title') or 'Отчёт')}</b>{live_note}\n"
+            f"{len(doc.get('orders') or [])} заказов · долг {html_esc(money(debt, currency))}\n"
+            f"фильтр: {filt} · показано {len(orders)}{search}"
+        )
+        rows: list[list[dict[str, str]]] = []
+        offset = session.opage * PAGE
+        for i, order in enumerate(chunk):
+            rows.append([_btn(_clip(_order_label(order, currency)), f"Oi:{offset + i}")])
+        if not chunk:
+            text += "\n\nНичего не нашлось."
+        rows.append(
+            [
+                _btn("Все" if session.filter != "all" else "· Все", "Of:all"),
+                _btn("Долг" if session.filter != "debt" else "· Долг", "Of:debt"),
+                _btn("Оплата" if session.filter != "paid" else "· Оплата", "Of:paid"),
+            ]
+        )
+        nav: list[dict[str, str]] = []
+        if session.opage > 0:
+            nav.append(_btn("‹", f"Op:{session.opage - 1}"))
+        if pages > 1:
+            nav.append(_btn(f"{session.opage + 1}/{pages}", "O"))
+        if session.opage < pages - 1:
+            nav.append(_btn("›", f"Op:{session.opage + 1}"))
+        if session.search:
+            nav.append(_btn("Сбросить поиск", "Os"))
+        if nav:
+            rows.append(nav)
+        rows.append([_btn("Отчёты", "R"), _btn("Меню", "H")])
+        return text, rows
+
+    def _screen_order(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
+        doc, _ = self._doc_of(session)
+        order = self._find_order(doc, session.order_id)
+        if not order:
+            return "Заказ не найден.", [[_btn("К заказам", "O")]]
+        currency = str(doc.get("currency") or "₽")
+        tot = order_totals(order)
+        lines_out = []
+        for line in order.get("lines") or []:
+            if not isinstance(line, dict):
+                continue
+            bit = order_totals({"lines": [line]})
+            lines_out.append(
+                f"• {html_esc(line.get('product') or '—')} · {html_esc(qty_text(line))} · "
+                f"{html_esc(money(bit['after'], currency))} · {html_esc(line.get('status') or '—')}"
+            )
+        notes = str(order.get("notes") or "").strip()
+        text = (
+            f"<b>{html_esc(order.get('number') or '—')} · {html_esc(order.get('name') or 'без названия')}</b>\n"
+            f"Заказчик: {html_esc(order.get('customer') or '—')}\n"
+            f"Итого {html_esc(money(tot['after'], currency))} · оплачено {html_esc(money(tot['paid'], currency))} · "
+            f"долг {html_esc(money(tot['unpaid'], currency))}\n\n"
+            + ("\n".join(lines_out) if lines_out else "Нет позиций.")
+        )
+        if notes:
+            text += f"\n\nЗаметки: {html_esc(notes)}"
+        if len(text) > 3800:
+            text = text[:3790] + "…"
+        rows = [
+            [_btn("Снимок", "S")],
+            [_btn("Открыть на компьютере", "PC")],
+            [_btn("К заказам", "O"), _btn("Отчёты", "R")],
+        ]
+        return text, rows
+
+    def _screen_snap(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
+        doc, _ = self._doc_of(session)
+        blocks = self._snap_blocks(session, doc)
+        fields = snapmod.normalize_fields(session.snap.get("fields"))
+        theme = snapmod.theme_key(str(session.snap.get("theme") or "teal"))
+        preset = next((key for key, ids in snapmod.PRESETS.items() if ids == fields), "")
+        names = [str(block["order"].get("number") or block["order"].get("name") or "заказ") for block in blocks]
+        lines_n = sum(len(block["lines"]) for block in blocks)
+        text = (
+            f"<b>Снимок</b>\n"
+            f"{html_esc(', '.join(names) or 'нет заказов')} · позиций: {lines_n}\n"
+            f"набор: {html_esc(snapmod.PRESET_LABELS.get(preset, 'свой'))}\n"
+            f"тема: {html_esc(snapmod.THEMES[theme]['label'])}\n"
+            f"подписи: {'скрыты' if session.snap.get('hide_labels') else 'видны'} · "
+            f"дата: {'скрыта' if session.snap.get('hide_stamp') else 'есть'}\n"
+            f"заголовок: {html_esc(session.snap.get('title') or 'как на компьютере')}"
+        )
+        rows = [
+            [_btn("Для работы", "Sp:work"), _btn("Как счёт", "Sp:invoice")],
+            [_btn("Коротко", "Sp:short"), _btn("Все поля", "Sp:full")],
+            [_btn("Изумруд", "St:teal"), _btn("Графит", "St:graphite"), _btn("Индиго", "St:indigo")],
+            [_btn("Золото", "St:gold"), _btn("Вишня", "St:rose"), _btn("Минимал", "St:mono"), _btn("Ночь", "St:night")],
+            [
+                _btn("Подписи ✓" if not session.snap.get("hide_labels") else "Подписи", "Shl"),
+                _btn("Дата ✓" if not session.snap.get("hide_stamp") else "Дата", "Shs"),
+            ],
+            [_btn("Поля", "SF"), _btn("Позиции", "SN"), _btn("Заказы", "SA")],
+            [_btn("Заголовок", "SC"), _btn("Сбросить заголовок", "SX")],
+            [_btn("Картинка PNG", "SP"), _btn("Текст", "ST")],
+            [_btn("К заказу", "D"), _btn("К заказам", "O")],
+        ]
+        return text, rows
+
+    def _screen_fields(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
+        fields = set(snapmod.normalize_fields(session.snap.get("fields")))
+        rows: list[list[dict[str, str]]] = []
+        pair: list[dict[str, str]] = []
+        for index, item in enumerate(snapmod.FIELDS):
+            mark = "✓ " if item["id"] in fields else ""
+            pair.append(_btn(f"{mark}{item['label']}", f"Sf:{index}"))
+            if len(pair) == 2:
+                rows.append(pair)
+                pair = []
+        if pair:
+            rows.append(pair)
+        rows.append([_btn("Готово", "S")])
+        return "<b>Поля снимка</b>\nнажмите, чтобы включить или выключить — как на компьютере.", rows
+
+    def _screen_lines(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
+        doc, _ = self._doc_of(session)
+        order = self._find_order(doc, session.order_id)
+        skip = set((session.snap.get("skip") or {}).get(session.order_id) or [])
+        rows: list[list[dict[str, str]]] = []
+        lines = [line for line in (order.get("lines") or []) if isinstance(line, dict)]
+        if not lines:
+            return "В этом заказе нет позиций.", [[_btn("Назад", "S")]]
+        for index, line in enumerate(lines):
+            line_id = str(line.get("id") or f"i{index}")
+            mark = "" if line_id in skip else "✓ "
+            label = f"{mark}{line.get('product') or '—'} · {qty_text(line)}"
+            rows.append([_btn(_clip(label, 60), f"Sn:{index}")])
+        rows.append([_btn("Готово", "S")])
+        return "<b>Позиции снимка</b>\nснимите галочку, чтобы не показывать строку.", rows
+
+    def _screen_add(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
+        doc, _ = self._doc_of(session)
+        currency = str(doc.get("currency") or "₽")
+        chosen = set(session.snap.get("order_ids") or [])
+        orders = self._filtered_orders(session, doc)
+        session.orders = [str(order.get("id") or "") for order in orders]
+        rows: list[list[dict[str, str]]] = []
+        for index, order in enumerate(orders[:18]):
+            mark = "✓ " if str(order.get("id") or "") in chosen else ""
+            rows.append([_btn(_clip(f"{mark}{_order_label(order, currency)}"), f"Sa:{index}")])
+        if not rows:
+            rows.append([_btn("Нет заказов", "S")])
+        rows.append([_btn("Готово", "S")])
+        return "<b>Заказы на снимке</b>\nможно собрать несколько, как на компьютере.", rows
 
 
 BOT = TelegramBot()

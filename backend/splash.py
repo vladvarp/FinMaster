@@ -37,7 +37,7 @@ def _python_for_pip() -> str:
 
 def ensure_packages(splash: "Splash", requirements: str) -> None:
     missing: list[str] = []
-    for module, package in (("flask", "flask"), ("webview", "pywebview")):
+    for module, package in (("flask", "flask"), ("webview", "pywebview"), ("PIL", "pillow")):
         try:
             __import__(module)
         except ImportError:
