@@ -73,19 +73,98 @@ def money(n: Any, currency: str = "₽") -> str:
     return f"{sign}{text} {currency}"
 
 
+def num_text(n: Any) -> str:
+    """Число для снимка: целое как есть, иначе ровно до сотых."""
+    value = round2(n)
+    if abs(value - round(value)) < 0.0005:
+        return str(int(round(value)))
+    return f"{value:.2f}".replace(".", ",")
+
+
 def qty_text(line: dict[str, Any]) -> str:
-    qty = num_expr(line, "qty_expr", "quantity")
-    if abs(qty - round(qty)) < 0.0005:
-        shown = str(int(round(qty)))
-    else:
-        shown = f"{qty:.3f}".replace(".", ",").rstrip("0").rstrip(",")
+    shown = num_text(num_expr(line, "qty_expr", "quantity"))
     unit = str(line.get("unit") or "").strip()
     return f"{shown} {unit}".strip() or "—"
 
 
-def line_totals(line: dict[str, Any]) -> dict[str, float]:
+def type_index(doc: dict[str, Any] | None) -> dict[str, str]:
+    """Имя типа заказа -> «tax», «cost» или пустая строка для обычной выручки."""
+    index: dict[str, str] = {}
+    for item in (doc or {}).get("order_types") or []:
+        if isinstance(item, dict):
+            name = str(item.get("name") or "").strip()
+            kind = "tax" if item.get("is_tax") else ("cost" if item.get("is_cost") else "")
+        else:
+            name = str(item or "").strip()
+            kind = ""
+        if name:
+            index[name] = kind
+    return index
+
+
+def line_kind(line: dict[str, Any] | None, types: dict[str, str] | None = None) -> str:
+    return str((types or {}).get(str((line or {}).get("order_type") or "").strip()) or "")
+
+
+def is_expense(line: dict[str, Any] | None, types: dict[str, str] | None = None) -> bool:
+    return bool(line_kind(line, types))
+
+
+def tax_mode(line: dict[str, Any] | None) -> str:
+    """«amount» — своя сумма, «gross» — процент от выручки, «net» — процент от выручки без затрат."""
+    mode = str((line or {}).get("tax_mode") or "amount")
+    return mode if mode in ("gross", "net") else "amount"
+
+
+def order_tax_base(
+    order: dict[str, Any] | None, mode: str, types: dict[str, str] | None = None
+) -> float:
+    """База процента налога. Считается по доходам и затратам, поэтому налог от налога не берётся."""
+    gross = 0.0
+    costs = 0.0
+    for item in (order or {}).get("lines") or []:
+        if not isinstance(item, dict):
+            continue
+        kind = line_kind(item, types)
+        if not kind:
+            gross += float(line_totals(item, types)["after"])
+        elif kind == "cost":
+            costs += float(line_totals(item, types)["cost"])
+    return round2(gross - costs if mode == "net" else gross)
+
+
+def line_totals(
+    line: dict[str, Any],
+    types: dict[str, str] | None = None,
+    order: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     qty = num_expr(line, "qty_expr", "quantity")
     price = max(0.0, num_expr(line, "price_expr", "price"))
+    kind = line_kind(line, types)
+    if kind:
+        mode = tax_mode(line) if kind == "tax" else "amount"
+        if mode != "amount":
+            percent = max(0.0, num_expr(line, "tax_percent_expr", "tax_percent"))
+            base = order_tax_base(order, mode, types)
+            cost = round2(base * percent / 100)
+        else:
+            base = 0.0
+            percent = 0.0
+            cost = round2(qty * price)
+        return {
+            "qty": qty,
+            "price": price,
+            "discount": 0.0,
+            "total": cost,
+            "after": 0.0,
+            "paid": 0.0,
+            "unpaid": 0.0,
+            "cost": cost,
+            "kind": kind,
+            "mode": mode,
+            "percent": percent,
+            "base": base,
+        }
     discount = min(100.0, max(0.0, num_expr(line, "discount_expr", "discount")))
     total = round2(qty * price)
     after = round2(total * (1 - discount / 100))
@@ -99,20 +178,44 @@ def line_totals(line: dict[str, Any]) -> dict[str, float]:
         "after": after,
         "paid": paid,
         "unpaid": unpaid,
+        "cost": 0.0,
+        "kind": "",
+        "mode": "amount",
+        "percent": 0.0,
+        "base": 0.0,
     }
 
 
-def lines_totals(lines: list[dict[str, Any]] | None) -> dict[str, float]:
-    acc = {"total": 0.0, "after": 0.0, "paid": 0.0, "unpaid": 0.0}
+def lines_totals(
+    lines: list[dict[str, Any]] | None,
+    types: dict[str, str] | None = None,
+    order: dict[str, Any] | None = None,
+) -> dict[str, float]:
+    acc = {"total": 0.0, "after": 0.0, "paid": 0.0, "unpaid": 0.0, "cost": 0.0}
     for line in lines or []:
-        tot = line_totals(line)
-        for key in acc:
-            acc[key] += tot[key]
+        tot = line_totals(line, types, order)
+        if tot["kind"]:
+            acc["cost"] += float(tot["cost"])
+            continue
+        for key in ("total", "after", "paid", "unpaid"):
+            acc[key] += float(tot[key])
+    acc["net"] = round2(acc["after"] - acc["cost"])
     return acc
 
 
-def order_totals(order: dict[str, Any] | None) -> dict[str, float]:
-    return lines_totals((order or {}).get("lines") or [])
+def order_totals(order: dict[str, Any] | None, types: dict[str, str] | None = None) -> dict[str, float]:
+    return lines_totals((order or {}).get("lines") or [], types, order)
+
+
+def split_lines(
+    lines: list[dict[str, Any]] | None, types: dict[str, str] | None = None
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Разделить позиции на доходные и расходные (налог / затрата)."""
+    income: list[dict[str, Any]] = []
+    expense: list[dict[str, Any]] = []
+    for line in lines or []:
+        (expense if line_kind(line, types) else income).append(line)
+    return income, expense
 
 
 def customer_org(doc: dict[str, Any] | None, name: str) -> str:

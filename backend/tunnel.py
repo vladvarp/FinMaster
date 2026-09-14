@@ -12,6 +12,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from backend import netlog
+
 
 def find_ngrok() -> str:
     for name in ("ngrok", "ngrok.exe"):
@@ -66,12 +68,14 @@ class NgrokTunnel:
             if existing:
                 self._url = existing
                 self._error = ""
+                netlog.add("ngrok", f"Туннель уже открыт: {existing}", level="ok", key="ngrok-up")
                 return existing
 
             exe = find_ngrok()
             if not exe:
                 self._error = "ngrok не найден. Скачайте с ngrok.com, добавьте в PATH и вставьте токен."
                 self._url = ""
+                netlog.add("ngrok", self._error, level="err", key="ngrok-missing")
                 raise RuntimeError(self._error)
 
             token = str(authtoken or "").strip()
@@ -109,15 +113,20 @@ class NgrokTunnel:
                     "ngrok не выдал ссылку. Нужен токен с ngrok.com → Your Authtoken. "
                     "Если ngrok уже запущен в другом окне — закройте его и попробуйте снова."
                 )
+                netlog.add("ngrok", self._error, level="err", key="ngrok-fail")
                 raise RuntimeError(self._error)
 
             self._url = url
             self._error = ""
+            netlog.add("ngrok", f"Туннель открыт: {url}", level="ok", key="ngrok-up")
             return url
 
     def stop(self) -> None:
         with self._lock:
+            had = bool(self._url or self._proc)
             self._stop_locked()
+            if had:
+                netlog.add("ngrok", "Туннель остановлен", level="warn", key="ngrok-stop")
 
     def _stop_locked(self) -> None:
         proc = self._proc

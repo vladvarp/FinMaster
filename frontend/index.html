@@ -416,7 +416,7 @@
           <div class="catalog-grid">
             <div class="card">
               <h3>Статусы заказа</h3>
-              <p class="hint" style="margin-top:0">Замок защищает статус от массовой смены в заказе. «Оплачено» — статус полной оплаты.</p>
+              <p class="hint" style="margin-top:0">Замок защищает статус от массовой смены в заказе. «Оплачено» — статус полной оплаты. Имена в справочнике не повторяются.</p>
               <div class="list-edit" id="status-list"></div>
               <button class="btn small" id="btn-add-status" style="margin-top:10px">+ Статус</button>
             </div>
@@ -427,12 +427,13 @@
             </div>
             <div class="card">
               <h3>Типы заказа</h3>
+              <p class="hint" style="margin-top:0">Галочка «Налог» или «Затрата» превращает тип в расход: такие строки уходят в отдельный блок заказа и вычитаются из суммы.</p>
               <div class="list-edit" id="type-list"></div>
               <button class="btn small" id="btn-add-type" style="margin-top:10px">+ Тип</button>
             </div>
             <div class="card">
               <h3>Продукты</h3>
-              <p class="hint" style="margin-top:0">Ед. по умолчанию берётся из единиц измерения и подставляется в столбец «Ед.» при выборе продукта.</p>
+              <p class="hint" style="margin-top:0">Ед. и цена по умолчанию подставляются в строку заказа при выборе продукта.</p>
               <div class="list-edit" id="product-catalog"></div>
               <button class="btn small" id="btn-add-product" style="margin-top:10px">+ Продукт</button>
             </div>
@@ -455,7 +456,7 @@
   </div>
 
   <datalist id="customer-list"></datalist>
-  <datalist id="product-list"></datalist>
+  <div id="product-suggest" class="suggest" role="listbox" hidden></div>
 
   <div class="modal" id="close-modal">
     <div class="modal-card">
@@ -477,6 +478,17 @@
         <button class="btn" id="new-cancel">Отмена</button>
         <button class="btn" id="new-save">Сохранить и создать</button>
         <button class="btn primary" id="new-discard">Создать без сохранения</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="confirm-modal">
+    <div class="modal-card confirm-modal">
+      <h3 id="confirm-title">Подтверждение</h3>
+      <p id="confirm-text"></p>
+      <div class="modal-actions">
+        <button class="btn" type="button" id="confirm-cancel">Отмена</button>
+        <button class="btn primary" type="button" id="confirm-ok">Продолжить</button>
       </div>
     </div>
   </div>
@@ -552,7 +564,10 @@
     <div class="modal-card remote-modal">
       <div class="modal-title-row">
         <h3>Управление с телефона</h3>
-        <button type="button" class="info-btn" id="remote-guide-open" title="Как подключить телефон" aria-label="Как подключить телефон">i</button>
+        <div class="modal-title-actions">
+          <button type="button" class="btn small" id="remote-console-open" title="Консоль сети (Ctrl+Ё)">Консоль</button>
+          <button type="button" class="info-btn" id="remote-guide-open" title="Как подключить телефон" aria-label="Как подключить телефон">i</button>
+        </div>
       </div>
       <p>Один раз отсканируйте код или откройте ссылку — устройство запомнится. Дальше заходите по той же закладке, без нового QR.</p>
       <div class="remote-layout">
@@ -576,7 +591,7 @@
           </label>
           <div class="remote-fold collapsed" data-remote-fold>
             <button type="button" class="remote-fold-head">
-              <span>Токен ngrok</span>
+              <span class="remote-fold-title">Токен ngrok<i class="token-dot" id="ngrok-token-dot" title="Токен не сохранён"></i></span>
               <span class="remote-fold-ico">▾</span>
             </button>
             <div class="remote-fold-body">
@@ -592,7 +607,7 @@
           </div>
           <div class="remote-fold collapsed" data-remote-fold>
             <button type="button" class="remote-fold-head">
-              <span>Telegram</span>
+              <span class="remote-fold-title">Telegram<i class="token-dot" id="tg-token-dot" title="Токен не сохранён"></i></span>
               <span class="remote-fold-ico">▾</span>
             </button>
             <div class="remote-fold-body">
@@ -632,6 +647,20 @@
         <button class="btn primary" type="button" id="remote-start">Включить доступ</button>
       </div>
     </div>
+  </div>
+
+  <div id="net-console" class="net-console" hidden>
+    <div class="net-console-head" id="net-console-head">
+      <span class="net-console-title">Сеть</span>
+      <span class="net-console-hint"><kbd>Ctrl</kbd><kbd>Ё</kbd></span>
+      <button type="button" class="net-console-tool" id="net-console-clear">Очистить</button>
+      <button type="button" class="net-console-tool" id="net-console-close" title="Закрыть" aria-label="Закрыть">✕</button>
+    </div>
+    <div class="net-console-body" id="net-console-body">
+      <div class="net-console-empty" id="net-console-empty">Пока нет событий. Включите доступ — здесь появятся подключения, синхронизация, Telegram и ngrok.</div>
+      <div class="net-console-log" id="net-console-log"></div>
+    </div>
+    <div class="net-console-resize" id="net-console-resize"></div>
   </div>
 
   <div class="modal" id="device-info-modal">
@@ -699,6 +728,7 @@
           <div class="help-row"><span>Поиск по отчёту</span><span><kbd>Ctrl</kbd><kbd>F</kbd></span></div>
           <div class="help-row"><span>Эта подсказка</span><span><kbd>F1</kbd></span></div>
           <div class="help-row"><span>Полный экран</span><span><kbd>F11</kbd></span></div>
+          <div class="help-row"><span>Консоль сети</span><span><kbd>Ctrl</kbd><kbd>Ё</kbd></span></div>
         </div>
         <div class="help-col">
           <h4>Таблица заказа</h4>

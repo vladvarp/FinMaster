@@ -12,9 +12,19 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable
 
+from backend import netlog
 from backend import storage
 from backend.document import normalize_document
-from backend.finance import html_esc, money, order_totals, qty_text
+from backend.finance import (
+    html_esc,
+    line_kind,
+    line_totals,
+    money,
+    order_totals,
+    qty_text,
+    split_lines,
+    type_index,
+)
 from backend.remote import SESSION as REMOTE
 from backend import snapshot as snapmod
 
@@ -310,8 +320,8 @@ def _live_path() -> str:
     return str(REMOTE.path or "") if REMOTE.enabled else ""
 
 
-def _order_label(order: dict[str, Any], currency: str) -> str:
-    tot = order_totals(order)
+def _order_label(order: dict[str, Any], currency: str, types: dict[str, str] | None = None) -> str:
+    tot = order_totals(order, types)
     title = " · ".join(part for part in (str(order.get("number") or "—"), str(order.get("name") or "без названия")) if part)
     if tot["unpaid"] > 0.005:
         extra = f"долг {money(tot['unpaid'], currency)}"
@@ -393,14 +403,18 @@ class TelegramBot:
             self._running = bool(token)
         if token:
             setup_bot(token)
+            netlog.add("telegram", "Бот слушает обновления", level="ok", key="tg-on")
         if token and (self._thread is None or not self._thread.is_alive()):
             self._thread = threading.Thread(target=self._loop, name="fm-telegram", daemon=True)
             self._thread.start()
 
     def stop(self) -> None:
         with self._lock:
+            was = self._running
             self._running = False
             self._token = ""
+        if was:
+            netlog.add("telegram", "Бот остановлен", level="warn", key="tg-off")
 
     def _state(self) -> tuple[str, int, bool]:
         with self._lock:
@@ -471,6 +485,7 @@ class TelegramBot:
                 with self._lock:
                     self._error = str(exc)
                     still = self._running and self._token == token
+                netlog.add("telegram", str(exc), level="err", key="tg-error")
                 if not still:
                     return
                 time.sleep(4)
@@ -493,6 +508,12 @@ class TelegramBot:
             if cid is None:
                 return
             text = str(msg.get("text") or "").strip()
+            netlog.add(
+                "telegram",
+                f"Сообщение: {text[:80] or 'без текста'}",
+                source=f"chat {cid}",
+                key=f"tg-msg-{cid}",
+            )
             self._on_text(token, str(cid), text)
             with self._lock:
                 self._error = ""
@@ -564,6 +585,28 @@ class TelegramBot:
         if cid is None:
             return
         chat_id = str(cid)
+        labels = {
+            "H": "меню",
+            "R": "отчёты",
+            "O": "заказы",
+            "L": "ссылка",
+            "S": "снимок",
+            "PC": "открыть на ПК",
+            "D": "детали заказа",
+            "SP": "снимок PNG",
+            "ST": "снимок текстом",
+        }
+        hint = labels.get(data)
+        if not hint:
+            if data.startswith("Oi:"):
+                hint = "заказ"
+            elif data.startswith("Ri:"):
+                hint = "открыть отчёт"
+            elif data.startswith("Of:"):
+                hint = "фильтр заказов"
+            else:
+                hint = data or "кнопка"
+        netlog.add("telegram", f"Кнопка: {hint}", source=f"chat {chat_id}", key=f"tg-cb-{chat_id}")
         if data == "L":
             info = self._status_for(chat_id)
             send_access(token, chat_id, str(info.get("url") or ""), info)
@@ -719,10 +762,22 @@ class TelegramBot:
             fields.append(field)
         session.snap["fields"] = snapmod.normalize_fields(fields) or [field]
 
+    def _snap_lines(
+        self, doc: dict[str, Any], order: dict[str, Any] | None, session: ChatSession | None = None
+    ) -> list[dict[str, Any]]:
+        """Позиции для снимка: налоги и затраты доступны, только если включено поле «Налоги и затраты»."""
+        with_expenses = "expenses" in snapmod.normalize_fields((session.snap if session else {}).get("fields"))
+        types = type_index(doc)
+        return [
+            line
+            for line in ((order or {}).get("lines") or [])
+            if isinstance(line, dict) and (with_expenses or not line_kind(line, types))
+        ]
+
     def _toggle_line(self, session: ChatSession, index: int) -> None:
         doc, _ = self._doc_of(session)
         order = self._find_order(doc, session.order_id)
-        lines = [line for line in (order.get("lines") or []) if isinstance(line, dict)]
+        lines = self._snap_lines(doc, order, session)
         if index < 0 or index >= len(lines):
             return
         line_id = str(lines[index].get("id") or f"i{index}")
@@ -771,10 +826,11 @@ class TelegramBot:
     def _filtered_orders(self, session: ChatSession, doc: dict[str, Any]) -> list[dict[str, Any]]:
         found: list[dict[str, Any]] = []
         needle = (session.search or "").strip().lower()
+        types = type_index(doc)
         for order in doc.get("orders") or []:
             if not isinstance(order, dict):
                 continue
-            tot = order_totals(order)
+            tot = order_totals(order, types)
             if session.filter == "debt" and tot["unpaid"] <= 0.005:
                 continue
             if session.filter == "paid" and tot["unpaid"] > 0.005:
@@ -808,13 +864,10 @@ class TelegramBot:
             if not order:
                 continue
             banned = set(skip.get(order_id) or [])
-            lines = [
-                line
-                for i, line in enumerate(order.get("lines") or [])
-                if isinstance(line, dict) and str(line.get("id") or f"i{i}") not in banned
-            ]
+            allowed = self._snap_lines(doc, order, session)
+            lines = [line for i, line in enumerate(allowed) if str(line.get("id") or f"i{i}") not in banned]
             if not lines and not banned:
-                lines = [line for line in (order.get("lines") or []) if isinstance(line, dict)]
+                lines = allowed
             if lines:
                 blocks.append({"order": order, "lines": lines})
         return blocks
@@ -934,7 +987,8 @@ class TelegramBot:
         orders = self._filtered_orders(session, doc)
         session.orders = [str(order.get("id") or "") for order in orders]
         currency = str(doc.get("currency") or "₽")
-        debt = sum(order_totals(order)["unpaid"] for order in (doc.get("orders") or []) if isinstance(order, dict))
+        types = type_index(doc)
+        debt = sum(order_totals(order, types)["unpaid"] for order in (doc.get("orders") or []) if isinstance(order, dict))
         pages = max(1, (len(orders) + PAGE - 1) // PAGE)
         session.opage = min(session.opage, pages - 1)
         chunk = orders[session.opage * PAGE : session.opage * PAGE + PAGE]
@@ -949,7 +1003,7 @@ class TelegramBot:
         rows: list[list[dict[str, str]]] = []
         offset = session.opage * PAGE
         for i, order in enumerate(chunk):
-            rows.append([_btn(_clip(_order_label(order, currency)), f"Oi:{offset + i}")])
+            rows.append([_btn(_clip(_order_label(order, currency, types)), f"Oi:{offset + i}")])
         if not chunk:
             text += "\n\nНичего не нашлось."
         rows.append(
@@ -979,24 +1033,42 @@ class TelegramBot:
         if not order:
             return "Заказ не найден.", [[_btn("К заказам", "O")]]
         currency = str(doc.get("currency") or "₽")
-        tot = order_totals(order)
+        types = type_index(doc)
+        tot = order_totals(order, types)
+        income, expense = split_lines(
+            [line for line in order.get("lines") or [] if isinstance(line, dict)], types
+        )
         lines_out = []
-        for line in order.get("lines") or []:
-            if not isinstance(line, dict):
-                continue
-            bit = order_totals({"lines": [line]})
+        for line in income:
+            bit = order_totals({"lines": [line]}, types)
             lines_out.append(
                 f"• {html_esc(line.get('product') or '—')} · {html_esc(qty_text(line))} · "
                 f"{html_esc(money(bit['after'], currency))} · {html_esc(line.get('status') or '—')}"
             )
+        cost_out = []
+        for line in expense:
+            bit = line_totals(line, types, order)
+            tag = "налог" if bit["kind"] == "tax" else "затрата"
+            how = qty_text(line) if bit["mode"] == "amount" else f"{bit['percent']:g} % от {money(bit['base'], currency)}"
+            cost_out.append(
+                f"− {html_esc(line.get('product') or line.get('order_type') or '—')} · {html_esc(how)} · "
+                f"{html_esc(money(bit['cost'], currency))} · {tag}"
+            )
         notes = str(order.get("notes") or "").strip()
+        sums = (
+            f"Итого {html_esc(money(tot['after'], currency))} · оплачено {html_esc(money(tot['paid'], currency))} · "
+            f"долг {html_esc(money(tot['unpaid'], currency))}"
+        )
+        if tot["cost"] > 0.005:
+            sums += f"\nРасход {html_esc(money(tot['cost'], currency))} · чистыми {html_esc(money(tot['net'], currency))}"
         text = (
             f"<b>{html_esc(order.get('number') or '—')} · {html_esc(order.get('name') or 'без названия')}</b>\n"
             f"Заказчик: {html_esc(order.get('customer') or '—')}\n"
-            f"Итого {html_esc(money(tot['after'], currency))} · оплачено {html_esc(money(tot['paid'], currency))} · "
-            f"долг {html_esc(money(tot['unpaid'], currency))}\n\n"
+            f"{sums}\n\n"
             + ("\n".join(lines_out) if lines_out else "Нет позиций.")
         )
+        if cost_out:
+            text += "\n\n<b>Расходы</b>\n" + "\n".join(cost_out)
         if notes:
             text += f"\n\nЗаметки: {html_esc(notes)}"
         if len(text) > 3800:
@@ -1061,13 +1133,16 @@ class TelegramBot:
         order = self._find_order(doc, session.order_id)
         skip = set((session.snap.get("skip") or {}).get(session.order_id) or [])
         rows: list[list[dict[str, str]]] = []
-        lines = [line for line in (order.get("lines") or []) if isinstance(line, dict)]
+        lines = self._snap_lines(doc, order, session)
         if not lines:
-            return "В этом заказе нет позиций.", [[_btn("Назад", "S")]]
+            return "В этом заказе нет позиций для снимка.", [[_btn("Назад", "S")]]
+        types = type_index(doc)
         for index, line in enumerate(lines):
             line_id = str(line.get("id") or f"i{index}")
             mark = "" if line_id in skip else "✓ "
-            label = f"{mark}{line.get('product') or '—'} · {qty_text(line)}"
+            kind = line_kind(line, types)
+            tail = " · налог" if kind == "tax" else " · затрата" if kind else ""
+            label = f"{mark}{line.get('product') or '—'} · {qty_text(line)}{tail}"
             rows.append([_btn(_clip(label, 60), f"Sn:{index}")])
         rows.append([_btn("Готово", "S")])
         return "<b>Позиции снимка</b>\nснимите галочку, чтобы не показывать строку.", rows
@@ -1078,10 +1153,11 @@ class TelegramBot:
         chosen = set(session.snap.get("order_ids") or [])
         orders = self._filtered_orders(session, doc)
         session.orders = [str(order.get("id") or "") for order in orders]
+        types = type_index(doc)
         rows: list[list[dict[str, str]]] = []
         for index, order in enumerate(orders[:18]):
             mark = "✓ " if str(order.get("id") or "") in chosen else ""
-            rows.append([_btn(_clip(f"{mark}{_order_label(order, currency)}"), f"Sa:{index}")])
+            rows.append([_btn(_clip(f"{mark}{_order_label(order, currency, types)}"), f"Sa:{index}")])
         if not rows:
             rows.append([_btn("Нет заказов", "S")])
         rows.append([_btn("Готово", "S")])

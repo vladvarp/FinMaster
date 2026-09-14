@@ -18,7 +18,12 @@ DEFAULT_STATUSES = [
 ]
 
 DEFAULT_UNITS = ["шт.", "м²", "м", "мин"]
-DEFAULT_ORDER_TYPES = ["Производство", "Услуга", "Поставка", "Монтаж"]
+DEFAULT_ORDER_TYPES = [
+    {"id": "production", "name": "Производство", "is_tax": False, "is_cost": False},
+    {"id": "service", "name": "Услуга", "is_tax": False, "is_cost": False},
+    {"id": "supply", "name": "Поставка", "is_tax": False, "is_cost": False},
+    {"id": "install", "name": "Монтаж", "is_tax": False, "is_cost": False},
+]
 DEFAULT_PRODUCTS: list[dict[str, str]] = []
 
 DEFAULT_PAYMENT_TERMS = 14
@@ -58,16 +63,47 @@ def _int_in_range(value: Any, default: int, low: int, high: int) -> int:
     return max(low, min(high, number))
 
 
-def _product_entry(item: Any, default_unit: str) -> dict[str, str] | None:
+def _order_type_entry(item: Any) -> dict[str, Any] | None:
+    """Тип заказа: строка из старых файлов или объект с галочками «налог» / «затрата»."""
+    if isinstance(item, dict):
+        name = str(item.get("name") or "").strip()
+        is_tax = bool(item.get("is_tax"))
+        is_cost = bool(item.get("is_cost"))
+        type_id = str(item.get("id") or name)
+    else:
+        name = str(item or "").strip()
+        is_tax = False
+        is_cost = False
+        type_id = name
+    if not name:
+        return None
+    if is_tax:
+        is_cost = False
+    return {"id": type_id, "name": name, "is_tax": is_tax, "is_cost": is_cost}
+
+
+def _product_price(value: Any) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if number != number or number < 0:
+        return 0.0
+    return round(number * 100) / 100
+
+
+def _product_entry(item: Any, default_unit: str) -> dict[str, Any] | None:
     if isinstance(item, dict):
         name = str(item.get("name") or "").strip()
         unit = str(item.get("unit") or "").strip() or default_unit
+        price = _product_price(item.get("price"))
     else:
         name = str(item or "").strip()
         unit = default_unit
+        price = 0.0
     if not name:
         return None
-    return {"name": name, "unit": unit}
+    return {"name": name, "unit": unit, "price": price}
 
 
 def now_iso() -> str:
@@ -84,7 +120,7 @@ def empty_document(title: str = "Новый отчёт") -> dict[str, Any]:
         "currency": "₽",
         "statuses": [dict(item) for item in DEFAULT_STATUSES],
         "units": list(DEFAULT_UNITS),
-        "order_types": list(DEFAULT_ORDER_TYPES),
+        "order_types": [dict(item) for item in DEFAULT_ORDER_TYPES],
         "products": list(DEFAULT_PRODUCTS),
         "customers": [],
         "orders": [],
@@ -149,7 +185,16 @@ def normalize_document(raw: Any) -> dict[str, Any]:
 
     order_types = raw.get("order_types")
     if isinstance(order_types, list) and order_types:
-        base["order_types"] = [str(t).strip() for t in order_types if str(t).strip()]
+        seen_types: set[str] = set()
+        cleaned_types = []
+        for item in order_types:
+            entry = _order_type_entry(item)
+            if not entry or entry["name"] in seen_types:
+                continue
+            seen_types.add(entry["name"])
+            cleaned_types.append(entry)
+        if cleaned_types:
+            base["order_types"] = cleaned_types
 
     products = raw.get("products")
     default_unit = base["units"][0] if base["units"] else "шт."
@@ -186,7 +231,8 @@ def normalize_document(raw: Any) -> dict[str, Any]:
                 if name and name not in seen:
                     seen.add(name)
                     unit = str(line.get("unit") or "").strip() or default_unit
-                    harvested.append({"name": name, "unit": unit})
+                    price = _product_price(line.get("price"))
+                    harvested.append({"name": name, "unit": unit, "price": price})
         if harvested:
             base["products"] = harvested
 

@@ -9,11 +9,14 @@ from typing import Any
 from backend.finance import (
     customer_org,
     fmt_date,
+    line_kind,
     line_totals,
     lines_totals,
     money,
     num_expr,
+    num_text,
     qty_text,
+    type_index,
 )
 
 
@@ -34,6 +37,7 @@ FIELDS = [
     {"id": "unpaid", "label": "Не оплачено", "kind": "col"},
     {"id": "payment_date", "label": "Дата оплаты", "kind": "col"},
     {"id": "totals", "label": "Итоги заказа", "kind": "meta"},
+    {"id": "expenses", "label": "Налоги и затраты", "kind": "meta"},
 ]
 FIELD_IDS = [item["id"] for item in FIELDS]
 FIELD_BY_ID = {item["id"]: item for item in FIELDS}
@@ -186,8 +190,34 @@ def theme_key(name: str) -> str:
     return name if name in THEMES else "teal"
 
 
-def line_value(line: dict[str, Any], field_id: str, currency: str) -> str:
-    tot = line_totals(line)
+def line_value(
+    line: dict[str, Any],
+    field_id: str,
+    currency: str,
+    types: dict[str, str] | None = None,
+    order: dict[str, Any] | None = None,
+) -> str:
+    tot = line_totals(line, types, order)
+    if tot["kind"]:
+        # Расход в снимке — название, объём и сумма с минусом; скидок и оплат у него нет.
+        if field_id == "order_type":
+            label = "налог" if tot["kind"] == "tax" else "затрата"
+            return f"{line.get('order_type') or '—'} · {label}"
+        if field_id == "product":
+            return str(line.get("product") or "—")
+        if field_id == "quantity":
+            return qty_text(line) if tot["mode"] == "amount" else f"{num_text(tot['percent'])} %"
+        if field_id == "price":
+            return (
+                money(num_expr(line, "price_expr", "price"), currency)
+                if tot["mode"] == "amount"
+                else money(tot["base"], currency)
+            )
+        if field_id == "total":
+            return f"−{money(tot['cost'], currency)}"
+        if field_id == "order_date":
+            return fmt_date(line.get("order_date"))
+        return "—"
     if field_id == "order_type":
         return str(line.get("order_type") or "—")
     if field_id == "product":
@@ -197,7 +227,7 @@ def line_value(line: dict[str, Any], field_id: str, currency: str) -> str:
     if field_id == "price":
         return money(num_expr(line, "price_expr", "price"), currency)
     if field_id == "discount":
-        return f"{num_expr(line, 'discount_expr', 'discount'):g} %"
+        return f"{num_text(num_expr(line, 'discount_expr', 'discount'))} %"
     if field_id == "total":
         return money(tot["after"], currency)
     if field_id == "paid":
@@ -242,16 +272,22 @@ def needs_money_footer(cols: list[dict[str, str]]) -> bool:
     return any(item["id"] in MONEY_COLS for item in cols)
 
 
-def footer_cells(cols: list[dict[str, str]], lines: list[dict[str, Any]], currency: str) -> list[str] | None:
+def footer_cells(
+    cols: list[dict[str, str]],
+    lines: list[dict[str, Any]],
+    currency: str,
+    types: dict[str, str] | None = None,
+    order: dict[str, Any] | None = None,
+) -> list[str] | None:
     if not needs_money_footer(cols):
         return None
-    tot = lines_totals(lines)
+    tot = lines_totals(lines, types, order)
     cells: list[str] = []
     for col in cols:
         if col["id"] == "price":
             cells.append(money(tot["total"], currency))
         elif col["id"] == "total":
-            cells.append(money(tot["after"], currency))
+            cells.append(money(tot["net"] if tot["cost"] > 0.005 else tot["after"], currency))
         elif col["id"] == "paid":
             cells.append(money(tot["paid"], currency))
         elif col["id"] == "unpaid":
@@ -261,18 +297,43 @@ def footer_cells(cols: list[dict[str, str]], lines: list[dict[str, Any]], curren
     return cells
 
 
-def totals_text(fields: list[str], cols: list[dict[str, str]], lines: list[dict[str, Any]], currency: str) -> str:
+def totals_text(
+    fields: list[str],
+    cols: list[dict[str, str]],
+    lines: list[dict[str, Any]],
+    currency: str,
+    types: dict[str, str] | None = None,
+    order: dict[str, Any] | None = None,
+) -> str:
     if "totals" not in fields or needs_money_footer(cols):
         return ""
-    tot = lines_totals(lines)
+    tot = lines_totals(lines, types, order)
     bits: list[str] = []
     if "total" in fields or "price" in fields or not cols:
         bits.append(f"Итого {money(tot['after'], currency)}")
+    if tot["cost"] > 0.005:
+        bits.append(f"расходы −{money(tot['cost'], currency)}")
+        bits.append(f"к оплате {money(tot['net'], currency)}")
     if "paid" in fields:
         bits.append(f"оплачено {money(tot['paid'], currency)}")
     if "unpaid" in fields:
         bits.append(f"остаток {money(tot['unpaid'], currency)}")
     return " · ".join(bits) if bits else f"Позиций: {len(lines)}"
+
+
+def income_blocks(
+    doc: dict[str, Any], blocks: list[dict[str, Any]], fields: list[str] | None = None
+) -> list[dict[str, Any]]:
+    """Расходы уходят заказчику только при включённом поле «Налоги и затраты»."""
+    if fields is not None and "expenses" in fields:
+        return [block for block in blocks or [] if block.get("lines")]
+    types = type_index(doc)
+    out: list[dict[str, Any]] = []
+    for block in blocks or []:
+        lines = [line for line in block.get("lines") or [] if not line_kind(line, types)]
+        if lines:
+            out.append({**block, "lines": lines})
+    return out
 
 
 def default_title(blocks: list[dict[str, Any]], custom: str = "") -> str:
@@ -309,10 +370,12 @@ def render_text(
     hide_stamp: bool = False,
     title: str = "",
 ) -> str:
+    fields = normalize_fields(fields)
+    blocks = income_blocks(doc, blocks, fields)
     if not blocks:
         raise ValueError("Выберите заказы и строки для снимка")
     currency = str(doc.get("currency") or "₽")
-    fields = normalize_fields(fields)
+    types = type_index(doc)
     cols = cols_of(fields)
     out = [default_title(blocks, title)]
     for index, block in enumerate(blocks):
@@ -325,9 +388,14 @@ def render_text(
             out.append("")
             out.extend(meta)
         if cols:
-            foot = footer_cells(cols, lines, currency)
+            foot = footer_cells(cols, lines, currency, types, block["order"])
             rows = [ [col["label"] for col in cols] ]
-            rows.extend([[line_value(line, col["id"], currency) or "—" for col in cols] for line in lines])
+            rows.extend(
+                [
+                    [line_value(line, col["id"], currency, types, block["order"]) or "—" for col in cols]
+                    for line in lines
+                ]
+            )
             if foot and any(foot):
                 rows.append([cell or "" for cell in foot])
             widths = [max(1, max(_vis_len(row[i]) for row in rows)) for i in range(len(cols))]
@@ -336,7 +404,7 @@ def render_text(
                 out.append("  ".join(_pad(row[i], widths[i]) for i in range(len(cols))))
                 if row_i == 0:
                     out.append("  ".join("─" * widths[i] for i in range(len(cols))))
-        totals = totals_text(fields, cols, lines, currency)
+        totals = totals_text(fields, cols, lines, currency, types, block["order"])
         if totals:
             out.append("")
             out.append(totals)
@@ -409,10 +477,12 @@ def render_png(
         from PIL import Image, ImageDraw
     except ImportError as exc:
         raise RuntimeError("Для картинки нужна библиотека Pillow. Перезапустите FinMaster — она установится сама.") from exc
+    fields = normalize_fields(fields)
+    blocks = income_blocks(doc, blocks, fields)
     if not blocks:
         raise ValueError("Выберите заказы и строки для снимка")
     currency = str(doc.get("currency") or "₽")
-    fields = normalize_fields(fields)
+    types = type_index(doc)
     cols = cols_of(fields)
     theme = THEMES[theme_key(theme_name)]
     heading = default_title(blocks, title)
@@ -422,13 +492,13 @@ def render_png(
     row_h = 34
     header_h = 64
 
-    def col_widths(lines: list[dict[str, Any]]) -> list[int]:
+    def col_widths(lines: list[dict[str, Any]], order: dict[str, Any] | None = None) -> list[int]:
         widths: list[int] = []
-        foot = footer_cells(cols, lines, currency)
+        foot = footer_cells(cols, lines, currency, types, order)
         for index, col in enumerate(cols):
             width = _text_w(th_font, col["label"].upper())
             for line in lines:
-                width = max(width, _text_w(body_font, line_value(line, col["id"], currency) or "—"))
+                width = max(width, _text_w(body_font, line_value(line, col["id"], currency, types, order) or "—"))
             if foot:
                 width = max(width, _text_w(strong_font, foot[index] or ""))
             widths.append(max(52, int(width + 24)))
@@ -437,13 +507,13 @@ def render_png(
     layouts = []
     inner = _text_w(head_font, heading)
     for block in blocks:
-        widths = col_widths(block["lines"]) if cols else []
+        widths = col_widths(block["lines"], block["order"]) if cols else []
         table_w = sum(widths)
         layouts.append({**block, "widths": widths, "table_w": table_w})
         inner = max(inner, table_w)
         for line in meta_items(block["order"], doc, fields, hide_labels):
             inner = max(inner, _text_w(body_font, line))
-        totals = totals_text(fields, cols, block["lines"], currency)
+        totals = totals_text(fields, cols, block["lines"], currency, types, block["order"])
         if totals:
             inner = max(inner, _text_w(strong_font, totals))
     if not hide_stamp:
@@ -452,11 +522,11 @@ def render_png(
     body_h = 16
     for index, block in enumerate(layouts):
         meta = meta_items(block["order"], doc, fields, hide_labels)
-        foot = footer_cells(cols, block["lines"], currency)
+        foot = footer_cells(cols, block["lines"], currency, types, block["order"])
         body_h += (36 if index else 0)
         body_h += (len(meta) * 22 + 10) if meta else 0
         body_h += (32 + len(block["lines"]) * row_h + (row_h if foot else 0)) if cols else 28
-        body_h += 36 if totals_text(fields, cols, block["lines"], currency) else 0
+        body_h += 36 if totals_text(fields, cols, block["lines"], currency, types, block["order"]) else 0
         body_h += 16
     height = header_h + body_h + (16 if hide_stamp else 36)
     image = Image.new("RGB", (width, height), _hex(theme["bg"]))
@@ -509,10 +579,14 @@ def render_png(
                     fill(pad, y, table_w, row_h, theme["zebra"])
                 line(pad, y, pad + table_w, y, theme["line"])
                 for i, col in enumerate(cols):
-                    cell = _fit(body_font, line_value(row, col["id"], currency) or "—", block["widths"][i] - 12)
+                    cell = _fit(
+                        body_font,
+                        line_value(row, col["id"], currency, types, block["order"]) or "—",
+                        block["widths"][i] - 12,
+                    )
                     text(xs[i] + 8, y + 8, cell, body_font, theme["ink"])
                 y += row_h
-            foot = footer_cells(cols, block["lines"], currency)
+            foot = footer_cells(cols, block["lines"], currency, types, block["order"])
             if foot:
                 fill(pad, y, table_w, row_h, theme["footBg"])
                 line(pad, y, pad + table_w, y, theme["accent"])
@@ -521,7 +595,7 @@ def render_png(
                         continue
                     text(xs[i] + 8, y + 8, _fit(strong_font, cell, block["widths"][i] - 12), strong_font, theme["ink"])
                 y += row_h
-        totals = totals_text(fields, cols, block["lines"], currency)
+        totals = totals_text(fields, cols, block["lines"], currency, types, block["order"])
         if totals:
             y += 14
             text(pad, y, totals, strong_font, theme["ink"])

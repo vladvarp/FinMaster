@@ -66,7 +66,18 @@
   }
 
   const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
-  const EXPR_MIRROR = { qty_expr: "quantity", price_expr: "price", discount_expr: "discount", paid_expr: "paid" };
+  const EXPR_MIRROR = {
+    qty_expr: "quantity",
+    price_expr: "price",
+    discount_expr: "discount",
+    paid_expr: "paid",
+    tax_percent_expr: "tax_percent",
+  };
+  const TAX_MODES = [
+    ["gross", "% от выручки"],
+    ["net", "% от выручки − затраты"],
+    ["amount", "Своя сумма"],
+  ];
 
   function isFormula(expr) {
     return /[+\-*/()×xX÷]/.test(String(expr || ""));
@@ -110,32 +121,129 @@
     return Number.isFinite(v) ? v : num(line[numKey]);
   }
 
-  function lineTotals(line) {
+  /* ==== Типы заказа: обычные, «налог» и «затрата» ==== */
+
+  function typeEntry(item) {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      const isTax = !!item.is_tax;
+      return { name: String(item.name || "").trim(), is_tax: isTax, is_cost: !isTax && !!item.is_cost };
+    }
+    return { name: String(item || "").trim(), is_tax: false, is_cost: false };
+  }
+
+  function orderTypes() {
+    return (state.doc?.order_types || []).map(typeEntry).filter((t) => t.name);
+  }
+
+  /** "tax" | "cost" | "" — пустая строка означает обычную доходную позицию. */
+  function typeKind(name) {
+    const key = String(name || "").trim();
+    const meta = orderTypes().find((t) => t.name === key);
+    return meta?.is_tax ? "tax" : meta?.is_cost ? "cost" : "";
+  }
+
+  function kindLabel(kind) {
+    return kind === "tax" ? "налог" : kind === "cost" ? "затрата" : "";
+  }
+
+  function isExpenseLine(line) {
+    return !!typeKind(line?.order_type);
+  }
+
+  function typeNames(kind) {
+    const list = orderTypes();
+    if (kind === "expense") return list.filter((t) => t.is_tax || t.is_cost).map((t) => t.name);
+    if (kind === "income") return list.filter((t) => !t.is_tax && !t.is_cost).map((t) => t.name);
+    return list.map((t) => t.name);
+  }
+
+  function splitLines(lines) {
+    const income = [];
+    const expense = [];
+    (lines || []).forEach((line) => (isExpenseLine(line) ? expense : income).push(line));
+    return { income, expense };
+  }
+
+  /** Режим строки налога: «amount» — своя сумма, «gross» — % от выручки, «net» — % от выручки без затрат. */
+  function taxMode(line) {
+    const mode = String(line?.tax_mode || "amount");
+    return mode === "gross" || mode === "net" ? mode : "amount";
+  }
+
+  function ownerOrder(line) {
+    return (state.doc?.orders || []).find((o) => (o.lines || []).includes(line)) || null;
+  }
+
+  /** База процента налога: выручка заказа, в режиме «net» — минус затраты. Налог от налога не считается. */
+  function orderTaxBase(order, mode) {
+    let gross = 0;
+    let costs = 0;
+    for (const item of order?.lines || []) {
+      const kind = typeKind(item.order_type);
+      if (!kind) gross += lineTotals(item).after;
+      else if (kind === "cost") costs += lineTotals(item).cost;
+    }
+    return round2(mode === "net" ? gross - costs : gross);
+  }
+
+  function lineTotals(line, order) {
     const qty = numExpr(line, "qty_expr", "quantity");
     const price = Math.max(0, numExpr(line, "price_expr", "price"));
+    const kind = typeKind(line.order_type);
+    if (kind) {
+      const mode = kind === "tax" ? taxMode(line) : "amount";
+      if (mode !== "amount") {
+        const percent = Math.max(0, numExpr(line, "tax_percent_expr", "tax_percent"));
+        const base = orderTaxBase(order || ownerOrder(line), mode);
+        const cost = round2((base * percent) / 100);
+        return { qty, price, discount: 0, total: cost, after: 0, paid: 0, unpaid: 0, cost, kind, expense: true, mode, percent, base };
+      }
+      const cost = round2(qty * price);
+      return { qty, price, discount: 0, total: cost, after: 0, paid: 0, unpaid: 0, cost, kind, expense: true, mode: "amount", percent: 0, base: 0 };
+    }
     const discount = Math.min(100, Math.max(0, numExpr(line, "discount_expr", "discount")));
     const total = round2(qty * price);
     const after = round2(total * (1 - discount / 100));
     const paid = Math.max(0, numExpr(line, "paid_expr", "paid"));
-    return { qty, price, discount, total, after, paid, unpaid: round2(Math.max(0, after - paid)) };
+    return {
+      qty,
+      price,
+      discount,
+      total,
+      after,
+      paid,
+      unpaid: round2(Math.max(0, after - paid)),
+      cost: 0,
+      kind: "",
+      expense: false,
+      mode: "amount",
+      percent: 0,
+      base: 0,
+    };
   }
 
-  function sumLines(lines) {
-    return (lines || []).reduce(
-      (acc, line) => {
-        const t = lineTotals(line);
-        acc.total += t.total;
-        acc.after += t.after;
-        acc.paid += t.paid;
-        acc.unpaid += t.unpaid;
-        return acc;
+  function sumLines(lines, order) {
+    const acc = (lines || []).reduce(
+      (sum, line) => {
+        const t = lineTotals(line, order);
+        if (t.expense) {
+          sum.cost += t.cost;
+          return sum;
+        }
+        sum.total += t.total;
+        sum.after += t.after;
+        sum.paid += t.paid;
+        sum.unpaid += t.unpaid;
+        return sum;
       },
-      { total: 0, after: 0, paid: 0, unpaid: 0 }
+      { total: 0, after: 0, paid: 0, unpaid: 0, cost: 0 }
     );
+    acc.net = round2(acc.after - acc.cost);
+    return acc;
   }
 
   function orderTotals(order) {
-    return sumLines(order?.lines);
+    return sumLines(order?.lines, order);
   }
 
   function money(n) {
@@ -557,7 +665,7 @@
   function emptyLine() {
     return {
       id: uid(),
-      order_type: state.doc.order_types?.[0] || "",
+      order_type: typeNames("income")[0] || typeNames()[0] || "",
       product: "",
       quantity: 1,
       qty_expr: "1",
@@ -571,6 +679,9 @@
       paid_expr: "0",
       payment_date: "",
       status: state.doc.statuses?.[0]?.name || "Новый заказ",
+      tax_mode: "gross",
+      tax_percent: 0,
+      tax_percent_expr: "0",
     };
   }
 
@@ -795,8 +906,9 @@
   }
 
   function lineRowHtml(line, index) {
-    const meta = statusMeta(line.status);
     const t = lineTotals(line);
+    if (t.expense) return costRowHtml(line, index);
+    const meta = statusMeta(line.status);
     const parts = [line.order_type, `${qtyText(line)} × ${money(t.price)}`];
     if (t.discount > 0) parts.push(`−${Math.round(t.discount)}%`);
     return `<article class="line-row" data-edit="${esc(line.id)}" style="--tint:${esc(meta.color)}">
@@ -814,6 +926,26 @@
     </article>`;
   }
 
+  function costRowHtml(line, index) {
+    const t = lineTotals(line);
+    const calc =
+      t.mode === "amount"
+        ? `${qtyText(line)} × ${money(t.price)}`
+        : `${moneyFmt.format(t.percent).replace(",00", "")} % от ${money(t.base)}${t.mode === "net" ? " (без затрат)" : ""}`;
+    return `<article class="line-row cost-row" data-edit="${esc(line.id)}">
+      <span class="lr-index">${index + 1}</span>
+      <div class="lr-main">
+        <strong>${esc(line.product || line.order_type || "Расход")}</strong>
+        <small>${esc([line.order_type, calc].filter(Boolean).join(" · "))}</small>
+        <span class="lr-status cost-kind ${esc(t.kind)}">${esc(kindLabel(t.kind))}</span>
+      </div>
+      <div class="lr-right">
+        <b class="cost">−${esc(money(t.cost))}</b>
+        <span class="lr-go">›</span>
+      </div>
+    </article>`;
+  }
+
   function renderOrder() {
     if (!requireDocument()) return;
     const order = currentOrder();
@@ -823,6 +955,7 @@
     }
     const t = orderTotals(order);
     const lines = order.lines || [];
+    const { income, expense } = splitLines(lines);
     const a = (f) => `data-o="${esc(order.id)}" data-f="${f}"`;
 
     $("order-top").innerHTML = `
@@ -835,7 +968,13 @@
         <div class="ot-sum ${t.unpaid > 0.005 ? "debt" : "paid"}"><span>${t.unpaid > 0.005 ? "Долг" : "Оплачено"}</span><b>${esc(
           money(t.unpaid > 0.005 ? t.unpaid : t.paid)
         )}</b></div>
-        <div class="ot-sum"><span>Позиций</span><b>${lines.length}</b></div>
+        <div class="ot-sum"><span>Позиций</span><b>${income.length}</b></div>
+        ${
+          t.cost > 0.005
+            ? `<div class="ot-sum cost"><span>Расход</span><b>−${esc(money(t.cost))}</b></div>
+        <div class="ot-sum ${t.net >= 0 ? "paid" : "debt"}"><span>Чистыми</span><b>${esc(money(t.net))}</b></div>`
+            : ""
+        }
       </div>`;
 
     $("order-head").innerHTML = `<article class="card fold ${state.headOpen ? "" : "closed"}">
@@ -853,36 +992,67 @@
         <div class="field last"><label>Заметки</label><textarea rows="3" ${a("notes")}>${esc(order.notes || "")}</textarea></div>
       </div>
     </article>
-    <datalist id="products-list">${(state.doc.products || []).map((p) => `<option value="${esc(p.name || p)}"></option>`).join("")}</datalist>
     <datalist id="customers-list">${(state.doc.customers || []).map((c) => `<option value="${esc(c.name || "")}"></option>`).join("")}</datalist>`;
 
-    $("lines-title").textContent = `Позиции · ${lines.length}`;
-    $("lines-list").innerHTML = lines.length
-      ? lines.map((line, i) => lineRowHtml(line, i)).join("")
+    $("lines-title").textContent = `Позиции · ${income.length}`;
+    $("lines-list").innerHTML = income.length
+      ? income.map((line, i) => lineRowHtml(line, i)).join("")
       : `<div class="empty">Позиций нет. Нажмите «+ Позиция».</div>`;
+
+    const costsRow = $("costs-row");
+    const costsList = $("costs-list");
+    const addCost = $("btn-add-cost");
+    if (costsRow && costsList) {
+      costsRow.hidden = !expense.length;
+      costsList.hidden = !expense.length;
+      $("costs-title").textContent = `Расходы · ${expense.length}`;
+      $("costs-sum").textContent = expense.length ? `−${money(t.cost)}` : "";
+      costsList.innerHTML = expense.map((line, i) => costRowHtml(line, i)).join("");
+    }
+    if (addCost) addCost.hidden = !typeNames("expense").length;
   }
 
   function refreshOrderRow(lineId) {
     const order = currentOrder();
     if (!order) return;
-    const index = (order.lines || []).findIndex((l) => l.id === lineId);
-    const line = order.lines?.[index];
-    if (line) {
-      const row = document.querySelector(`.line-row[data-edit="${CSS.escape(lineId)}"]`);
-      if (row) row.outerHTML = lineRowHtml(line, index);
+    const row = document.querySelector(`.line-row[data-edit="${CSS.escape(lineId)}"]`);
+    const { income, expense } = splitLines(order.lines);
+    const wasCost = !!row?.classList.contains("cost-row");
+    const index = income.findIndex((l) => l.id === lineId);
+    const costIndex = expense.findIndex((l) => l.id === lineId);
+    const line = index >= 0 ? income[index] : expense[costIndex];
+    if (!line) return;
+    // Смена типа переносит строку между списками — проще перерисовать заказ целиком.
+    // Налог в процентах зависит от других строк, поэтому его тоже проще пересобрать вместе с заказом.
+    const hasPercentTax = expense.some((l) => taxMode(l) !== "amount" && typeKind(l.order_type) === "tax");
+    if (!row || wasCost !== (costIndex >= 0) || (hasPercentTax && costIndex < 0)) {
+      renderOrder();
+      return;
     }
+    row.outerHTML = costIndex >= 0 ? costRowHtml(line, costIndex) : lineRowHtml(line, index);
     const t = orderTotals(order);
+    const sum = $("costs-sum");
+    if (sum && expense.length) sum.textContent = `−${money(t.cost)}`;
     const top = $("order-top");
-    if (top) {
-      const sums = top.querySelectorAll(".ot-sum b");
-      if (sums.length === 3) {
-        sums[0].textContent = money(t.after);
-        sums[1].textContent = money(t.unpaid > 0.005 ? t.unpaid : t.paid);
-        sums[2].textContent = String((order.lines || []).length);
-        const second = top.querySelectorAll(".ot-sum")[1];
-        second.className = `ot-sum ${t.unpaid > 0.005 ? "debt" : "paid"}`;
-        second.querySelector("span").textContent = t.unpaid > 0.005 ? "Долг" : "Оплачено";
-      }
+    if (!top) return;
+    const cells = top.querySelectorAll(".ot-sum");
+    const set = (cell, label, value, cls) => {
+      if (!cell) return;
+      cell.className = `ot-sum${cls ? ` ${cls}` : ""}`;
+      cell.querySelector("span").textContent = label;
+      cell.querySelector("b").textContent = value;
+    };
+    set(cells[0], "Итого", money(t.after));
+    set(
+      cells[1],
+      t.unpaid > 0.005 ? "Долг" : "Оплачено",
+      money(t.unpaid > 0.005 ? t.unpaid : t.paid),
+      t.unpaid > 0.005 ? "debt" : "paid"
+    );
+    set(cells[2], "Позиций", String(income.length));
+    if (cells.length >= 5) {
+      set(cells[3], "Расход", `−${money(t.cost)}`, "cost");
+      set(cells[4], "Чистыми", money(t.net), t.net >= 0 ? "paid" : "debt");
     }
   }
 
@@ -916,6 +1086,24 @@
     flushPending();
   }
 
+  function catalogProductNames() {
+    return (state.doc.products || []).map((p) => String(p.name || p || "").trim()).filter(Boolean);
+  }
+
+  function edProductSuggestHtml(query) {
+    const q = String(query || "").trim().toLocaleLowerCase("ru");
+    const items = catalogProductNames().filter((name) => !q || name.toLocaleLowerCase("ru").includes(q));
+    if (!items.length) return "";
+    return items
+      .map((name) => `<button type="button" class="suggest-item" data-pick-product>${esc(name)}</button>`)
+      .join("");
+  }
+
+  function fillEdProductSuggest(query) {
+    const box = $("ed-product-suggest");
+    if (box) box.innerHTML = edProductSuggestHtml(query);
+  }
+
   function renderEditor() {
     const order = currentOrder();
     const line = findLine(order, state.editLineId);
@@ -927,31 +1115,54 @@
     const index = lines.findIndex((l) => l.id === line.id);
     const t = lineTotals(line);
     const a = (f) => `data-l="${esc(line.id)}" data-f="${f}"`;
-    $("ed-title").textContent = `Позиция ${index + 1} из ${lines.length}`;
+    const { income } = splitLines(lines);
+    $("ed-title").textContent = t.expense
+      ? `Расход · ${kindLabel(t.kind)}`
+      : `Позиция ${income.findIndex((l) => l.id === line.id) + 1} из ${income.length}`;
     $("ed-prev").disabled = index <= 0;
     $("ed-next").disabled = index >= lines.length - 1;
 
-    $("editor-body").innerHTML = `
+    const head = `
       <div class="field">
-        <label>Позиция</label>
-        <input type="text" list="products-list" placeholder="Название работы или товара" value="${esc(line.product || "")}" ${a("product")} />
+        <label>${t.expense ? "За что" : "Позиция"}</label>
+        <input type="text" autocomplete="off" spellcheck="false" placeholder="${
+          t.expense ? "Налог, аренда, материалы…" : "Название работы или товара"
+        }" value="${esc(line.product || "")}" ${a("product")} />
+        <div class="suggest-inline" id="ed-product-suggest">${edProductSuggestHtml(line.product)}</div>
       </div>
       <div class="field">
         <label>Тип заказа</label>
-        ${selectHtml(state.doc.order_types, line.order_type, a("order_type"))}
+        ${selectHtml(typeNames(), line.order_type, a("order_type"))}
       </div>
-
-      <label class="big-label">Количество</label>
+      ${
+        t.kind === "tax"
+          ? `<label class="big-label">Как считать</label>
+      <div class="chips inline">${TAX_MODES.map(
+        ([id, label]) =>
+          `<button type="button" class="chip ${t.mode === id ? "active" : ""}" data-tax-mode="${id}">${esc(label)}</button>`
+      ).join("")}</div>`
+          : ""
+      }
+      ${
+        t.mode === "amount"
+          ? `<label class="big-label">Количество</label>
       <div class="qty-row">
         ${exprFieldHtml(line, "qty_expr", a("qty_expr"), "1+2×6")}
         ${selectHtml(state.doc.units, line.unit, `${a("unit")} class="unit-select"`)}
       </div>
       <div class="hint">Можно 2×6+1 — цифры и знаки на панели внизу</div>
 
-      <label class="big-label">Цена за единицу</label>
+      <label class="big-label">${t.expense ? "Сумма за единицу" : "Цена за единицу"}</label>
       ${exprFieldHtml(line, "price_expr", a("price_expr"), "2×350")}
-      <div class="hint">После ввода видно сумму, при нажатии снова — выражение</div>
+      <div class="hint">После ввода видно сумму, при нажатии снова — выражение</div>`
+          : `<label class="big-label">Процент, %</label>
+      ${exprFieldHtml(line, "tax_percent_expr", a("tax_percent_expr"), "20")}
+      <div class="hint">${
+        t.mode === "net" ? "Считается от выручки заказа за вычетом затрат" : "Считается от всей выручки заказа"
+      } — сейчас это ${esc(money(t.base))}</div>`
+      }`;
 
+    const money_ = `
       <label class="big-label">Скидка, %</label>
       ${exprFieldHtml(line, "discount_expr", a("discount_expr"), "0")}
       <div class="chips inline">${DISCOUNTS.map(
@@ -983,7 +1194,19 @@
       <div class="chips inline">
         <button type="button" class="chip" data-now="order_date">Заказ — сейчас</button>
         <button type="button" class="chip" data-now="payment_date">Оплата — сейчас</button>
+      </div>`;
+
+    const costOnly = `
+      <div class="field"><label>Дата</label><input type="datetime-local" value="${esc(line.order_date || "")}" ${a("order_date")} /></div>
+      <div class="chips inline">
+        <button type="button" class="chip" data-now="order_date">Сейчас</button>
       </div>
+      <div class="hint">Расход вычитается из заказа: скидки, оплаты и статуса у него нет.</div>`;
+
+    $("editor-body").innerHTML = `
+      ${t.expense ? `<div class="cost-banner ${esc(t.kind)}">Это расход — ${esc(kindLabel(t.kind))}</div>` : ""}
+      ${head}
+      ${t.expense ? costOnly : money_}
 
       <div class="ed-sums" id="ed-sums">${editorSumsHtml(t)}</div>
 
@@ -998,6 +1221,14 @@
   }
 
   function editorSumsHtml(t) {
+    if (t.expense) {
+      return `
+      <div class="ed-sum"><span>Вид</span><b>${esc(
+        t.mode === "amount" ? kindLabel(t.kind) : `${moneyFmt.format(t.percent).replace(",00", "")} %`
+      )}</b></div>
+      ${t.mode === "amount" ? "" : `<div class="ed-sum"><span>База</span><b>${esc(money(t.base))}</b></div>`}
+      <div class="ed-sum cost"><span>Вычитается</span><b>−${esc(money(t.cost))}</b></div>`;
+    }
     return `
       <div class="ed-sum"><span>Сумма</span><b>${esc(money(t.total))}</b></div>
       <div class="ed-sum"><span>После скидки</span><b>${esc(money(t.after))}</b></div>
@@ -1303,10 +1534,14 @@
         acc.after += t.after;
         acc.paid += t.paid;
         acc.unpaid += t.unpaid;
+        acc.cost += t.cost;
+        if (t.expense) acc.costCount += 1;
+        else acc.count += 1;
         return acc;
       },
-      { after: 0, paid: 0, unpaid: 0 }
+      { after: 0, paid: 0, unpaid: 0, cost: 0, count: 0, costCount: 0 }
     );
+    agg.net = round2(agg.after - agg.cost);
 
     const byStatus = {};
     all.forEach(({ line }) => {
@@ -1350,9 +1585,15 @@
     $("stats-body").innerHTML = `
       <div class="kpis">
         <div class="kpi"><span>Заказов</span><strong>${list.length}</strong></div>
-        <div class="kpi"><span>Позиций</span><strong>${all.length}</strong></div>
+        <div class="kpi"><span>Позиций</span><strong>${agg.count}</strong></div>
         <div class="kpi"><span>Выручка</span><strong>${esc(compact(agg.after))}</strong></div>
         <div class="kpi ${agg.unpaid > 0.005 ? "debt" : "ok"}"><span>Долг</span><strong>${esc(compact(agg.unpaid))}</strong></div>
+        ${
+          agg.cost > 0.005
+            ? `<div class="kpi cost"><span>Расход</span><strong>−${esc(compact(agg.cost))}</strong></div>
+        <div class="kpi ${agg.net >= 0 ? "ok" : "debt"}"><span>Чистыми</span><strong>${esc(compact(agg.net))}</strong></div>`
+            : ""
+        }
       </div>
       <article class="card">
         <div class="bar-row"><span>За этот месяц</span><b>${esc(money(monthSum))}</b>
@@ -1372,6 +1613,22 @@
             agg.after ? Math.min(100, (agg.unpaid / agg.after) * 100) : 0
           }%"></div></div>
         </div>
+        ${
+          agg.cost > 0.005
+            ? `<div style="height:12px"></div>
+        <div class="bar-row"><span>Налоги и затраты</span><b>−${esc(money(agg.cost))}</b>
+          <div class="bar-track"><div class="bar-fill" style="background:var(--warn, #d97706);width:${
+            agg.after ? Math.min(100, (agg.cost / agg.after) * 100) : 100
+          }%"></div></div>
+        </div>
+        <div style="height:12px"></div>
+        <div class="bar-row"><span>Чистыми</span><b>${esc(money(agg.net))}</b>
+          <div class="bar-track"><div class="bar-fill" style="background:var(--accent);width:${
+            agg.after ? Math.max(0, Math.min(100, (agg.net / agg.after) * 100)) : 0
+          }%"></div></div>
+        </div>`
+            : ""
+        }
       </article>
       <h3 class="section">По статусам</h3>
       <article class="card"><div class="bars">${
@@ -1451,6 +1708,7 @@
     { id: "unpaid", label: "Долг", kind: "col" },
     { id: "payment_date", label: "Дата оплаты", kind: "col" },
     { id: "totals", label: "Итоги заказа", kind: "meta" },
+    { id: "expenses", label: "Налоги и затраты", kind: "meta" },
   ];
 
   const SNAP_PRESETS = {
@@ -1563,8 +1821,19 @@
     return list.find((o) => o.id === state.snap.orderId) || list.find((o) => o.id === state.orderId) || list[list.length - 1];
   }
 
+  /** Снимок уходит заказчику — налоги и затраты в него не попадают. */
+  /** Расходы попадают в снимок только при включённом поле «Налоги и затраты». */
+  function snapShowsExpenses() {
+    return state.snap.fields.includes("expenses");
+  }
+
+  function snapCandidates(order) {
+    const withExpenses = snapShowsExpenses();
+    return (order?.lines || []).filter((l) => withExpenses || !isExpenseLine(l));
+  }
+
   function snapLines(order) {
-    const all = order?.lines || [];
+    const all = snapCandidates(order);
     if (!state.snap.lines) return all;
     const picked = all.filter((l) => state.snap.lines.has(l.id));
     return picked.length ? picked : all;
@@ -1578,13 +1847,30 @@
     return (state.doc?.customers || []).find((c) => c.name === name)?.organization || "";
   }
 
+  function snapNumber(n) {
+    const r = round2(n);
+    if (Number.isInteger(r)) return String(r);
+    return r.toFixed(2).replace(".", ",");
+  }
+
   function snapValue(line, id) {
     const t = lineTotals(line);
+    if (t.expense) {
+      // Расход в снимке — название, объём и сумма с минусом; скидок и оплат у него нет.
+      if (id === "order_type") return `${line.order_type || "—"} · ${kindLabel(t.kind)}`;
+      if (id === "product") return line.product || "—";
+      if (id === "quantity")
+        return t.mode === "amount" ? `${snapNumber(t.qty)} ${line.unit || ""}`.trim() : `${snapNumber(t.percent)} %`;
+      if (id === "price") return t.mode === "amount" ? money(t.price) : money(t.base);
+      if (id === "total") return `−${money(t.cost)}`;
+      if (id === "order_date") return fmtDate(line.order_date);
+      return "—";
+    }
     if (id === "order_type") return line.order_type || "—";
     if (id === "product") return line.product || "—";
-    if (id === "quantity") return qtyText(line) || "—";
+    if (id === "quantity") return `${snapNumber(t.qty)} ${line.unit || ""}`.trim();
     if (id === "price") return money(t.price);
-    if (id === "discount") return `${Math.round(t.discount * 100) / 100} %`;
+    if (id === "discount") return `${snapNumber(t.discount)} %`;
     if (id === "total") return money(t.after);
     if (id === "paid") return money(t.paid);
     if (id === "unpaid") return money(t.unpaid);
@@ -1628,7 +1914,7 @@
 
   function snapFooterValue(colId, lines) {
     const tot = sumLines(lines);
-    if (colId === "total") return money(tot.after);
+    if (colId === "total") return money(tot.cost > 0.005 ? tot.net : tot.after);
     if (colId === "paid") return money(tot.paid);
     if (colId === "unpaid") return money(tot.unpaid);
     if (colId === "price") return "Итого";
@@ -1644,6 +1930,10 @@
     if (!state.snap.fields.includes("totals") || snapNeedsFooter(cols)) return "";
     const tot = sumLines(lines);
     const bits = [`Итого ${money(tot.after)}`];
+    if (tot.cost > 0.005) {
+      bits.push(`расходы −${money(tot.cost)}`);
+      bits.push(`к оплате ${money(tot.net)}`);
+    }
     if (state.snap.fields.includes("paid")) bits.push(`оплачено ${money(tot.paid)}`);
     if (state.snap.fields.includes("unpaid")) bits.push(`остаток ${money(tot.unpaid)}`);
     return bits.join(" · ");
@@ -1658,7 +1948,7 @@
       return;
     }
     const order = snapOrder();
-    const lines = order.lines || [];
+    const lines = snapCandidates(order);
     const picked = snapLines(order);
     const theme = SNAP_THEMES[state.snap.theme] || SNAP_THEMES.teal;
 
@@ -1677,11 +1967,15 @@
         .map((line, i) => {
           const on = picked.includes(line);
           const t = lineTotals(line);
-          return `<label class="pick-row ${on ? "on" : ""}">
+          return `<label class="pick-row ${on ? "on" : ""} ${t.expense ? "cost" : ""}">
             <input type="checkbox" data-snap-line="${esc(line.id)}" ${on ? "checked" : ""} />
-            <span class="pr-main"><strong>${i + 1}. ${esc(line.product || "Без названия")}</strong>
-            <small>${esc(line.order_type || "")} · ${esc(qtyText(line))}</small></span>
-            <b>${esc(money(t.after))}</b>
+            <span class="pr-main"><strong>${i + 1}. ${esc(line.product || line.order_type || "Без названия")}</strong>
+            <small>${esc(
+              [line.order_type, t.expense ? kindLabel(t.kind) : "", t.mode === "amount" ? qtyText(line) : `${t.percent} %`]
+                .filter(Boolean)
+                .join(" · ")
+            )}</small></span>
+            <b>${t.expense ? `−${esc(money(t.cost))}` : esc(money(t.after))}</b>
           </label>`;
         })
         .join("")}</div>
@@ -2350,7 +2644,7 @@
 
   /* ================= редактирование ================= */
 
-  const DECIMAL_FIELDS = new Set(["qty_expr", "price_expr", "discount_expr", "paid_expr"]);
+  const DECIMAL_FIELDS = new Set(["qty_expr", "price_expr", "discount_expr", "paid_expr", "tax_percent_expr"]);
   const MIRROR = EXPR_MIRROR;
 
   function onEdit(e) {
@@ -2379,6 +2673,7 @@
         el.value = value;
         if (pos != null) el.setSelectionRange(pos, pos);
       }
+      const prevKind = field === "order_type" ? typeKind(line.order_type) : "";
       line[field] = value;
       if (DECIMAL_FIELDS.has(field)) el.dataset.expr = value;
       if (MIRROR[field]) {
@@ -2386,13 +2681,14 @@
         line[MIRROR[field]] = Number.isFinite(v) ? round2(v) : 0;
       }
       if (field === "product") {
+        fillEdProductSuggest(value);
         const found = (state.doc.products || []).find((p) => (p.name || p) === value);
         if (found?.unit) {
           line.unit = found.unit;
           const sel = document.querySelector(`select[data-l="${CSS.escape(line.id)}"][data-f="unit"]`);
           if (sel) sel.value = found.unit;
         }
-        if (found?.price != null && !num(line.price)) {
+        if (found?.price != null && num(found.price) > 0) {
           setLineNumber(line, "price_expr", found.price);
           const inp = document.querySelector(`input[data-l="${CSS.escape(line.id)}"][data-f="price_expr"]`);
           if (inp) {
@@ -2402,6 +2698,25 @@
             inp.classList.remove("is-result");
           }
         }
+      }
+      // Смена вида (доход / налог / затрата) меняет форму редактора — пересобираем экран.
+      if (field === "order_type" && typeKind(line.order_type) !== prevKind) {
+        const nextKind = typeKind(line.order_type);
+        if (nextKind && !prevKind) resetExpenseLine(line);
+        line.tax_mode = nextKind === "tax" ? "gross" : "amount";
+        touchDoc();
+        pushSoon();
+        renderOrder();
+        renderEditor();
+        return;
+      }
+      if (field === "tax_percent_expr") {
+        markExprValidity(el);
+        refreshEditorSums();
+        renderOrder();
+        touchDoc();
+        pushSoon();
+        return;
       }
       if (field === "paid_expr") autoPaidStatus(line);
       if (DECIMAL_FIELDS.has(field)) markExprValidity(el);
@@ -2424,9 +2739,24 @@
     if (cust) cust.textContent = order.customer || "Без заказчика";
   }
 
+  /** У расхода нет скидки, оплаты и даты оплаты — очищаем, чтобы цифры не всплыли при возврате к обычному типу. */
+  function resetExpenseLine(line) {
+    line.discount = 0;
+    line.discount_expr = "0";
+    line.paid = 0;
+    line.paid_expr = "0";
+    line.payment_date = "";
+    if (line.tax_mode == null) line.tax_mode = typeKind(line.order_type) === "tax" ? "gross" : "amount";
+    if (line.tax_percent_expr == null) {
+      line.tax_percent = num(line.tax_percent);
+      line.tax_percent_expr = String(line.tax_percent || 0);
+    }
+    return line;
+  }
+
   function autoPaidStatus(line) {
     const name = paidStatusName();
-    if (!name) return;
+    if (!name || isExpenseLine(line)) return;
     const t = lineTotals(line);
     if (t.after > 0 && t.paid + 0.005 >= t.after && line.status !== name) {
       line.status = name;
@@ -2615,7 +2945,9 @@
           : state.snap.fields.concat([id]);
         field.classList.toggle("active");
         saveSnapPrefs();
-        renderSnapPreview();
+        // Список позиций зависит от поля «Налоги и затраты» — его нужно пересобрать.
+        if (id === "expenses") renderSnapshot();
+        else renderSnapPreview();
         return;
       }
       const themeBtn = e.target.closest("[data-snap-theme]");
@@ -2727,10 +3059,33 @@
         closeEditor();
         return;
       }
+      const pickProduct = e.target.closest("[data-pick-product]");
+      if (pickProduct) {
+        const inp = document.querySelector('#editor-body [data-f="product"]');
+        if (inp) {
+          inp.value = pickProduct.textContent;
+          inp.dispatchEvent(new Event("input", { bubbles: true }));
+          inp.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        return;
+      }
       const order = currentOrder();
       const line = findLine(order, state.editLineId);
       if (!line) return;
 
+      const taxMode_ = e.target.closest("[data-tax-mode]");
+      if (taxMode_) {
+        line.tax_mode = taxMode_.dataset.taxMode;
+        if (line.tax_percent_expr == null) {
+          line.tax_percent = 0;
+          line.tax_percent_expr = "0";
+        }
+        touchDoc();
+        pushSoon();
+        renderEditor();
+        renderOrder();
+        return;
+      }
       const disc = e.target.closest("[data-discount]");
       if (disc) {
         setLineNumber(line, "discount_expr", Number(disc.dataset.discount));
@@ -2819,6 +3174,26 @@
       const order = currentOrder();
       if (!order) return;
       const line = emptyLine();
+      order.lines = (order.lines || []).concat([line]);
+      touchDoc();
+      pushSoon();
+      renderOrder();
+      openEditor(line.id);
+    });
+
+    $("btn-add-cost")?.addEventListener("click", () => {
+      const order = currentOrder();
+      const type = typeNames("expense")[0];
+      if (!order) return;
+      if (!type) {
+        toast("Отметьте тип заказа как налог или затрату на компьютере");
+        return;
+      }
+      const line = resetExpenseLine(emptyLine());
+      line.order_type = type;
+      line.tax_mode = typeKind(type) === "tax" ? "gross" : "amount";
+      line.price = 0;
+      line.price_expr = "0";
       order.lines = (order.lines || []).concat([line]);
       touchDoc();
       pushSoon();

@@ -12,6 +12,8 @@ import threading
 import time
 from typing import Any
 
+from backend import netlog
+
 CLIENT_TTL = 45.0
 POLL_TIMEOUT = 25.0
 
@@ -96,6 +98,7 @@ class RemoteSession:
             self.nav = {"seq": 0, "view": "", "order_id": "", "cid": "", "period": "", "filter": "", "status": ""}
             self.version += 1
             self._cond.notify_all()
+            netlog.add("session", "Доступ с телефона включён", level="ok", key="session-on")
             return self.token
 
     def stop(self) -> None:
@@ -108,6 +111,7 @@ class RemoteSession:
             self.nav = {"seq": 0, "view": "", "order_id": "", "cid": "", "period": "", "filter": "", "status": ""}
             self.version += 1
             self._cond.notify_all()
+        netlog.add("session", "Доступ с телефона выключен", level="warn", key="session-off")
 
     def check(self, token: str | None) -> bool:
         if not self.enabled or not self.token or not token:
@@ -138,6 +142,8 @@ class RemoteSession:
             self.doc_version += 1
             self.version += 1
             self._cond.notify_all()
+            who = "компьютер" if str(origin or "") == "desktop" else str(origin or "телефон")
+            netlog.add("sync", f"Отчёт обновлён ({who})", source=who, key=f"pub-{origin or 'x'}")
             return self.version
 
     def clear_document(self) -> int:
@@ -168,6 +174,7 @@ class RemoteSession:
             self.command = {"id": self._command_id, "type": kind, **payload}
             self.version += 1
             self._cond.notify_all()
+            netlog.add("command", f"Команда: {kind}", detail=str(payload)[:200], key=f"cmd-{kind}")
             return self.version
 
     def notify(self) -> int:
@@ -202,6 +209,14 @@ class RemoteSession:
             }
             self.version += 1
             self._cond.notify_all()
+            label = {
+                "orders": "Заказы",
+                "order": "Заказ",
+                "stats": "Сводка",
+                "files": "Отчёты",
+                "snapshot": "Снимок",
+            }.get(str(view or ""), str(view or "экран"))
+            netlog.add("nav", f"Телефон открыл: {label}", source=str(cid or ""), key=f"nav-{view}")
             return self.version
 
     # ---------- клиенты ----------
@@ -214,7 +229,10 @@ class RemoteSession:
         now = time.time()
         stale = [cid for cid, c in self._clients.items() if now - c.get("seen", 0) > CLIENT_TTL]
         for cid in stale:
-            self._clients.pop(cid, None)
+            gone = self._clients.pop(cid, None) or {}
+            name = str(gone.get("name") or cid)
+            kind = str(gone.get("kind") or "")
+            netlog.add("client", f"Пропал из сети: {name}", level="warn", source=kind or cid)
         return bool(stale)
 
     def touch(self, cid: str, kind: str = "mobile", name: str = "") -> None:
@@ -229,12 +247,20 @@ class RemoteSession:
             if name:
                 client["name"] = name
             pruned = self._prune_locked()
+            if is_new:
+                if (kind or "") == "desktop":
+                    netlog.add("client", "Компьютер на связи", level="ok", source="desktop", key="desktop-on")
+                else:
+                    netlog.add("client", f"В сети: {name or cid}", level="ok", source=kind or cid)
             if is_new or pruned:
                 self._bump()
 
     def drop(self, cid: str) -> None:
         with self._cond:
-            if self._clients.pop(cid, None) is not None:
+            gone = self._clients.pop(cid, None)
+            if gone is not None:
+                name = str(gone.get("name") or cid)
+                netlog.add("client", f"Отключился: {name}", level="warn", source=str(gone.get("kind") or cid))
                 self._bump()
 
     def _live_clients(self) -> list[dict[str, Any]]:

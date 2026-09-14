@@ -9,9 +9,9 @@ import time
 import webbrowser
 from typing import Any
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, request, send_from_directory
 
-from backend import qr, storage
+from backend import netlog, qr, storage
 from backend.dialogs import open_report_dialog, save_csv_dialog, save_png_dialog, save_report_dialog
 from backend.document import empty_document, normalize_document, now_iso
 from backend.remote import SESSION as REMOTE
@@ -72,6 +72,16 @@ def _device_info() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _net_peer() -> str:
+    forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    ip = forwarded or (request.remote_addr or "")
+    if _is_tunneled():
+        return forwarded or "интернет"
+    if (request.remote_addr or "") in LOCAL_ADDRS:
+        return "компьютер"
+    return ip
+
+
 @app.before_request
 def guard_remote_clients():
     """Телефон видит только мобильный интерфейс и только с действующим токеном."""
@@ -82,11 +92,46 @@ def guard_remote_clients():
         return None
     if path.startswith("/api/remote/"):
         if not REMOTE.enabled:
+            netlog.add("http", "Запрос отклонён: доступ выключен", level="warn", source=_net_peer(), detail=path, key="deny-off")
             return jsonify({"error": "Удалённый доступ выключен на компьютере."}), 403
         if not REMOTE.check(_remote_token()):
+            netlog.add("http", "Запрос отклонён: неверный токен", level="err", source=_net_peer(), detail=path, key="deny-token")
             return jsonify({"error": "Сессия недействительна — отсканируйте QR-код заново."}), 401
         return None
     return jsonify({"error": "Доступ запрещён."}), 403
+
+
+@app.after_request
+def log_remote_http(response):
+    path = request.path
+    if path in {"/m", "/mobile.html"} and response.status_code < 400:
+        netlog.add("http", "Телефон открыл страницу", source=_net_peer(), key="open-m")
+        return response
+    if not path.startswith("/api/remote/"):
+        return response
+    if path.startswith("/api/remote/log") or path in {"/api/remote/info", "/api/remote/pull", "/api/remote/publish"}:
+        return response
+    if getattr(g, "netlog_skip", False):
+        return response
+    if response.status_code >= 400:
+        netlog.add(
+            "http",
+            f"{request.method} {path} → {response.status_code}",
+            level="err",
+            source=_net_peer(),
+            key=f"http-err-{path}",
+        )
+        return response
+    text = getattr(g, "netlog_text", "")
+    if text:
+        netlog.add(
+            "http",
+            text,
+            level=getattr(g, "netlog_level", "info") or "info",
+            source=_net_peer(),
+            key=getattr(g, "netlog_key", "") or "",
+        )
+    return response
 
 
 @app.get("/")
@@ -506,12 +551,17 @@ def api_remote_address():
         if not payload.get("public_url"):
             return jsonify({"error": payload.get("tunnel", {}).get("error") or "Интернет-туннель ещё не готов."}), 409
         payload["ok"] = True
+        g.netlog_text = "QR переключён на интернет"
+        g.netlog_level = "ok"
+        g.netlog_key = "addr-ngrok"
         return jsonify(payload)
     if ip not in lan_candidates():
         return jsonify({"error": "Неизвестный адрес."}), 400
     storage.save_remote_settings(via="lan")
     payload = _remote_public(ip, via="lan")
     payload["ok"] = True
+    g.netlog_text = f"QR переключён на {ip}"
+    g.netlog_key = "addr-lan"
     return jsonify(payload)
 
 
@@ -576,6 +626,9 @@ def api_remote_telegram():
                 payload = _remote_public()
         except RuntimeError as exc:
             return jsonify({**payload, "error": str(exc)}), 400
+        g.netlog_text = "Ссылка отправлена в Telegram"
+        g.netlog_level = "ok"
+        g.netlog_key = "tg-send"
     payload = _remote_public()
     payload["ok"] = True
     return jsonify(payload)
@@ -596,14 +649,36 @@ def api_remote_rotate():
         REMOTE.start(settings["token"])
     payload = _remote_public()
     payload["ok"] = True
+    g.netlog_text = "Выпущена новая ссылка"
+    g.netlog_level = "warn"
+    g.netlog_key = "rotate"
     return jsonify(payload)
 
 
 @app.post("/api/remote/forget")
 def api_remote_forget():
     data = request.get_json(silent=True) or {}
-    devices = storage.forget_device(str(data.get("id") or ""))
+    cid = str(data.get("id") or "")
+    devices = storage.forget_device(cid)
+    g.netlog_text = f"Устройство забыто: {cid[:12]}" if cid else "Устройство забыто"
+    g.netlog_level = "warn"
+    g.netlog_key = f"forget-{cid}"
     return jsonify({"ok": True, "devices": devices})
+
+
+@app.get("/api/remote/log")
+def api_remote_log():
+    if not _is_local():
+        return jsonify({"error": "Только в окне программы."}), 403
+    since = request.args.get("since", type=int) or 0
+    return jsonify(netlog.since(since))
+
+
+@app.post("/api/remote/log/clear")
+def api_remote_log_clear():
+    if not _is_local():
+        return jsonify({"error": "Только в окне программы."}), 403
+    return jsonify(netlog.clear())
 
 
 @app.get("/api/remote/info")
@@ -668,6 +743,9 @@ def api_remote_session():
         name = name or str(info.get("name") or "")
         REMOTE.touch(cid, "mobile", name)
         storage.remember_device(cid, name, request.remote_addr or "", info)
+        g.netlog_text = f"Телефон открыл сессию: {name or cid[:8]}"
+        g.netlog_level = "ok"
+        g.netlog_key = f"sess-{cid}"
     return jsonify(snap)
 
 

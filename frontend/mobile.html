@@ -12,7 +12,7 @@
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/favicon.png" />
-    <link rel="stylesheet" href="/mobile.css?v=24" />
+    <link rel="stylesheet" href="/mobile.css?v=26" />
   </head>
   <body>
     <header class="topbar">
@@ -49,7 +49,13 @@
           <button type="button" class="btn small" id="btn-add-line">+ Позиция</button>
         </div>
         <div class="list tight" id="lines-list"></div>
+        <div class="section-row" id="costs-row" hidden>
+          <h3 class="section" id="costs-title">Расходы</h3>
+          <span class="costs-sum" id="costs-sum"></span>
+        </div>
+        <div class="list tight" id="costs-list" hidden></div>
         <div class="stack">
+          <button type="button" class="btn wide" id="btn-add-cost" hidden>+ Налог или затрата</button>
           <button type="button" class="btn wide" id="btn-order-snapshot">Снимок для заказчика</button>
           <button type="button" class="btn wide" id="btn-dup-order">Дублировать заказ</button>
           <button type="button" class="btn wide danger-ghost" id="btn-del-order">Удалить заказ</button>
@@ -121,6 +127,6 @@
     </div>
 
     <div class="toast" id="toast"></div>
-    <script src="/mobile.js?v=25"></script>
+    <script src="/mobile.js?v=26"></script>
   </body>
 </html>

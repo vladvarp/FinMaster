@@ -24,6 +24,7 @@
     cloud: null,
   };
 
+  const LS_NET_CONSOLE = "finmaster.netconsole";
   const LS_CLOUD = "finmaster.cloud";
   const CLOUD_LAYOUTS = ["galaxy", "orbit", "timeline", "constellation"];
   const CLOUD_COLOR_MODES = ["status", "customer", "debt", "type"];
@@ -223,15 +224,99 @@
     return Number.isFinite(v) ? v : num(line[numKey]);
   }
 
-  function lineTotals(line) {
+  /* ==== Типы заказа: обычные, «налог» и «затрата» ==== */
+
+  function typeEntry(item) {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      const isTax = !!item.is_tax;
+      return { id: String(item.id || item.name || ""), name: String(item.name || "").trim(), is_tax: isTax, is_cost: !isTax && !!item.is_cost };
+    }
+    return { id: String(item || ""), name: String(item || "").trim(), is_tax: false, is_cost: false };
+  }
+
+  function orderTypes() {
+    return (state.doc?.order_types || []).map(typeEntry).filter((t) => t.name);
+  }
+
+  function typeMeta(name) {
+    const key = String(name || "").trim();
+    return orderTypes().find((t) => t.name === key) || { id: key, name: key, is_tax: false, is_cost: false };
+  }
+
+  /** "tax" | "cost" | "" — пустая строка означает обычную доходную позицию. */
+  function typeKind(name) {
+    const meta = typeMeta(name);
+    return meta.is_tax ? "tax" : meta.is_cost ? "cost" : "";
+  }
+
+  function kindLabel(kind) {
+    return kind === "tax" ? "налог" : kind === "cost" ? "затрата" : "";
+  }
+
+  function isExpenseLine(line) {
+    return !!typeKind(line?.order_type);
+  }
+
+  function typeNames(kind) {
+    const list = orderTypes();
+    if (kind === "expense") return list.filter((t) => t.is_tax || t.is_cost).map((t) => t.name);
+    if (kind === "income") return list.filter((t) => !t.is_tax && !t.is_cost).map((t) => t.name);
+    return list.map((t) => t.name);
+  }
+
+  function splitLines(lines) {
+    const income = [];
+    const expense = [];
+    (lines || []).forEach((line) => (isExpenseLine(line) ? expense : income).push(line));
+    return { income, expense };
+  }
+
+  /** Режим строки налога: «amount» — своя сумма, «gross» — % от выручки, «net» — % от выручки без затрат. */
+  function taxMode(line) {
+    const mode = String(line?.tax_mode || "amount");
+    return mode === "gross" || mode === "net" ? mode : "amount";
+  }
+
+  function ownerOrder(line) {
+    return (state.doc?.orders || []).find((o) => (o.lines || []).includes(line)) || null;
+  }
+
+  /**
+   * База для процента налога: выручка заказа, при режиме «net» — за вычетом затрат.
+   * Считается только по доходным строкам и затратам, поэтому налог никогда не зависит от налога.
+   */
+  function orderTaxBase(order, mode) {
+    let gross = 0;
+    let costs = 0;
+    for (const item of order?.lines || []) {
+      const kind = typeKind(item.order_type);
+      if (!kind) gross += lineTotals(item).after;
+      else if (kind === "cost") costs += lineTotals(item).cost;
+    }
+    return round2(mode === "net" ? gross - costs : gross);
+  }
+
+  function lineTotals(line, order) {
     const qty = qtyValue(line);
     const price = Math.max(0, numExpr(line, "price_expr", "price"));
+    const kind = typeKind(line.order_type);
+    if (kind) {
+      const mode = kind === "tax" ? taxMode(line) : "amount";
+      if (mode !== "amount") {
+        const percent = Math.max(0, numExpr(line, "tax_percent_expr", "tax_percent"));
+        const base = orderTaxBase(order || ownerOrder(line), mode);
+        const cost = round2((base * percent) / 100);
+        return { total: cost, after: 0, paid: 0, unpaid: 0, discount: 0, cost, kind, expense: true, mode, percent, base };
+      }
+      const cost = round2(qty * price);
+      return { total: cost, after: 0, paid: 0, unpaid: 0, discount: 0, cost, kind, expense: true, mode: "amount", percent: 0, base: 0 };
+    }
     const discount = Math.min(100, Math.max(0, numExpr(line, "discount_expr", "discount")));
     const total = round2(qty * price);
     const after = round2(total * (1 - discount / 100));
     const paid = Math.max(0, numExpr(line, "paid_expr", "paid"));
     const unpaid = round2(Math.max(0, after - paid));
-    return { total, after, paid, unpaid, discount };
+    return { total, after, paid, unpaid, discount, cost: 0, kind: "", expense: false, mode: "amount", percent: 0, base: 0 };
   }
 
   function paidStatus() {
@@ -245,7 +330,7 @@
 
   function applyPaidIfCovered(line) {
     const ps = paidStatus();
-    if (!ps || statusLocked(line.status)) return false;
+    if (!ps || statusLocked(line.status) || isExpenseLine(line)) return false;
     const t = lineTotals(line);
     if (t.after > 0 && t.paid + 0.005 >= t.after) {
       if (line.status !== ps.name) {
@@ -257,17 +342,23 @@
   }
 
   function orderTotals(order) {
-    return (order.lines || []).reduce(
-      (acc, line) => {
-        const t = lineTotals(line);
-        acc.total += t.total;
-        acc.after += t.after;
-        acc.paid += t.paid;
-        acc.unpaid += t.unpaid;
-        return acc;
+    const acc = (order.lines || []).reduce(
+      (sum, line) => {
+        const t = lineTotals(line, order);
+        if (t.expense) {
+          sum.cost += t.cost;
+          return sum;
+        }
+        sum.total += t.total;
+        sum.after += t.after;
+        sum.paid += t.paid;
+        sum.unpaid += t.unpaid;
+        return sum;
       },
-      { total: 0, after: 0, paid: 0, unpaid: 0 }
+      { total: 0, after: 0, paid: 0, unpaid: 0, cost: 0 }
     );
+    acc.net = round2(acc.after - acc.cost);
+    return acc;
   }
 
   function emptyDoc() {
@@ -288,7 +379,12 @@
         { id: "blacklist", name: "Черный список", color: "#111827" },
       ],
       units: ["шт.", "м²", "м", "мин"],
-      order_types: ["Производство", "Услуга", "Поставка", "Монтаж"],
+      order_types: [
+        { id: "production", name: "Производство", is_tax: false, is_cost: false },
+        { id: "service", name: "Услуга", is_tax: false, is_cost: false },
+        { id: "supply", name: "Поставка", is_tax: false, is_cost: false },
+        { id: "install", name: "Монтаж", is_tax: false, is_cost: false },
+      ],
       products: [],
       customers: [],
       orders: [],
@@ -299,7 +395,7 @@
   function emptyLine() {
     return {
       id: uid(),
-      order_type: state.doc.order_types[0] || "",
+      order_type: typeNames("income")[0] || typeNames()[0] || "",
       product: "",
       quantity: 1,
       qty_expr: "1",
@@ -313,6 +409,9 @@
       paid_expr: "0",
       payment_date: "",
       status: state.doc.statuses[0]?.name || "Новый заказ",
+      tax_mode: "gross",
+      tax_percent: 0,
+      tax_percent_expr: "0",
     };
   }
 
@@ -514,7 +613,7 @@
     const rows = [];
     for (const order of state.doc.orders || []) {
       for (const line of order.lines || []) {
-        rows.push({ order, line, totals: lineTotals(line) });
+        rows.push({ order, line, totals: lineTotals(line, order) });
       }
     }
     return rows;
@@ -566,7 +665,7 @@
   function dashRows() {
     const order = focusedOrder();
     let rows = order
-      ? (order.lines || []).map((line) => ({ order, line, totals: lineTotals(line) }))
+      ? (order.lines || []).map((line) => ({ order, line, totals: lineTotals(line, order) }))
       : allRows();
     const f = state.remoteStats;
     if (!f || focusedOrder()) return rows;
@@ -589,7 +688,7 @@
     const t = orderTotals(order);
     if (filter === "debt") return t.unpaid > 0.005;
     if (filter === "paid") return t.after > 0.005 && t.unpaid <= 0.005;
-    if (filter === "empty") return (order.lines || []).some((line) => lineTotals(line).after <= 0.005);
+    if (filter === "empty") return (order.lines || []).some((line) => !isExpenseLine(line) && lineTotals(line).after <= 0.005);
     if (filter === "month") {
       const now = new Date();
       const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -671,15 +770,22 @@
   }
 
   function summarize(rows) {
-    const s = { count: rows.length, orders: new Set(), after: 0, paid: 0, unpaid: 0, total: 0 };
+    const s = { count: 0, costCount: 0, orders: new Set(), after: 0, paid: 0, unpaid: 0, total: 0, cost: 0 };
     rows.forEach(({ order, totals }) => {
       s.orders.add(order.id);
+      if (totals.expense) {
+        s.cost += totals.cost;
+        s.costCount += 1;
+        return;
+      }
+      s.count += 1;
       s.after += totals.after;
       s.paid += totals.paid;
       s.unpaid += totals.unpaid;
       s.total += totals.total;
     });
     s.orderCount = s.orders.size;
+    s.net = round2(s.after - s.cost);
     return s;
   }
 
@@ -703,11 +809,18 @@
     const s = summarize(rows);
     const active = rows.filter(({ line }) => !/отмен|аннул|черн/i.test(line.status));
     const as = summarize(active);
+    const costTiles = s.cost
+      ? `<div class="kpi cost"><div class="label">Расходы</div><div class="value">−${money(s.cost)}</div><div class="sub">${s.costCount} налогов и затрат</div></div>
+      <div class="kpi ${s.net >= 0 ? "ok" : "warn"}"><div class="label">Чистыми</div><div class="value">${money(s.net)}</div><div class="sub">${
+          s.after ? Math.round((s.net / s.after) * 100) : 0
+        }% от выручки</div></div>`
+      : "";
     $("kpi-row").innerHTML = `
       <div class="kpi"><div class="label">Заказов</div><div class="value">${s.orderCount}</div><div class="sub">${s.count} позиций</div></div>
       <div class="kpi ok"><div class="label">К оплате (после скидки)</div><div class="value">${money(s.after)}</div><div class="sub">без отмен: ${money(as.after)}</div></div>
       <div class="kpi"><div class="label">Оплачено</div><div class="value">${money(s.paid)}</div><div class="sub">${s.after ? Math.round((s.paid / s.after) * 100) : 0}% от суммы</div></div>
       <div class="kpi warn"><div class="label">Не оплачено</div><div class="value">${money(s.unpaid)}</div><div class="sub">долг по открытым позициям</div></div>
+      ${costTiles}
     `;
   }
 
@@ -764,9 +877,13 @@
     const prevKey = monthKeyOf(new Date(now.getFullYear(), now.getMonth() - 1, 15).toISOString());
     let curMonth = 0;
     let prevMonth = 0;
+    let curMonthCost = 0;
     rows.forEach(({ line, totals }) => {
       const k = monthKeyOf(line.order_date);
-      if (k === curKey) curMonth += totals.after;
+      if (k === curKey) {
+        curMonth += totals.after;
+        curMonthCost += totals.cost;
+      }
       if (k === prevKey) prevMonth += totals.after;
     });
 
@@ -799,6 +916,25 @@
 
     const paidShare = s.after ? Math.round((s.paid / s.after) * 100) : 0;
 
+    const netCards = s.cost
+      ? [
+          insightCard({
+            tint: "#b45309",
+            ico: "▼",
+            label: "Налоги и затраты",
+            value: `−${money(s.cost)}`,
+            note: `${s.costCount} строк расхода · за месяц ${money(curMonthCost)}`,
+          }),
+          insightCard({
+            tint: s.net >= 0 ? "#047857" : "#dc2626",
+            ico: "=",
+            label: "Чистая прибыль",
+            value: money(s.net),
+            note: `выручка ${money(s.after)} минус расходы`,
+          }),
+        ]
+      : [];
+
     box.innerHTML = [
       insightCard({
         tint: "#0f766e",
@@ -808,6 +944,7 @@
         note: `прошлый месяц ${money(prevMonth)}`,
         trend: trendChip(curMonth, prevMonth),
       }),
+      ...netCards,
       insightCard({
         tint: "#2563eb",
         ico: "◈",
@@ -867,14 +1004,23 @@
     renderInsights();
     const rows = dashRows();
     const byDay = {};
+    const costByDay = {};
+    let dashCost = 0;
     rows.forEach(({ line, totals }) => {
       const k = groupKey(line.order_date, "day");
       byDay[k] = (byDay[k] || 0) + totals.after;
+      if (totals.cost) {
+        costByDay[k] = (costByDay[k] || 0) + totals.cost;
+        dashCost += totals.cost;
+      }
     });
-    const labels = Object.keys(byDay).sort().slice(-14);
+    const labels = [...new Set([...Object.keys(byDay), ...Object.keys(costByDay)])].sort().slice(-14);
     FinCharts.line($("chart-dash-line"), {
       labels,
-      datasets: [{ values: labels.map((k) => byDay[k] || 0), color: "#0f766e", label: "Выручка" }],
+      datasets: [
+        { values: labels.map((k) => byDay[k] || 0), color: "#0f766e", label: "Выручка" },
+        ...(dashCost ? [{ values: labels.map((k) => costByDay[k] || 0), color: "#d97706", label: "Расходы" }] : []),
+      ],
     });
     const byStatus = {};
     rows.forEach(({ line, totals }) => {
@@ -964,6 +1110,12 @@
         <div class="focus-sum"><span>К оплате</span><b>${esc(money(t.after))}</b></div>
         <div class="focus-sum ok"><span>Оплачено</span><b>${esc(money(t.paid))}</b></div>
         <div class="focus-sum ${t.unpaid > 0.005 ? "warn" : ""}"><span>Долг</span><b>${esc(money(t.unpaid))}</b></div>
+        ${
+          t.cost > 0.005
+            ? `<div class="focus-sum warn"><span>Расход</span><b>−${esc(money(t.cost))}</b></div>
+        <div class="focus-sum ${t.net >= 0 ? "ok" : "warn"}"><span>Чистыми</span><b>${esc(money(t.net))}</b></div>`
+            : ""
+        }
       </div>
       <div class="table-wrap">
         <table class="data"><thead><tr><th>Тип</th><th>Позиция</th><th class="num">Кол-во</th><th class="num">Цена</th><th class="num">Итог</th><th class="num">Долг</th><th>Статус</th></tr></thead>
@@ -972,12 +1124,17 @@
             ? lines
                 .map((line) => {
                   const lt = lineTotals(line);
-                  return `<tr><td>${esc(line.order_type || "—")}</td><td>${esc(line.product || "—")}</td>
+                  const label = lt.expense ? `${line.order_type || "—"} · ${kindLabel(lt.kind)}` : line.order_type || "—";
+                  return `<tr class="${lt.expense ? "is-expense" : ""}"><td>${esc(label)}</td><td>${esc(line.product || "—")}</td>
                   <td class="num">${esc(`${qtyValue(line)} ${line.unit || ""}`.trim())}</td>
                   <td class="num">${esc(money(numExpr(line, "price_expr", "price")))}</td>
-                  <td class="num">${esc(money(lt.after))}</td>
+                  <td class="num">${lt.expense ? `−${esc(money(lt.cost))}` : esc(money(lt.after))}</td>
                   <td class="num">${lt.unpaid > 0.005 ? esc(money(lt.unpaid)) : "—"}</td>
-                  <td><span class="pill" style="background:${statusMeta(line.status).color}">${esc(line.status || "—")}</span></td></tr>`;
+                  <td>${
+                    lt.expense
+                      ? `<span class="pill expense-pill">${esc(kindLabel(lt.kind))}</span>`
+                      : `<span class="pill" style="background:${statusMeta(line.status).color}">${esc(line.status || "—")}</span>`
+                  }</td></tr>`;
                 })
                 .join("")
             : `<tr><td colspan="7">В заказе нет позиций</td></tr>`
@@ -997,8 +1154,9 @@
     price_expr: "price",
     discount_expr: "discount",
     paid_expr: "paid",
+    tax_percent_expr: "tax_percent",
   };
-  const DECIMAL_KEYS = new Set(["qty_expr", "price_expr", "discount_expr"]);
+  const DECIMAL_KEYS = new Set(["qty_expr", "price_expr", "discount_expr", "tax_percent_expr"]);
 
   function commaToDot(inp) {
     if (!DECIMAL_KEYS.has(inp?.dataset?.lk) || !inp.value.includes(",")) return;
@@ -1183,6 +1341,7 @@
   }
 
   function renderOrders() {
+    closeProductSuggest();
     const orders = filteredOrders();
     renderOrderChips();
     const summary = summarize(orders.flatMap((o) => (o.lines || []).map((line) => ({ order: o, line, totals: lineTotals(line) }))));
@@ -1196,10 +1355,13 @@
     }
     const statusNames = (state.doc.statuses || []).map((s) => s.name);
     const units = state.doc.units || [];
-    const types = state.doc.order_types || [];
+    const types = typeNames();
+    const ctx = { statusNames, units, types };
+    const canExpense = typeNames("expense").length > 0;
     $("orders-list").innerHTML = orders
       .map((order) => {
         const tot = orderTotals(order);
+        const { income, expense } = splitLines(order.lines);
         return `<article class="order-card" data-order="${order.id}">
           <div class="order-head">
             <div class="field"><label>Номер заказа</label><input data-k="number" value="${esc(order.number)}" /></div>
@@ -1218,7 +1380,7 @@
           </div>
           <div class="order-globals">
             <div class="field"><label>Тип всем строкам</label>
-              <select data-g="order_type"><option value="">— не менять —</option>${optionList(types, "")}</select>
+              <select data-g="order_type"><option value="">— не менять —</option>${optionList(typeNames("income"), "")}</select>
             </div>
             <div class="field"><label>Скидка % всем</label>
               <input data-g="discount" type="number" min="0" max="100" step="0.01" placeholder="%" />
@@ -1235,47 +1397,175 @@
                 <tr>${orderHeadHtml()}</tr>
               </thead>
               <tbody>
-                ${(order.lines || [])
-                  .map((line) => {
-                    const t = lineTotals(line);
-                    return `<tr data-line="${line.id}" class="line-row" style="--status-color:${esc(statusColor(line.status))}">
-                      <td class="line-drag" title="Перетащить строку"><span></span></td>
-                      <td><select data-lk="order_type">${optionList(unique([line.order_type, ...types]), line.order_type)}</select></td>
-                      <td><input data-lk="product" list="product-list" value="${esc(line.product)}" /></td>
-                      <td class="num">${exprInput(line, "qty_expr")}</td>
-                      <td><select data-lk="unit">${optionList(unique([line.unit, ...units]), line.unit)}</select></td>
-                      <td class="num">${exprInput(line, "price_expr")}</td>
-                      <td class="num">${exprInput(line, "discount_expr")}</td>
-                      <td><input data-lk="order_date" type="datetime-local" value="${esc((line.order_date || "").slice(0, 16))}" /></td>
-                      <td class="num">${exprInput(line, "paid_expr")}</td>
-                      <td><input data-lk="payment_date" type="datetime-local" value="${esc((line.payment_date || "").slice(0, 16))}" /></td>
-                      <td class="num computed">${esc(money(t.unpaid))}</td>
-                      <td class="num computed">${esc(money(t.after))}<div style="color:#94a3b8;font-weight:500;font-size:11px">до скидки ${esc(money(t.total))}</div></td>
-                      <td><select data-lk="status">${optionList(unique([line.status, ...statusNames]), line.status)}</select></td>
-                      <td><div class="row-actions">
-                        <button class="btn icon small" data-act="dupline" title="Дублировать строку (Ctrl+Alt+D)">⧉</button>
-                        <button class="btn icon small danger" data-act="delline" title="Удалить строку">✕</button>
-                      </div></td>
-                    </tr>`;
-                  })
-                  .join("")}
+                ${
+                  income.length
+                    ? income.map((line) => orderLineRow(line, ctx)).join("")
+                    : `<tr><td colspan="${ORDER_COLS.length}" class="empty-cell">Доходных позиций нет — только расходы. Нажмите «+ Тип заказа».</td></tr>`
+                }
               </tbody>
             </table>
           </div>
+          ${orderExpensesHtml(expense, tot, { ...ctx, order })}
           <div class="order-foot">
             <button class="btn small" data-act="addline">+ Тип заказа</button>
-            <div class="totals">Итог <b>${esc(money(tot.after))}</b> · оплачено <b>${esc(money(tot.paid))}</b> · не оплачено <b>${esc(money(tot.unpaid))}</b></div>
+            ${canExpense ? `<button class="btn small" data-act="addcost" title="Строка налога или затраты — вычитается из заказа">+ Расход</button>` : ""}
+            <div class="totals">${orderTotalsHtml(tot)}</div>
           </div>
         </article>`;
       })
       .join("");
   }
 
+  function orderTotalsHtml(tot) {
+    const base = `Итог <b>${esc(money(tot.after))}</b> · оплачено <b>${esc(money(tot.paid))}</b> · не оплачено <b>${esc(money(tot.unpaid))}</b>`;
+    if (tot.cost <= 0.005) return base;
+    return `${base} · расход <b class="cost">−${esc(money(tot.cost))}</b> · чистыми <b>${esc(money(tot.net))}</b>`;
+  }
+
+  function orderLineRow(line, { statusNames, units, types }) {
+    const t = lineTotals(line);
+    return `<tr data-line="${line.id}" class="line-row" style="--status-color:${esc(statusColor(line.status))}">
+      <td class="line-drag" title="Перетащить строку"><span></span></td>
+      <td><select data-lk="order_type">${optionList(unique([line.order_type, ...types]), line.order_type)}</select></td>
+      <td><input data-lk="product" autocomplete="off" spellcheck="false" value="${esc(line.product)}" /></td>
+      <td class="num">${exprInput(line, "qty_expr")}</td>
+      <td><select data-lk="unit">${optionList(unique([line.unit, ...units]), line.unit)}</select></td>
+      <td class="num">${exprInput(line, "price_expr")}</td>
+      <td class="num">${exprInput(line, "discount_expr")}</td>
+      <td><input data-lk="order_date" type="datetime-local" value="${esc((line.order_date || "").slice(0, 16))}" /></td>
+      <td class="num">${exprInput(line, "paid_expr")}</td>
+      <td><input data-lk="payment_date" type="datetime-local" value="${esc((line.payment_date || "").slice(0, 16))}" /></td>
+      <td class="num computed">${esc(money(t.unpaid))}</td>
+      <td class="num computed">${esc(money(t.after))}<div style="color:#94a3b8;font-weight:500;font-size:11px">до скидки ${esc(money(t.total))}</div></td>
+      <td><select data-lk="status">${optionList(unique([line.status, ...statusNames]), line.status)}</select></td>
+      <td><div class="row-actions">
+        <button class="btn icon small" data-act="dupline" title="Дублировать строку (Ctrl+Alt+D)">⧉</button>
+        <button class="btn icon small danger" data-act="delline" title="Удалить строку">✕</button>
+      </div></td>
+    </tr>`;
+  }
+
+  const TAX_MODES = [
+    ["gross", "% от выручки"],
+    ["net", "% от выручки − затраты"],
+    ["amount", "своя сумма"],
+  ];
+
+  function orderCostRow(line, { units, types, order }) {
+    const t = lineTotals(line, order);
+    const calc =
+      t.kind === "tax"
+        ? `<select data-lk="tax_mode" title="Своя сумма или процент от заказа">${TAX_MODES.map(
+            ([id, label]) => `<option value="${id}" ${id === t.mode ? "selected" : ""}>${esc(label)}</option>`
+          ).join("")}</select>`
+        : `<span class="cost-calc">своя сумма</span>`;
+    const amount =
+      t.mode === "amount"
+        ? `<td class="num">${exprInput(line, "qty_expr")}</td>
+      <td><select data-lk="unit">${optionList(unique([line.unit, ...units]), line.unit)}</select></td>
+      <td class="num">${exprInput(line, "price_expr")}</td>`
+        : `<td class="num" colspan="3">
+        <div class="tax-percent">${exprInput(line, "tax_percent_expr")}<span class="tax-of">% от ${esc(money(t.base))}</span></div>
+      </td>`;
+    return `<tr data-line="${line.id}" class="line-row cost-row">
+      <td class="line-drag" title="Перетащить строку"><span></span></td>
+      <td><select data-lk="order_type">${optionList(unique([line.order_type, ...types]), line.order_type)}</select></td>
+      <td><span class="cost-kind ${esc(t.kind)}">${esc(kindLabel(t.kind))}</span></td>
+      <td><input data-lk="product" autocomplete="off" spellcheck="false" value="${esc(line.product)}" placeholder="за что" /></td>
+      <td>${calc}</td>
+      ${amount}
+      <td><input data-lk="order_date" type="datetime-local" value="${esc((line.order_date || "").slice(0, 16))}" /></td>
+      <td class="num computed">−${esc(money(t.cost))}</td>
+      <td><div class="row-actions">
+        <button class="btn icon small" data-act="dupline" title="Дублировать строку">⧉</button>
+        <button class="btn icon small danger" data-act="delline" title="Удалить строку">✕</button>
+      </div></td>
+    </tr>`;
+  }
+
+  function orderExpensesHtml(expense, tot, ctx) {
+    if (!expense.length) return "";
+    return `<div class="order-expenses">
+      <div class="oe-head"><span class="oe-title">Расходы заказа</span>
+        <span class="oe-sum">−${esc(money(tot.cost))} · чистыми ${esc(money(tot.net))}</span>
+      </div>
+      <div class="table-wrap">
+        <table class="data cost-table">
+          <thead><tr>
+            <th></th><th>Тип</th><th>Вид</th><th>За что</th><th>Расчёт</th><th class="num">Кол-во</th><th>Ед.</th>
+            <th class="num">Сумма за ед.</th><th>Дата</th><th class="num">Итог</th><th></th>
+          </tr></thead>
+          <tbody>${expense.map((line) => orderCostRow(line, ctx)).join("")}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
   function productEntry(item) {
     if (item && typeof item === "object" && !Array.isArray(item)) {
-      return { name: String(item.name || "").trim(), unit: String(item.unit || "").trim() };
+      return {
+        name: String(item.name || "").trim(),
+        unit: String(item.unit || "").trim(),
+        price: Math.max(0, round2(item.price)),
+      };
     }
-    return { name: String(item || "").trim(), unit: "" };
+    return { name: String(item || "").trim(), unit: "", price: 0 };
+  }
+
+  function catalogNameKey(name) {
+    return String(name || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
+  }
+
+  function catalogNameConflict(names, candidate, skipIndex) {
+    const key = catalogNameKey(candidate);
+    if (!key) return "empty";
+    const dup = names.some((name, i) => i !== skipIndex && catalogNameKey(name) === key);
+    return dup ? "dup" : "";
+  }
+
+  function uniqueCatalogName(names, base) {
+    const root = String(base || "").trim() || "Без имени";
+    if (!catalogNameConflict(names, root, -1)) return root;
+    let n = 2;
+    while (catalogNameConflict(names, `${root} ${n}`, -1)) n += 1;
+    return `${root} ${n}`;
+  }
+
+  function catalogConflictMessage(conflict) {
+    if (conflict === "dup") return "Такое имя уже есть в справочнике";
+    if (conflict === "empty") return "Имя не может быть пустым";
+    return "";
+  }
+
+  function setCatalogNameState(input, conflict) {
+    input.classList.toggle("invalid", !!conflict);
+    input.title = catalogConflictMessage(conflict);
+  }
+
+  /** Дубликат и пустое имя не пишутся в модель — можно дописать текст дальше. */
+  function tryCatalogName(input, names, index) {
+    const conflict = catalogNameConflict(names, input.value, index);
+    setCatalogNameState(input, conflict);
+    return conflict ? null : input.value;
+  }
+
+  function finishCatalogName(input, names, index, saved) {
+    const trimmed = String(input.value || "").trim().replace(/\s+/g, " ");
+    input.value = trimmed;
+    const conflict = catalogNameConflict(names, trimmed, index);
+    if (!conflict) {
+      setCatalogNameState(input, "");
+      return trimmed;
+    }
+    input.value = saved;
+    setCatalogNameState(input, "");
+    toast(catalogConflictMessage(conflict));
+    return null;
+  }
+
+  function catalogNameAttrs(names, name, index) {
+    const conflict = catalogNameConflict(names, name, index);
+    return conflict ? ` class="invalid" title="${esc(catalogConflictMessage(conflict))}"` : "";
   }
 
   function normalizeProducts() {
@@ -1285,22 +1575,143 @@
     const seen = new Set();
     const next = [];
     for (const item of state.doc.products || []) {
-      const { name, unit } = productEntry(item);
-      if (!name || seen.has(name)) continue;
-      seen.add(name);
-      next.push({ name, unit: unit || fallback });
+      const { name, unit, price } = productEntry(item);
+      const key = catalogNameKey(name);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      next.push({ name, unit: unit || fallback, price });
     }
     state.doc.products = next;
   }
 
   function catalogProductNames() {
-    return (state.doc.products || []).map((p) => p.name);
+    return (state.doc.products || []).map((p) => productEntry(p).name).filter(Boolean);
   }
 
-  function defaultUnitForProduct(name) {
-    const n = String(name || "").trim();
-    const p = (state.doc.products || []).find((x) => x.name === n);
-    return p?.unit || "";
+  const productSuggest = { input: null, items: [], index: -1, picking: false };
+
+  function productSuggestNames() {
+    const catalog = catalogProductNames();
+    const seen = new Set(catalog.map(catalogNameKey));
+    const extra = [];
+    for (const { line } of allRows()) {
+      const name = String(line.product || "").trim();
+      const key = catalogNameKey(name);
+      if (!name || seen.has(key)) continue;
+      seen.add(key);
+      extra.push(name);
+    }
+    return catalog.concat(extra);
+  }
+
+  function filterProductSuggest(query) {
+    const all = productSuggestNames();
+    const q = String(query || "").trim().toLocaleLowerCase("ru");
+    if (!q) return all;
+    return all.filter((name) => name.toLocaleLowerCase("ru").includes(q));
+  }
+
+  function productSuggestOpen() {
+    const box = $("product-suggest");
+    return !!(box && !box.hidden);
+  }
+
+  function closeProductSuggest() {
+    const box = $("product-suggest");
+    if (box) {
+      box.hidden = true;
+      box.innerHTML = "";
+    }
+    productSuggest.input = null;
+    productSuggest.items = [];
+    productSuggest.index = -1;
+  }
+
+  function positionProductSuggest() {
+    const box = $("product-suggest");
+    const input = productSuggest.input;
+    if (!box || !input || box.hidden) return;
+    const r = input.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - r.bottom - 8;
+    const spaceAbove = r.top - 8;
+    const openUp = spaceBelow < 140 && spaceAbove > spaceBelow;
+    const maxH = Math.min(280, Math.max(120, openUp ? spaceAbove : spaceBelow));
+    box.style.left = `${Math.round(r.left)}px`;
+    box.style.minWidth = `${Math.round(Math.max(r.width, 180))}px`;
+    box.style.maxHeight = `${Math.round(maxH)}px`;
+    if (openUp) {
+      box.style.top = "auto";
+      box.style.bottom = `${Math.round(window.innerHeight - r.top + 4)}px`;
+    } else {
+      box.style.bottom = "auto";
+      box.style.top = `${Math.round(r.bottom + 4)}px`;
+    }
+  }
+
+  function renderProductSuggestBox() {
+    const box = $("product-suggest");
+    const input = productSuggest.input;
+    if (!box || !input) return;
+    const { items, index } = productSuggest;
+    if (!items.length) {
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    box.innerHTML = items
+      .map(
+        (name, i) =>
+          `<button type="button" role="option" data-i="${i}" class="suggest-item${i === index ? " active" : ""}">${esc(name)}</button>`
+      )
+      .join("");
+    box.hidden = false;
+    positionProductSuggest();
+    box.querySelector(".active")?.scrollIntoView({ block: "nearest" });
+  }
+
+  function openProductSuggest(input) {
+    if (!input) return;
+    const items = filterProductSuggest(input.value);
+    const q = String(input.value || "").trim();
+    const exact = items.findIndex((name) => catalogNameKey(name) === catalogNameKey(q));
+    let index = productSuggest.index;
+    if (productSuggest.input !== input) {
+      index = exact >= 0 ? exact : q ? 0 : -1;
+    } else {
+      if (index >= items.length) index = items.length - 1;
+      if (exact >= 0 && (index < 0 || catalogNameKey(items[index] || "") !== catalogNameKey(q))) index = exact;
+    }
+    productSuggest.input = input;
+    productSuggest.items = items;
+    productSuggest.index = index;
+    renderProductSuggestBox();
+  }
+
+  function moveProductSuggest(delta) {
+    const n = productSuggest.items.length;
+    if (!n) return;
+    let i = productSuggest.index;
+    if (i < 0) i = delta > 0 ? 0 : n - 1;
+    else i = (i + delta + n) % n;
+    productSuggest.index = i;
+    renderProductSuggestBox();
+  }
+
+  function pickProductSuggest(name) {
+    const input = productSuggest.input;
+    if (!input || name == null) return;
+    productSuggest.picking = true;
+    input.value = name;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    productSuggest.picking = false;
+    closeProductSuggest();
+  }
+
+  function catalogProduct(name) {
+    const key = catalogNameKey(name);
+    if (!key) return null;
+    return (state.doc.products || []).find((x) => catalogNameKey(productEntry(x).name) === key) || null;
   }
 
   function applyLineUnit(tr, line, unit) {
@@ -1314,30 +1725,77 @@
     sel.value = unit;
   }
 
-  function ensureProduct(name, unitHint) {
+  function applyLinePrice(tr, line, price) {
+    const n = Math.max(0, round2(price));
+    if (!n) return;
+    line.price = n;
+    line.price_expr = String(n);
+    const inp = tr.querySelector('[data-lk="price_expr"]');
+    if (!inp) return;
+    inp.value = String(n);
+    inp.dataset.expr = String(n);
+    inp.dataset.showing = "expr";
+    inp.classList.remove("invalid");
+  }
+
+  function applyLineProductDefaults(tr, line) {
+    const p = catalogProduct(line.product);
+    if (!p) return;
+    applyLineUnit(tr, line, p.unit);
+    applyLinePrice(tr, line, p.price);
+  }
+
+  function ensureProduct(name, unitHint, priceHint) {
     const n = String(name || "").trim();
     if (!n) return;
-    normalizeProducts();
-    const list = state.doc.products;
-    if (list.some((p) => p.name === n)) return;
+    const list = state.doc.products || (state.doc.products = []);
+    if (list.some((p) => catalogNameKey(p.name) === catalogNameKey(n))) return;
     const fallback = String(unitHint || "").trim() || (state.doc.units || [])[0] || "шт.";
-    list.push({ name: n, unit: fallback });
+    list.push({ name: n, unit: fallback, price: Math.max(0, round2(priceHint)) });
+  }
+
+  /** Убрать обрывки вроде «т», «то», «тор», если в заказах уже есть полное имя. */
+  function pruneDraftProducts() {
+    const list = state.doc.products || [];
+    if (list.length < 2) return;
+    const used = new Set();
+    for (const order of state.doc.orders || []) {
+      for (const line of order.lines || []) {
+        const key = catalogNameKey(line.product);
+        if (key) used.add(key);
+      }
+    }
+    const keys = list.map((p) => catalogNameKey(p.name));
+    const next = list.filter((p, i) => {
+      const key = keys[i];
+      if (!key) return false;
+      if (used.has(key)) return true;
+      return !keys.some((other, j) => j !== i && other.startsWith(key) && other.length > key.length);
+    });
+    if (next.length !== list.length) state.doc.products = next;
   }
 
   function syncProductsFromOrders() {
     const list = state.doc.products || (state.doc.products = []);
     (state.doc.orders || []).forEach((order) => {
-      (order.lines || []).forEach((line) => ensureProduct(line.product));
+      (order.lines || []).forEach((line) => ensureProduct(line.product, line.unit, line.price));
     });
+    pruneDraftProducts();
+  }
+
+  /** Переименование в справочнике сразу подставляется во все заказы и строки. */
+  function renameCatalogValue(field, oldName, nextName) {
+    if (!oldName || oldName === nextName) return;
+    for (const order of state.doc.orders || []) {
+      if (field === "customer" && order.customer === oldName) order.customer = nextName;
+      for (const line of order.lines || []) {
+        if (line[field] === oldName) line[field] = nextName;
+      }
+    }
   }
 
   function renameProduct(oldName, nextName) {
-    if (!oldName || oldName === nextName) return;
-    (state.doc.orders || []).forEach((order) => {
-      (order.lines || []).forEach((line) => {
-        if (line.product === oldName) line.product = nextName;
-      });
-    });
+    renameCatalogValue("product", oldName, nextName);
   }
 
   function orderNewestStamp(order) {
@@ -1368,10 +1826,9 @@
       el.innerHTML = `<option value="">Все</option>` + values.map((v) => `<option ${v === cur ? "selected" : ""}>${esc(v)}</option>`).join("");
     };
     setSel("f-status", (state.doc.statuses || []).map((s) => s.name));
-    setSel("f-type", state.doc.order_types || []);
+    setSel("f-type", typeNames());
     setSel("f-unit", state.doc.units || []);
     $("customer-list").innerHTML = unique((state.doc.orders || []).map((o) => o.customer)).map((c) => `<option value="${esc(c)}">`).join("");
-    $("product-list").innerHTML = unique([...catalogProductNames(), ...allRows().map((r) => r.line.product)]).map((c) => `<option value="${esc(c)}">`).join("");
   }
 
   function renderAnalytics() {
@@ -1381,31 +1838,37 @@
     const group = $("f-group").value;
     const dateField = $("f-date-field").value;
     const series = {};
+    const costSeries = {};
     rows.forEach(({ line, totals }) => {
       const k = groupKey(line[dateField], group);
       series[k] = (series[k] || 0) + totals.after;
+      if (totals.cost) costSeries[k] = (costSeries[k] || 0) + totals.cost;
     });
-    const labels = Object.keys(series).sort();
+    const labels = [...new Set([...Object.keys(series), ...Object.keys(costSeries)])].sort();
     FinCharts.line($("chart-an-line"), {
       labels,
-      datasets: [{ values: labels.map((k) => series[k]), color: "#2563eb", label: "Выручка" }],
+      datasets: [
+        { values: labels.map((k) => series[k] || 0), color: "#2563eb", label: "Выручка" },
+        ...(s.cost ? [{ values: labels.map((k) => costSeries[k] || 0), color: "#d97706", label: "Расходы" }] : []),
+      ],
     });
 
     const a = periodStats($("c-a-from").value, $("c-a-to").value, dateField);
     const b = periodStats($("c-b-from").value, $("c-b-to").value, dateField);
     $("cmp-a").innerHTML = cmpHtml(a);
     $("cmp-b").innerHTML = cmpHtml(b);
+    const withCost = a.cost > 0.005 || b.cost > 0.005;
     FinCharts.bar($("chart-an-bar"), {
-      labels: ["Выручка", "Оплачено", "Долг", "Позиции"],
+      labels: withCost ? ["Выручка", "Оплачено", "Долг", "Расход", "Чистыми", "Позиции"] : ["Выручка", "Оплачено", "Долг", "Позиции"],
       scale: "group",
-      formats: ["money", "money", "money", "count"],
+      formats: withCost ? ["money", "money", "money", "money", "money", "count"] : ["money", "money", "money", "count"],
       legend: [
         { label: "Период A", color: "#0f766e" },
         { label: "Период B", color: "#c9a227" },
       ],
       datasets: [
-        { values: [a.after, a.paid, a.unpaid, a.count], color: "#0f766e" },
-        { values: [b.after, b.paid, b.unpaid, b.count], color: "#c9a227" },
+        { values: withCost ? [a.after, a.paid, a.unpaid, a.cost, a.net, a.count] : [a.after, a.paid, a.unpaid, a.count], color: "#0f766e" },
+        { values: withCost ? [b.after, b.paid, b.unpaid, b.cost, b.net, b.count] : [b.after, b.paid, b.unpaid, b.count], color: "#c9a227" },
       ],
     });
 
@@ -1415,15 +1878,19 @@
           <th>Итог</th><th>Оплачено</th><th>Долг</th><th>Дата</th><th>Статус</th>
         </tr></thead><tbody>${rows
           .map(
-            ({ order, line, totals }) => `<tr>
+            ({ order, line, totals }) => `<tr class="${totals.expense ? "is-expense" : ""}">
             <td>${esc(order.number)}</td><td>${esc(order.customer)}</td><td>${esc(order.name)}</td>
             <td>${esc(line.order_type)}</td><td>${esc(line.product)}</td>
             <td class="num">${esc(qtyValue(line))} ${esc(line.unit)}</td>
-            <td class="num">${esc(money(totals.after))}</td>
-            <td class="num">${esc(money(totals.paid))}</td>
-            <td class="num">${esc(money(totals.unpaid))}</td>
+            <td class="num">${totals.expense ? `−${esc(money(totals.cost))}` : esc(money(totals.after))}</td>
+            <td class="num">${totals.expense ? "—" : esc(money(totals.paid))}</td>
+            <td class="num">${totals.expense ? "—" : esc(money(totals.unpaid))}</td>
             <td>${esc((line.order_date || "").replace("T", " "))}</td>
-            <td><span class="pill" style="background:${statusMeta(line.status).color}">${esc(line.status)}</span></td>
+            <td>${
+              totals.expense
+                ? `<span class="pill expense-pill">${esc(kindLabel(totals.kind))}</span>`
+                : `<span class="pill" style="background:${statusMeta(line.status).color}">${esc(line.status)}</span>`
+            }</td>
           </tr>`
           )
           .join("")}</tbody>
@@ -1434,9 +1901,20 @@
             <td class="num">${esc(money(s.paid))}</td>
             <td class="num">${esc(money(s.unpaid))}</td>
             <td colspan="2">${s.orderCount} зак.</td>
-          </tr></tfoot>
+          </tr>${
+            s.cost
+              ? `<tr><td colspan="5">Расход и чистыми</td>
+            <td class="num">${s.costCount} поз.</td>
+            <td class="num">−${esc(money(s.cost))}</td>
+            <td colspan="2" class="num">чистыми ${esc(money(s.net))}</td>
+            <td colspan="2"></td>
+          </tr>`
+              : ""
+          }</tfoot>
           </table>
-          <p class="hint">Найдено ${rows.length} позиций, ${s.orderCount} заказов, сумма ${money(s.after)}, долг ${money(s.unpaid)}</p>`
+          <p class="hint">Найдено ${rows.length} позиций, ${s.orderCount} заказов, сумма ${money(s.after)}, долг ${money(s.unpaid)}${
+            s.cost ? `, расход ${money(s.cost)}, чистыми ${money(s.net)}` : ""
+          }</p>`
       : `<div class="empty">Ничего не найдено — ослабьте фильтры.</div>`;
   }
 
@@ -1446,6 +1924,12 @@
       <div class="kpi"><div class="label">Оплачено</div><div class="value" style="font-size:18px">${money(s.paid)}</div></div>
       <div class="kpi warn"><div class="label">Долг</div><div class="value" style="font-size:18px">${money(s.unpaid)}</div></div>
       <div class="kpi"><div class="label">Позиции / заказы</div><div class="value" style="font-size:18px">${s.count} / ${s.orderCount}</div></div>
+      ${
+        s.cost
+          ? `<div class="kpi cost"><div class="label">Расход</div><div class="value" style="font-size:18px">−${money(s.cost)}</div></div>
+      <div class="kpi ${s.net >= 0 ? "ok" : "warn"}"><div class="label">Чистыми</div><div class="value" style="font-size:18px">${money(s.net)}</div></div>`
+          : ""
+      }
     </div>`;
   }
 
@@ -2172,6 +2656,7 @@
       const orderText = [order.number, order.name, order.customer, order.notes].join(" ").toLocaleLowerCase("ru");
       const lines = (order.lines || []).filter((line) => {
         const t = lineTotals(line);
+        if (t.expense) return false;
         if (debtOnly && t.unpaid <= 0.005) return false;
         if (!query || orderText.includes(query)) return true;
         return [line.product, line.order_type, line.status, line.unit].join(" ").toLocaleLowerCase("ru").includes(query);
@@ -2578,12 +3063,13 @@
   }
 
   function renderCatalogs() {
+    const statusNames = (state.doc.statuses || []).map((s) => s.name);
     $("status-list").innerHTML = (state.doc.statuses || [])
       .map(
         (s, i) => `<div class="list-item" data-i="${i}">
         <button type="button" class="item-drag" title="Перетащить"><span></span></button>
         <input type="color" data-ck="color" value="${esc(toHex(s.color))}" />
-        <input data-ck="name" value="${esc(s.name)}" />
+        <input data-ck="name" value="${esc(s.name)}"${catalogNameAttrs(statusNames, s.name, i)} />
         <label class="paid-toggle" title="Статус полной оплаты"><input type="radio" name="paid-status-flag" data-ck="is_paid" ${s.is_paid ? "checked" : ""} /> Оплачено</label>
         <button type="button" class="lock-btn ${s.locked ? "on" : ""}" data-cact="lock" title="${s.locked ? "Снять замок" : "Замок: не менять глобальным статусом"}">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -2595,18 +3081,52 @@
       </div>`
       )
       .join("");
-    $("unit-list").innerHTML = (state.doc.units || [])
-      .map((u, i) => `<div class="list-item" data-i="${i}"><button type="button" class="item-drag" title="Перетащить"><span></span></button><input data-uk value="${esc(u)}" /><button class="btn small danger" data-uact="del">Удалить</button></div>`)
+    const unitNames = state.doc.units || [];
+    $("unit-list").innerHTML = unitNames
+      .map(
+        (u, i) =>
+          `<div class="list-item" data-i="${i}"><button type="button" class="item-drag" title="Перетащить"><span></span></button><input data-uk value="${esc(u)}"${catalogNameAttrs(
+            unitNames,
+            u,
+            i
+          )} /><button class="btn small danger" data-uact="del">Удалить</button></div>`
+      )
       .join("");
+    const typeNamesList = (state.doc.order_types || []).map((t) => typeEntry(t).name);
     $("type-list").innerHTML = (state.doc.order_types || [])
-      .map((u, i) => `<div class="list-item" data-i="${i}"><button type="button" class="item-drag" title="Перетащить"><span></span></button><input data-tk value="${esc(u)}" /><button class="btn small danger" data-tact="del">Удалить</button></div>`)
+      .map(typeEntry)
+      .map(
+        (t, i) => `<div class="list-item type-item ${t.is_tax || t.is_cost ? "is-expense" : ""}" data-i="${i}">
+        <button type="button" class="item-drag" title="Перетащить"><span></span></button>
+        <input data-tk value="${esc(t.name)}"${catalogNameAttrs(typeNamesList, t.name, i)} />
+        <button class="btn small danger" data-tact="del">Удалить</button>
+        <div class="type-flags">
+          <label class="type-flag tax ${t.is_tax ? "on" : ""}" title="Строки этого типа вычитаются из суммы заказа как налог">
+            <input type="checkbox" data-ck="is_tax" ${t.is_tax ? "checked" : ""} /><span>Налог</span>
+          </label>
+          <label class="type-flag ${t.is_cost ? "on" : ""}" title="Строки этого типа вычитаются из суммы заказа как затрата">
+            <input type="checkbox" data-ck="is_cost" ${t.is_cost ? "checked" : ""} /><span>Затрата</span>
+          </label>
+          <span class="type-flag-note">${
+            t.is_tax ? "процент можно задать в строке заказа" : t.is_cost ? "вычитается из заказа" : "обычная выручка"
+          }</span>
+        </div>
+      </div>`
+      )
       .join("");
     syncProductsFromOrders();
     const units = state.doc.units || [];
+    const productNames = (state.doc.products || []).map((p) => p.name);
     $("product-catalog").innerHTML = (state.doc.products || [])
       .map((p, i) => {
         const unitOpts = unique([p.unit, ...units]);
-        return `<div class="list-item" data-i="${i}"><button type="button" class="item-drag" title="Перетащить"><span></span></button><input data-pk value="${esc(p.name)}" /><select data-pu title="Ед. по умолчанию">${optionList(unitOpts, p.unit)}</select><button class="btn small danger" data-pact="del">Удалить</button></div>`;
+        return `<div class="list-item" data-i="${i}"><button type="button" class="item-drag" title="Перетащить"><span></span></button><input data-pk value="${esc(p.name)}"${catalogNameAttrs(
+          productNames,
+          p.name,
+          i
+        )} /><select data-pu title="Ед. по умолчанию">${optionList(unitOpts, p.unit)}</select><input data-pp inputmode="decimal" placeholder="Цена" title="Цена по умолчанию" value="${
+          p.price ? esc(formatQty(p.price)) : ""
+        }" /><button class="btn small danger" data-pact="del">Удалить</button></div>`;
       })
       .join("");
   }
@@ -2617,8 +3137,23 @@
     return "#64748b";
   }
 
+  function normalizeOrderTypes() {
+    if (!state.doc) return;
+    const seen = new Set();
+    const next = [];
+    for (const item of state.doc.order_types || []) {
+      const entry = typeEntry(item);
+      const key = catalogNameKey(entry.name);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      next.push(entry);
+    }
+    state.doc.order_types = next;
+  }
+
   function renderAll() {
     if (!state.doc) return;
+    normalizeOrderTypes();
     normalizeProducts();
     FinCharts.setCurrency(state.doc.currency || "₽");
     updateChrome();
@@ -2643,6 +3178,7 @@
   }
 
   function setView(name) {
+    closeProductSuggest();
     if (name !== "cloud") orderCloud?.stopTour();
     state.view = name;
     document.querySelectorAll(".nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
@@ -2770,7 +3306,7 @@
 
   async function exportCsv() {
     const rows = allRows();
-    const head = ["Номер", "Заказчик", "Название", "Тип", "Продукт", "Количество", "Ед", "Цена", "Скидка%", "Итог", "Оплачено", "Не оплачено", "Дата заказа", "Дата оплаты", "Статус"];
+    const head = ["Номер", "Заказчик", "Название", "Тип", "Вид", "Продукт", "Количество", "Ед", "Цена", "Скидка%", "Итог", "Расход", "Оплачено", "Не оплачено", "Дата заказа", "Дата оплаты", "Статус"];
     const lines = [head.join(";")];
     rows.forEach(({ order, line, totals }) => {
       const vals = [
@@ -2778,17 +3314,19 @@
         order.customer,
         order.name,
         line.order_type,
+        kindLabel(totals.kind) || "доход",
         line.product,
-        line.quantity,
-        line.unit,
-        totals.total,
-        line.discount,
-        totals.after,
-        totals.paid,
-        totals.unpaid,
+        totals.mode === "amount" ? line.quantity : `${totals.percent} %`,
+        totals.mode === "amount" ? line.unit : "",
+        totals.mode === "amount" ? totals.total : totals.base,
+        totals.expense ? "" : line.discount,
+        totals.expense ? "" : totals.after,
+        totals.expense ? totals.cost : "",
+        totals.expense ? "" : totals.paid,
+        totals.expense ? "" : totals.unpaid,
         line.order_date,
-        line.payment_date,
-        line.status,
+        totals.expense ? "" : line.payment_date,
+        totals.expense ? kindLabel(totals.kind) : line.status,
       ].map((v) => `"${String(v ?? "").replaceAll('"', '""')}"`);
       lines.push(vals.join(";"));
     });
@@ -2895,6 +3433,57 @@
 
   function askClose() {
     $("close-modal").classList.add("open");
+  }
+
+  let confirmWait = null;
+
+  function closeConfirm(ok) {
+    $("confirm-modal")?.classList.remove("open");
+    const wait = confirmWait;
+    confirmWait = null;
+    wait?.(!!ok);
+  }
+
+  function askConfirm({ title, text, ok = "Продолжить", cancel = "Отмена", danger = false } = {}) {
+    closeConfirm(false);
+    return new Promise((resolve) => {
+      confirmWait = resolve;
+      const titleEl = $("confirm-title");
+      const textEl = $("confirm-text");
+      const okBtn = $("confirm-ok");
+      const cancelBtn = $("confirm-cancel");
+      if (titleEl) titleEl.textContent = title || "Подтверждение";
+      if (textEl) textEl.textContent = text || "";
+      if (okBtn) {
+        okBtn.textContent = ok;
+        okBtn.className = danger ? "btn danger" : "btn primary";
+      }
+      if (cancelBtn) cancelBtn.textContent = cancel;
+      $("confirm-modal")?.classList.add("open");
+      queueMicrotask(() => okBtn?.focus());
+    });
+  }
+
+  function typeKindWarning(name, prevKind, nextKind) {
+    const label = name || "этот тип";
+    if (!prevKind && nextKind) {
+      return {
+        title: "Отметить тип как расход?",
+        text: `Тип «${label}» станет ${nextKind === "tax" ? "налогом" : "затратой"}. Строки с этим типом в заказах перейдут в расходы и будут вычитаться из суммы.`,
+      };
+    }
+    if (prevKind && !nextKind) {
+      return {
+        title: "Снять пометку с типа?",
+        text: `Тип «${label}» снова станет обычной выручкой. Строки в заказах выйдут из блока расходов.`,
+      };
+    }
+    return {
+      title: "Изменить вид типа?",
+      text: `Тип «${label}» станет ${nextKind === "tax" ? "налогом" : "затратой"} вместо ${
+        prevKind === "tax" ? "налога" : "затраты"
+      }. Строки этого типа в заказах изменятся.`,
+    };
   }
 
   window.__finmasterIsDirty = () => !!state.dirty;
@@ -3005,6 +3594,30 @@
     $("orders-list").addEventListener("change", onOrderInput);
     $("orders-list").addEventListener("click", onOrderClick);
     $("orders-list").addEventListener("keydown", onOrderKeydown);
+    $("orders-list").addEventListener("focusin", (e) => {
+      if (e.target.dataset?.lk === "product") openProductSuggest(e.target);
+    });
+    $("orders-list").addEventListener("focusout", (e) => {
+      if (e.target.dataset?.lk !== "product") return;
+      requestAnimationFrame(() => {
+        if (document.activeElement === productSuggest.input) return;
+        if ($("product-suggest")?.contains(document.activeElement)) return;
+        closeProductSuggest();
+      });
+    });
+    $("product-suggest")?.addEventListener("mousedown", (e) => {
+      const btn = e.target.closest("[data-i]");
+      if (!btn) return;
+      e.preventDefault();
+      const name = productSuggest.items[Number(btn.dataset.i)];
+      if (name != null) pickProductSuggest(name);
+    });
+    window.addEventListener("scroll", () => {
+      if (productSuggest.input) positionProductSuggest();
+    }, true);
+    window.addEventListener("resize", () => {
+      if (productSuggest.input) positionProductSuggest();
+    });
     $("order-chips").addEventListener("click", (e) => {
       const chip = e.target.closest(".chip");
       if (!chip) return;
@@ -3061,6 +3674,7 @@
         const ids = [...card.querySelectorAll("tr[data-line]")].map((r) => r.dataset.line);
         order.lines = ids.map((id) => order.lines.find((l) => l.id === id)).filter(Boolean);
         markDirty();
+        renderOrders();
       },
     });
     bindSortable($("status-list"), {
@@ -3112,8 +3726,31 @@
       if (!row) return;
       const i = Number(row.dataset.i);
       const s = state.doc.statuses[i];
-      if (e.target.dataset.ck === "name") s.name = e.target.value;
+      if (!s) return;
+      if (e.target.dataset.ck === "name") {
+        const names = (state.doc.statuses || []).map((x) => x.name);
+        const accepted = tryCatalogName(e.target, names, i);
+        if (accepted == null) return;
+        const prev = s.name;
+        s.name = accepted;
+        renameCatalogValue("status", prev, s.name);
+        markDirty();
+        return;
+      }
       if (e.target.dataset.ck === "color") s.color = e.target.value;
+      markDirty();
+    });
+    $("status-list").addEventListener("focusout", (e) => {
+      if (e.target.dataset.ck !== "name") return;
+      const i = Number(e.target.closest(".list-item")?.dataset.i);
+      const s = state.doc.statuses?.[i];
+      if (!s) return;
+      const names = (state.doc.statuses || []).map((x) => x.name);
+      const next = finishCatalogName(e.target, names, i, s.name);
+      if (next == null || next === s.name) return;
+      const prev = s.name;
+      s.name = next;
+      renameCatalogValue("status", prev, s.name);
       markDirty();
     });
     $("status-list").addEventListener("change", (e) => {
@@ -3145,18 +3782,42 @@
       }
     });
     $("btn-add-status").addEventListener("click", () => {
-      state.doc.statuses.push({ id: uid(), name: "Новый статус", color: "#64748b", is_paid: false, locked: false });
+      const names = (state.doc.statuses || []).map((x) => x.name);
+      state.doc.statuses.push({
+        id: uid(),
+        name: uniqueCatalogName(names, "Новый статус"),
+        color: "#64748b",
+        is_paid: false,
+        locked: false,
+      });
       markDirty();
       renderCatalogs();
     });
     $("unit-list").addEventListener("input", (e) => {
       const i = Number(e.target.closest(".list-item").dataset.i);
       if (!e.target.hasAttribute("data-uk")) return;
+      const names = state.doc.units || [];
+      const accepted = tryCatalogName(e.target, names, i);
+      if (accepted == null) return;
       const prev = state.doc.units[i];
-      const val = e.target.value;
-      state.doc.units[i] = val;
+      state.doc.units[i] = accepted;
+      renameCatalogValue("unit", prev, accepted);
       (state.doc.products || []).forEach((p) => {
-        if (p.unit === prev) p.unit = val;
+        if (p.unit === prev) p.unit = accepted;
+      });
+      markDirty();
+    });
+    $("unit-list").addEventListener("focusout", (e) => {
+      if (!e.target.hasAttribute("data-uk")) return;
+      const i = Number(e.target.closest(".list-item")?.dataset.i);
+      if (!Number.isFinite(i) || !state.doc.units?.[i]) return;
+      const next = finishCatalogName(e.target, state.doc.units, i, state.doc.units[i]);
+      if (next == null || next === state.doc.units[i]) return;
+      const prev = state.doc.units[i];
+      state.doc.units[i] = next;
+      renameCatalogValue("unit", prev, next);
+      (state.doc.products || []).forEach((p) => {
+        if (p.unit === prev) p.unit = next;
       });
       markDirty();
     });
@@ -3170,14 +3831,68 @@
       }
     });
     $("btn-add-unit").addEventListener("click", () => {
-      state.doc.units.push("ед.");
+      state.doc.units.push(uniqueCatalogName(state.doc.units || [], "ед."));
       markDirty();
       renderCatalogs();
     });
+    $("type-list").addEventListener("focusin", (e) => {
+      if (e.target.hasAttribute("data-tk")) e.target.dataset.old = e.target.value;
+    });
     $("type-list").addEventListener("input", (e) => {
+      if (!e.target.hasAttribute("data-tk")) return;
       const i = Number(e.target.closest(".list-item").dataset.i);
-      if (e.target.hasAttribute("data-tk")) state.doc.order_types[i] = e.target.value;
+      const names = (state.doc.order_types || []).map((t) => typeEntry(t).name);
+      const accepted = tryCatalogName(e.target, names, i);
+      if (accepted == null) return;
+      const entry = typeEntry(state.doc.order_types[i]);
+      const prev = e.target.dataset.old ?? entry.name;
+      entry.name = accepted;
+      state.doc.order_types[i] = entry;
+      if (prev && prev !== entry.name) {
+        renameCatalogValue("order_type", prev, entry.name);
+        e.target.dataset.old = entry.name;
+      }
       markDirty();
+    });
+    $("type-list").addEventListener("focusout", (e) => {
+      if (!e.target.hasAttribute("data-tk")) return;
+      const i = Number(e.target.closest(".list-item")?.dataset.i);
+      const current = state.doc.order_types?.[i];
+      if (current == null) return;
+      const saved = typeEntry(current).name;
+      const names = (state.doc.order_types || []).map((t) => typeEntry(t).name);
+      const next = finishCatalogName(e.target, names, i, saved);
+      if (next == null || next === saved) return;
+      const entry = typeEntry(current);
+      entry.name = next;
+      state.doc.order_types[i] = entry;
+      renameCatalogValue("order_type", saved, next);
+      e.target.dataset.old = next;
+      markDirty();
+    });
+    $("type-list").addEventListener("change", async (e) => {
+      const key = e.target.dataset.ck;
+      if (key !== "is_tax" && key !== "is_cost") return;
+      const i = Number(e.target.closest(".list-item").dataset.i);
+      const entry = typeEntry(state.doc.order_types[i]);
+      const prevKind = entry.is_tax ? "tax" : entry.is_cost ? "cost" : "";
+      const nextKind = e.target.checked ? (key === "is_tax" ? "tax" : "cost") : "";
+      if (prevKind === nextKind) return;
+      e.target.checked = !e.target.checked;
+      const warn = typeKindWarning(entry.name, prevKind, nextKind);
+      const ok = await askConfirm({ title: warn.title, text: warn.text, ok: "Изменить" });
+      if (!ok) return;
+      entry.is_tax = nextKind === "tax";
+      entry.is_cost = nextKind === "cost";
+      state.doc.order_types[i] = entry;
+      (state.doc.orders || []).forEach((order) =>
+        (order.lines || []).forEach((line) => {
+          if (line.order_type !== entry.name) return;
+          line.tax_mode = nextKind === "tax" ? "gross" : "amount";
+        })
+      );
+      markDirty();
+      renderAll();
     });
     $("type-list").addEventListener("click", (e) => {
       if (e.target.dataset.tact === "del") {
@@ -3189,7 +3904,8 @@
       }
     });
     $("btn-add-type").addEventListener("click", () => {
-      state.doc.order_types.push("Новый тип");
+      const names = (state.doc.order_types || []).map((t) => typeEntry(t).name);
+      state.doc.order_types.push({ id: uid(), name: uniqueCatalogName(names, "Новый тип"), is_tax: false, is_cost: false });
       markDirty();
       renderCatalogs();
     });
@@ -3203,26 +3919,60 @@
       const item = state.doc.products[i];
       if (!item) return;
       if (e.target.hasAttribute("data-pk")) {
-        const old = e.target.dataset.old || "";
-        const val = e.target.value;
-        item.name = val;
-        renameProduct(old, val);
-        e.target.dataset.old = val;
+        const names = (state.doc.products || []).map((p) => p.name);
+        const accepted = tryCatalogName(e.target, names, i);
+        if (accepted == null) return;
+        const old = e.target.dataset.old || item.name;
+        item.name = accepted;
+        renameProduct(old, accepted);
+        e.target.dataset.old = accepted;
         markDirty();
         return;
       }
       if (e.target.hasAttribute("data-pu")) {
         item.unit = e.target.value;
         markDirty();
+        return;
+      }
+      if (e.target.hasAttribute("data-pp")) {
+        const raw = String(e.target.value || "").replaceAll(",", ".");
+        if (raw !== e.target.value) e.target.value = raw;
+        const v = evalExpr(raw);
+        e.target.classList.toggle("invalid", raw.trim() !== "" && !Number.isFinite(v));
+        item.price = Number.isFinite(v) ? Math.max(0, round2(v)) : 0;
+        markDirty();
       }
     });
-    $("product-catalog").addEventListener("change", (e) => {
-      if (!e.target.hasAttribute("data-pu")) return;
-      const i = Number(e.target.closest(".list-item").dataset.i);
-      const item = state.doc.products[i];
+    $("product-catalog").addEventListener("focusout", (e) => {
+      if (!e.target.hasAttribute("data-pk")) return;
+      const i = Number(e.target.closest(".list-item")?.dataset.i);
+      const item = state.doc.products?.[i];
       if (!item) return;
-      item.unit = e.target.value;
+      const names = (state.doc.products || []).map((p) => p.name);
+      const next = finishCatalogName(e.target, names, i, item.name);
+      if (next == null || next === item.name) return;
+      const old = item.name;
+      item.name = next;
+      renameProduct(old, next);
+      e.target.dataset.old = next;
       markDirty();
+    });
+    $("product-catalog").addEventListener("change", (e) => {
+      const i = Number(e.target.closest(".list-item")?.dataset.i);
+      const item = state.doc.products?.[i];
+      if (!item) return;
+      if (e.target.hasAttribute("data-pu")) {
+        item.unit = e.target.value;
+        markDirty();
+      }
+      if (e.target.hasAttribute("data-pp")) {
+        const raw = String(e.target.value || "").replaceAll(",", ".").trim();
+        const v = evalExpr(raw);
+        item.price = Number.isFinite(v) ? Math.max(0, round2(v)) : 0;
+        e.target.value = item.price ? formatQty(item.price) : "";
+        e.target.classList.remove("invalid");
+        markDirty();
+      }
     });
     $("product-catalog").addEventListener("click", (e) => {
       if (e.target.closest("[data-pact='del']")) {
@@ -3234,9 +3984,11 @@
       }
     });
     $("btn-add-product").addEventListener("click", () => {
-      (state.doc.products || (state.doc.products = [])).push({
-        name: "Новый продукт",
+      const list = state.doc.products || (state.doc.products = []);
+      list.push({
+        name: uniqueCatalogName(list.map((p) => p.name), "Новый продукт"),
         unit: (state.doc.units || [])[0] || "шт.",
+        price: 0,
       });
       markDirty();
       renderCatalogs();
@@ -3250,11 +4002,7 @@
       if (cf === "name") {
         const old = c.name;
         c.name = e.target.value;
-        if (old && old !== c.name) {
-          (state.doc.orders || []).forEach((o) => {
-            if (o.customer === old) o.customer = c.name;
-          });
-        }
+        if (old && old !== c.name) renameCatalogValue("customer", old, c.name);
       } else {
         c[cf] = e.target.value;
       }
@@ -3544,6 +4292,11 @@
       const ok = await save();
       if (ok) await createNew();
     });
+    $("confirm-cancel")?.addEventListener("click", () => closeConfirm(false));
+    $("confirm-ok")?.addEventListener("click", () => closeConfirm(true));
+    $("confirm-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("confirm-modal")) closeConfirm(false);
+    });
 
     document.addEventListener("keydown", (e) => {
       const ctrl = e.ctrlKey || e.metaKey;
@@ -3569,8 +4322,23 @@
           toggleAppFullscreen(false);
           return;
         }
+        if (productSuggestOpen()) {
+          e.preventDefault();
+          closeProductSuggest();
+          return;
+        }
+        if (netConsoleOpen()) {
+          e.preventDefault();
+          closeNetConsole();
+          return;
+        }
         if (paletteIsOpen()) {
           closePalette();
+          return;
+        }
+        if ($("confirm-modal")?.classList.contains("open")) {
+          e.preventDefault();
+          closeConfirm(false);
           return;
         }
         if ($("help-modal").classList.contains("open")) $("help-modal").classList.remove("open");
@@ -3593,6 +4361,11 @@
       if (code === "KeyK" || (e.shiftKey && code === "KeyP")) {
         e.preventDefault();
         paletteIsOpen() ? closePalette() : openPalette();
+        return;
+      }
+      if (code === "Backquote" || e.key === "`" || e.key === "ё" || e.key === "Ё") {
+        e.preventDefault();
+        toggleNetConsole();
         return;
       }
       if (code === "KeyS") {
@@ -3664,6 +4437,7 @@
       if (g === "discount") {
         const v = Math.min(100, Math.max(0, num(e.target.value)));
         (order.lines || []).forEach((line) => {
+          if (isExpenseLine(line)) return;
           line.discount = v;
           line.discount_expr = String(v);
           applyPaidIfCovered(line);
@@ -3679,6 +4453,7 @@
       } else if (g === "status" || g === "order_type") {
         if (!e.target.value) return;
         (order.lines || []).forEach((line) => {
+          if (isExpenseLine(line)) return;
           if (g === "status" && statusLocked(line.status)) return;
           line[g] = e.target.value;
         });
@@ -3686,6 +4461,7 @@
       } else if (g === "order_date" || g === "payment_date") {
         if (e.type !== "change" || !e.target.value) return;
         (order.lines || []).forEach((line) => {
+          if (g === "payment_date" && isExpenseLine(line)) return;
           line[g] = e.target.value;
         });
         markDirty();
@@ -3723,14 +4499,33 @@
         const numKey = EXPR_MAP[key];
         let n = round2(v);
         if (numKey === "discount") n = Math.min(100, Math.max(0, n));
-        if (numKey === "price" || numKey === "paid") n = Math.max(0, n);
+        if (numKey === "price" || numKey === "paid" || numKey === "tax_percent") n = Math.max(0, n);
         line[numKey] = n;
       }
     } else {
+      const prevKind = key === "order_type" ? typeKind(line.order_type) : "";
       line[key] = e.target.type === "number" ? num(e.target.value) : e.target.value;
       if (key === "product") {
-        ensureProduct(line.product, line.unit);
-        applyLineUnit(tr, line, defaultUnitForProduct(line.product));
+        if (e.type === "change") ensureProduct(line.product, line.unit, line.price);
+        applyLineProductDefaults(tr, line);
+        if (e.type === "input" && !productSuggest.picking) openProductSuggest(e.target);
+      }
+      if (key === "tax_mode") {
+        markDirty();
+        renderOrders();
+        requestAnimationFrame(() => focusLineCell(line.id, 4));
+        return;
+      }
+      if (key === "order_type") {
+        const nextKind = typeKind(line.order_type);
+        if (nextKind !== prevKind) {
+          if (nextKind && !prevKind) resetExpenseLine(line);
+          line.tax_mode = nextKind === "tax" ? "gross" : "amount";
+          markDirty();
+          renderOrders();
+          requestAnimationFrame(() => focusLineCell(line.id, 1));
+          return;
+        }
       }
     }
     applyPaidIfCovered(line);
@@ -3742,15 +4537,36 @@
   }
 
   function refreshComputed(card, tr, order, line) {
-    const t = lineTotals(line);
+    const t = lineTotals(line, order);
     const cells = tr.querySelectorAll(".computed");
-    if (cells[0]) cells[0].textContent = money(t.unpaid);
-    if (cells[1]) {
-      cells[1].innerHTML = `${esc(money(t.after))}<div style="color:#94a3b8;font-weight:500;font-size:11px">до скидки ${esc(money(t.total))}</div>`;
+    if (t.expense) {
+      if (cells[0]) cells[0].textContent = `−${money(t.cost)}`;
+    } else {
+      if (cells[0]) cells[0].textContent = money(t.unpaid);
+      if (cells[1]) {
+        cells[1].innerHTML = `${esc(money(t.after))}<div style="color:#94a3b8;font-weight:500;font-size:11px">до скидки ${esc(money(t.total))}</div>`;
+      }
     }
+    if (!t.expense || t.mode === "amount") refreshPercentRows(card, order);
     const tot = orderTotals(order);
     const foot = card.querySelector(".totals");
-    if (foot) foot.innerHTML = `Итог <b>${esc(money(tot.after))}</b> · оплачено <b>${esc(money(tot.paid))}</b> · не оплачено <b>${esc(money(tot.unpaid))}</b>`;
+    if (foot) foot.innerHTML = orderTotalsHtml(tot);
+    const oeSum = card.querySelector(".oe-sum");
+    if (oeSum) oeSum.textContent = `−${money(tot.cost)} · чистыми ${money(tot.net)}`;
+  }
+
+  /** Налог в процентах зависит от других строк — обновляем его при любой правке заказа. */
+  function refreshPercentRows(card, order) {
+    for (const item of order.lines || []) {
+      if (!isExpenseLine(item) || taxMode(item) === "amount") continue;
+      const row = card.querySelector(`tr[data-line="${cssEscape(item.id)}"]`);
+      if (!row) continue;
+      const t = lineTotals(item, order);
+      const cell = row.querySelector(".computed");
+      if (cell) cell.textContent = `−${money(t.cost)}`;
+      const of = row.querySelector(".tax-of");
+      if (of) of.textContent = `% от ${money(t.base)}`;
+    }
   }
 
   function onExprFocus(e) {
@@ -3822,6 +4638,7 @@
     { id: "unpaid", label: "Не оплачено", kind: "col" },
     { id: "payment_date", label: "Дата оплаты", kind: "col" },
     { id: "totals", label: "Итоги заказа", kind: "meta" },
+    { id: "expenses", label: "Налоги и затраты", kind: "meta" },
   ];
   const SHARE_PRESETS = {
     work: ["number", "name", "order_type", "product", "quantity", "status", "order_date"],
@@ -3974,13 +4791,29 @@
     return (state.doc.customers || []).find((c) => c.name === name)?.organization || "";
   }
 
+  function shareNumber(n) {
+    const r = round2(n);
+    if (Number.isInteger(r)) return String(r);
+    return r.toFixed(2).replace(".", ",");
+  }
+
   function shareLineValue(line, id) {
     const t = lineTotals(line);
+    if (t.expense) {
+      // Расход в снимке — только название, объём и сумма с минусом; скидок и оплат у него нет.
+      if (id === "order_type") return `${line.order_type || "—"} · ${kindLabel(t.kind)}`;
+      if (id === "product") return line.product || "—";
+      if (id === "quantity") return t.mode === "amount" ? `${shareNumber(qtyValue(line))} ${line.unit || ""}`.trim() : `${shareNumber(t.percent)} %`;
+      if (id === "price") return t.mode === "amount" ? money(numExpr(line, "price_expr", "price")) : money(t.base);
+      if (id === "total") return `−${money(t.cost)}`;
+      if (id === "order_date") return fmtShareDate(line.order_date);
+      return "—";
+    }
     if (id === "order_type") return line.order_type || "—";
     if (id === "product") return line.product || "—";
-    if (id === "quantity") return `${qtyValue(line)} ${line.unit || ""}`.trim();
+    if (id === "quantity") return `${shareNumber(qtyValue(line))} ${line.unit || ""}`.trim();
     if (id === "price") return money(numExpr(line, "price_expr", "price"));
-    if (id === "discount") return `${numExpr(line, "discount_expr", "discount")} %`;
+    if (id === "discount") return `${shareNumber(numExpr(line, "discount_expr", "discount"))} %`;
     if (id === "total") return money(t.after);
     if (id === "paid") return money(t.paid);
     if (id === "unpaid") return money(t.unpaid);
@@ -4010,26 +4843,38 @@
   }
 
   function linesTotals(lines) {
-    return (lines || []).reduce(
-      (acc, line) => {
+    const acc = (lines || []).reduce(
+      (sum, line) => {
         const t = lineTotals(line);
-        acc.total += t.total;
-        acc.after += t.after;
-        acc.paid += t.paid;
-        acc.unpaid += t.unpaid;
-        return acc;
+        if (t.expense) {
+          sum.cost += t.cost;
+          return sum;
+        }
+        sum.total += t.total;
+        sum.after += t.after;
+        sum.paid += t.paid;
+        sum.unpaid += t.unpaid;
+        return sum;
       },
-      { total: 0, after: 0, paid: 0, unpaid: 0 }
+      { total: 0, after: 0, paid: 0, unpaid: 0, cost: 0 }
     );
+    acc.net = round2(acc.after - acc.cost);
+    return acc;
+  }
+
+  /** Расходы попадают в снимок только при включённом поле «Налоги и затраты». */
+  function shareShowsExpenses() {
+    return currentShareFields().includes("expenses");
   }
 
   function selectedShareBlocks() {
+    const withExpenses = shareShowsExpenses();
     return [...document.querySelectorAll("#share-orders .share-order")]
       .map((block) => {
         const order = findOrder(block.dataset.order);
         if (!order || !block.querySelector("[data-share-order]")?.checked) return null;
         const ids = new Set([...block.querySelectorAll("[data-share-line]:checked")].map((el) => el.dataset.shareLine));
-        const lines = (order.lines || []).filter((l) => ids.has(l.id));
+        const lines = (order.lines || []).filter((l) => ids.has(l.id) && (withExpenses || !isExpenseLine(l)));
         if (!lines.length) return null;
         return { order, lines };
       })
@@ -4058,6 +4903,10 @@
     const tot = linesTotals(lines);
     const bits = [];
     if (fields.includes("total") || fields.includes("price") || !cols.length) bits.push(`Итого ${money(tot.after)}`);
+    if (tot.cost > 0.005) {
+      bits.push(`расходы −${money(tot.cost)}`);
+      bits.push(`к оплате ${money(tot.net)}`);
+    }
     if (fields.includes("paid")) bits.push(`оплачено ${money(tot.paid)}`);
     if (fields.includes("unpaid")) bits.push(`остаток ${money(tot.unpaid)}`);
     return bits.length ? bits.join(" · ") : `Позиций: ${lines.length}`;
@@ -4072,7 +4921,7 @@
   function shareFooterValue(colId, lines) {
     const tot = linesTotals(lines);
     if (colId === "price") return money(tot.total);
-    if (colId === "total") return money(tot.after);
+    if (colId === "total") return tot.cost > 0.005 ? money(tot.net) : money(tot.after);
     if (colId === "paid") return money(tot.paid);
     if (colId === "unpaid") return money(tot.unpaid);
     return "";
@@ -4126,10 +4975,12 @@
             <label><input type="checkbox" data-share-order ${on ? "checked" : ""} /> ${esc(order.number || "—")} · ${esc(order.name || "без названия")}</label>
           </div>
           <div class="share-lines">${(order.lines || [])
-            .map(
-              (line) =>
-                `<label><input type="checkbox" data-share-line="${esc(line.id)}" ${on ? "checked" : ""} /> ${esc(line.order_type || "тип")} · ${esc(line.product || "—")}</label>`
-            )
+            .map((line) => {
+              const kind = typeKind(line.order_type);
+              return `<label class="${kind ? "share-cost" : ""}"><input type="checkbox" data-share-line="${esc(line.id)}" ${
+                on ? "checked" : ""
+              } /> ${esc(line.order_type || "тип")} · ${esc(line.product || "—")}${kind ? ` · ${esc(kindLabel(kind))}` : ""}</label>`;
+            })
             .join("")}</div>
         </div>`;
           })
@@ -4575,15 +5426,57 @@
     return String(value).replace(/["\\]/g, "\\$&");
   }
 
+  /** У расхода нет скидки, оплаты и даты оплаты — очищаем, чтобы цифры не всплыли при возврате к обычному типу. */
+  function resetExpenseLine(line) {
+    line.discount = 0;
+    line.discount_expr = "0";
+    line.paid = 0;
+    line.paid_expr = "0";
+    line.payment_date = "";
+    if (line.tax_mode == null) line.tax_mode = typeKind(line.order_type) === "tax" ? "gross" : "amount";
+    if (line.tax_percent_expr == null) {
+      line.tax_percent = num(line.tax_percent);
+      line.tax_percent_expr = String(line.tax_percent || 0);
+    }
+    return line;
+  }
+
+  function addExpenseLine(order) {
+    const type = typeNames("expense")[0];
+    if (!type) {
+      toast("Сначала отметьте тип заказа как налог или затрату в справочниках");
+      return null;
+    }
+    const prev = (order.lines || [])[order.lines.length - 1];
+    const line = resetExpenseLine(emptyLine());
+    line.order_type = type;
+    line.tax_mode = typeKind(type) === "tax" ? "gross" : "amount";
+    line.product = "";
+    line.price = 0;
+    line.price_expr = "0";
+    if (prev) {
+      line.unit = prev.unit;
+      line.order_date = prev.order_date;
+    }
+    order.lines.push(line);
+    markDirty();
+    renderOrders();
+    requestAnimationFrame(() => focusLineCell(line.id, 3));
+    return line;
+  }
+
   function addOrderLine(order, afterId) {
     const prev = afterId ? order.lines.find((l) => l.id === afterId) : (order.lines || [])[order.lines.length - 1];
     const line = emptyLine();
-    if (prev) {
+    if (prev && !isExpenseLine(prev)) {
       line.order_type = prev.order_type;
       line.product = prev.product;
       line.unit = prev.unit;
       line.order_date = prev.order_date;
       line.status = prev.status;
+    } else if (prev) {
+      line.unit = prev.unit;
+      line.order_date = prev.order_date;
     }
     const idx = afterId ? order.lines.findIndex((l) => l.id === afterId) : -1;
     if (idx >= 0) order.lines.splice(idx + 1, 0, line);
@@ -4647,6 +5540,32 @@
   const NAV_SKIP_INPUT_TYPES = new Set(["datetime-local", "date", "time", "number"]);
 
   function onOrderKeydown(e) {
+    if (e.target.dataset?.lk === "product") {
+      const open = productSuggestOpen();
+      if (e.key === "ArrowDown" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        if (open) moveProductSuggest(1);
+        else openProductSuggest(e.target);
+        return;
+      }
+      if (e.key === "ArrowUp" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        if (open) moveProductSuggest(-1);
+        else openProductSuggest(e.target);
+        return;
+      }
+      if (e.key === "Enter" && !e.ctrlKey && !e.altKey && open && productSuggest.index >= 0) {
+        e.preventDefault();
+        pickProductSuggest(productSuggest.items[productSuggest.index]);
+        return;
+      }
+      if (e.key === "Escape" && open) {
+        e.preventDefault();
+        closeProductSuggest();
+        return;
+      }
+      if (e.key === "Tab") closeProductSuggest();
+    }
     const tr = e.target.closest?.("tr[data-line]");
     const td = e.target.closest?.("td");
     if (!tr || !td) return;
@@ -4761,6 +5680,14 @@
         title: remote.enabled ? "Телефон: показать QR-код" : "Управление с телефона",
         sub: "работать с отчётом со смартфона",
         run: () => $("btn-remote")?.click(),
+      },
+      {
+        group: "Действия",
+        ico: ">_",
+        title: netConsoleOpen() ? "Скрыть консоль сети" : "Консоль сети",
+        sub: "подключения, синхронизация, Telegram и ngrok",
+        right: "Ctrl+Ё",
+        run: () => toggleNetConsole(),
       },
       { group: "Действия", ico: "⤓", title: "Сохранить как…", right: "Ctrl+Shift+S", run: () => save({ as: true }) },
       { group: "Действия", ico: "⌸", title: "Открыть отчёт", right: "Ctrl+O", run: () => maybeOpen(openFromDialog) },
@@ -5078,6 +6005,7 @@
     }
     if (act === "payall") {
       (order.lines || []).forEach((line) => {
+        if (isExpenseLine(line)) return;
         const after = lineTotals(line).after;
         line.paid = after;
         line.paid_expr = String(after);
@@ -5118,6 +6046,10 @@
     if (act === "addline") {
       addOrderLine(order);
     }
+    if (act === "addcost") {
+      addExpenseLine(order);
+      return;
+    }
     if (act === "delline") {
       const id = e.target.closest("[data-line]").dataset.line;
       if (order.lines.length <= 1) {
@@ -5146,6 +6078,202 @@
     polling: false,
     applying: false,
   };
+
+  const NET_KIND = {
+    session: "сессия",
+    client: "клиент",
+    sync: "синхр.",
+    command: "команда",
+    nav: "навиг.",
+    http: "http",
+    telegram: "telegram",
+    ngrok: "ngrok",
+  };
+
+  const netConsole = { lastId: 0, timer: 0, stick: true, drag: null };
+  const NET_CONSOLE_MIN_W = 280;
+  const NET_CONSOLE_MIN_H = 160;
+
+  function netConsoleOpen() {
+    return !!$("net-console") && !$("net-console").hidden;
+  }
+
+  function loadNetConsoleSize() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(LS_NET_CONSOLE) || "null");
+      const w = Number(raw?.w);
+      const h = Number(raw?.h);
+      if (!Number.isFinite(w) || !Number.isFinite(h)) return null;
+      if (Math.round(w) === 440) w = 880;
+      return { w, h };
+    } catch {
+      return null;
+    }
+  }
+
+  function clampNetConsoleSize(w, h) {
+    const maxW = Math.max(NET_CONSOLE_MIN_W, window.innerWidth - 24);
+    const maxH = Math.max(NET_CONSOLE_MIN_H, window.innerHeight - 24);
+    return {
+      w: Math.min(maxW, Math.max(NET_CONSOLE_MIN_W, Math.round(w))),
+      h: Math.min(maxH, Math.max(NET_CONSOLE_MIN_H, Math.round(h))),
+    };
+  }
+
+  function applyNetConsoleSize(box) {
+    const el = box || $("net-console");
+    if (!el) return;
+    const saved = loadNetConsoleSize();
+    if (!saved) return;
+    const { w, h } = clampNetConsoleSize(saved.w, saved.h);
+    el.style.width = `${w}px`;
+    el.style.height = `${h}px`;
+  }
+
+  function persistNetConsoleSize(box) {
+    const el = box || $("net-console");
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const { w, h } = clampNetConsoleSize(r.width, r.height);
+    try {
+      localStorage.setItem(LS_NET_CONSOLE, JSON.stringify({ w, h }));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function toggleNetConsole(force) {
+    const show = force == null ? !netConsoleOpen() : !!force;
+    if (show) openNetConsole();
+    else closeNetConsole();
+  }
+
+  function openNetConsole() {
+    const box = $("net-console");
+    if (!box) return;
+    box.hidden = false;
+    applyNetConsoleSize(box);
+    $("remote-console-open")?.classList.add("on");
+    if (!netConsole.timer) netConsole.timer = setInterval(() => pollNetConsole(), 800);
+    pollNetConsole(true);
+  }
+
+  function closeNetConsole() {
+    const box = $("net-console");
+    if (box) box.hidden = true;
+    $("remote-console-open")?.classList.remove("on");
+    if (netConsole.timer) clearInterval(netConsole.timer);
+    netConsole.timer = 0;
+  }
+
+  function formatNetTime(ts) {
+    const d = new Date((Number(ts) || 0) * 1000);
+    if (!Number.isFinite(d.getTime())) return "—";
+    return d.toLocaleTimeString("ru-RU", { hour12: false });
+  }
+
+  function appendNetConsoleEvents(events) {
+    const log = $("net-console-log");
+    const empty = $("net-console-empty");
+    if (!log) return;
+    if (events.length && empty) empty.hidden = true;
+    const body = $("net-console-body");
+    const stick = netConsole.stick || (body && body.scrollHeight - body.scrollTop - body.clientHeight < 28);
+    events.forEach((ev) => {
+      const row = document.createElement("div");
+      row.className = `nc-row ${ev.level || "info"}`;
+      const src = ev.source ? ` <span class="nc-src">${esc(ev.source)}</span>` : "";
+      row.innerHTML = `<span class="nc-time">${esc(formatNetTime(ev.ts))}</span><span class="nc-kind">${esc(
+        NET_KIND[ev.kind] || ev.kind || ""
+      )}</span><span class="nc-text">${esc(ev.text || "")}${src}</span>`;
+      log.appendChild(row);
+    });
+    while (log.children.length > 500) log.removeChild(log.firstChild);
+    if (stick && body) body.scrollTop = body.scrollHeight;
+  }
+
+  async function pollNetConsole(reset) {
+    if (!netConsoleOpen()) return;
+    try {
+      if (reset) {
+        netConsole.lastId = 0;
+        const log = $("net-console-log");
+        if (log) log.innerHTML = "";
+        const empty = $("net-console-empty");
+        if (empty) empty.hidden = false;
+      }
+      const data = await apiGet(`/api/remote/log?since=${netConsole.lastId}`);
+      const events = data.events || [];
+      if (events.length) appendNetConsoleEvents(events);
+      if (typeof data.last_id === "number") netConsole.lastId = data.last_id;
+      const empty = $("net-console-empty");
+      if (empty && $("net-console-log")?.children.length) empty.hidden = true;
+    } catch {
+      /* консоль только с компьютера */
+    }
+  }
+
+  function bindNetConsole() {
+    $("remote-console-open")?.addEventListener("click", () => toggleNetConsole(true));
+    $("net-console-close")?.addEventListener("click", () => closeNetConsole());
+    $("net-console-clear")?.addEventListener("click", async () => {
+      try {
+        await apiPost("/api/remote/log/clear", {});
+      } catch {
+        /* ignore */
+      }
+      pollNetConsole(true);
+    });
+    $("net-console-body")?.addEventListener("scroll", () => {
+      const body = $("net-console-body");
+      if (!body) return;
+      netConsole.stick = body.scrollHeight - body.scrollTop - body.clientHeight < 36;
+    });
+    const box = $("net-console");
+    const head = $("net-console-head");
+    const grip = $("net-console-resize");
+    if (!box || !head) return;
+    applyNetConsoleSize(box);
+    head.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || e.target.closest("button")) return;
+      e.preventDefault();
+      const r = box.getBoundingClientRect();
+      netConsole.drag = { kind: "move", dx: e.clientX - r.left, dy: e.clientY - r.top };
+      head.setPointerCapture(e.pointerId);
+    });
+    grip?.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const r = box.getBoundingClientRect();
+      netConsole.drag = { kind: "resize", x: e.clientX, y: e.clientY, w: r.width, h: r.height };
+      grip.setPointerCapture(e.pointerId);
+    });
+    const onMove = (e) => {
+      const drag = netConsole.drag;
+      if (!drag) return;
+      if (drag.kind === "move") {
+        const x = Math.max(8, Math.min(window.innerWidth - 80, e.clientX - drag.dx));
+        const y = Math.max(8, Math.min(window.innerHeight - 40, e.clientY - drag.dy));
+        box.style.left = `${x}px`;
+        box.style.top = `${y}px`;
+        box.style.right = "auto";
+        box.style.bottom = "auto";
+      } else {
+        const next = clampNetConsoleSize(drag.w + e.clientX - drag.x, drag.h + e.clientY - drag.y);
+        box.style.width = `${next.w}px`;
+        box.style.height = `${next.h}px`;
+      }
+    };
+    const onUp = () => {
+      if (netConsole.drag?.kind === "resize") persistNetConsoleSize(box);
+      netConsole.drag = null;
+    };
+    head.addEventListener("pointermove", onMove);
+    head.addEventListener("pointerup", onUp);
+    grip?.addEventListener("pointermove", onMove);
+    grip?.addEventListener("pointerup", onUp);
+  }
 
   function remoteWatchStart() {
     if (remote.watch) return;
@@ -5254,6 +6382,35 @@
     remoteBadge();
   }
 
+  function setTokenDot(id, { state: mark, title }) {
+    const dot = $(id);
+    if (!dot) return;
+    dot.className = `token-dot${mark ? ` ${mark}` : ""}`;
+    dot.setAttribute("title", title);
+  }
+
+  function renderTokenDots() {
+    if (!remote.ngrokReady) {
+      setTokenDot("ngrok-token-dot", { state: "", title: "Токен ngrok не сохранён" });
+    } else if (remote.ngrok && remote.tunnel?.error) {
+      setTokenDot("ngrok-token-dot", { state: "err", title: `Токен сохранён, ошибка туннеля: ${remote.tunnel.error}` });
+    } else if (remote.public_url) {
+      setTokenDot("ngrok-token-dot", { state: "live", title: "Токен сохранён, туннель работает" });
+    } else {
+      setTokenDot("ngrok-token-dot", { state: "on", title: "Токен ngrok сохранён" });
+    }
+
+    if (!remote.telegramReady) {
+      setTokenDot("tg-token-dot", { state: "", title: "Токен Telegram-бота не сохранён" });
+    } else if (remote.telegramError) {
+      setTokenDot("tg-token-dot", { state: "err", title: `Токен сохранён, ошибка: ${remote.telegramError}` });
+    } else if (remote.telegramListening) {
+      setTokenDot("tg-token-dot", { state: "live", title: "Токен сохранён, бот слушает" });
+    } else {
+      setTokenDot("tg-token-dot", { state: "on", title: "Токен Telegram-бота сохранён" });
+    }
+  }
+
   function renderRemoteDevices() {
     const box = $("remote-clients");
     if (!box) return;
@@ -5342,6 +6499,7 @@
     if (tgToken && remote.telegramReady && !tgToken.value) tgToken.placeholder = "токен сохранён — можно не вводить заново";
     const tgChat = $("remote-tg-chat");
     if (tgChat && remote.telegramChatId && !tgChat.value) tgChat.value = remote.telegramChatId;
+    renderTokenDots();
     const tgStatus = $("remote-tg-status");
     if (tgStatus && !tgStatus.dataset.hold) {
       tgStatus.className = "remote-ngrok-status";
@@ -5589,6 +6747,7 @@
   }
 
   function bindRemote() {
+    bindNetConsole();
     document.querySelectorAll(".js-open-remote").forEach((btn) => {
       btn.addEventListener("click", async () => {
         $("remote-modal").classList.add("open");
