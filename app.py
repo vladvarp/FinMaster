@@ -18,6 +18,7 @@ from backend.remote import SESSION as REMOTE
 from backend.remote import lan_candidates
 from backend.telegram import BOT as TELEGRAM
 from backend.telegram import send_link as telegram_send_link
+from backend.telegram import set_menu_button as telegram_set_menu
 from backend.tunnel import TUNNEL
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -195,6 +196,20 @@ def _qr_svg(url: str) -> str:
         return ""
 
 
+def _telegram_sync_menu() -> None:
+    """Кнопка Mini App в меню бота. Не поднимает туннель — только текущий HTTPS."""
+    settings = storage.remote_settings()
+    token = str(settings.get("telegram_bot_token") or "")
+    if not token:
+        return
+    url = ""
+    if REMOTE.enabled:
+        public_base = str(TUNNEL.snapshot().get("url") or "")
+        if public_base.startswith("https://"):
+            url = _mobile_url(public_base, REMOTE.token or settings.get("token") or "")
+    telegram_set_menu(token, url)
+
+
 def _telegram_live_url(chat_id: str = "") -> dict[str, Any]:
     """Возвращает ссылку и состояние тумблеров. Выключенный доступ сам не поднимает."""
     settings = storage.remote_settings()
@@ -206,7 +221,9 @@ def _telegram_live_url(chat_id: str = "") -> dict[str, Any]:
     if access_on:
         if ngrok_on:
             _ensure_tunnel(settings)
-        url = str(_remote_public().get("url") or "")
+        public = _remote_public()
+        url = str(public.get("public_url") or public.get("url") or "")
+    _telegram_sync_menu()
     return {"url": url, "access": access_on, "ngrok": ngrok_on}
 
 
@@ -222,6 +239,7 @@ def _start_telegram(settings: dict[str, Any] | None = None) -> None:
         on_request=_telegram_live_url,
         on_offset=lambda value: storage.save_remote_settings(telegram_offset=value),
     )
+    _telegram_sync_menu()
 
 
 def _ensure_tunnel(settings: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -230,10 +248,12 @@ def _ensure_tunnel(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     if not cfg.get("ngrok"):
         return {**snap, "wanted": False}
     if snap.get("url"):
+        _telegram_sync_menu()
         return {**snap, "wanted": True}
     try:
         TUNNEL.start(SERVER_PORT, str(cfg.get("ngrok_token") or ""))
         snap = TUNNEL.snapshot()
+        _telegram_sync_menu()
         return {**snap, "wanted": True}
     except Exception as exc:
         return {**TUNNEL.snapshot(), "wanted": True, "error": str(exc)}
@@ -534,6 +554,7 @@ def api_remote_start():
     payload = _remote_public(str(data.get("ip") or "") or None)
     payload["ok"] = True
     payload["token"] = token
+    _telegram_sync_menu()
     return jsonify(payload)
 
 
@@ -554,6 +575,7 @@ def api_remote_address():
         g.netlog_text = "QR переключён на интернет"
         g.netlog_level = "ok"
         g.netlog_key = "addr-ngrok"
+        _telegram_sync_menu()
         return jsonify(payload)
     if ip not in lan_candidates():
         return jsonify({"error": "Неизвестный адрес."}), 400
@@ -586,6 +608,7 @@ def api_remote_ngrok():
         TUNNEL.stop()
     payload = _remote_public()
     payload["ok"] = True
+    _telegram_sync_menu()
     if settings.get("ngrok") and REMOTE.enabled and not payload.get("public_url"):
         return jsonify({**payload, "error": payload.get("tunnel", {}).get("error") or "Не удалось поднять ngrok."}), 400
     return jsonify(payload)
@@ -631,6 +654,7 @@ def api_remote_telegram():
         g.netlog_key = "tg-send"
     payload = _remote_public()
     payload["ok"] = True
+    _telegram_sync_menu()
     return jsonify(payload)
 
 
@@ -639,6 +663,7 @@ def api_remote_stop():
     REMOTE.stop()
     TUNNEL.stop()
     storage.save_remote_settings(autostart=False)
+    _telegram_sync_menu()
     return jsonify({"ok": True, **_remote_public()})
 
 
@@ -652,6 +677,7 @@ def api_remote_rotate():
     g.netlog_text = "Выпущена новая ссылка"
     g.netlog_level = "warn"
     g.netlog_key = "rotate"
+    _telegram_sync_menu()
     return jsonify(payload)
 
 

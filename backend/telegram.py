@@ -114,21 +114,72 @@ def _call_file(
     return _read(req, 45)
 
 
-def _menu_keyboard() -> dict[str, Any]:
+def _web_app_url(url: str) -> str:
+    link = str(url or "").strip()
+    return link if link.startswith("https://") else ""
+
+
+def _menu_keyboard(app_url: str = "") -> dict[str, Any]:
+    second: list[dict[str, Any]] = [{"text": "Ссылка"}, {"text": "Меню"}]
+    app = _web_app_url(app_url)
+    if app:
+        second = [{"text": "Открыть", "web_app": {"url": app}}, {"text": "Ссылка"}, {"text": "Меню"}]
     return {
-        "keyboard": [[{"text": "Отчёты"}, {"text": "Заказы"}], [{"text": "Ссылка"}, {"text": "Меню"}]],
+        "keyboard": [[{"text": "Отчёты"}, {"text": "Заказы"}], second],
         "resize_keyboard": True,
         "is_persistent": True,
         "input_field_placeholder": "Отчёты, заказы или поиск",
     }
 
 
-def _inline(rows: list[list[dict[str, str]]]) -> dict[str, Any]:
+def _inline(rows: list[list[dict[str, Any]]]) -> dict[str, Any]:
     return {"inline_keyboard": rows}
 
 
-def _btn(text: str, data: str) -> dict[str, str]:
+def _btn(text: str, data: str) -> dict[str, Any]:
     return {"text": text, "url": data} if data.startswith("http") else {"text": text, "callback_data": data}
+
+
+def _open_btn(text: str, url: str) -> dict[str, Any]:
+    app = _web_app_url(url)
+    if app:
+        return {"text": text, "web_app": {"url": app}}
+    return _btn(text, url)
+
+
+_last_menu = ""
+_menu_lock = threading.Lock()
+
+
+def set_menu_button(token: str, url: str = "") -> None:
+    """Кнопка меню бота: Mini App по HTTPS, иначе обычные команды."""
+    global _last_menu
+    token = str(token or "").strip()
+    if not token:
+        return
+    app = _web_app_url(url)
+    key = f"{token[-12:]}:{app}"
+    with _menu_lock:
+        if key == _last_menu:
+            return
+    if app:
+        payload: dict[str, Any] = {
+            "menu_button": {"type": "web_app", "text": "Открыть", "web_app": {"url": app}}
+        }
+    else:
+        payload = {"menu_button": {"type": "commands"}}
+    try:
+        _call(token, "setChatMenuButton", payload)
+        with _menu_lock:
+            _last_menu = key
+        netlog.add(
+            "telegram",
+            "Mini App в меню бота" if app else "Меню бота без Mini App",
+            level="ok" if app else "info",
+            key="tg-menu",
+        )
+    except RuntimeError:
+        pass
 
 
 def send_html(
@@ -217,6 +268,7 @@ def welcome_text(info: Any = None) -> str:
         "отчёты, заказы и снимки прямо здесь\n\n"
         f"{channel_block(info)}\n\n"
         "Кнопки внизу: <b>Отчёты</b>, <b>Заказы</b>, <b>Ссылка</b>.\n"
+        "Если включён интернет — «Открыть» запускает приложение внутри Telegram.\n"
         "В списке заказов можно написать имя или номер — найду."
     )
 
@@ -230,15 +282,17 @@ def access_text(url: str, info: Any = None) -> str:
         return f"{banner}\n\n" + "\n\n".join(warns) + "\n\nПосле включения нажмите «Ссылка» ещё раз."
     if not link:
         return f"{banner}\n\nПока нет ссылки. Проверьте окно <b>Телефон</b> на компьютере."
-    how = "Откроется из любой сети." if is_internet(flags, link) else "Откроется только в той же Wi‑Fi."
-    text = f"{banner}\n\n<b>Ссылка готова.</b> {how}\n\n<code>{html_esc(link)}</code>"
+    how = "Откроется из любой сети, внутри Telegram." if is_internet(flags, link) else "Откроется только в той же Wi‑Fi."
+    action = "Нажмите «Открыть приложение»." if _web_app_url(link) else "Нажмите «Открыть FinMaster»."
+    text = f"{banner}\n\n<b>Ссылка готова.</b> {how} {action}\n\n<code>{html_esc(link)}</code>"
     if warns:
         text += "\n\n" + "\n\n".join(warns)
     return text
 
 
 def send_welcome(token: str, chat_id: str, info: Any = None) -> None:
-    send_html(token, chat_id, welcome_text(info), _menu_keyboard())
+    flags = _status(info)
+    send_html(token, chat_id, welcome_text(info), _menu_keyboard(str(flags.get("url") or "")))
 
 
 def send_access(token: str, chat_id: str, url: str, info: Any = None) -> None:
@@ -247,7 +301,7 @@ def send_access(token: str, chat_id: str, url: str, info: Any = None) -> None:
     can_open = bool(flags.get("access")) and link.startswith(("http://", "https://"))
     rows = []
     if can_open:
-        rows.append([_btn("Открыть FinMaster", link)])
+        rows.append([_open_btn("Открыть приложение" if _web_app_url(link) else "Открыть FinMaster", link)])
         rows.append([_btn("Обновить ссылку", "L")])
     else:
         rows.append([_btn("Получить ссылку", "L")])
@@ -440,6 +494,9 @@ class TelegramBot:
         except Exception:
             return {"url": "", "access": False, "ngrok": False}
 
+    def _reply_kb(self, chat_id: str) -> dict[str, Any]:
+        return _menu_keyboard(str(self._status_for(chat_id).get("url") or ""))
+
     def _chat(self, chat_id: str) -> ChatSession:
         with self._lock:
             session = self._chats.get(chat_id)
@@ -555,7 +612,7 @@ class TelegramBot:
             session.opage = 0
             self._show(token, chat_id, "orders")
             return
-        send_html(token, chat_id, "Нажмите <b>Отчёты</b>, <b>Заказы</b> или <b>Меню</b>.", _menu_keyboard())
+        send_html(token, chat_id, "Нажмите <b>Отчёты</b>, <b>Заказы</b> или <b>Меню</b>.", self._reply_kb(chat_id))
 
     def _on_callback(self, token: str, query: dict[str, Any]) -> None:
         qid = str(query.get("id") or "")
@@ -910,7 +967,13 @@ class TelegramBot:
         session.screen = screen
         session.awaiting = ""
         text, rows = self._screen(session, screen)
-        session.message_id = send_html(token, chat_id, text, _inline(rows) if rows else _menu_keyboard(), message_id=session.message_id)
+        session.message_id = send_html(
+            token,
+            chat_id,
+            text,
+            _inline(rows) if rows else self._reply_kb(chat_id),
+            message_id=session.message_id,
+        )
 
     def _screen(self, session: ChatSession, screen: str) -> tuple[str, list[list[dict[str, str]]]]:
         if screen == "reports":

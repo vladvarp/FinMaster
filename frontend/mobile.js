@@ -448,6 +448,70 @@
     $("blocker").hidden = true;
   }
 
+  let telegramApp = null;
+
+  function telegramColor(name, fallback) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+  }
+
+  function paintTelegram(tg) {
+    if (!tg) return;
+    const accent = telegramColor("--accent", "#0f766e");
+    const bg = telegramColor("--bg", "#f1f5f9");
+    try {
+      tg.setHeaderColor(accent);
+    } catch (_) {}
+    try {
+      tg.setBackgroundColor(bg);
+    } catch (_) {}
+    if (typeof tg.setBottomBarColor === "function") {
+      try {
+        tg.setBottomBarColor(bg);
+      } catch (_) {}
+    }
+  }
+
+  function enterTelegramFullscreen(tg) {
+    if (!tg || typeof tg.requestFullscreen !== "function" || tg.isFullscreen) return;
+    try {
+      tg.requestFullscreen();
+    } catch (_) {}
+  }
+
+  function initTelegram() {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg || !tg.initData) return;
+    telegramApp = tg;
+    document.documentElement.classList.add("in-telegram");
+    document.documentElement.classList.toggle("tg-fullscreen", Boolean(tg.isFullscreen));
+    try {
+      tg.ready();
+    } catch (_) {}
+    try {
+      tg.expand();
+    } catch (_) {}
+    if (typeof tg.disableVerticalSwipes === "function") {
+      try {
+        tg.disableVerticalSwipes();
+      } catch (_) {}
+    }
+    paintTelegram(tg);
+    enterTelegramFullscreen(tg);
+    if (typeof tg.onEvent === "function") {
+      tg.onEvent("fullscreenChanged", () => {
+        document.documentElement.classList.toggle("tg-fullscreen", Boolean(tg.isFullscreen));
+        paintTelegram(tg);
+      });
+      tg.onEvent("fullscreenFailed", (err) => {
+        if (err && err.error === "ALREADY_FULLSCREEN") {
+          document.documentElement.classList.add("tg-fullscreen");
+        }
+      });
+    }
+    setTimeout(() => enterTelegramFullscreen(tg), 80);
+    setTimeout(() => enterTelegramFullscreen(tg), 400);
+  }
+
   async function boot() {
     const params = new URLSearchParams(location.search);
     const fromUrl = params.get("t");
@@ -2632,6 +2696,7 @@
     const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", next);
     localStorage.setItem(LS_THEME, next);
+    paintTelegram(telegramApp);
   }
 
   function copyLink() {
@@ -3323,6 +3388,7 @@
   );
 
   loadSnapPrefs();
+  initTelegram();
   bind();
   boot();
 })();

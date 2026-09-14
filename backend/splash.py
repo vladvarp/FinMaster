@@ -6,7 +6,6 @@ import os
 import subprocess
 import sys
 import tkinter as tk
-from tkinter import ttk
 from typing import Callable
 
 
@@ -72,13 +71,24 @@ def ensure_packages(splash: "Splash", requirements: str) -> None:
     splash.step("Библиотеки установлены", 32)
 
 
+def _round_rect(canvas: tk.Canvas, x1: float, y1: float, x2: float, y2: float, r: float, **kwargs) -> int:
+    r = max(0, min(r, (x2 - x1) / 2, (y2 - y1) / 2))
+    pts = [
+        x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
+        x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
+        x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
+    ]
+    return canvas.create_polygon(pts, smooth=True, splinesteps=24, **kwargs)
+
+
 class Splash:
-    W = 580
-    H = 368
+    W = 500
+    H = 300
 
     def __init__(self, icon_png: str = "") -> None:
         self._closed = False
         self.lines: list[str] = []
+        self._progress = 0.0
         if sys.platform == "win32":
             try:
                 import ctypes
@@ -89,14 +99,13 @@ class Splash:
         self.root = tk.Tk()
         self.root.title("FinMaster")
         self.root.overrideredirect(True)
-        self.root.configure(bg="#0b1220")
+        self.root.configure(bg="#070b14")
         try:
             self.root.attributes("-topmost", True)
         except tk.TclError:
             pass
         self.root.geometry(self._centered())
-        self._photo = None
-        self._build(icon_png)
+        self._build()
         self.pump()
 
     def _centered(self) -> str:
@@ -107,136 +116,135 @@ class Splash:
         y = max(0, (sh - self.H) // 3)
         return f"{self.W}x{self.H}+{x}+{y}"
 
-    def _build(self, icon_png: str) -> None:
-        canvas = tk.Canvas(self.root, width=self.W, height=self.H, highlightthickness=0, bd=0)
-        canvas.pack(fill="both", expand=True)
-        for i in range(self.H):
-            t = i / max(self.H - 1, 1)
-            r = int(11 + (18 - 11) * t)
-            g = int(18 + (38 - 18) * t)
-            b = int(32 + (58 - 32) * t)
-            canvas.create_line(0, i, self.W, i, fill=f"#{r:02x}{g:02x}{b:02x}")
-        canvas.create_rectangle(0, 0, self.W, 4, fill="#14b8a6", outline="")
-        canvas.create_rectangle(0, self.H - 3, self.W, self.H, fill="#c9a227", outline="")
+    def _build(self) -> None:
+        c = tk.Canvas(self.root, width=self.W, height=self.H, highlightthickness=0, bd=0, bg="#070b14")
+        c.pack(fill="both", expand=True)
+        self._canvas = c
 
-        if icon_png and os.path.exists(icon_png):
-            try:
-                img = tk.PhotoImage(file=icon_png)
-                w = max(img.width(), 1)
-                factor = max(1, w // 64)
-                if factor > 1:
-                    img = img.subsample(factor, factor)
-                self._photo = img
-                canvas.create_image(36, 36, image=img, anchor="nw")
-            except tk.TclError:
-                self._draw_mark(canvas)
-        else:
-            self._draw_mark(canvas)
+        c.create_oval(-80, -90, 220, 160, fill="#0d1a22", outline="")
+        c.create_oval(300, 140, 620, 420, fill="#12100c", outline="")
+        c.create_oval(360, -70, 560, 110, fill="#14241f", outline="")
 
-        canvas.create_text(116, 48, text="FinMaster", fill="#f8fafc", font=("Segoe UI Semibold", 22), anchor="w")
-        canvas.create_text(116, 80, text="Бухгалтерский учёт заказов", fill="#94a3b8", font=("Segoe UI", 11), anchor="w")
+        _round_rect(c, 18, 18, self.W - 18, self.H - 18, 22, fill="#101826", outline="")
+        c.create_line(48, 20, self.W - 48, 20, fill="#14b8a6", width=2)
 
-        self.status = tk.StringVar(value="Запуск…")
-        tk.Label(
-            self.root,
-            textvariable=self.status,
-            bg="#12263a",
-            fg="#e2e8f0",
-            font=("Segoe UI", 10),
+        self._draw_mark(c, 48, 52)
+
+        c.create_text(118, 68, text="FinMaster", fill="#f8fafc", font=("Segoe UI", 26, "bold"), anchor="w")
+        c.create_text(
+            118,
+            102,
+            text="Бухгалтерский учёт заказов",
+            fill="#8b9cb3",
+            font=("Segoe UI", 11),
             anchor="w",
-        ).place(x=28, y=118, width=524, height=22)
-
-        style = ttk.Style(self.root)
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-        style.configure(
-            "FM.Horizontal.TProgressbar",
-            troughcolor="#1b2538",
-            background="#14b8a6",
-            bordercolor="#12263a",
-            lightcolor="#14b8a6",
-            darkcolor="#0f766e",
-            thickness=8,
         )
-        self.bar = ttk.Progressbar(self.root, style="FM.Horizontal.TProgressbar", maximum=100, mode="determinate")
-        self.bar.place(x=28, y=146, width=524, height=10)
 
-        self.log_var = tk.StringVar(value="")
-        tk.Label(
-            self.root,
-            textvariable=self.log_var,
-            bg="#0d1726",
-            fg="#7c8ba1",
-            font=("Consolas", 9),
-            anchor="nw",
-            justify="left",
-            padx=10,
-            pady=8,
-        ).place(x=28, y=172, width=524, height=148)
-
-        tk.Label(
-            self.root,
-            text="локальная программа · без облака",
-            bg="#12263a",
-            fg="#64748b",
-            font=("Segoe UI", 8),
+        self._status_id = c.create_text(
+            48,
+            168,
+            text="Запуск…",
+            fill="#e2e8f0",
+            font=("Segoe UI", 11),
+            anchor="w",
+        )
+        self._log_id = c.create_text(
+            48,
+            220,
+            text="",
+            fill="#5b6b82",
+            font=("Segoe UI", 9),
+            anchor="w",
+        )
+        self._foot_id = c.create_text(
+            self.W - 48,
+            self.H - 42,
+            text="локально · без облака",
+            fill="#4b5a70",
+            font=("Segoe UI", 9),
             anchor="e",
-        ).place(x=28, y=332, width=524, height=18)
+        )
 
-        self._canvas = canvas
+        self._bar = (48, 188, self.W - 48, 198)
+        x1, y1, x2, y2 = self._bar
+        _round_rect(c, x1, y1, x2, y2, 5, fill="#1b2538", outline="")
+        self._bar_fill = _round_rect(c, x1, y1, x1, y2, 5, fill="#14b8a6", outline="")
+        self._draw_bar(0)
 
-    def _draw_mark(self, canvas: tk.Canvas) -> None:
-        canvas.create_rectangle(36, 36, 100, 100, fill="#0f766e", outline="")
-        canvas.create_rectangle(50, 52, 86, 57, fill="#eafaf7", outline="")
-        canvas.create_rectangle(50, 64, 86, 69, fill="#eafaf7", outline="")
-        canvas.create_rectangle(50, 76, 74, 81, fill="#eafaf7", outline="")
+    def _draw_mark(self, canvas: tk.Canvas, x: int, y: int) -> None:
+        size = 54
+        _round_rect(canvas, x, y, x + size, y + size, 15, fill="#0f766e", outline="")
+        pad = 12
+        bar_h = 5
+        gap = 8
+        canvas.create_rectangle(x + pad, y + 15, x + size - pad, y + 15 + bar_h, fill="#eafaf7", outline="")
+        canvas.create_rectangle(x + pad, y + 15 + bar_h + gap, x + size - pad, y + 15 + 2 * bar_h + gap, fill="#99f6e4", outline="")
+        canvas.create_rectangle(
+            x + pad,
+            y + 15 + 2 * (bar_h + gap),
+            x + size - pad - 12,
+            y + 15 + 3 * bar_h + 2 * gap,
+            fill="#eafaf7",
+            outline="",
+        )
+
+    def _draw_bar(self, value: float) -> None:
+        x1, y1, x2, y2 = self._bar
+        t = max(0.0, min(1.0, value / 100))
+        right = x1 + max(0, (x2 - x1) * t)
+        r = 5 if right - x1 > 12 else max(0, (right - x1) / 2)
+        self._canvas.delete(self._bar_fill)
+        if right <= x1:
+            self._bar_fill = self._canvas.create_rectangle(x1, y1, x1, y2, outline="")
+            return
+        self._bar_fill = _round_rect(self._canvas, x1, y1, right, y2, r, fill="#14b8a6", outline="")
+        self._canvas.tag_raise(self._bar_fill)
 
     def set_progress(self, value: float) -> None:
         if self._closed:
             return
-        self.bar["value"] = max(0, min(100, value))
+        self._progress = max(0, min(100, value))
+        self._draw_bar(self._progress)
         self.pump()
 
     def log(self, text: str) -> None:
         if self._closed or not text:
             return
         line = " ".join(str(text).split())
-        if len(line) > 92:
-            line = line[:91] + "…"
+        if len(line) > 72:
+            line = line[:71] + "…"
         self.lines.append(line)
-        self.lines = self.lines[-8:]
-        self.log_var.set("\n".join(self.lines))
+        self.lines = self.lines[-4:]
+        self._canvas.itemconfigure(self._log_id, text=line)
         self.pump()
 
     def step(self, text: str, progress: float | None = None) -> None:
-        self.status.set(text)
-        self.log(text)
+        if self._closed:
+            return
+        self._canvas.itemconfigure(self._status_id, text=text, fill="#e2e8f0")
         if progress is not None:
             self.set_progress(progress)
         else:
             self.pump()
 
     def fail(self, text: str) -> None:
-        self.status.set("Ошибка запуска")
+        self._canvas.itemconfigure(self._status_id, text="Не удалось запустить", fill="#fca5a5")
+        self._canvas.itemconfigure(self._foot_id, text="")
         self.log(text)
         self.set_progress(100)
         if self._closed:
             return
-        btn = tk.Button(
-            self.root,
-            text="Закрыть",
-            command=self.close,
-            bg="#0f766e",
-            fg="#ffffff",
-            activebackground="#14b8a6",
-            activeforeground="#ffffff",
-            relief="flat",
-            font=("Segoe UI Semibold", 10),
-            cursor="hand2",
-        )
-        btn.place(x=230, y=328, width=120, height=28)
+        x1, y1, x2, y2 = 190, 238, 310, 270
+        btn = _round_rect(self._canvas, x1, y1, x2, y2, 10, fill="#0f766e", outline="")
+        label = self._canvas.create_text((x1 + x2) / 2, (y1 + y2) / 2, text="Закрыть", fill="#ffffff", font=("Segoe UI", 10, "bold"))
+
+        def _hover(_e, color: str) -> None:
+            self._canvas.itemconfigure(btn, fill=color)
+
+        for item in (btn, label):
+            self._canvas.tag_bind(item, "<Button-1>", lambda _e: self.close())
+            self._canvas.tag_bind(item, "<Enter>", lambda e: _hover(e, "#14b8a6"))
+            self._canvas.tag_bind(item, "<Leave>", lambda e: _hover(e, "#0f766e"))
         try:
             self.root.mainloop()
         except tk.TclError:
