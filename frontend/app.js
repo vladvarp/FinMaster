@@ -5466,18 +5466,7 @@
   }
 
   function addOrderLine(order, afterId) {
-    const prev = afterId ? order.lines.find((l) => l.id === afterId) : (order.lines || [])[order.lines.length - 1];
     const line = emptyLine();
-    if (prev && !isExpenseLine(prev)) {
-      line.order_type = prev.order_type;
-      line.product = prev.product;
-      line.unit = prev.unit;
-      line.order_date = prev.order_date;
-      line.status = prev.status;
-    } else if (prev) {
-      line.unit = prev.unit;
-      line.order_date = prev.order_date;
-    }
     const idx = afterId ? order.lines.findIndex((l) => l.id === afterId) : -1;
     if (idx >= 0) order.lines.splice(idx + 1, 0, line);
     else order.lines.push(line);
