@@ -45,6 +45,7 @@
     },
     device: null,
     deviceFactsOpen: false,
+    snapReturn: null,
     waitingForDoc: false,
     exprField: "",
     exprInput: null,
@@ -81,6 +82,17 @@
 
   function isFormula(expr) {
     return /[+\-*/()×xX÷]/.test(String(expr || ""));
+  }
+
+  function isBareZeroExpr(value) {
+    return /^0([.,]0+)?$/.test(String(value || "").trim());
+  }
+
+  function stripLeadingZerosPlain(raw) {
+    const text = String(raw ?? "").replaceAll(",", ".");
+    if (!text || isFormula(text)) return String(raw ?? "");
+    const m = /^(-?)0+(\d+(?:\.\d*)?)$/.exec(text);
+    return m ? m[1] + m[2] : text;
   }
 
   function formatExprResult(n) {
@@ -822,6 +834,40 @@
       .sort((a, b) => compareOrders(a, b, state.sort));
   }
 
+  function orderQueue() {
+    const shown = visibleOrders();
+    if (shown.some((o) => o.id === state.orderId)) return shown;
+    return orders()
+      .slice()
+      .sort((a, b) => compareOrders(a, b, state.sort));
+  }
+
+  function neighborOrder(dir) {
+    const list = orderQueue();
+    const i = list.findIndex((o) => o.id === state.orderId);
+    if (i < 0) return null;
+    return list[i + dir] || null;
+  }
+
+  function showNeighborOrder(dir) {
+    if (state.view !== "order") return false;
+    if (!$("editor").hidden || !$("sheet").hidden) return false;
+    const next = neighborOrder(dir);
+    if (!next) return false;
+    state.headOpen = false;
+    setView("order", next.id);
+    const screen = $("screen-order");
+    if (screen) {
+      screen.classList.remove("swipe-next", "swipe-prev");
+      void screen.offsetWidth;
+      screen.classList.add(dir > 0 ? "swipe-next" : "swipe-prev");
+    }
+    try {
+      navigator.vibrate?.(10);
+    } catch (_) {}
+    return true;
+  }
+
   function updateSortBtn() {
     const btn = $("btn-sort");
     if (!btn) return;
@@ -854,7 +900,7 @@
       : "на компьютере ничего не открыто";
     const phones = state.clients.filter((c) => c.kind === "mobile").length;
     $("head-sub").textContent = `${state.dirty ? "• " : ""}${file}${phones > 1 ? ` · ${phones} телефона` : ""}`;
-    $("btn-back").hidden = state.view !== "order";
+    $("btn-back").hidden = !(state.view === "order" || (state.view === "snapshot" && state.snapReturn));
     const undo = $("btn-undo");
     const redo = $("btn-redo");
     if (undo) undo.disabled = !state.history.undo;
@@ -862,6 +908,26 @@
   }
 
   const SCREENS = ["orders", "order", "stats", "snapshot", "files"];
+
+  function rememberSnapReturn() {
+    if (state.view === "snapshot") return;
+    state.snapReturn = { view: state.view, orderId: state.orderId };
+  }
+
+  function openSnapshot() {
+    rememberSnapReturn();
+    setView("snapshot");
+  }
+
+  function goBack() {
+    if (state.view === "snapshot" && state.snapReturn) {
+      const ret = state.snapReturn;
+      state.snapReturn = null;
+      setView(ret.view, ret.orderId);
+      return;
+    }
+    setView("orders");
+  }
 
   function setView(view, orderId) {
     const changed = view !== state.view || (orderId !== undefined && orderId !== state.orderId);
@@ -1025,7 +1091,7 @@
     $("order-top").innerHTML = `
       <div class="ot-line">
         <span class="ot-num">${esc(order.number || "—")}</span>
-        <span class="ot-cust">${esc(order.customer || "Без заказчика")}</span>
+        <span class="ot-name">${esc(order.name || "без названия")}</span>
       </div>
       <div class="ot-sums">
         <div class="ot-sum"><span>Итого</span><b>${esc(money(t.after))}</b></div>
@@ -1154,18 +1220,32 @@
     return (state.doc.products || []).map((p) => String(p.name || p || "").trim()).filter(Boolean);
   }
 
+  function closeEdProductSuggest() {
+    const box = $("ed-product-suggest");
+    if (box) box.innerHTML = "";
+  }
+
   function edProductSuggestHtml(query) {
     const q = String(query || "").trim().toLocaleLowerCase("ru");
     const items = catalogProductNames().filter((name) => !q || name.toLocaleLowerCase("ru").includes(q));
     if (!items.length) return "";
     return items
-      .map((name) => `<button type="button" class="suggest-item" data-pick-product>${esc(name)}</button>`)
+      .map((name) => {
+        const current = q && name.toLocaleLowerCase("ru") === q;
+        return `<button type="button" class="suggest-item${current ? " current" : ""}" data-pick-product>${esc(name)}</button>`;
+      })
       .join("");
   }
 
   function fillEdProductSuggest(query) {
     const box = $("ed-product-suggest");
-    if (box) box.innerHTML = edProductSuggestHtml(query);
+    if (!box) return;
+    const field = document.querySelector('#editor-body [data-f="product"]');
+    if (document.activeElement !== field) {
+      box.innerHTML = "";
+      return;
+    }
+    box.innerHTML = edProductSuggestHtml(query);
   }
 
   function renderEditor() {
@@ -1192,7 +1272,7 @@
         <input type="text" autocomplete="off" spellcheck="false" placeholder="${
           t.expense ? "Налог, аренда, материалы…" : "Название работы или товара"
         }" value="${esc(line.product || "")}" ${a("product")} />
-        <div class="suggest-inline" id="ed-product-suggest">${edProductSuggestHtml(line.product)}</div>
+        <div class="suggest-inline" id="ed-product-suggest"></div>
       </div>
       <div class="field">
         <label>Тип заказа</label>
@@ -1442,9 +1522,22 @@
       } else {
         return;
       }
+    } else if (
+      input.dataset.f === "price_expr" &&
+      /^\d+$/.test(token) &&
+      start === end &&
+      isBareZeroExpr(value)
+    ) {
+      next = token === "00" || token === "0" ? "0" : token.replace(/^0+/, "") || "0";
+      pos = next.length;
     } else {
       next = value.slice(0, start) + token + value.slice(end);
       pos = start + token.length;
+    }
+    if (input.dataset.f === "price_expr") {
+      const stripped = stripLeadingZerosPlain(next);
+      pos = Math.max(0, pos - (next.length - stripped.length));
+      next = stripped;
     }
     input.value = next;
     input.dataset.expr = next;
@@ -2686,7 +2779,7 @@
     if (value === "save") {
       await push();
       if (await command("save")) toast("Отчёт сохраняется на компьютере");
-    } else if (value === "snapshot") setView("snapshot");
+    } else if (value === "snapshot") openSnapshot();
     else if (value === "new") await createNewReport();
     else if (value === "link") copyLink();
     else if (value === "device") setView("files");
@@ -2738,6 +2831,20 @@
         el.value = value;
         if (pos != null) el.setSelectionRange(pos, pos);
       }
+      if (field === "price_expr") {
+        const cleaned = stripLeadingZerosPlain(value);
+        if (cleaned !== value) {
+          const pos = el.selectionStart;
+          const diff = value.length - cleaned.length;
+          value = cleaned;
+          el.value = cleaned;
+          if (pos != null) {
+            try {
+              el.setSelectionRange(Math.max(0, pos - diff), Math.max(0, pos - diff));
+            } catch (_) {}
+          }
+        }
+      }
       const prevKind = field === "order_type" ? typeKind(line.order_type) : "";
       line[field] = value;
       if (DECIMAL_FIELDS.has(field)) el.dataset.expr = value;
@@ -2753,7 +2860,7 @@
           const sel = document.querySelector(`select[data-l="${CSS.escape(line.id)}"][data-f="unit"]`);
           if (sel) sel.value = found.unit;
         }
-        if (found?.price != null && num(found.price) > 0) {
+        if (found?.price != null && num(found.price) > 0 && !(num(line.price) > 0)) {
           setLineNumber(line, "price_expr", found.price);
           const inp = document.querySelector(`input[data-l="${CSS.escape(line.id)}"][data-f="price_expr"]`);
           if (inp) {
@@ -2789,7 +2896,7 @@
       refreshOrderRow(line.id);
     } else {
       order[field] = el.value;
-      if (field === "number" || field === "customer") renderOrderTopOnly(order);
+      if (field === "number" || field === "name") renderOrderTopOnly(order);
     }
     touchDoc();
     pushSoon();
@@ -2799,9 +2906,9 @@
     const top = $("order-top");
     if (!top) return;
     const numEl = top.querySelector(".ot-num");
-    const cust = top.querySelector(".ot-cust");
+    const nameEl = top.querySelector(".ot-name");
     if (numEl) numEl.textContent = order.number || "—";
-    if (cust) cust.textContent = order.customer || "Без заказчика";
+    if (nameEl) nameEl.textContent = order.name || "без названия";
   }
 
   /** У расхода нет скидки, оплаты и даты оплаты — очищаем, чтобы цифры не всплыли при возврате к обычному типу. */
@@ -2852,6 +2959,56 @@
     window.visualViewport?.addEventListener("resize", dockEditorToViewport);
     window.visualViewport?.addEventListener("scroll", dockEditorToViewport);
 
+    const orderScreen = $("screen-order");
+    let swipe = null;
+    const swipeIgnore = (el) => el.closest("input, textarea, select, button, a, .sheet, .editor");
+    orderScreen.addEventListener(
+      "touchstart",
+      (e) => {
+        if (state.view !== "order" || e.touches.length !== 1 || swipeIgnore(e.target)) {
+          swipe = null;
+          return;
+        }
+        const t = e.touches[0];
+        swipe = { x: t.clientX, y: t.clientY, at: Date.now() };
+      },
+      { passive: true }
+    );
+    orderScreen.addEventListener(
+      "touchmove",
+      (e) => {
+        if (!swipe || e.touches.length !== 1) {
+          swipe = null;
+          return;
+        }
+        const t = e.touches[0];
+        const dx = t.clientX - swipe.x;
+        const dy = t.clientY - swipe.y;
+        if (Math.abs(dy) > 28 && Math.abs(dy) >= Math.abs(dx)) swipe = null;
+      },
+      { passive: true }
+    );
+    orderScreen.addEventListener(
+      "touchend",
+      (e) => {
+        if (!swipe) return;
+        const t = e.changedTouches[0];
+        const dx = t.clientX - swipe.x;
+        const dy = t.clientY - swipe.y;
+        const dt = Date.now() - swipe.at;
+        swipe = null;
+        if (dt > 650 || Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+        showNeighborOrder(dx < 0 ? 1 : -1);
+      },
+      { passive: true }
+    );
+    orderScreen.addEventListener("touchcancel", () => {
+      swipe = null;
+    });
+    orderScreen.addEventListener("animationend", (e) => {
+      if (e.target === orderScreen) orderScreen.classList.remove("swipe-next", "swipe-prev");
+    });
+
     document.addEventListener("touchstart", (e) => {
       const input = e.target.closest("#editor-body input.expr-input");
       if (!input || state.exprSystemKb || document.activeElement === input) return;
@@ -2859,6 +3016,13 @@
     }, true);
 
     document.addEventListener("focusin", (e) => {
+      const product = e.target.closest('#editor-body [data-f="product"]');
+      if (product) {
+        fillEdProductSuggest(product.value);
+        hideExprPad();
+        return;
+      }
+      if (!e.target.closest("#ed-product-suggest")) closeEdProductSuggest();
       const input = e.target.closest("#editor-body input.expr-input");
       if (input) {
         if (state.exprField && state.exprField !== input.dataset.f) state.exprSystemKb = false;
@@ -3119,19 +3283,35 @@
       }
     });
 
-    $("editor").addEventListener("click", (e) => {
-      if (e.target.closest("[data-close-editor]") || e.target.closest("#ed-done")) {
-        closeEditor();
-        return;
-      }
+    $("editor").addEventListener("pointerdown", (e) => {
       const pickProduct = e.target.closest("[data-pick-product]");
       if (pickProduct) {
+        e.preventDefault();
         const inp = document.querySelector('#editor-body [data-f="product"]');
         if (inp) {
           inp.value = pickProduct.textContent;
           inp.dispatchEvent(new Event("input", { bubbles: true }));
           inp.dispatchEvent(new Event("change", { bubbles: true }));
         }
+        closeEdProductSuggest();
+        return;
+      }
+      if (!e.target.closest('#editor-body [data-f="product"]') && !e.target.closest("#ed-product-suggest")) {
+        closeEdProductSuggest();
+      }
+    });
+
+    document.addEventListener("focusout", (e) => {
+      if (!e.target.closest?.('#editor-body [data-f="product"]')) return;
+      requestAnimationFrame(() => {
+        if (document.activeElement?.closest?.("#ed-product-suggest, #editor-body [data-f='product']")) return;
+        closeEdProductSuggest();
+      });
+    });
+
+    $("editor").addEventListener("click", (e) => {
+      if (e.target.closest("[data-close-editor]") || e.target.closest("#ed-done")) {
+        closeEditor();
         return;
       }
       const order = currentOrder();
@@ -3286,7 +3466,7 @@
     $("btn-order-snapshot").addEventListener("click", () => {
       state.snap.orderId = state.orderId;
       state.snap.lines = null;
-      setView("snapshot");
+      openSnapshot();
     });
 
     $("btn-del-order").addEventListener("click", () => {
@@ -3300,7 +3480,7 @@
       toast("Заказ удалён");
     });
 
-    $("btn-back").addEventListener("click", () => setView("orders"));
+    $("btn-back").addEventListener("click", goBack);
 
     $("btn-sort").addEventListener("click", () => {
       openSheet("Сортировка заказов", SORT_OPTIONS, state.sort, (item) => {
@@ -3328,6 +3508,8 @@
       if (!btn) return;
       const tab = btn.dataset.tab;
       if (tab === "files") refreshRecent();
+      if (tab === "snapshot") rememberSnapReturn();
+      else state.snapReturn = null;
       setView(tab);
     });
 

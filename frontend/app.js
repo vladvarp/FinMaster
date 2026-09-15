@@ -1186,6 +1186,17 @@
     return /[+\-*/()×xX]/.test(String(expr || ""));
   }
 
+  function isBareZeroExpr(value) {
+    return /^0([.,]0+)?$/.test(String(value || "").trim());
+  }
+
+  function stripLeadingZerosPlain(raw) {
+    const text = String(raw ?? "").replaceAll(",", ".");
+    if (!text || isFormula(text)) return String(raw ?? "");
+    const m = /^(-?)0+(\d+(?:\.\d*)?)$/.exec(text);
+    return m ? m[1] + m[2] : text;
+  }
+
   function shownExpr(line, exprKey) {
     const expr = exprRaw(line, exprKey);
     const v = evalExpr(expr);
@@ -1727,7 +1738,7 @@
 
   function applyLinePrice(tr, line, price) {
     const n = Math.max(0, round2(price));
-    if (!n) return;
+    if (!n || num(line.price) > 0) return;
     line.price = n;
     line.price_expr = String(n);
     const inp = tr.querySelector('[data-lk="price_expr"]');
@@ -4491,6 +4502,19 @@
     if (EXPR_MAP[key]) {
       if (e.target.dataset.showing === "result") return;
       commaToDot(e.target);
+      if (key === "price_expr") {
+        const cleaned = stripLeadingZerosPlain(e.target.value);
+        if (cleaned !== e.target.value) {
+          const pos = e.target.selectionStart;
+          const diff = e.target.value.length - cleaned.length;
+          e.target.value = cleaned;
+          try {
+            if (pos != null) e.target.setSelectionRange(Math.max(0, pos - diff), Math.max(0, pos - diff));
+          } catch {
+            /* ignore */
+          }
+        }
+      }
       line[key] = e.target.value;
       const v = evalExpr(e.target.value);
       e.target.dataset.expr = e.target.value;
@@ -4572,16 +4596,28 @@
   function onExprFocus(e) {
     const inp = e.target;
     const key = inp.dataset?.lk;
-    if (!EXPR_MAP[key] || inp.dataset.showing !== "result") return;
-    inp.dataset.showing = "expr";
-    inp.value = inp.dataset.expr || "";
-    queueMicrotask(() => {
-      try {
-        inp.select();
-      } catch {
-        /* ignore */
-      }
-    });
+    if (!EXPR_MAP[key]) return;
+    if (inp.dataset.showing === "result") {
+      inp.dataset.showing = "expr";
+      inp.value = inp.dataset.expr || "";
+      queueMicrotask(() => {
+        try {
+          inp.select();
+        } catch {
+          /* ignore */
+        }
+      });
+      return;
+    }
+    if (key === "price_expr" && isBareZeroExpr(inp.value)) {
+      queueMicrotask(() => {
+        try {
+          inp.select();
+        } catch {
+          /* ignore */
+        }
+      });
+    }
   }
 
   function onExprBlur(e) {
@@ -4595,8 +4631,9 @@
     const line = order?.lines.find((l) => l.id === tr.dataset.line);
     if (!line) return;
     const raw = inp.value.includes(",") && DECIMAL_KEYS.has(key) ? inp.value.replaceAll(",", ".") : inp.value;
-    if (raw !== inp.value) inp.value = raw;
-    line[key] = raw;
+    const next = key === "price_expr" ? stripLeadingZerosPlain(raw) : raw;
+    if (next !== inp.value) inp.value = next;
+    line[key] = next;
     inp.dataset.expr = raw;
     const v = evalExpr(raw);
     inp.classList.toggle("invalid", raw.trim() !== "" && !Number.isFinite(v));
