@@ -46,6 +46,7 @@
     device: null,
     deviceFactsOpen: false,
     snapReturn: null,
+    homeScreen: "",
     waitingForDoc: false,
     exprField: "",
     exprInput: null,
@@ -490,6 +491,48 @@
     } catch (_) {}
   }
 
+  function refreshHomeScreenStatus() {
+    const tg = telegramApp;
+    if (!tg || typeof tg.checkHomeScreenStatus !== "function") {
+      state.homeScreen = telegramApp ? "unsupported" : "";
+      return;
+    }
+    try {
+      tg.checkHomeScreenStatus((status) => {
+        state.homeScreen = status || "unknown";
+        if (state.view === "files") renderFiles();
+        renderMenu();
+      });
+    } catch (_) {
+      state.homeScreen = "unsupported";
+    }
+  }
+
+  function addToHomeScreen() {
+    const tg = telegramApp;
+    if (!tg) {
+      toast("Ярлык как у игр доступен только внутри Telegram");
+      return;
+    }
+    if (typeof tg.addToHomeScreen !== "function") {
+      toast("Обновите Telegram — эта версия не ставит ярлык на экран");
+      return;
+    }
+    if (state.homeScreen === "added") {
+      toast("Ярлык уже на экране телефона");
+      return;
+    }
+    if (state.homeScreen === "unsupported") {
+      toast("Телефон или Telegram не умеет ярлык Mini App. В @BotFather: Mini App → иконка.");
+      return;
+    }
+    try {
+      tg.addToHomeScreen();
+    } catch (_) {
+      toast("Не удалось показать запрос ярлыка");
+    }
+  }
+
   function initTelegram() {
     const tg = window.Telegram && window.Telegram.WebApp;
     if (!tg || !tg.initData) return;
@@ -519,7 +562,20 @@
           document.documentElement.classList.add("tg-fullscreen");
         }
       });
+      tg.onEvent("homeScreenAdded", () => {
+        state.homeScreen = "added";
+        toast("Ярлык добавлен на экран телефона");
+        if (state.view === "files") renderFiles();
+        renderMenu();
+      });
+      tg.onEvent("homeScreenChecked", (ev) => {
+        if (ev && ev.status) state.homeScreen = ev.status;
+      });
+      tg.onEvent("homeScreenFailed", () => {
+        toast("Ярлык не добавлен");
+      });
     }
+    refreshHomeScreenStatus();
     setTimeout(() => enterTelegramFullscreen(tg), 80);
     setTimeout(() => enterTelegramFullscreen(tg), 400);
   }
@@ -2680,7 +2736,13 @@
         <div class="device-facts" id="device-facts" ${state.deviceFactsOpen ? "" : "hidden"}>${deviceFactsHtml()}</div>
         <div class="muted" style="margin:10px 0 0">Если имя не задано, компьютер берёт его из браузера. Добавьте страницу в закладки — QR больше не нужен.</div>
         <div class="stack">
-          <button type="button" class="btn wide" id="cmd-fullscreen">${document.fullscreenElement ? "Выйти из полного экрана" : "Полный экран"}</button>
+          ${
+            telegramApp
+              ? `<button type="button" class="btn wide" id="cmd-homescreen">${
+                  state.homeScreen === "added" ? "Ярлык уже на экране" : "Добавить иконку на экран"
+                }</button>`
+              : `<button type="button" class="btn wide" id="cmd-fullscreen">${document.fullscreenElement ? "Выйти из полного экрана" : "Полный экран"}</button>`
+          }
           <button type="button" class="btn wide" id="cmd-copy-link">Скопировать постоянную ссылку</button>
           <button type="button" class="btn wide danger-ghost" id="cmd-leave">Отключиться от компьютера</button>
         </div>
@@ -2782,14 +2844,20 @@
       ["link", "↗", "Ссылка"],
       ["device", "◈", "Отчёты"],
     ];
+    const homeAdded = state.homeScreen === "added";
+    const toolBtn = telegramApp
+      ? `<button type="button" class="menu-sq ${homeAdded ? "on" : ""}" data-menu="homescreen" aria-label="${homeAdded ? "Ярлык уже на экране" : "Добавить иконку на экран"}">
+              <b>⌂</b>
+            </button>`
+      : `<button type="button" class="menu-sq ${full ? "on" : ""}" data-menu="fullscreen" aria-label="${full ? "Выйти из полного экрана" : "Полный экран"}">
+              <b>${full ? "↙" : "⛶"}</b>
+            </button>`;
     return `
       <div class="menu-panel">
         <div class="menu-head">
           <div class="menu-title">Меню</div>
           <div class="menu-tools">
-            <button type="button" class="menu-sq ${full ? "on" : ""}" data-menu="fullscreen" aria-label="${full ? "Выйти из полного экрана" : "Полный экран"}">
-              <b>${full ? "↙" : "⛶"}</b>
-            </button>
+            ${toolBtn}
             <button type="button" class="menu-sq" data-menu="theme" aria-label="${dark ? "Светлая тема" : "Тёмная тема"}">
               <b>${dark ? "☀" : "☾"}</b>
             </button>
@@ -2832,6 +2900,12 @@
     if (value === "fullscreen") {
       await toggleFullscreen();
       renderMenu();
+      return;
+    }
+    if (value === "homescreen") {
+      addToHomeScreen();
+      if (state.homeScreen === "added") renderMenu();
+      else closeSheet();
       return;
     }
     closeSheet();
@@ -3350,6 +3424,10 @@
       if (e.target.closest("#cmd-fullscreen")) {
         await toggleFullscreen();
         renderFiles();
+        return;
+      }
+      if (e.target.closest("#cmd-homescreen")) {
+        addToHomeScreen();
         return;
       }
       if (e.target.closest("#cmd-copy-link")) {
