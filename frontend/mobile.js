@@ -1042,6 +1042,7 @@
     const parts = [line.order_type, `${qtyText(line)} × ${money(t.price)}`];
     if (t.discount > 0) parts.push(`−${Math.round(t.discount)}%`);
     return `<article class="line-row" data-edit="${esc(line.id)}" style="--tint:${esc(meta.color)}">
+      <button type="button" class="lr-drag" aria-label="Перетащить" title="Перетащить"><span></span></button>
       <span class="lr-index">${index + 1}</span>
       <div class="lr-main">
         <strong>${esc(line.product || "Без названия")}</strong>
@@ -1063,6 +1064,7 @@
         ? `${qtyText(line)} × ${money(t.price)}`
         : `${moneyFmt.format(t.percent).replace(",00", "")} % от ${money(t.base)}${t.mode === "net" ? " (без затрат)" : ""}`;
     return `<article class="line-row cost-row" data-edit="${esc(line.id)}">
+      <button type="button" class="lr-drag" aria-label="Перетащить" title="Перетащить"><span></span></button>
       <span class="lr-index">${index + 1}</span>
       <div class="lr-main">
         <strong>${esc(line.product || line.order_type || "Расход")}</strong>
@@ -1140,6 +1142,63 @@
       costsList.innerHTML = expense.map((line, i) => costRowHtml(line, i)).join("");
     }
     if (addCost) addCost.hidden = !typeNames("expense").length;
+  }
+
+  function bindSortable(container, { handle, item, onCommit }) {
+    if (!container || container.dataset.sortable === "1") return;
+    container.dataset.sortable = "1";
+    container.addEventListener(
+      "pointerdown",
+      (e) => {
+      if (e.button !== 0) return;
+      const grip = e.target.closest(handle);
+      if (!grip || !container.contains(grip)) return;
+      const row = grip.closest(item);
+      if (!row) return;
+      e.preventDefault();
+      row.classList.add("is-dragging");
+      const parent = row.parentNode;
+      let moved = false;
+      const move = (ev) => {
+        const el = document.elementFromPoint(ev.clientX, ev.clientY);
+        const over = el?.closest(item);
+        if (!over || over === row || over.parentNode !== parent) return;
+        const rect = over.getBoundingClientRect();
+        parent.insertBefore(row, ev.clientY > rect.top + rect.height / 2 ? over.nextSibling : over);
+        moved = true;
+      };
+      const up = () => {
+        row.classList.remove("is-dragging");
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
+        document.removeEventListener("pointercancel", up);
+        if (moved) onCommit(row);
+      };
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
+      document.addEventListener("pointercancel", up);
+    },
+      { passive: false }
+    );
+  }
+
+  function commitLineOrder(listEl, expense) {
+    const order = currentOrder();
+    if (!order || !listEl) return;
+    const ids = [...listEl.querySelectorAll(".line-row[data-edit]")].map((el) => el.dataset.edit);
+    const group = (order.lines || []).filter((line) => (expense ? isExpenseLine(line) : !isExpenseLine(line)));
+    if (ids.length !== group.length) return;
+    const byId = new Map(group.map((line) => [line.id, line]));
+    const nextGroup = ids.map((id) => byId.get(id)).filter(Boolean);
+    if (nextGroup.length !== group.length) return;
+    let i = 0;
+    order.lines = (order.lines || []).map((line) => {
+      if (isExpenseLine(line) !== expense) return line;
+      return nextGroup[i++] || line;
+    });
+    touchDoc();
+    pushSoon();
+    renderOrder();
   }
 
   function refreshOrderRow(lineId) {
@@ -2942,6 +3001,23 @@
 
   function bind() {
     fillExprPad();
+    let skipLineClick = false;
+    bindSortable($("lines-list"), {
+      handle: ".lr-drag",
+      item: ".line-row",
+      onCommit: () => {
+        skipLineClick = true;
+        commitLineOrder($("lines-list"), false);
+      },
+    });
+    bindSortable($("costs-list"), {
+      handle: ".lr-drag",
+      item: ".line-row",
+      onCommit: () => {
+        skipLineClick = true;
+        commitLineOrder($("costs-list"), true);
+      },
+    });
 
     const dockEditorToViewport = () => {
       const editor = $("editor");
@@ -3119,6 +3195,11 @@
       }
       const editRow = e.target.closest("[data-edit]");
       if (editRow) {
+        if (skipLineClick) {
+          skipLineClick = false;
+          return;
+        }
+        if (e.target.closest(".lr-drag")) return;
         openEditor(editRow.dataset.edit);
         return;
       }

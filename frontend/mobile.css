@@ -628,6 +628,33 @@ html[data-theme="dark"] input[type="date"] { color-scheme: dark; }
   transition: transform 0.12s ease;
 }
 .line-row:active { transform: scale(0.985); }
+.line-row.is-dragging {
+  opacity: 0.42;
+  transform: none;
+  pointer-events: none;
+}
+.lr-drag {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 36px;
+  margin: 0 -4px 0 -6px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  touch-action: none;
+  cursor: grab;
+}
+.lr-drag span {
+  display: block;
+  width: 10px;
+  height: 16px;
+  margin: 10px auto;
+  background-image: radial-gradient(var(--muted) 1.15px, transparent 1.2px);
+  background-size: 5px 5px;
+  background-position: 0 0;
+}
+.lr-drag:active { cursor: grabbing; }
 .line-row::before {
   content: "";
   position: absolute;
