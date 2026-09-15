@@ -23,6 +23,8 @@
     history: { undo: false, redo: false },
     view: "orders",
     orderId: null,
+    ordersResume: null,
+    scroll: { orders: 0, stats: 0, snapshot: 0, files: 0, order: {} },
     editLineId: null,
     headOpen: false,
     query: "",
@@ -32,7 +34,9 @@
     pending: null,
     pushTimer: null,
     pushing: false,
+    pinging: false,
     stopped: false,
+    autosave: false,
     snap: {
       orderId: null,
       lines: null,
@@ -289,12 +293,16 @@
 
   function localStamp(d) {
     const p = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+
+  function dateValue(v) {
+    return String(v || "").slice(0, 10);
   }
 
   function fmtDate(v) {
     if (!v) return "—";
-    return String(v).replace("T", " ").slice(0, 16);
+    return dateValue(v) || "—";
   }
 
   function esc(s) {
@@ -644,6 +652,7 @@
           return;
         }
         if (typeof data.version === "number") state.version = Math.max(state.version, data.version);
+        if (typeof data.autosave === "boolean") applyAutosave(data.autosave);
         if (data.changed) applySnapshot(data);
         if (state.version <= before) await sleep(400);
       } catch (err) {
@@ -660,6 +669,7 @@
 
   function applySnapshot(data, initial = false) {
     if (typeof data.version === "number") state.version = Math.max(state.version, data.version);
+    if (typeof data.autosave === "boolean") applyAutosave(data.autosave);
     if (typeof data.path === "string") state.path = data.path;
     if (typeof data.dirty === "boolean") state.dirty = data.dirty;
     if (Array.isArray(data.clients)) state.clients = data.clients;
@@ -768,11 +778,19 @@
     }
   }
 
+  function applyAutosave(enabled) {
+    if (typeof enabled !== "boolean") return;
+    state.autosave = enabled;
+    const el = $("m-autosave");
+    if (el) el.checked = enabled;
+  }
+
   function navReport() {
     if (state.stopped || !state.token) return;
     const view = state.view;
     const orderId = view === "order" ? state.orderId || "" : "";
     const payload = { view, order_id: orderId, cid: state.cid };
+    if (view === "order" && state.editLineId) payload.line_id = state.editLineId;
     if (view === "stats") {
       payload.period = state.stats.period || "all";
       payload.filter = state.stats.filter || "all";
@@ -1006,10 +1024,36 @@
     setView("orders");
   }
 
+  function pageScrollY() {
+    return window.scrollY || document.documentElement.scrollTop || 0;
+  }
+
+  function savePageScroll() {
+    const y = pageScrollY();
+    if (state.view === "order") {
+      if (state.orderId) state.scroll.order[state.orderId] = y;
+      return;
+    }
+    if (state.view in state.scroll && state.view !== "order") state.scroll[state.view] = y;
+  }
+
+  function restorePageScroll() {
+    const y =
+      state.view === "order"
+        ? state.scroll.order[state.orderId] || 0
+        : Number(state.scroll[state.view]) || 0;
+    const go = () => window.scrollTo(0, y);
+    go();
+    requestAnimationFrame(() => requestAnimationFrame(go));
+  }
+
   function setView(view, orderId) {
     const changed = view !== state.view || (orderId !== undefined && orderId !== state.orderId);
+    if (changed) savePageScroll();
     state.view = view;
     if (orderId !== undefined) state.orderId = orderId;
+    if (view === "order") state.ordersResume = state.orderId || null;
+    else if (view === "orders") state.ordersResume = null;
     SCREENS.forEach((v) => {
       $(`screen-${v}`).hidden = v !== view;
     });
@@ -1017,9 +1061,19 @@
       const tab = b.dataset.tab;
       b.classList.toggle("active", tab === view || (view === "order" && tab === "orders"));
     });
-    window.scrollTo({ top: 0 });
     renderCurrent();
+    restorePageScroll();
     if (changed) navReport();
+  }
+
+  function resumeOrdersTab() {
+    const id = state.ordersResume;
+    if (id && orders().some((o) => o.id === id)) {
+      setView("order", id);
+      return true;
+    }
+    setView("orders");
+    return false;
   }
 
   function requireDocument() {
@@ -1064,6 +1118,27 @@
       .join("");
   }
 
+  function statusDotsHtml(lines) {
+    const items = (lines || []).map((l) => `<i class="dot" style="background:${esc(statusMeta(l.status).color)}"></i>`);
+    if (!items.length) return "";
+    const inner = items.join("");
+    if (items.length <= 10) return `<span class="dots">${inner}</span>`;
+    return `<span class="dots dots-marquee" style="--dot-n:${items.length}"><span class="dots-track">${inner}</span></span>`;
+  }
+
+  function tuneStatusDots() {
+    document.querySelectorAll(".dots-marquee").forEach((box) => {
+      const track = box.querySelector(".dots-track");
+      if (!track) return;
+      track.style.animation = "none";
+      const shift = Math.max(0, Math.ceil(track.scrollWidth - box.clientWidth));
+      box.style.setProperty("--dot-shift", `${shift}px`);
+      box.style.setProperty("--dot-dur", `${Math.max(2.4, 1.4 + shift / 22)}s`);
+      box.classList.toggle("is-moving", shift > 1);
+      track.style.animation = "";
+    });
+  }
+
   function renderOrders() {
     if (!requireDocument()) return;
     renderChips();
@@ -1079,10 +1154,6 @@
     box.innerHTML = list
       .map((order) => {
         const t = orderTotals(order);
-        const dots = (order.lines || [])
-          .slice(0, 8)
-          .map((l) => `<i class="dot" style="background:${esc(statusMeta(l.status).color)}"></i>`)
-          .join("");
         const tint = statusMeta(order.lines?.[0]?.status).color;
         const debt = t.unpaid > 0.005;
         return `<article class="card order-item" data-open="${esc(order.id)}" style="--tint:${esc(tint)}">
@@ -1095,11 +1166,12 @@
           <div class="oi-foot">
             <span class="sum">${esc(money(t.after))}</span>
             ${debt ? `<span class="sum debt">долг ${esc(money(t.unpaid))}</span>` : `<span class="sum paid">оплачено</span>`}
-            <span class="dots">${dots}</span>
+            ${statusDotsHtml(order.lines)}
           </div>
         </article>`;
       })
       .join("");
+    requestAnimationFrame(tuneStatusDots);
   }
 
   /* ================= карточка заказа ================= */
@@ -1194,7 +1266,7 @@
       <div class="fold-body">
         <div class="grid-2">
           <div class="field"><label>Номер</label><input type="text" inputmode="numeric" value="${esc(order.number || "")}" ${a("number")} /></div>
-          <div class="field"><label>Создан</label><input type="datetime-local" value="${esc(order.created_at || "")}" ${a("created_at")} /></div>
+          <div class="field"><label>Создан</label><input type="date" value="${esc(dateValue(order.created_at))}" ${a("created_at")} /></div>
         </div>
         <div class="field"><label>Заказчик</label><input type="text" list="customers-list" value="${esc(order.customer || "")}" ${a("customer")} /></div>
         <div class="field"><label>Название</label><input type="text" value="${esc(order.name || "")}" ${a("name")} /></div>
@@ -1335,6 +1407,7 @@
     document.body.classList.add("locked");
     renderEditor();
     $("editor-body").scrollTop = 0;
+    navReport();
   }
 
   function closeEditor() {
@@ -1350,6 +1423,7 @@
     document.body.classList.remove("locked");
     if (state.view === "order") renderOrder();
     flushPending();
+    navReport();
   }
 
   function catalogProductNames() {
@@ -1468,18 +1542,18 @@
         .join("")}</div>
 
       <div class="grid-2 dates">
-        <div class="field"><label>Дата заказа</label><input type="datetime-local" value="${esc(line.order_date || "")}" ${a("order_date")} /></div>
-        <div class="field"><label>Дата оплаты</label><input type="datetime-local" value="${esc(line.payment_date || "")}" ${a("payment_date")} /></div>
+        <div class="field"><label>Дата заказа</label><input type="date" value="${esc(dateValue(line.order_date))}" ${a("order_date")} /></div>
+        <div class="field"><label>Дата оплаты</label><input type="date" value="${esc(dateValue(line.payment_date))}" ${a("payment_date")} /></div>
       </div>
       <div class="chips inline">
-        <button type="button" class="chip" data-now="order_date">Заказ — сейчас</button>
-        <button type="button" class="chip" data-now="payment_date">Оплата — сейчас</button>
+        <button type="button" class="chip" data-now="order_date">Заказ — сегодня</button>
+        <button type="button" class="chip" data-now="payment_date">Оплата — сегодня</button>
       </div>`;
 
     const costOnly = `
-      <div class="field"><label>Дата</label><input type="datetime-local" value="${esc(line.order_date || "")}" ${a("order_date")} /></div>
+      <div class="field"><label>Дата</label><input type="date" value="${esc(dateValue(line.order_date))}" ${a("order_date")} /></div>
       <div class="chips inline">
-        <button type="button" class="chip" data-now="order_date">Сейчас</button>
+        <button type="button" class="chip" data-now="order_date">Сегодня</button>
       </div>
       <div class="hint">Расход вычитается из заказа: скидки, оплаты и статуса у него нет.</div>`;
 
@@ -1729,10 +1803,20 @@
     const lines = order?.lines || [];
     const index = lines.findIndex((l) => l.id === state.editLineId);
     const next = lines[index + step];
-    if (!next) return;
+    if (!next) return false;
+    hideExprPad();
+    state.exprField = "";
+    state.exprInput = null;
+    document.activeElement?.blur?.();
     state.editLineId = next.id;
     renderEditor();
     $("editor-body").scrollTop = 0;
+    navReport();
+    flashSwipe($("editor-body"), step);
+    try {
+      navigator.vibrate?.(10);
+    } catch (_) {}
+    return true;
   }
 
   /* ================= сводка ================= */
@@ -1750,57 +1834,111 @@
     if (period === "today") return stamp.slice(0, 10) === dayKeyOf(now);
     if (period === "week") {
       const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
-      return stamp >= `${dayKeyOf(from)}T00:00`;
+      return dateValue(stamp) >= dayKeyOf(from);
     }
     if (period === "month") return stamp.startsWith(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
     if (period === "year") return stamp.startsWith(String(now.getFullYear()));
     return true;
   }
 
-  function statsChip(id, label, count, current, attr) {
-    const extra = count == null ? "" : `<b>${count}</b>`;
-    return `<button type="button" class="chip ${current === id ? "active" : ""}" ${attr}="${esc(id)}">${label}${extra}</button>`;
+  const STATS_PERIODS = [
+    ["all", "Все даты"],
+    ["today", "Сегодня"],
+    ["week", "7 дней"],
+    ["month", "Месяц"],
+    ["year", "Год"],
+  ];
+  const STATS_FILTERS = [
+    ["all", "Все заказы"],
+    ["debt", "С долгом"],
+    ["paid", "Оплачены"],
+  ];
+
+  function statsPeriodLabel() {
+    return (STATS_PERIODS.find(([id]) => id === state.stats.period) || STATS_PERIODS[0])[1];
+  }
+
+  function statsFilterLabel() {
+    return (STATS_FILTERS.find(([id]) => id === state.stats.filter) || STATS_FILTERS[0])[1];
+  }
+
+  function statsStatusLabel() {
+    return state.stats.status || "Все статусы";
+  }
+
+  function statsPickHtml(label, on) {
+    return `<span class="${on ? "on" : ""}">${esc(label)}</span><span class="picker-ico">▾</span>`;
   }
 
   function renderStatsChips(rows, list) {
-    if (!$("stats-period") || !$("stats-filter") || !$("stats-status")) return;
-    const periodCounts = { all: rows.length };
-    ["today", "week", "month", "year"].forEach((id) => {
-      periodCounts[id] = rows.filter(({ line }) => matchesStatsPeriod(line.order_date, id)).length;
-    });
-    $("stats-period").innerHTML = [
-      ["all", "Все даты"],
-      ["today", "Сегодня"],
-      ["week", "7 дней"],
-      ["month", "Месяц"],
-      ["year", "Год"],
-    ]
-      .map(([id, label]) => statsChip(id, label, periodCounts[id], state.stats.period, "data-stats-period"))
-      .join("");
+    const periodEl = $("stats-period");
+    const filterEl = $("stats-filter");
+    const statusEl = $("stats-status");
+    if (!periodEl || !filterEl || !statusEl) return;
+    periodEl.innerHTML = statsPickHtml(statsPeriodLabel(), state.stats.period !== "all");
+    filterEl.innerHTML = statsPickHtml(statsFilterLabel(), state.stats.filter !== "all");
+    statusEl.innerHTML = statsPickHtml(statsStatusLabel(), !!state.stats.status);
+    periodEl._rows = rows;
+    filterEl._list = list;
+    statusEl._rows = rows;
+  }
 
-    const filterCounts = {
-      all: list.length,
-      debt: list.filter((o) => matchesFilter(o, "debt")).length,
-      paid: list.filter((o) => matchesFilter(o, "paid")).length,
-    };
-    $("stats-filter").innerHTML = [
-      ["all", "Все заказы"],
-      ["debt", "С долгом"],
-      ["paid", "Оплачены"],
-    ]
-      .map(([id, label]) => statsChip(id, label, filterCounts[id], state.stats.filter, "data-stats-filter"))
-      .join("");
+  function openStatsPeriod() {
+    const rows = $("stats-period")?._rows || [];
+    openSheet(
+      "Период",
+      STATS_PERIODS.map(([id, label]) => ({
+        value: id,
+        label,
+        hint: `${rows.filter(({ line }) => matchesStatsPeriod(line.order_date, id)).length} поз.`,
+      })),
+      state.stats.period,
+      (item) => {
+        state.stats.period = item.value;
+        renderStats();
+        navReport();
+      }
+    );
+  }
 
+  function openStatsFilter() {
+    const list = $("stats-filter")?._list || orders();
+    openSheet(
+      "Заказы",
+      STATS_FILTERS.map(([id, label]) => ({
+        value: id,
+        label,
+        hint: `${id === "all" ? list.length : list.filter((o) => matchesFilter(o, id)).length}`,
+      })),
+      state.stats.filter,
+      (item) => {
+        state.stats.filter = item.value;
+        renderStats();
+        navReport();
+      }
+    );
+  }
+
+  function openStatsStatus() {
+    const rows = $("stats-status")?._rows || [];
     const statuses = state.doc?.statuses || [];
-    const statusCounts = { "": rows.length };
-    statuses.forEach((s) => {
-      statusCounts[s.name] = rows.filter(({ line }) => line.status === s.name).length;
-    });
-    $("stats-status").innerHTML =
-      statsChip("", "Все статусы", statusCounts[""], state.stats.status, "data-stats-status") +
-      statuses
-        .map((s) => statsChip(s.name, s.name, statusCounts[s.name] || 0, state.stats.status, "data-stats-status"))
-        .join("");
+    openSheet(
+      "Статус",
+      [{ value: "", label: "Все статусы", hint: `${rows.length} поз.`, color: "" }].concat(
+        statuses.map((s) => ({
+          value: s.name,
+          label: s.name,
+          hint: `${rows.filter(({ line }) => line.status === s.name).length} поз.`,
+          color: s.color || "",
+        }))
+      ),
+      state.stats.status,
+      (item) => {
+        state.stats.status = item.value;
+        renderStats();
+        navReport();
+      }
+    );
   }
 
   function statsRows() {
@@ -2941,12 +3079,22 @@
             <button type="button" class="menu-sq" data-menu="theme" aria-label="${dark ? "Светлая тема" : "Тёмная тема"}">
               <b>${dark ? "☀" : "☾"}</b>
             </button>
+            <button type="button" class="menu-sq ${state.pinging ? "busy" : ""}" data-menu="ping" aria-label="Проверить подключение">
+              <b>↻</b>
+            </button>
           </div>
         </div>
         <button type="button" class="menu-save ${state.dirty ? "dirty" : ""}" data-menu="save">
           <strong>${state.dirty ? "Сохранить изменения" : "Сохранить"}</strong>
           ${state.dirty ? "<small>есть несохранённые правки</small>" : "<small>на компьютере</small>"}
         </button>
+        <label class="menu-autosave">
+          <input type="checkbox" id="m-autosave" ${state.autosave ? "checked" : ""} />
+          <span>
+            <strong>Автосохранение</strong>
+            <small>синхронно с компьютером</small>
+          </span>
+        </label>
         <div class="menu-grid">
           ${tiles
             .map(
@@ -2961,6 +3109,7 @@
   function renderMenu() {
     if (!$("sheet").classList.contains("is-menu")) return;
     $("sheet-list").innerHTML = menuHtml();
+    bindMenuAutosave();
   }
 
   function openMenu() {
@@ -2969,12 +3118,36 @@
     $("sheet").hidden = false;
     $("sheet-list").innerHTML = menuHtml();
     $("sheet")._menu = onMenuAction;
+    bindMenuAutosave();
+  }
+
+  function bindMenuAutosave() {
+    $("m-autosave")?.addEventListener("change", onAutosaveChange);
+  }
+
+  async function onAutosaveChange(e) {
+    const enabled = !!e.target.checked;
+    const previous = state.autosave;
+    state.autosave = enabled;
+    try {
+      const res = await api("/api/remote/autosave", { method: "POST", body: JSON.stringify({ enabled }) });
+      if (typeof res.version === "number") state.version = res.version;
+      toast(enabled ? "Автосохранение включено" : "Автосохранение выключено");
+    } catch (err) {
+      state.autosave = previous;
+      e.target.checked = previous;
+      toast(`Не удалось: ${err.message || err}`);
+    }
   }
 
   async function onMenuAction(value) {
     if (value === "theme") {
       toggleTheme();
       renderMenu();
+      return;
+    }
+    if (value === "ping") {
+      await checkConnection();
       return;
     }
     if (value === "fullscreen") {
@@ -3003,6 +3176,28 @@
     document.documentElement.setAttribute("data-theme", next);
     localStorage.setItem(LS_THEME, next);
     paintTelegram(telegramApp);
+  }
+
+  async function checkConnection() {
+    if (state.pinging) return;
+    state.pinging = true;
+    document.querySelector('[data-menu="ping"]')?.classList.add("busy");
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      await api("/api/remote/info", { signal: ctrl.signal });
+      toast("Связь с компьютером есть");
+      setSync("ok", "подключено");
+    } catch (err) {
+      if (state.stopped) return;
+      const timedOut = err?.name === "AbortError";
+      toast(timedOut ? "Нет ответа от компьютера" : "Нет связи с компьютером");
+      setSync("err", timedOut ? "нет ответа" : "нет связи с компьютером");
+    } finally {
+      clearTimeout(timer);
+      state.pinging = false;
+      document.querySelector('[data-menu="ping"]')?.classList.remove("busy");
+    }
   }
 
   function copyLink() {
@@ -3192,13 +3387,14 @@
     const orderScreen = $("screen-order");
     const snapScreen = $("screen-snapshot");
     const swipeIgnore = (el) => el.closest("input, textarea, select, button, a, .sheet, .editor, .preview-wrap");
-    const bindSwipeNav = (screen, active, go) => {
+    const editorSwipeIgnore = (el) => el.closest("input, textarea, select, button, a, .expr-pad, #ed-product-suggest");
+    const bindSwipeNav = (screen, active, go, ignore = swipeIgnore) => {
       if (!screen) return;
       let swipe = null;
       screen.addEventListener(
         "touchstart",
         (e) => {
-          if (!active() || e.touches.length !== 1 || swipeIgnore(e.target)) {
+          if (!active() || e.touches.length !== 1 || ignore(e.target)) {
             swipe = null;
             return;
           }
@@ -3251,6 +3447,12 @@
       snapScreen,
       () => state.view === "snapshot" && $("sheet").hidden,
       showNeighborSnap
+    );
+    bindSwipeNav(
+      $("editor-body"),
+      () => !$("editor").hidden && !!$("expr-pad")?.hidden,
+      editorJump,
+      editorSwipeIgnore
     );
 
     document.addEventListener("touchstart", (e) => {
@@ -3382,25 +3584,19 @@
         renderOrders();
         return;
       }
-      const statsPeriod = e.target.closest("[data-stats-period]");
+      const statsPeriod = e.target.closest("#stats-period");
       if (statsPeriod) {
-        state.stats.period = statsPeriod.dataset.statsPeriod;
-        renderStats();
-        navReport();
+        openStatsPeriod();
         return;
       }
-      const statsFilter = e.target.closest("[data-stats-filter]");
+      const statsFilter = e.target.closest("#stats-filter");
       if (statsFilter) {
-        state.stats.filter = statsFilter.dataset.statsFilter;
-        renderStats();
-        navReport();
+        openStatsFilter();
         return;
       }
-      const statsStatus = e.target.closest("[data-stats-status]");
+      const statsStatus = e.target.closest("#stats-status");
       if (statsStatus) {
-        state.stats.status = statsStatus.dataset.statsStatus;
-        renderStats();
-        navReport();
+        openStatsStatus();
         return;
       }
       if (e.target.closest("#order-fold")) {
@@ -3772,9 +3968,14 @@
       const btn = e.target.closest("[data-tab]");
       if (!btn) return;
       const tab = btn.dataset.tab;
+      if (tab === "orders" && state.view === "order") return;
       if (tab === "files") refreshRecent();
       if (tab === "snapshot") rememberSnapReturn();
       else state.snapReturn = null;
+      if (tab === "orders") {
+        resumeOrdersTab();
+        return;
+      }
       setView(tab);
     });
 
@@ -3818,6 +4019,10 @@
         `/api/remote/leave?t=${encodeURIComponent(state.token)}`,
         new Blob([JSON.stringify({ cid: state.cid })], { type: "application/json" })
       );
+    });
+
+    window.addEventListener("resize", () => {
+      if (state.view === "orders") tuneStatusDots();
     });
 
     document.addEventListener("visibilitychange", () => {

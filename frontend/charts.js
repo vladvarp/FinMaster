@@ -269,16 +269,21 @@ const FinCharts = (() => {
     const { ctx, w, h } = size(inst.canvas);
     const { labels, datasets, kind } = inst.opts;
     const values = inst.current;
-    if (!labels.length || !values.flat().length) {
+    if (!labels.length || !values.flat().length || !datasets.length) {
       inst.geom = null;
       drawEmpty(ctx, w, h, "Нет данных за выбранный период");
       return;
     }
-    const targetMax = niceMax(Math.max(0, ...inst.target.flat()));
+    const nums = inst.target.flat();
+    const yMax = niceMax(Math.max(0, ...nums));
+    const yMin = Math.min(0, ...nums) < 0 ? -niceMax(-Math.min(0, ...nums)) : 0;
+    const span = yMax - yMin || 1;
     const pad = { t: 18, r: 18, b: 30, l: 58 };
     const innerW = w - pad.l - pad.r;
     const innerH = h - pad.t - pad.b;
     const n = labels.length;
+    const xAt = (i) => pad.l + (innerW * i) / Math.max(n - 1, 1);
+    const yAt = (v) => pad.t + innerH * (1 - clamp((v - yMin) / span, 0, 1));
 
     ctx.font = "11px Segoe UI, sans-serif";
     ctx.textAlign = "right";
@@ -295,18 +300,22 @@ const FinCharts = (() => {
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = muted();
-      ctx.fillText(fmtAxis((targetMax * (steps - i)) / steps, kind), pad.l - 10, y);
+      ctx.fillText(fmtAxis(yMax - (span * i) / steps, kind), pad.l - 10, y);
+    }
+    if (yMin < 0) {
+      ctx.strokeStyle = axisColor();
+      ctx.beginPath();
+      ctx.moveTo(pad.l, yAt(0));
+      ctx.lineTo(w - pad.r, yAt(0));
+      ctx.stroke();
     }
 
-    const xAt = (i) => pad.l + (innerW * i) / Math.max(n - 1, 1);
-    const yAt = (v) => pad.t + innerH * (1 - clamp(v / targetMax, 0, 1));
-
     ctx.fillStyle = muted();
-    ctx.textAlign = "center";
     ctx.textBaseline = "top";
     const stride = Math.max(1, Math.ceil(n / Math.max(3, Math.floor(innerW / 78))));
     labels.forEach((label, i) => {
       if (i % stride !== 0 && i !== n - 1) return;
+      ctx.textAlign = n === 1 ? "center" : i === 0 ? "left" : i === n - 1 ? "right" : "center";
       ctx.fillText(String(label), xAt(i), h - pad.b + 9);
     });
 
@@ -316,17 +325,21 @@ const FinCharts = (() => {
       const pts = (values[di] || []).map((v, i) => ({ x: xAt(i), y: yAt(v), v }));
       geom.pts.push(pts);
       if (!pts.length) return;
+      const doFill = ds.fill === true || (ds.fill !== false && datasets.length === 1);
 
-      const fill = ctx.createLinearGradient(0, pad.t, 0, pad.t + innerH);
-      fill.addColorStop(0, rgba(color, isDark() ? 0.38 : 0.28));
-      fill.addColorStop(1, rgba(color, 0));
-      ctx.beginPath();
-      smoothPath(ctx, pts);
-      ctx.lineTo(pts[pts.length - 1].x, pad.t + innerH);
-      ctx.lineTo(pts[0].x, pad.t + innerH);
-      ctx.closePath();
-      ctx.fillStyle = fill;
-      ctx.fill();
+      if (doFill) {
+        const z = yAt(0);
+        const fill = ctx.createLinearGradient(0, pad.t, 0, pad.t + innerH);
+        fill.addColorStop(0, rgba(color, isDark() ? 0.38 : 0.28));
+        fill.addColorStop(1, rgba(color, 0));
+        ctx.beginPath();
+        smoothPath(ctx, pts);
+        ctx.lineTo(pts[pts.length - 1].x, z);
+        ctx.lineTo(pts[0].x, z);
+        ctx.closePath();
+        ctx.fillStyle = fill;
+        ctx.fill();
+      }
 
       const stroke = ctx.createLinearGradient(pad.l, 0, pad.l + innerW, 0);
       stroke.addColorStop(0, mix(color, isDark() ? 0.28 : -0.12));
@@ -334,30 +347,35 @@ const FinCharts = (() => {
       ctx.beginPath();
       smoothPath(ctx, pts);
       ctx.strokeStyle = stroke;
-      ctx.lineWidth = 2.6;
+      ctx.lineWidth = doFill ? 2.6 : 2.1;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
-      ctx.shadowColor = rgba(color, isDark() ? 0.55 : 0.3);
-      ctx.shadowBlur = 12;
-      ctx.shadowOffsetY = 4;
+      ctx.setLineDash(ds.dashed ? [6, 5] : []);
+      ctx.shadowColor = doFill ? rgba(color, isDark() ? 0.55 : 0.3) : "transparent";
+      ctx.shadowBlur = doFill ? 12 : 0;
+      ctx.shadowOffsetY = doFill ? 4 : 0;
       ctx.stroke();
+      ctx.setLineDash([]);
       ctx.shadowColor = "transparent";
       ctx.shadowBlur = 0;
       ctx.shadowOffsetY = 0;
 
       const last = pts[pts.length - 1];
       ctx.beginPath();
-      ctx.arc(last.x, last.y, 4.5, 0, Math.PI * 2);
+      ctx.arc(last.x, last.y, doFill ? 4.5 : 3.4, 0, Math.PI * 2);
       ctx.fillStyle = color;
       ctx.fill();
-      ctx.beginPath();
-      ctx.arc(last.x, last.y, 8, 0, Math.PI * 2);
-      ctx.strokeStyle = rgba(color, 0.35);
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      if (doFill) {
+        ctx.beginPath();
+        ctx.arc(last.x, last.y, 8, 0, Math.PI * 2);
+        ctx.strokeStyle = rgba(color, 0.35);
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
     });
 
     inst.geom = geom;
+    inst.canvas.style.cursor = "crosshair";
 
     const hi = inst.hover;
     if (hi != null && hi >= 0 && hi < n) {

@@ -80,7 +80,7 @@ class RemoteSession:
         self.dirty = False
         self.origin = ""
         self.command: dict[str, Any] | None = None
-        self.nav: dict[str, Any] = {"seq": 0, "view": "", "order_id": "", "cid": "", "period": "", "filter": "", "status": ""}
+        self.nav: dict[str, Any] = {"seq": 0, "view": "", "order_id": "", "line_id": "", "cid": "", "period": "", "filter": "", "status": ""}
         self.history: dict[str, bool] = {"undo": False, "redo": False}
         self.doc_version = 0
         self._command_id = 0
@@ -95,7 +95,7 @@ class RemoteSession:
             self.token = str(token or self.token or secrets.token_urlsafe(12))
             self._clients = {}
             self.command = None
-            self.nav = {"seq": 0, "view": "", "order_id": "", "cid": "", "period": "", "filter": "", "status": ""}
+            self.nav = {"seq": 0, "view": "", "order_id": "", "line_id": "", "cid": "", "period": "", "filter": "", "status": ""}
             self.version += 1
             self._cond.notify_all()
             netlog.add("session", "Доступ с телефона включён", level="ok", key="session-on")
@@ -108,7 +108,7 @@ class RemoteSession:
             self.path = ""
             self._clients = {}
             self.command = None
-            self.nav = {"seq": 0, "view": "", "order_id": "", "cid": "", "period": "", "filter": "", "status": ""}
+            self.nav = {"seq": 0, "view": "", "order_id": "", "line_id": "", "cid": "", "period": "", "filter": "", "status": ""}
             self.version += 1
             self._cond.notify_all()
         netlog.add("session", "Доступ с телефона выключен", level="warn", key="session-off")
@@ -192,6 +192,7 @@ class RemoteSession:
         period: str = "",
         order_filter: str = "",
         status: str = "",
+        line_id: str = "",
     ) -> int:
         """Телефон сообщает, какой экран и какие фильтры сводки открыты."""
         periods = {"all", "today", "week", "month", "year"}
@@ -202,6 +203,7 @@ class RemoteSession:
                 "seq": self._nav_seq,
                 "view": str(view or ""),
                 "order_id": str(order_id or ""),
+                "line_id": str(line_id or "")[:80],
                 "cid": str(cid or ""),
                 "period": period if period in periods else "all",
                 "filter": order_filter if order_filter in filters else "all",

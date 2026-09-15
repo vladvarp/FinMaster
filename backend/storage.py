@@ -4,6 +4,7 @@ import json
 import os
 import re
 import secrets
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -12,6 +13,10 @@ APP_NAME = "FinMaster"
 MAX_RECENT = 15
 MAX_DEVICES = 20
 DEFAULT_REMOTE_PORT = 17891
+_TELEGRAM_TOKEN_RE = re.compile(r"^\d{5,}:[A-Za-z0-9_-]{20,}$")
+_LOCK = threading.RLock()
+_CACHE: dict[str, Any] | None = None
+_SECRETS = {"ngrok_token": "", "telegram_bot_token": "", "telegram_chat_id": ""}
 
 
 def config_dir() -> str:
@@ -25,28 +30,100 @@ def config_path() -> str:
     return os.path.join(config_dir(), "config.json")
 
 
+def _blank_config() -> dict[str, Any]:
+    return {"recent": [], "autosave": False, "last_dir": "", "theme": "light", "window_maximized": False}
+
+
+def _clone(data: dict[str, Any]) -> dict[str, Any]:
+    return json.loads(json.dumps(data))
+
+
+def valid_telegram_token(value: str) -> bool:
+    return bool(_TELEGRAM_TOKEN_RE.match(str(value or "").strip()))
+
+
+def valid_ngrok_token(value: str) -> bool:
+    text = str(value or "").strip()
+    return 16 <= len(text) <= 200 and all(ch.isalnum() or ch in "-_." for ch in text)
+
+
+def _remember_secrets(remote: dict[str, Any]) -> None:
+    for key in _SECRETS:
+        value = str(remote.get(key) or "").strip()
+        if not value:
+            continue
+        if key == "telegram_bot_token" and ":" not in value:
+            continue
+        if key == "ngrok_token" and len(value) < 16:
+            continue
+        _SECRETS[key] = value
+
+
+def _fill_secrets(remote: dict[str, Any]) -> dict[str, Any]:
+    _remember_secrets(remote)
+    for key, value in _SECRETS.items():
+        if value and not str(remote.get(key) or "").strip():
+            remote[key] = value
+    return remote
+
+
 def load_config() -> dict[str, Any]:
+    global _CACHE
     path = config_path()
-    if not os.path.exists(path):
-        return {"recent": [], "autosave": False, "last_dir": "", "theme": "light"}
-    try:
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-        if not isinstance(data, dict):
-            return {"recent": [], "autosave": False, "last_dir": "", "theme": "light"}
-        data.setdefault("recent", [])
-        data.setdefault("autosave", False)
-        data.setdefault("last_dir", "")
-        data.setdefault("theme", "light")
-        data.setdefault("window_maximized", False)
-        return data
-    except (OSError, json.JSONDecodeError):
-        return {"recent": [], "autosave": False, "last_dir": "", "theme": "light"}
+    with _LOCK:
+        if not os.path.exists(path):
+            data = _blank_config()
+            _CACHE = _clone(data)
+            return _clone(data)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                loaded = json.load(fh)
+            if not isinstance(loaded, dict):
+                raise json.JSONDecodeError("not an object", "", 0)
+            data = _blank_config()
+            data.update(loaded)
+            data.setdefault("recent", [])
+            data.setdefault("autosave", False)
+            data.setdefault("last_dir", "")
+            data.setdefault("theme", "light")
+            data.setdefault("window_maximized", False)
+            if isinstance(data.get("remote"), dict):
+                _fill_secrets(data["remote"])
+            _CACHE = _clone(data)
+            return _clone(data)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            if _CACHE is not None:
+                return _clone(_CACHE)
+            return _blank_config()
 
 
 def save_config(data: dict[str, Any]) -> None:
-    with open(config_path(), "w", encoding="utf-8") as fh:
-        json.dump(data, fh, ensure_ascii=False, indent=2)
+    global _CACHE
+    if not isinstance(data, dict):
+        return
+    with _LOCK:
+        payload = _clone(data)
+        remote = payload.get("remote")
+        if isinstance(remote, dict):
+            _fill_secrets(remote)
+            payload["remote"] = remote
+        elif _CACHE and isinstance(_CACHE.get("remote"), dict):
+            payload["remote"] = _clone(_CACHE["remote"])
+        path = config_path()
+        tmp = f"{path}.{os.getpid()}.tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False, indent=2)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)
+            _CACHE = _clone(payload)
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
 
 
 def add_recent(path: str, title: str = "") -> list[dict[str, Any]]:
@@ -157,13 +234,13 @@ def save_remote_settings(**updates: Any) -> dict[str, Any]:
         data["ngrok"] = bool(updates["ngrok"])
     if "ngrok_token" in updates:
         token_value = str(updates["ngrok_token"] or "").strip()
-        if token_value:
+        if valid_ngrok_token(token_value):
             data["ngrok_token"] = token_value
     if "via" in updates:
         data["via"] = "ngrok" if updates["via"] == "ngrok" else "lan"
     if "telegram_bot_token" in updates:
         bot = str(updates["telegram_bot_token"] or "").strip()
-        if bot:
+        if valid_telegram_token(bot):
             if bot != data.get("telegram_bot_token"):
                 data["telegram_offset"] = 0
             data["telegram_bot_token"] = bot

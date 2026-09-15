@@ -38,6 +38,7 @@ ASK_LINK = {
     "открыть",
     "открыть finmaster",
 }
+ASK_NEW_LINK = {"новая ссылка", "/newlink", "/rotate", "new link"}
 ASK_REPORTS = {"отчёты", "отчеты", "/reports", "/files"}
 ASK_ORDERS = {"заказы", "/orders"}
 ASK_MENU = {"/start", "/help", "меню", "start", "help"}
@@ -125,7 +126,7 @@ def _menu_keyboard(app_url: str = "") -> dict[str, Any]:
     if app:
         second = [{"text": "Открыть", "web_app": {"url": app}}, {"text": "Ссылка"}, {"text": "Меню"}]
     return {
-        "keyboard": [[{"text": "Отчёты"}, {"text": "Заказы"}], second],
+        "keyboard": [[{"text": "Отчёты"}, {"text": "Заказы"}], second, [{"text": "Новая ссылка"}]],
         "resize_keyboard": True,
         "is_persistent": True,
         "input_field_placeholder": "Отчёты, заказы или поиск",
@@ -151,23 +152,27 @@ _last_menu = ""
 _menu_lock = threading.Lock()
 
 
-def set_menu_button(token: str, url: str = "") -> None:
+def set_menu_button(token: str, url: str = "", force: bool = False, chat_id: str = "") -> None:
     """Кнопка меню бота: Mini App по HTTPS, иначе обычные команды."""
     global _last_menu
     token = str(token or "").strip()
     if not token:
         return
     app = _web_app_url(url)
-    key = f"{token[-12:]}:{app}"
-    with _menu_lock:
-        if key == _last_menu:
-            return
+    cid = str(chat_id or "").strip()
+    key = f"{token[-12:]}:{cid}:{app}"
+    if not force:
+        with _menu_lock:
+            if key == _last_menu:
+                return
     if app:
         payload: dict[str, Any] = {
             "menu_button": {"type": "web_app", "text": "Открыть", "web_app": {"url": app}}
         }
     else:
         payload = {"menu_button": {"type": "commands"}}
+    if cid:
+        payload["chat_id"] = cid
     try:
         _call(token, "setChatMenuButton", payload)
         with _menu_lock:
@@ -178,8 +183,43 @@ def set_menu_button(token: str, url: str = "") -> None:
             level="ok" if app else "info",
             key="tg-menu",
         )
-    except RuntimeError:
-        pass
+    except RuntimeError as exc:
+        netlog.add("telegram", f"Не обновилась кнопка «Открыть»: {exc}", level="err", key="tg-menu")
+
+
+def push_open_controls(token: str, chat_id: str | list[str], url: str, notice: str = "") -> None:
+    """Сбрасывает кэш Telegram у «Открыть» и ставит клавиатуру с актуальным URL."""
+    token = str(token or "").strip()
+    link = str(url or "").strip()
+    if not token:
+        return
+    ids: list[str] = []
+    for item in chat_id if isinstance(chat_id, list) else [chat_id]:
+        cid = str(item or "").strip()
+        if cid and cid not in ids:
+            ids.append(cid)
+    set_menu_button(token, link, force=True)
+    if not ids:
+        return
+    text = notice or "Ссылка на телефон обновлена. Нажмите <b>Открыть</b>."
+    kb = _menu_keyboard(link)
+    for cid in ids:
+        set_menu_button(token, link, force=True, chat_id=cid)
+        try:
+            _call(
+                token,
+                "sendMessage",
+                {
+                    "chat_id": cid,
+                    "text": "Старая ссылка отключена.",
+                    "reply_markup": {"remove_keyboard": True},
+                },
+            )
+            time.sleep(0.35)
+            send_html(token, cid, text, kb)
+            netlog.add("telegram", "Клавиатура бота с новой ссылкой", source=f"chat {cid}", key=f"tg-kb-{cid}")
+        except RuntimeError as exc:
+            netlog.add("telegram", f"Не обновилась клавиатура: {exc}", level="err", key=f"tg-kb-{cid}")
 
 
 def send_html(
@@ -310,7 +350,7 @@ def welcome_text(info: Any = None) -> str:
         "<b>FinMaster</b>\n"
         "отчёты, заказы и снимки прямо здесь\n\n"
         f"{channel_block(info)}\n\n"
-        "Кнопки внизу: <b>Отчёты</b>, <b>Заказы</b>, <b>Ссылка</b>.\n"
+        "Кнопки внизу: <b>Отчёты</b>, <b>Заказы</b>, <b>Ссылка</b>, <b>Новая ссылка</b>.\n"
         "Если включён интернет — «Открыть» запускает приложение внутри Telegram.\n"
         "В списке заказов можно написать имя или номер — найду."
     )
@@ -345,7 +385,7 @@ def send_access(token: str, chat_id: str, url: str, info: Any = None) -> None:
     rows = []
     if can_open:
         rows.append([_open_btn("Открыть приложение" if _web_app_url(link) else "Открыть FinMaster", link)])
-        rows.append([_btn("Обновить ссылку", "L")])
+        rows.append([_btn("Обновить ссылку", "L"), _btn("Новая ссылка", "N")])
     else:
         rows.append([_btn("Получить ссылку", "L")])
     rows.append([_btn("Отчёты", "R"), _btn("Заказы", "O")])
@@ -374,6 +414,7 @@ def setup_bot(token: str) -> None:
                     {"command": "reports", "description": "Отчёты"},
                     {"command": "orders", "description": "Заказы"},
                     {"command": "link", "description": "Ссылка на телефон"},
+                    {"command": "newlink", "description": "Новая ссылка на телефон"},
                 ]
             },
         )
@@ -472,12 +513,21 @@ class TelegramBot:
         self._thread: threading.Thread | None = None
         self._on_request: Callable[[str], Any] | None = None
         self._on_offset: Callable[[int], None] | None = None
+        self._on_rotate: Callable[[], Any] | None = None
         self._skip = True
         self._chats: dict[str, ChatSession] = {}
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             return {"listening": self._running and bool(self._token), "error": self._error}
+
+    def token(self) -> str:
+        with self._lock:
+            return self._token
+
+    def chat_ids(self) -> list[str]:
+        with self._lock:
+            return [str(cid) for cid in self._chats.keys()]
 
     def deliver_webapp_snapshot(
         self,
@@ -515,21 +565,25 @@ class TelegramBot:
         offset: int = 0,
         on_request: Callable[[str], Any] | None = None,
         on_offset: Callable[[int], None] | None = None,
+        on_rotate: Callable[[], Any] | None = None,
     ) -> None:
         token = str(token or "").strip()
         with self._lock:
             same = token == self._token and self._running
             self._on_request = on_request
             self._on_offset = on_offset
-            if same:
-                return
-            self._token = token
-            self._offset = max(0, int(offset or 0))
-            self._skip = self._offset <= 0
-            self._error = ""
-            self._running = bool(token)
+            self._on_rotate = on_rotate
+            if not same:
+                self._token = token
+                self._offset = max(0, int(offset or 0))
+                self._skip = self._offset <= 0
+                self._error = ""
+                self._running = bool(token)
         if token:
             setup_bot(token)
+        if same:
+            return
+        if token:
             netlog.add("telegram", "Бот слушает обновления", level="ok", key="tg-on")
         if token and (self._thread is None or not self._thread.is_alive()):
             self._thread = threading.Thread(target=self._loop, name="fm-telegram", daemon=True)
@@ -674,6 +728,9 @@ class TelegramBot:
         if low in ASK_LINK:
             send_access(token, chat_id, str(info.get("url") or ""), info)
             return
+        if low in ASK_NEW_LINK:
+            self._ask_new_link(token, chat_id)
+            return
         if low in ASK_REPORTS:
             self._show(token, chat_id, "reports")
             return
@@ -702,6 +759,10 @@ class TelegramBot:
         notice = ""
         if data == "L":
             notice = "Обновляю ссылку…"
+        elif data == "N":
+            notice = "Новая ссылка…"
+        elif data == "Ny":
+            notice = "Выпускаю новую ссылку…"
         elif data in {"SP", "ST"}:
             notice = "Готовлю снимок…"
         if qid:
@@ -720,6 +781,9 @@ class TelegramBot:
             "R": "отчёты",
             "O": "заказы",
             "L": "ссылка",
+            "N": "новая ссылка",
+            "Ny": "подтверждение новой ссылки",
+            "Nn": "отмена новой ссылки",
             "S": "снимок",
             "PC": "открыть на ПК",
             "D": "детали заказа",
@@ -740,6 +804,16 @@ class TelegramBot:
         if data == "L":
             info = self._status_for(chat_id)
             send_access(token, chat_id, str(info.get("url") or ""), info)
+            return
+        if data == "N":
+            self._ask_new_link(token, chat_id)
+            return
+        if data == "Nn":
+            info = self._status_for(chat_id)
+            send_access(token, chat_id, str(info.get("url") or ""), info)
+            return
+        if data == "Ny":
+            self._rotate_link(token, chat_id)
             return
         if not self._authorized(chat_id):
             send_html(token, chat_id, "Этот бот уже привязан к другому чату.")
@@ -830,6 +904,29 @@ class TelegramBot:
             self._show(token, chat_id, back)
         else:
             self._show(token, chat_id, session.screen or "home")
+
+    def _ask_new_link(self, token: str, chat_id: str) -> None:
+        send_html(
+            token,
+            chat_id,
+            "Старая закладка на телефоне перестанет работать. Бот останется на связи, кнопка «Открыть» обновится.\n\nСоздать новую ссылку?",
+            _inline([[_btn("Создать новую ссылку", "Ny")], [_btn("Отмена", "Nn")]]),
+        )
+
+    def _rotate_link(self, token: str, chat_id: str) -> None:
+        with self._lock:
+            cb = self._on_rotate
+        if not cb:
+            send_html(token, chat_id, "Новую ссылку выпускает программа на компьютере. Откройте FinMaster.")
+            return
+        try:
+            payload = cb() or {}
+        except Exception as exc:
+            send_html(token, chat_id, html_esc(str(exc) or "Не удалось выпустить ссылку."))
+            return
+        info = self._status_for(chat_id)
+        link = str(payload.get("public_url") or payload.get("url") or info.get("url") or "")
+        send_access(token, chat_id, link, info)
 
     def _open_report(self, token: str, chat_id: str, index: int) -> None:
         session = self._chat(chat_id)
@@ -1076,7 +1173,7 @@ class TelegramBot:
         else:
             current = "Отчёт ещё не выбран — откройте файл из папки FinMaster."
         text = f"{welcome_text(info)}\n\n{current}"
-        rows = [[_btn("Отчёты", "R"), _btn("Заказы", "O")], [_btn("Ссылка на телефон", "L")]]
+        rows = [[_btn("Отчёты", "R"), _btn("Заказы", "O")], [_btn("Ссылка на телефон", "L"), _btn("Новая ссылка", "N")]]
         return text, rows
 
     def _screen_reports(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:

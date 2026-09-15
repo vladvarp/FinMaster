@@ -50,8 +50,37 @@ def _cloud_ui(raw: Any) -> dict[str, Any]:
         out["motion"] = raw["motion"]
     if isinstance(raw.get("heat"), bool):
         out["heat"] = raw["heat"]
+    if isinstance(raw.get("space3d"), bool):
+        out["space3d"] = raw["space3d"]
     if isinstance(raw.get("debtOnly"), bool):
         out["debtOnly"] = raw["debtOnly"]
+    return out
+
+
+def _line_series_ui(raw: Any) -> dict[str, Any]:
+    ids = ("after", "paid", "unpaid", "cost", "net")
+    defaults = {"after": True, "paid": True, "unpaid": True, "cost": True, "net": False}
+
+    def one(src: Any) -> dict[str, bool]:
+        out = dict(defaults)
+        if isinstance(src, dict):
+            for key in ids:
+                if isinstance(src.get(key), bool):
+                    out[key] = src[key]
+        if not any(out.values()):
+            out["after"] = True
+        return out
+
+    if not isinstance(raw, dict):
+        return {}
+    if any(isinstance(raw.get(key), bool) for key in ids) and "dash" not in raw and "analytics" not in raw:
+        shared = one(raw)
+        return {"dash": dict(shared), "analytics": dict(shared)}
+    out: dict[str, Any] = {}
+    if isinstance(raw.get("dash"), dict):
+        out["dash"] = one(raw.get("dash"))
+    if isinstance(raw.get("analytics"), dict):
+        out["analytics"] = one(raw.get("analytics"))
     return out
 
 
@@ -132,6 +161,7 @@ def empty_document(title: str = "Новый отчёт") -> dict[str, Any]:
             "payment_terms": DEFAULT_PAYMENT_TERMS,
             "cash_horizon": DEFAULT_CASH_HORIZON,
             "cloud": {},
+            "line_series": {},
         },
     }
 
@@ -246,6 +276,7 @@ def normalize_document(raw: Any) -> dict[str, Any]:
             "payment_terms": _int_in_range(ui.get("payment_terms"), DEFAULT_PAYMENT_TERMS, 0, 365),
             "cash_horizon": _int_in_range(ui.get("cash_horizon"), DEFAULT_CASH_HORIZON, 14, 90),
             "cloud": _cloud_ui(ui.get("cloud")),
+            "line_series": _line_series_ui(ui.get("line_series")),
         }
         if base["ui"]["cash_horizon"] not in CASH_HORIZONS:
             base["ui"]["cash_horizon"] = DEFAULT_CASH_HORIZON

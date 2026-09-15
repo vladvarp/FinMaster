@@ -12,7 +12,7 @@
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/favicon.png" />
-    <link rel="stylesheet" href="/mobile.css?v=42" />
+    <link rel="stylesheet" href="/mobile.css?v=52" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -65,9 +65,11 @@
 
       <!-- Сводка -->
       <section class="screen" id="screen-stats" hidden>
-        <div class="chips" id="stats-period"></div>
-        <div class="chips" id="stats-filter"></div>
-        <div class="chips wrap" id="stats-status"></div>
+        <div class="stats-filters">
+          <button type="button" class="stats-pick" id="stats-period"></button>
+          <button type="button" class="stats-pick" id="stats-filter"></button>
+          <button type="button" class="stats-pick" id="stats-status"></button>
+        </div>
         <div id="stats-body"></div>
       </section>
 
@@ -128,6 +130,6 @@
     </div>
 
     <div class="toast" id="toast"></div>
-    <script src="/mobile.js?v=42"></script>
+    <script src="/mobile.js?v=52"></script>
   </body>
 </html>

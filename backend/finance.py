@@ -228,7 +228,8 @@ def customer_org(doc: dict[str, Any] | None, name: str) -> str:
 def fmt_date(value: Any) -> str:
     if not value:
         return "—"
-    return str(value).replace("T", " ")[:16]
+    text = str(value).replace("T", " ")
+    return text[:10] if len(text) >= 10 else text
 
 
 def order_stamp(order: dict[str, Any]) -> str:

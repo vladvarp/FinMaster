@@ -27,6 +27,45 @@
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
   };
 
+  const mixRgb = (a, b, t) => [
+    Math.round(a[0] + (b[0] - a[0]) * t),
+    Math.round(a[1] + (b[1] - a[1]) * t),
+    Math.round(a[2] + (b[2] - a[2]) * t),
+  ];
+
+  function heatRgb(t, dark) {
+    const x = clamp(t, 0, 1);
+    const stops = dark
+      ? [[0, [56, 189, 248]], [0.32, [45, 212, 191]], [0.55, [250, 204, 21]], [0.78, [251, 146, 60]], [1, [248, 113, 113]]]
+      : [[0, [2, 132, 199]], [0.28, [13, 148, 136]], [0.52, [217, 119, 6]], [0.74, [234, 88, 12]], [1, [185, 28, 28]]];
+    for (let i = 1; i < stops.length; i += 1) {
+      if (x <= stops[i][0]) {
+        const span = stops[i][0] - stops[i - 1][0] || 1;
+        return mixRgb(stops[i - 1][1], stops[i][1], (x - stops[i - 1][0]) / span);
+      }
+    }
+    return stops[stops.length - 1][1];
+  }
+
+  function heatTone(debt, peak) {
+    return Math.log1p(Math.max(0, debt)) / Math.log1p(Math.max(peak, 0.01));
+  }
+
+  function compactMoney(value) {
+    const n = Number(value) || 0;
+    const abs = Math.abs(n);
+    const sign = n < 0 ? "−" : "";
+    if (abs >= 1_000_000) {
+      const v = abs / 1_000_000;
+      return `${sign}${v >= 10 ? v.toFixed(0) : v.toFixed(1).replace(".", ",")} млн`;
+    }
+    if (abs >= 10_000) {
+      const v = abs / 1000;
+      return `${sign}${v >= 100 ? v.toFixed(0) : v.toFixed(1).replace(".", ",")} тыс`;
+    }
+    return `${sign}${Math.round(abs).toLocaleString("ru-RU")}`;
+  }
+
   function convexHull(points) {
     const pts = points.slice().sort((a, b) => a.x - b.x || a.y - b.y);
     if (pts.length < 3) return pts;
@@ -154,8 +193,15 @@
       this.zoomTarget = 1;
       this.zoomAnchor = { sx: 0, sy: 0, wx: 0, wy: 0 };
       this.camTween = null;
+      this.orbitTween = null;
       this.panVel = { x: 0, y: 0 };
-      this.options = { layout: "galaxy", labels: true, motion: true, heat: false, query: "" };
+      this.orbit = { yaw: 0.4, pitch: 0.68, dist: 1080, focal: 920, targetX: 0, targetY: 0, targetZ: 8 };
+      this.orbitVel = { yaw: 0, pitch: 0 };
+      this.orbitPivot = null;
+      this.spaceMix = 0;
+      this.spaceTarget = 0;
+      this.idleUntil = 0;
+      this.options = { layout: "galaxy", labels: true, motion: true, heat: false, space3d: false, query: "" };
       this.hovered = null;
       this.selected = null;
       this.pointer = null;
@@ -168,7 +214,6 @@
       this.lastTime = performance.now();
       this.needsFrame = true;
       this.tour = null;
-      this.heat = { grid: null, cols: 0, rows: 0, box: null };
       this.stars = this.makeStars(160);
       this.dust = this.makeDust(48);
       this.reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -201,6 +246,8 @@
 
     bind() {
       this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+      this.canvas.addEventListener("auxclick", (e) => { if (e.button === 1) e.preventDefault(); });
+      this.canvas.addEventListener("mousedown", (e) => { if (e.button === 1) e.preventDefault(); });
       this.canvas.addEventListener("pointerdown", (e) => this.pointerDown(e));
       this.canvas.addEventListener("pointermove", (e) => this.pointerMove(e));
       this.canvas.addEventListener("pointerup", (e) => this.pointerUp(e));
@@ -211,16 +258,17 @@
       this.canvas.addEventListener("wheel", (e) => {
         e.preventDefault();
         this.stopTour();
-        const rect = this.canvas.getBoundingClientRect();
         let dy = e.deltaY;
         if (e.deltaMode === 1) dy *= 16;
         if (e.deltaMode === 2) dy *= this.height;
         const pixels = Math.max(-140, Math.min(140, dy));
-        this.aimZoom(this.zoomTarget * Math.exp(-pixels * 0.00092), e.clientX - rect.left, e.clientY - rect.top);
+        const rect = this.canvas.getBoundingClientRect();
+        const cursor = { sx: e.clientX - rect.left, sy: e.clientY - rect.top };
+        const pivot = this.selected || this.is3d() ? this.zoomFocusScreen() : cursor;
+        this.aimZoom(this.zoomTarget * Math.exp(-pixels * 0.00092), pivot.sx, pivot.sy);
       }, { passive: false });
       this.canvas.addEventListener("dblclick", (e) => {
-        const point = this.eventPoint(e);
-        const node = this.hit(point.wx, point.wy);
+        const node = this.pickNode(this.eventPoint(e));
         if (node) this.onOpen(node.data);
       });
       this.canvas.addEventListener("keydown", (e) => this.onKey(e));
@@ -234,10 +282,10 @@
     onKey(e) {
       if (e.key === "+" || e.key === "=") {
         e.preventDefault();
-        this.zoomAt(1.22, this.width / 2, this.height / 2);
+        this.zoomAt(1.22);
       } else if (e.key === "-") {
         e.preventDefault();
-        this.zoomAt(1 / 1.22, this.width / 2, this.height / 2);
+        this.zoomAt(1 / 1.22);
       } else if (e.key.toLowerCase() === "f") {
         e.preventDefault();
         this.fit();
@@ -278,11 +326,15 @@
         const node = old || {
           x: jitter(data.id, 1) * 260,
           y: jitter(data.id, 2) * 190,
+          z: 0,
           vx: 0,
           vy: 0,
+          vz: 0,
           pinned: false,
           phase: hash(data.id) / 4294967295,
         };
+        if (!Number.isFinite(node.z)) node.z = 0;
+        if (!Number.isFinite(node.vz)) node.vz = 0;
         node.data = data;
         node.index = index;
         node.r = data.radius || (data.kind === "customer" ? 19 : data.kind === "order" ? 12 : 6);
@@ -301,8 +353,12 @@
       this.bridges = this.buildBridges();
       this.refreshMatches();
       this.alpha = 1;
+      this.spaceTarget = this.options.space3d ? 1 : 0;
       if (this.selected && !this.nodeMap.has(this.selected.data.id)) this.select(null);
-      else if (this.selected) this.selected = this.nodeMap.get(this.selected.data.id);
+      else if (this.selected) {
+        this.selected = this.nodeMap.get(this.selected.data.id);
+        this.buildHot();
+      }
       this.needsFrame = true;
       if (!previous.size && this.nodes.length) requestAnimationFrame(() => this.fit(false));
     }
@@ -330,6 +386,7 @@
     setOptions(options) {
       const layoutChanged = options.layout && options.layout !== this.options.layout;
       const queryChanged = options.query !== undefined && options.query !== this.options.query;
+      const spaceChanged = options.space3d !== undefined && options.space3d !== this.options.space3d;
       this.options = { ...this.options, ...options };
       if (layoutChanged) {
         this.calculateTargets();
@@ -340,6 +397,17 @@
         this.alpha = 1;
       }
       if (queryChanged) this.refreshMatches();
+      if (spaceChanged) this.setSpace3d(!!this.options.space3d);
+      this.needsFrame = true;
+    }
+
+    setSpace3d(on) {
+      this.options.space3d = !!on;
+      this.spaceTarget = on ? 1 : 0;
+      this.idleUntil = performance.now() + 1600;
+      this.orbitVel.yaw = 0;
+      this.orbitVel.pitch = 0;
+      this.assignDepth();
       this.needsFrame = true;
     }
 
@@ -382,6 +450,7 @@
           });
         });
         this.timeline = { min, max, maxValue };
+        this.assignDepth();
         return;
       }
 
@@ -408,6 +477,7 @@
           n.tx = (parent?.tx || 0) + Math.cos(a) * ring;
           n.ty = (parent?.ty || 0) + Math.sin(a) * ring;
         });
+        this.assignDepth();
         return;
       }
 
@@ -448,6 +518,7 @@
             n.ty = lerp(parent?.ty || 0, c.y, 0.35) + Math.sin(a) * ring;
           });
         });
+        this.assignDepth();
         return;
       }
 
@@ -479,6 +550,22 @@
           n.tx = (parent?.tx || 0) + Math.cos(a) * ring;
           n.ty = (parent?.ty || 0) + Math.sin(a) * ring;
         });
+      });
+      this.assignDepth();
+    }
+
+    assignDepth() {
+      const layout = this.options.layout;
+      this.nodes.forEach((n, i) => {
+        const j = jitter(n.data.id, 19);
+        const k = jitter(n.data.id, 23);
+        if (layout === "timeline") {
+          n.tz = n.data.kind === "customer" ? (n.ty || 0) * 0.12 : n.data.kind === "order" ? 48 + j * 20 : 92 + k * 24;
+        } else if (layout === "orbit") {
+          n.tz = n.data.kind === "customer" ? j * 16 : n.data.kind === "order" ? 36 + Math.hypot(n.tx || 0, n.ty || 0) * 0.08 + j * 18 : 88 + k * 26;
+        } else {
+          n.tz = n.data.kind === "customer" ? (i % 7) * 6 + j * 14 : n.data.kind === "order" ? 58 + j * 24 : 112 + k * 30;
+        }
       });
     }
 
@@ -513,6 +600,7 @@
 
     simulate(dt) {
       const step = Math.min(1.7, dt / 16.67);
+      this.stepDepth(step);
       if (!this.options.motion || this.reducedMotion || this.alpha < 0.002) return;
       const alpha = this.alpha;
       this.grid.clear();
@@ -584,12 +672,23 @@
       this.alpha *= 0.975 ** step;
     }
 
+    stepDepth(step) {
+      this.nodes.forEach((n) => {
+        const wantZ = this.spaceTarget > 0.5 ? (n.tz || 0) : 0;
+        n.vz = (n.vz || 0) + (wantZ - (n.z || 0)) * 0.018 * step;
+        n.vz *= 0.82;
+        n.z = (n.z || 0) + n.vz * step;
+      });
+    }
+
     loop(time) {
       const dt = time - this.lastTime;
       this.lastTime = time;
       const moving = this.stepCamera(dt);
       const live = this.options.motion && !this.reducedMotion && (this.alpha > 0.002 || this.matches.size || this.edges.length);
-      if (this.needsFrame || live || this.drag || this.tour || moving) {
+      const heatPulse = this.options.heat && !this.reducedMotion;
+      const spaceLive = Math.abs(this.spaceMix - this.spaceTarget) > 0.002 || (this.options.space3d && !this.reducedMotion);
+      if (this.needsFrame || live || heatPulse || spaceLive || this.drag || this.tour || moving) {
         this.simulate(dt);
         this.draw(time);
         this.needsFrame = false;
@@ -600,9 +699,22 @@
     stepCamera(dt) {
       const step = Math.min(1.8, dt / 16.67);
       let moving = false;
-      if (this.camTween) {
+      const mixGap = this.spaceTarget - this.spaceMix;
+      if (Math.abs(mixGap) > 0.002) {
+        const k = 1 - Math.exp(-(Math.max(dt, 0) / 1000) / 0.28);
+        this.spaceMix += mixGap * k;
+        moving = true;
+      } else {
+        this.spaceMix = this.spaceTarget;
+      }
+      if (this.drag) {
+        this.camTween = null;
+        this.orbitTween = null;
+      } else if (this.orbitTween) {
+        moving = this.stepOrbitTween() || moving;
+      } else if (this.camTween) {
         moving = this.stepTween() || moving;
-      } else if (!this.drag) {
+      } else {
         moving = this.easeZoom(dt) || moving;
       }
       if (!this.drag && (Math.abs(this.panVel.x) > 0.12 || Math.abs(this.panVel.y) > 0.12)) {
@@ -610,8 +722,21 @@
         this.camera.y += this.panVel.y * step;
         this.panVel.x *= 0.9 ** step;
         this.panVel.y *= 0.9 ** step;
+        this.syncZoomAnchor();
         this.transformChanged();
         moving = true;
+      }
+      if (this.spaceMix > 0.01 && !this.drag) {
+        if (Math.abs(this.orbitVel.yaw) > 0.00005 || Math.abs(this.orbitVel.pitch) > 0.00005) {
+          this.orbit.yaw += this.orbitVel.yaw * step;
+          this.orbit.pitch = clamp(this.orbit.pitch + this.orbitVel.pitch * step, 0.22, 1.08);
+          this.orbitVel.yaw *= 0.94 ** step;
+          this.orbitVel.pitch *= 0.94 ** step;
+          moving = true;
+        } else if (this.options.space3d && !this.reducedMotion && performance.now() > this.idleUntil) {
+          this.orbit.yaw += 0.00115 * step;
+          moving = true;
+        }
       }
       return moving;
     }
@@ -627,6 +752,27 @@
       this.zoomTarget = tween.to.zoom;
       this.transformChanged();
       if (raw >= 1) this.camTween = null;
+      return raw < 1;
+    }
+
+    stepOrbitTween() {
+      const tween = this.orbitTween;
+      if (!tween) return false;
+      const raw = tween.duration <= 0 ? 1 : clamp((performance.now() - tween.start) / tween.duration, 0, 1);
+      const p = raw < 0.5 ? 2 * raw * raw : 1 - ((-2 * raw + 2) ** 2) / 2;
+      this.orbit.yaw = tween.from.yaw + (tween.to.yaw - tween.from.yaw) * p;
+      this.orbit.pitch = tween.from.pitch + (tween.to.pitch - tween.from.pitch) * p;
+      this.camera.zoom = tween.from.zoom + (tween.to.zoom - tween.from.zoom) * p;
+      this.camera.x = tween.from.x + (tween.to.x - tween.from.x) * p;
+      this.camera.y = tween.from.y + (tween.to.y - tween.from.y) * p;
+      if (tween.from.tx != null && tween.to.tx != null) {
+        this.orbit.targetX = tween.from.tx + (tween.to.tx - tween.from.tx) * p;
+        this.orbit.targetY = tween.from.ty + (tween.to.ty - tween.from.ty) * p;
+        this.orbit.targetZ = tween.from.tz + (tween.to.tz - tween.from.tz) * p;
+      }
+      this.zoomTarget = tween.to.zoom;
+      this.transformChanged();
+      if (raw >= 1) this.orbitTween = null;
       return raw < 1;
     }
 
@@ -652,15 +798,48 @@
       this.transformChanged();
     }
 
-    aimZoom(target, sx, sy) {
-      this.camTween = null;
+    zoomFocusScreen() {
+      if (this.selected) {
+        const p = this.view(this.selected);
+        if (p.visible && Number.isFinite(p.x) && Number.isFinite(p.y)) return { sx: p.x, sy: p.y };
+      }
+      if (this.is3d()) {
+        const p = this.project(this.orbit.targetX, this.orbit.targetY, this.orbit.targetZ);
+        if (p.visible && Number.isFinite(p.x) && Number.isFinite(p.y)) return { sx: p.x, sy: p.y };
+      }
+      return { sx: this.width / 2, sy: this.height / 2 };
+    }
+
+    syncZoomAnchor() {
       const zoom = this.camera.zoom || 1;
-      this.zoomTarget = clamp(target, 0.14, 5.4);
+      const sx = this.zoomAnchor?.sx ?? this.width / 2;
+      const sy = this.zoomAnchor?.sy ?? this.height / 2;
       this.zoomAnchor = {
         sx,
         sy,
         wx: (sx - this.width / 2 - this.camera.x) / zoom,
         wy: (sy - this.height / 2 - this.camera.y) / zoom,
+      };
+    }
+
+    settleZoom() {
+      this.camTween = null;
+      const target = clamp(this.zoomTarget, 0.14, 5.4);
+      if (Math.abs((this.camera.zoom || 1) - target) > 0.0002) this.applyZoom(target);
+      this.zoomTarget = target;
+    }
+
+    aimZoom(target, sx, sy) {
+      this.camTween = null;
+      this.orbitTween = null;
+      const zoom = this.camera.zoom || 1;
+      const pivot = sx == null || sy == null ? this.zoomFocusScreen() : { sx, sy };
+      this.zoomTarget = clamp(target, 0.14, 5.4);
+      this.zoomAnchor = {
+        sx: pivot.sx,
+        sy: pivot.sy,
+        wx: (pivot.sx - this.width / 2 - this.camera.x) / zoom,
+        wy: (pivot.sy - this.height / 2 - this.camera.y) / zoom,
       };
       this.needsFrame = true;
     }
@@ -692,22 +871,860 @@
         };
     }
 
+    is3d() {
+      return this.spaceMix > 0.01;
+    }
+
+    cameraSpace(x, y, z = 0) {
+      const px = x - this.orbit.targetX;
+      const py = y - this.orbit.targetY;
+      const pz = z - this.orbit.targetZ;
+      const cy = Math.cos(this.orbit.yaw);
+      const sy = Math.sin(this.orbit.yaw);
+      const rx = px * cy - py * sy;
+      const ry = px * sy + py * cy;
+      const rz = pz;
+      const cp = Math.cos(this.orbit.pitch);
+      const sp = Math.sin(this.orbit.pitch);
+      const zoom = this.camera.zoom || 1;
+      const dist = this.orbit.dist / Math.max(0.18, zoom);
+      return {
+        cx: rx,
+        cy: -ry * cp - rz * sp,
+        depth: ry * sp - rz * cp + dist,
+      };
+    }
+
+    project(x, y, z = 0) {
+      const mix = this.spaceMix;
+      const zoom = this.camera.zoom || 1;
+      const ox = this.width / 2 + this.camera.x;
+      const oy = this.height / 2 + this.camera.y;
+      const ortho = { x: ox + x * zoom, y: oy + y * zoom, s: zoom, depth: 900, visible: true };
+      if (mix < 0.001) return ortho;
+      const cam = this.cameraSpace(x, y, z);
+      const near = 42;
+      if (cam.depth < near) return { x: ox, y: oy, s: 0, depth: cam.depth, visible: false };
+      const persp = this.orbit.focal / cam.depth;
+      return {
+        x: lerp(ortho.x, ox + cam.cx * persp, mix),
+        y: lerp(ortho.y, oy + cam.cy * persp, mix),
+        s: lerp(ortho.s, persp, mix),
+        depth: cam.depth,
+        visible: true,
+      };
+    }
+
+    projectedOk(p) {
+      return !!(p && p.visible && Number.isFinite(p.x) && Number.isFinite(p.y) && p.s > 0.05 && p.s < 14);
+    }
+
+    cameraWorld() {
+      const zoom = Math.max(0.18, this.camera.zoom || 1);
+      const dist = this.orbit.dist / zoom;
+      const cy = Math.cos(this.orbit.yaw);
+      const sy = Math.sin(this.orbit.yaw);
+      const cp = Math.cos(this.orbit.pitch);
+      const sp = Math.sin(this.orbit.pitch);
+      return {
+        x: this.orbit.targetX - dist * sp * sy,
+        y: this.orbit.targetY - dist * sp * cy,
+        z: this.orbit.targetZ + dist * cp,
+      };
+    }
+
+    lookFromAt(cam, target) {
+      const dx = cam.x - target.x;
+      const dy = cam.y - target.y;
+      const dz = cam.z - target.z;
+      const dist = Math.max(48, Math.hypot(dx, dy, dz) || 48);
+      const zoom = Math.max(0.18, this.camera.zoom || 1);
+      this.orbit.targetX = target.x;
+      this.orbit.targetY = target.y;
+      this.orbit.targetZ = target.z;
+      this.orbit.dist = dist * zoom;
+      this.orbit.pitch = clamp(Math.acos(clamp(dz / dist, -1, 1)), 0.22, 1.08);
+      if (Math.hypot(dx, dy) > 1e-3) this.orbit.yaw = Math.atan2(-dx, -dy);
+    }
+
+    rotateAroundAxis(point, origin, axis, angle) {
+      const len = Math.hypot(axis.x, axis.y, axis.z) || 1;
+      const ux = axis.x / len;
+      const uy = axis.y / len;
+      const uz = axis.z / len;
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+      const vx = point.x - origin.x;
+      const vy = point.y - origin.y;
+      const vz = point.z - origin.z;
+      const dot = ux * vx + uy * vy + uz * vz;
+      return {
+        x: origin.x + vx * c + (uy * vz - uz * vy) * s + ux * dot * (1 - c),
+        y: origin.y + vy * c + (uz * vx - ux * vz) * s + uy * dot * (1 - c),
+        z: origin.z + vz * c + (ux * vy - uy * vx) * s + uz * dot * (1 - c),
+      };
+    }
+
+    applyOrbitAroundPivot(dx, dy, drag) {
+      const pivot = drag.pivot;
+      const dYaw = -dx * 0.0074;
+      const dPitch = clamp(drag.pitch - dy * 0.0054, 0.22, 1.08) - drag.pitch;
+      let cam = this.rotateAroundAxis(drag.cam, pivot, { x: 0, y: 0, z: 1 }, dYaw);
+      let target = this.rotateAroundAxis(drag.target, pivot, { x: 0, y: 0, z: 1 }, dYaw);
+      cam = this.rotateAroundAxis(cam, pivot, drag.right, dPitch);
+      target = this.rotateAroundAxis(target, pivot, drag.right, dPitch);
+      this.lookFromAt(cam, target);
+    }
+
+    lockOrbitTarget(x, y, z = 8) {
+      this.orbit.targetX = x;
+      this.orbit.targetY = y;
+      this.orbit.targetZ = z;
+    }
+
+    worldAtScreenCenter() {
+      const zoom = this.camera.zoom || 1;
+      if (!this.is3d()) {
+        return {
+          x: -this.camera.x / zoom,
+          y: -this.camera.y / zoom,
+          z: 0,
+        };
+      }
+      const dist = this.orbit.dist / Math.max(0.18, zoom);
+      const persp = this.orbit.focal / Math.max(48, dist);
+      const camCx = -this.camera.x / persp;
+      const camCy = -this.camera.y / persp;
+      const cp = Math.cos(this.orbit.pitch);
+      const ry = Math.abs(cp) > 0.08 ? -camCy / cp : 0;
+      const rx = camCx;
+      const cy = Math.cos(this.orbit.yaw);
+      const sy = Math.sin(this.orbit.yaw);
+      return {
+        x: this.orbit.targetX + rx * cy + ry * sy,
+        y: this.orbit.targetY - rx * sy + ry * cy,
+        z: this.orbit.targetZ,
+      };
+    }
+
+    prepareOrbitPivot() {
+      this.camTween = null;
+      this.orbitTween = null;
+      if (this.selected) {
+        this.orbitPivot = {
+          x: this.selected.x,
+          y: this.selected.y,
+          z: (this.selected.z || 0) * this.spaceMix || 8,
+        };
+        return;
+      }
+      this.orbitPivot = this.worldAtScreenCenter();
+    }
+
+    clipFloorLine(x0, y0, x1, y1, near = 64, far = 2400) {
+      const a0 = this.cameraSpace(x0, y0, 0);
+      const b0 = this.cameraSpace(x1, y1, 0);
+      if ((a0.depth < near && b0.depth < near) || (a0.depth > far && b0.depth > far)) return null;
+      const atDepth = (p, q, d) => {
+        const denom = q.depth - p.depth;
+        if (Math.abs(denom) < 1e-8) return null;
+        const t = (d - p.depth) / denom;
+        if (t < -1e-4 || t > 1 + 1e-4) return null;
+        return {
+          cx: p.cx + (q.cx - p.cx) * t,
+          cy: p.cy + (q.cy - p.cy) * t,
+          depth: d,
+        };
+      };
+      let a = a0;
+      let b = b0;
+      if (a0.depth < near) a = atDepth(a0, b0, near);
+      else if (a0.depth > far) a = atDepth(a0, b0, far);
+      if (b0.depth < near) b = atDepth(b0, a0, near);
+      else if (b0.depth > far) b = atDepth(b0, a0, far);
+      if (!a || !b) return null;
+      const ox = this.width / 2 + this.camera.x;
+      const oy = this.height / 2 + this.camera.y;
+      const toScreen = (p) => {
+        const persp = this.orbit.focal / Math.max(near, p.depth);
+        return { x: ox + p.cx * persp, y: oy + p.cy * persp };
+      };
+      const sa = toScreen(a);
+      const sb = toScreen(b);
+      if (!Number.isFinite(sa.x + sa.y + sb.x + sb.y)) return null;
+      const pad = 120;
+      const on = (p) => p.x >= -pad && p.x <= this.width + pad && p.y >= -pad && p.y <= this.height + pad;
+      if (!on(sa) && !on(sb)) return null;
+      return { a: sa, b: sb, depth: (a.depth + b.depth) * 0.5 };
+    }
+
+    view(node) {
+      const p = this.project(node.x, node.y, (node.z || 0) * this.spaceMix);
+      return { ...p, r: Math.max(1.4, (node.r || 6) * p.s), node };
+    }
+
+    worldDeltaFromScreen(node, dx, dy) {
+      const p0 = this.project(node.x, node.y, (node.z || 0) * this.spaceMix);
+      const px = this.project(node.x + 1, node.y, (node.z || 0) * this.spaceMix);
+      const py = this.project(node.x, node.y + 1, (node.z || 0) * this.spaceMix);
+      const ax = px.x - p0.x;
+      const ay = px.y - p0.y;
+      const bx = py.x - p0.x;
+      const by = py.y - p0.y;
+      const det = ax * by - ay * bx;
+      if (Math.abs(det) < 1e-5) return { x: dx / Math.max(0.2, p0.s), y: dy / Math.max(0.2, p0.s) };
+      return { x: (dx * by - dy * bx) / det, y: (dy * ax - dx * ay) / det };
+    }
+
     draw(time) {
       const ctx = this.ctx;
       const t = this.theme();
       ctx.save();
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      this.drawSpace(ctx, t);
-      ctx.translate(this.width / 2 + this.camera.x, this.height / 2 + this.camera.y);
-      ctx.scale(this.camera.zoom, this.camera.zoom);
-      if (this.options.heat) this.drawHeat(ctx);
-      if (this.options.layout === "timeline") this.drawTimeline(ctx, t);
-      this.drawHulls(ctx, t);
-      this.drawBridges(ctx, t, time);
-      this.drawEdges(ctx, t, time);
-      this.drawNodes(ctx, t, time);
+      if (this.spaceMix > 0.004) this.drawScene3d(ctx, t, time);
+      else {
+        this.drawSpace(ctx, t);
+        ctx.translate(this.width / 2 + this.camera.x, this.height / 2 + this.camera.y);
+        ctx.scale(this.camera.zoom, this.camera.zoom);
+        if (this.options.layout === "timeline") this.drawTimeline(ctx, t);
+        this.drawHulls(ctx, t);
+        if (this.options.heat) this.drawHeat(ctx, t);
+        this.drawBridges(ctx, t, time);
+        this.drawEdges(ctx, t, time);
+        this.drawNodes(ctx, t, time);
+        if (this.options.heat) this.drawHeatMarks(ctx, t, time);
+      }
       ctx.restore();
+      if (this.options.heat) {
+        ctx.save();
+        ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+        this.drawHeatCallouts(ctx, t);
+        ctx.restore();
+      }
       this.drawMinimap(t);
+    }
+
+    drawScene3d(ctx, theme, time) {
+      this.drawSpace3d(ctx, theme);
+      this.drawStems3d(ctx, theme);
+      if (this.options.heat) this.drawHeat3d(ctx, theme);
+      this.drawHulls3d(ctx, theme);
+      this.drawLinks3d(ctx, theme, time);
+      this.drawNodes3d(ctx, theme, time);
+      if (this.options.heat) this.drawHeatMarks3d(ctx, theme, time);
+    }
+
+    drawSpace3d(ctx, theme) {
+      ctx.fillStyle = theme.bg;
+      ctx.fillRect(0, 0, this.width, this.height);
+      const fog = ctx.createRadialGradient(this.width * 0.5, this.height * 0.42, 40, this.width * 0.5, this.height * 0.5, Math.max(this.width, this.height) * 0.72);
+      fog.addColorStop(0, theme.dark ? "rgba(14, 116, 144, 0.16)" : "rgba(15, 118, 110, 0.08)");
+      fog.addColorStop(0.45, theme.dark ? "rgba(37, 99, 235, 0.07)" : "rgba(37, 99, 235, 0.04)");
+      fog.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = fog;
+      ctx.fillRect(0, 0, this.width, this.height);
+      const zoom = this.camera.zoom || 1;
+      const dist = this.orbit.dist / Math.max(0.18, zoom);
+      const step = clamp(dist / 13, 38, 86);
+      const cells = 16;
+      const gx = Math.round(this.orbit.targetX / step) * step;
+      const gy = Math.round(this.orbit.targetY / step) * step;
+      const nearZ = 72;
+      const farZ = dist * 1.48;
+      const rgb = theme.dark ? "148,163,184" : "15,118,110";
+      const bands = [[], [], [], [], [], []];
+      const push = (x0, y0, x1, y1) => {
+        const seg = this.clipFloorLine(x0, y0, x1, y1, nearZ, farZ);
+        if (!seg) return;
+        const t = clamp((seg.depth - nearZ) / Math.max(120, farZ - nearZ), 0, 0.999);
+        bands[Math.min(bands.length - 1, Math.floor(t * bands.length))].push(seg);
+      };
+      for (let i = -cells; i <= cells; i += 1) {
+        const x = gx + i * step;
+        const y = gy + i * step;
+        for (let j = -cells; j < cells; j += 1) {
+          push(x, gy + j * step, x, gy + (j + 1) * step);
+          push(gx + j * step, y, gx + (j + 1) * step, y);
+        }
+      }
+      ctx.lineWidth = 1;
+      ctx.lineCap = "butt";
+      bands.forEach((list, i) => {
+        if (!list.length) return;
+        const fade = 1 - i / bands.length;
+        ctx.strokeStyle = `rgba(${rgb},${(theme.dark ? 0.22 : 0.2) * fade})`;
+        ctx.beginPath();
+        list.forEach((seg) => {
+          ctx.moveTo(seg.a.x, seg.a.y);
+          ctx.lineTo(seg.b.x, seg.b.y);
+        });
+        ctx.stroke();
+      });
+      const far = ctx.createLinearGradient(0, 0, 0, this.height * 0.38);
+      far.addColorStop(0, theme.dark ? "rgba(4,11,20,0.62)" : "rgba(244,248,251,0.62)");
+      far.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = far;
+      ctx.fillRect(0, 0, this.width, this.height);
+      const near = ctx.createLinearGradient(0, this.height * 0.78, 0, this.height);
+      near.addColorStop(0, "rgba(0,0,0,0)");
+      near.addColorStop(1, theme.dark ? "rgba(2,6,14,0.28)" : "rgba(15,23,42,0.06)");
+      ctx.fillStyle = near;
+      ctx.fillRect(0, 0, this.width, this.height);
+    }
+
+    drawStems3d(ctx, theme) {
+      if (this.spaceMix < 0.2) return;
+      ctx.lineCap = "round";
+      this.nodes.forEach((n) => {
+        if (n.data.kind === "line" && this.camera.zoom < 0.42) return;
+        const top = this.view(n);
+        const foot = this.project(n.x, n.y, 0);
+        if (!this.projectedOk(top) || !this.projectedOk(foot)) return;
+        const alpha = (theme.dark ? 0.22 : 0.16) * this.spaceMix;
+        ctx.strokeStyle = hexToRgba(n.data.color || "#64748b", alpha);
+        ctx.lineWidth = n.data.kind === "customer" ? 1.6 : 1;
+        ctx.beginPath();
+        ctx.moveTo(foot.x, foot.y);
+        ctx.lineTo(top.x, top.y);
+        ctx.stroke();
+        ctx.fillStyle = hexToRgba(n.data.color || "#64748b", alpha * 1.4);
+        const rx = Math.min(Math.max(2, top.r * 0.55), 28);
+        const ry = Math.min(Math.max(1.1, top.r * 0.22), 12);
+        ctx.beginPath();
+        ctx.ellipse(foot.x, foot.y, rx, ry, 0, 0, TAU);
+        ctx.fill();
+      });
+    }
+
+    drawHeat3d(ctx, theme) {
+      const customers = this.heatGroup("customer");
+      const orders = this.heatGroup("order");
+      const sources = customers.length ? customers : orders;
+      if (!sources.length) return;
+      const peak = this.heatPeak(sources);
+      const dark = !!theme.dark;
+      ctx.save();
+      ctx.globalCompositeOperation = dark ? "screen" : "source-over";
+      sources.slice().sort((a, b) => (a.data.debt || 0) - (b.data.debt || 0)).forEach((n) => {
+        const t = heatTone(n.data.debt, peak);
+        const p = this.view(n);
+        if (!p.visible) return;
+        this.paintHeatBlob(ctx, p.x, p.y, (70 + 150 * t) * p.s, t, (dark ? 0.42 : 0.36) + 0.32 * t, dark);
+      });
+      ctx.restore();
+    }
+
+    drawHulls3d(ctx, theme) {
+      this.clusters().forEach((group) => {
+        if (group.nodes.length < 2) return;
+        const pts = inflateHull(convexHull(group.nodes.map((n) => ({ x: n.x, y: n.y }))), 22)
+          .map((pt) => this.project(pt.x, pt.y, 8 * this.spaceMix))
+          .filter((p) => p.visible);
+        if (pts.length < 2) return;
+        ctx.beginPath();
+        organicPath(ctx, pts);
+        ctx.fillStyle = hexToRgba(group.color, theme.dark ? 0.07 : 0.05);
+        ctx.fill();
+        ctx.strokeStyle = hexToRgba(group.color, 0.2);
+        ctx.lineWidth = 1.1;
+        ctx.stroke();
+      });
+    }
+
+    drawLinks3d(ctx, theme, time) {
+      const selected = this.selected;
+      const motion = this.options.motion && !this.reducedMotion;
+      const underlay = theme.dark ? "rgba(2,6,14,0.55)" : "rgba(255,255,255,0.78)";
+      const drawOne = (edge, dashed) => {
+        const hot = this.edgeIsHot(edge);
+        const dim = !!(selected && !hot);
+        const trunk = edge.kind === "customer";
+        const base = (edge.source.data && edge.source.data.color) || "#64748b";
+        const color = hot ? hexToRgba(selected.data.color, 0.95) : hexToRgba(base, trunk ? 0.82 : 0.62);
+        this.drawLinkProjected(ctx, edge.source, edge.target, {
+          lift: dashed ? 0.18 : trunk ? 0.16 : 0.1,
+          color,
+          flowColor: hexToRgba(hot ? selected.data.color : base, 1),
+          width: hot ? (trunk ? 3.1 : 2.4) : dashed ? 1.35 : trunk ? 2.15 : 1.55,
+          underlay,
+          dashed,
+          flow: !dashed && motion && (!selected || hot),
+          time,
+          arrows: !dashed,
+          hot,
+          dim,
+          packets: dashed ? 0 : hot ? 2 : trunk ? 1 : 0,
+        });
+      };
+      this.bridges.forEach((edge) => drawOne(edge, true));
+      this.edges.forEach((edge) => {
+        if (this.camera.zoom < 0.22 && edge.kind === "line" && !selected) return;
+        drawOne(edge, false);
+      });
+      ctx.globalAlpha = 1;
+    }
+
+    drawLinkProjected(ctx, source, target, opt) {
+      const a = this.view(source);
+      const b = this.view(target);
+      if (!this.projectedOk(a) || !this.projectedOk(b)) return;
+      const s = (a.s + b.s) / 2;
+      const from = { x: a.x + (b.x - a.x) * ((a.r + 2) / (Math.hypot(b.x - a.x, b.y - a.y) || 1)), y: a.y + (b.y - a.y) * ((a.r + 2) / (Math.hypot(b.x - a.x, b.y - a.y) || 1)) };
+      const dist = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      const to = { x: b.x - (b.x - a.x) * ((b.r + (opt.arrows ? 6 : 2)) / dist), y: b.y - (b.y - a.y) * ((b.r + (opt.arrows ? 6 : 2)) / dist) };
+      const ctrl = { x: (from.x + to.x) / 2 - (to.y - from.y) * opt.lift, y: (from.y + to.y) / 2 + (to.x - from.x) * opt.lift };
+      const width = opt.width || 1.6;
+      ctx.save();
+      ctx.globalAlpha = opt.dim ? 0.22 : 1;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.quadraticCurveTo(ctrl.x, ctrl.y, to.x, to.y);
+      ctx.strokeStyle = opt.underlay;
+      ctx.lineWidth = width + 1.7;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.quadraticCurveTo(ctrl.x, ctrl.y, to.x, to.y);
+      ctx.strokeStyle = opt.color;
+      ctx.lineWidth = width;
+      if (opt.dashed) ctx.setLineDash([7, 6]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (opt.flow && !opt.dim) {
+        ctx.strokeStyle = opt.flowColor || opt.color;
+        ctx.lineWidth = Math.max(width * 0.55, 1.15);
+        ctx.setLineDash([6, 8]);
+        ctx.lineDashOffset = -(((opt.time || 0) * 0.055) % 14);
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.quadraticCurveTo(ctrl.x, ctrl.y, to.x, to.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      if (opt.arrows && s > 0.18) {
+        const tip = this.quadPoint(from, ctrl, to, 1);
+        const tan = this.quadTangent(from, ctrl, to, 0.97);
+        this.drawChevronScreen(ctx, tip.x, tip.y, tan.x, tan.y, opt.hot ? 7.2 : 6.1, opt.color);
+      }
+      const packets = opt.dim ? 0 : (opt.packets || 0);
+      for (let i = 0; i < packets; i += 1) {
+        const t = (((opt.time || 0) * 0.00032) + i / Math.max(1, packets)) % 1;
+        const pt = this.quadPoint(from, ctrl, to, t);
+        const tan = this.quadTangent(from, ctrl, to, t);
+        this.drawChevronScreen(ctx, pt.x, pt.y, tan.x, tan.y, opt.hot ? 6.4 : 5.2, opt.flowColor || opt.color);
+      }
+      ctx.restore();
+    }
+
+    drawChevronScreen(ctx, x, y, tx, ty, size, color) {
+      const nx = -ty;
+      const ny = tx;
+      ctx.beginPath();
+      ctx.moveTo(x + tx * size, y + ty * size);
+      ctx.lineTo(x - tx * size * 0.72 + nx * size * 0.58, y - ty * size * 0.72 + ny * size * 0.58);
+      ctx.lineTo(x - tx * size * 0.36, y - ty * size * 0.36);
+      ctx.lineTo(x - tx * size * 0.72 - nx * size * 0.58, y - ty * size * 0.72 - ny * size * 0.58);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+
+    volumeHeight(node) {
+      if (node.data.kind === "customer") return Math.max(18, node.r * 1.45);
+      if (node.data.kind === "order") return Math.max(14, node.r * 1.85);
+      return Math.max(9, node.r * 1.7);
+    }
+
+    drawVolumeFallback(ctx, node, color, selected, theme) {
+      const p = this.view(node);
+      if (!this.projectedOk(p)) return null;
+      const r = Math.max(4, node.r * Math.min(p.s, 3.4));
+      ctx.fillStyle = hexToRgba(color, theme.dark ? 0.9 : 0.95);
+      ctx.strokeStyle = hexToRgba(color, selected ? 0.95 : 0.45);
+      ctx.lineWidth = selected ? 1.6 : 1;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, TAU);
+      ctx.fill();
+      ctx.stroke();
+      return { x: p.x, y: p.y, r, s: p.s, depth: p.depth };
+    }
+
+    clipDiskHalf(ctx, nx, ny, span) {
+      const qx = -ny;
+      const qy = nx;
+      ctx.beginPath();
+      ctx.moveTo(nx * span * 0.02 + qx * span, ny * span * 0.02 + qy * span);
+      ctx.lineTo(nx * span + qx * span, ny * span + qy * span);
+      ctx.lineTo(nx * span - qx * span, ny * span - qy * span);
+      ctx.lineTo(nx * span * 0.02 - qx * span, ny * span * 0.02 - qy * span);
+      ctx.closePath();
+      ctx.clip();
+    }
+
+    paintAccretionDisk(ctx, inner, outer, opt) {
+      const phase = opt.phase || 0;
+      const tilt = opt.tilt || 0;
+      const dopX = opt.dopX || 1;
+      const dopY = opt.dopY || 0;
+      const doppler = opt.doppler || 0.35;
+      const alpha = 0.34 + tilt * 0.66;
+      const ring = ctx.createRadialGradient(0, 0, inner * 0.86, 0, 0, outer);
+      ring.addColorStop(0, "rgba(0,0,0,0)");
+      ring.addColorStop(0.1, "rgba(0,0,0,0)");
+      ring.addColorStop(0.14, `rgba(255,228,186,${0.4 * alpha})`);
+      ring.addColorStop(0.2, `rgba(255,132,42,${0.7 * alpha})`);
+      ring.addColorStop(0.32, `rgba(160,36,12,${0.48 * alpha})`);
+      ring.addColorStop(0.52, `rgba(68,14,8,${0.18 * alpha})`);
+      ring.addColorStop(0.78, `rgba(24,6,4,${0.05 * alpha})`);
+      ring.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = ring;
+      ctx.beginPath();
+      ctx.arc(0, 0, outer, 0, TAU);
+      ctx.fill();
+      const reach = outer * 1.05;
+      const heat = ctx.createLinearGradient(-reach * dopX, -reach * dopY, reach * dopX, reach * dopY);
+      heat.addColorStop(0, `rgba(16,4,4,${0.24 * doppler})`);
+      heat.addColorStop(0.42, "rgba(0,0,0,0)");
+      heat.addColorStop(0.72, `rgba(255,168,72,${0.14 * doppler})`);
+      heat.addColorStop(1, `rgba(255,236,196,${0.36 * doppler})`);
+      ctx.fillStyle = heat;
+      ctx.beginPath();
+      ctx.arc(0, 0, outer * 0.96, 0, TAU);
+      ctx.fill();
+      if ((opt.detail || 0) < 9) return;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      for (let arm = 0; arm < 4; arm += 1) {
+        ctx.beginPath();
+        const base = arm * (TAU / 4) + phase;
+        for (let i = 0; i <= 32; i += 1) {
+          const t = i / 32;
+          const r = inner + (outer - inner) * (0.08 + 0.92 * t * t);
+          const a = base + t * 2.15;
+          const x = Math.cos(a) * r;
+          const y = Math.sin(a) * r;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = `rgba(255,186,110,${0.08 + tilt * 0.09})`;
+        ctx.lineWidth = Math.max(0.35, (outer - inner) * 0.022);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(0, 0, inner * 1.04, 0, TAU);
+      ctx.strokeStyle = `rgba(255,214,160,${0.26 + tilt * 0.22})`;
+      ctx.lineWidth = Math.max(0.4, inner * 0.045);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    paintPhotonWrap(ctx, hx, hy, holeR, ux, uy, tilt, beamX, beamY) {
+      const inner = holeR * 0.985;
+      const outer = holeR * (1.058 + tilt * 0.07);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(hx, hy, outer, 0, TAU);
+      ctx.arc(hx, hy, inner, 0, TAU, true);
+      ctx.closePath();
+      ctx.clip();
+      const glow = ctx.createRadialGradient(hx, hy, inner, hx, hy, outer);
+      glow.addColorStop(0, "rgba(40,12,6,0.12)");
+      glow.addColorStop(0.42, `rgba(255,152,64,${0.3 + tilt * 0.2})`);
+      glow.addColorStop(1, "rgba(80,20,8,0)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(hx - outer - 2, hy - outer - 2, outer * 2 + 4, outer * 2 + 4);
+      if (Math.hypot(beamX, beamY) > 0.05) {
+        const bx = hx + beamX * holeR * 0.32;
+        const by = hy + beamY * holeR * 0.32;
+        const beam = ctx.createRadialGradient(bx, by, 0, bx, by, holeR * 0.82);
+        beam.addColorStop(0, `rgba(255,232,190,${0.2 + tilt * 0.12})`);
+        beam.addColorStop(0.45, `rgba(255,140,48,${0.1 + tilt * 0.08})`);
+        beam.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = beam;
+        ctx.beginPath();
+        ctx.arc(bx, by, holeR * 0.82, 0, TAU);
+        ctx.fill();
+      }
+      const polar = Math.hypot(ux, uy) > 0.2 && tilt > 0.1;
+      if (polar) {
+        ctx.globalCompositeOperation = "lighter";
+        ctx.save();
+        ctx.translate(hx, hy);
+        ctx.rotate(Math.atan2(uy, ux));
+        ctx.lineCap = "round";
+        const span = 0.7 + tilt * 0.38;
+        ctx.beginPath();
+        ctx.arc(0, 0, holeR * 1.02, -span, span);
+        ctx.strokeStyle = `rgba(255,210,140,${0.22 + tilt * 0.48})`;
+        ctx.lineWidth = Math.max(1.2, holeR * (0.075 + tilt * 0.09));
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(0, 0, holeR * 1.02, Math.PI - span * 0.72, Math.PI + span * 0.72);
+        ctx.strokeStyle = `rgba(255,130,55,${0.12 + tilt * 0.3})`;
+        ctx.lineWidth = Math.max(1, holeR * (0.05 + tilt * 0.07));
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    paintPhotonRing(ctx, hx, hy, holeR, tilt, selected) {
+      ctx.beginPath();
+      ctx.arc(hx, hy, holeR * 1.016, 0, TAU);
+      ctx.strokeStyle = selected ? "rgba(255,228,186,0.94)" : "rgba(255,198,132,0.82)";
+      ctx.lineWidth = Math.max(1.05, holeR * (0.036 + tilt * 0.012));
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(hx, hy, holeR * 1.068, 0, TAU);
+      ctx.strokeStyle = `rgba(255,120,40,${0.14 + tilt * 0.12})`;
+      ctx.lineWidth = Math.max(0.7, holeR * 0.018);
+      ctx.stroke();
+    }
+
+    drawBlackHole3d(ctx, node, selected, theme, time) {
+      const z = (node.z || 0) * this.spaceMix;
+      const core = this.project(node.x, node.y, z);
+      if (!this.projectedOk(core)) return null;
+      const s = Math.min(core.s, 3.6);
+      const holeR = Math.max(5.5, node.r * s * 0.92);
+      if (holeR > Math.max(this.width, this.height) * 0.55) return null;
+      const hx = core.x;
+      const hy = core.y;
+      const px = this.project(node.x + 1, node.y, z);
+      const py = this.project(node.x, node.y + 1, z);
+      const ax = px.x - hx;
+      const ay = px.y - hy;
+      const bx = py.x - hx;
+      const by = py.y - hy;
+      const axesOk = this.projectedOk(px) && this.projectedOk(py)
+        && Math.hypot(ax, ay) > 0.04 && Math.hypot(bx, by) > 0.04;
+      const aLen = Math.hypot(ax, ay);
+      const bLen = Math.hypot(bx, by);
+      const face = Math.min(aLen, bLen) / Math.max(aLen, bLen, 1e-6);
+      const tilt = clamp(1 - face, 0, 1);
+      const inner = node.r * 0.98;
+      const outer = node.r * (1.52 + tilt * 0.38);
+      const cam = this.cameraWorld();
+      const tx = cam.x - node.x;
+      const ty = cam.y - node.y;
+      const len = Math.hypot(tx, ty);
+      const nx = len > 1e-3 ? tx / len : 1;
+      const ny = len > 1e-3 ? ty / len : 0;
+      const dopX = -ny;
+      const dopY = nx;
+      const doppler = clamp(len / 90, 0.22, 1);
+      const moving = this.options.motion && !this.reducedMotion;
+      const phase = moving ? (time || 0) * 0.00016 : 0;
+      const diskOpt = { phase, tilt, dopX, dopY, doppler, detail: holeR };
+      const night = !theme || theme.dark;
+      const bloom = ctx.createRadialGradient(hx, hy, holeR * 0.55, hx, hy, holeR * 2.45);
+      bloom.addColorStop(0, "rgba(0,0,0,0)");
+      bloom.addColorStop(0.4, `rgba(255,96,32,${(night ? 0.055 : 0.04) + tilt * 0.035})`);
+      bloom.addColorStop(0.76, "rgba(80,16,8,0.04)");
+      bloom.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = bloom;
+      ctx.beginPath();
+      ctx.arc(hx, hy, holeR * 2.45, 0, TAU);
+      ctx.fill();
+      const split = axesOk && len > 6;
+      if (axesOk) {
+        ctx.save();
+        ctx.translate(hx, hy);
+        ctx.transform(ax, ay, bx, by, 0, 0);
+        if (split) this.clipDiskHalf(ctx, -nx, -ny, outer * 5);
+        this.paintAccretionDisk(ctx, inner, outer, diskOpt);
+        ctx.restore();
+      }
+      let ux = 0;
+      let uy = 0;
+      const up = this.project(node.x, node.y, z + 10);
+      if (this.projectedOk(up)) {
+        ux = up.x - hx;
+        uy = up.y - hy;
+        const ul = Math.hypot(ux, uy);
+        if (ul > 0.35) {
+          ux /= ul;
+          uy /= ul;
+        } else {
+          ux = 0;
+          uy = 0;
+        }
+      }
+      let beamX = 0;
+      let beamY = 0;
+      const beam = this.project(node.x + dopX, node.y + dopY, z);
+      if (this.projectedOk(beam)) {
+        beamX = beam.x - hx;
+        beamY = beam.y - hy;
+        const bl = Math.hypot(beamX, beamY) || 1;
+        beamX /= bl;
+        beamY /= bl;
+      }
+      this.paintPhotonWrap(ctx, hx, hy, holeR, ux, uy, tilt, beamX, beamY);
+      const horizon = ctx.createRadialGradient(hx, hy, holeR * 0.08, hx, hy, holeR);
+      horizon.addColorStop(0, "#000000");
+      horizon.addColorStop(0.78, "#000000");
+      horizon.addColorStop(0.93, "#050201");
+      horizon.addColorStop(1, "#140804");
+      ctx.fillStyle = horizon;
+      ctx.beginPath();
+      ctx.arc(hx, hy, holeR, 0, TAU);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(hx, hy, holeR * 0.992, 0, TAU);
+      ctx.strokeStyle = "rgba(0,0,0,0.85)";
+      ctx.lineWidth = Math.max(0.8, holeR * 0.028);
+      ctx.stroke();
+      this.paintPhotonRing(ctx, hx, hy, holeR, tilt, selected);
+      if (split) {
+        ctx.save();
+        ctx.translate(hx, hy);
+        ctx.transform(ax, ay, bx, by, 0, 0);
+        this.clipDiskHalf(ctx, nx, ny, outer * 5);
+        this.paintAccretionDisk(ctx, inner, outer, diskOpt);
+        ctx.restore();
+      }
+      if (selected) {
+        ctx.beginPath();
+        ctx.arc(hx, hy, holeR * 1.28, 0, TAU);
+        ctx.strokeStyle = "rgba(255,214,170,0.22)";
+        ctx.lineWidth = Math.max(1, holeR * 0.028);
+        ctx.stroke();
+      }
+      return { x: hx, y: hy, r: holeR * 1.18, s: core.s, depth: core.depth, hole: true };
+    }
+
+    drawPrism3d(ctx, node, color, selected, theme) {
+      const order = node.data.kind === "order";
+      const hw = order ? node.r * 1.08 : node.r * 0.74;
+      const hd = order ? node.r * 0.8 : node.r * 0.74;
+      const z0 = (node.z || 0) * this.spaceMix;
+      const z1 = z0 + this.volumeHeight(node);
+      const pts = [
+        [node.x - hw, node.y - hd, z0],
+        [node.x + hw, node.y - hd, z0],
+        [node.x + hw, node.y + hd, z0],
+        [node.x - hw, node.y + hd, z0],
+        [node.x - hw, node.y - hd, z1],
+        [node.x + hw, node.y - hd, z1],
+        [node.x + hw, node.y + hd, z1],
+        [node.x - hw, node.y + hd, z1],
+      ].map(([x, y, z]) => this.project(x, y, z));
+      if (pts.some((p) => !this.projectedOk(p))) {
+        return this.drawVolumeFallback(ctx, node, color, selected, theme);
+      }
+      const faces = [
+        [0, 1, 2, 3, 0.42],
+        [4, 5, 6, 7, 1],
+        [0, 1, 5, 4, 0.78],
+        [1, 2, 6, 5, 0.62],
+        [2, 3, 7, 6, 0.7],
+        [3, 0, 4, 7, 0.86],
+      ];
+      faces
+        .map((face) => {
+          const verts = face.slice(0, 4).map((i) => pts[i]);
+          const visible = verts.every((v) => this.projectedOk(v));
+          const depth = verts.reduce((sum, v) => sum + v.depth, 0) / 4;
+          return { verts, visible, depth, shade: face[4] };
+        })
+        .filter((face) => face.visible)
+        .sort((a, b) => b.depth - a.depth)
+        .forEach((face) => {
+          ctx.beginPath();
+          ctx.moveTo(face.verts[0].x, face.verts[0].y);
+          for (let i = 1; i < face.verts.length; i += 1) ctx.lineTo(face.verts[i].x, face.verts[i].y);
+          ctx.closePath();
+          ctx.fillStyle = hexToRgba(color, (theme.dark ? 0.94 : 0.97) * face.shade);
+          ctx.fill();
+          ctx.strokeStyle = hexToRgba(color, selected ? 0.95 : 0.4);
+          ctx.lineWidth = selected ? 1.5 : 0.9;
+          ctx.stroke();
+        });
+      const top = this.project(node.x, node.y, z1);
+      if (!this.projectedOk(top)) return this.drawVolumeFallback(ctx, node, color, selected, theme);
+      return { x: top.x, y: top.y, r: Math.max(4, hw * top.s), s: top.s, depth: top.depth };
+    }
+
+    drawNodes3d(ctx, theme, time) {
+      const focus = this.selected;
+      const searching = this.matches.size > 0;
+      const ordered = this.nodes.slice().sort((a, b) => this.view(b).depth - this.view(a).depth);
+      ordered.forEach((node) => {
+        const p = this.view(node);
+        if (!p.visible) return;
+        const related = !focus || node === focus || this.hot.has(node.data.id);
+        const matched = !searching || node.match;
+        if (this.camera.zoom < 0.3 && node.data.kind === "line" && !related && !matched) return;
+        ctx.globalAlpha = !focus || related ? 1 : 0.42;
+        const color = node.data.color || "#64748b";
+        const selected = node === this.selected;
+        const hovered = node === this.hovered;
+        const cap = node.data.kind === "customer"
+          ? this.drawBlackHole3d(ctx, node, selected, theme, time)
+          : this.drawPrism3d(ctx, node, color, selected, theme);
+        if (!cap) return;
+        if ((selected || hovered) && !cap.hole && cap.r > 4 && cap.r < Math.max(this.width, this.height) * 0.55) {
+          ctx.strokeStyle = hexToRgba(color, selected ? 0.5 : 0.3);
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.arc(cap.x, cap.y, cap.r + 6, 0, TAU);
+          ctx.stroke();
+        }
+        if (node.data.debt > 0.005) {
+          ctx.strokeStyle = "#dc2626";
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.arc(cap.x, cap.y, cap.r + 4, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(node.data.debt / Math.max(node.data.value, 1), 0.08, 1));
+          ctx.stroke();
+        }
+        const screen = { ...p, x: cap.x, y: cap.y, r: cap.r, s: cap.s };
+        const mustLabel = selected || hovered || node.match || node.data.kind === "customer"
+          || (node.data.kind === "order" && cap.s > 0.55)
+          || (node.data.kind === "line" && cap.s > 1.2);
+        if ((this.options.labels && mustLabel) || selected) this.drawLabel3d(ctx, node, screen, theme, selected || hovered || node.match);
+      });
+      ctx.globalAlpha = 1;
+    }
+
+    drawLabel3d(ctx, node, p, theme, emphasized) {
+      const fontSize = clamp(node.data.kind === "customer" ? 12 : 11, 8, 15);
+      ctx.font = `${node.data.kind === "customer" ? 650 : 500} ${fontSize}px Segoe UI, sans-serif`;
+      const label = this.truncate(ctx, node.data.label || "Без названия", node.data.kind === "line" ? 120 : 170);
+      const x = p.x + p.r + 8;
+      const y = p.y + fontSize * 0.35;
+      if (emphasized) {
+        const width = ctx.measureText(label).width;
+        ctx.fillStyle = theme.dark ? "rgba(8,16,28,0.86)" : "rgba(255,255,255,0.9)";
+        ctx.beginPath();
+        ctx.roundRect(x - 4, y - fontSize, width + 8, fontSize + 6, 5);
+        ctx.fill();
+      }
+      ctx.fillStyle = theme.ink;
+      ctx.fillText(label, x, y);
+    }
+
+    drawHeatMarks3d(ctx, theme, time) {
+      const marks = this.heatGroup("customer");
+      const foci = marks.length ? marks : this.heatGroup("order");
+      if (!foci.length) return;
+      const peak = this.heatPeak(foci);
+      foci.forEach((n) => {
+        const p = this.view(n);
+        if (!p.visible) return;
+        const t = heatTone(n.data.debt, peak);
+        const [r, g, b] = heatRgb(t, theme.dark);
+        const pulse = this.reducedMotion ? 1 : 0.72 + 0.28 * Math.sin((time || 0) / 380 + n.x * 0.012);
+        ctx.strokeStyle = `rgba(${r},${g},${b},${0.55 + 0.35 * t})`;
+        ctx.lineWidth = 2.4 + 2.8 * t;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r + 8 + 7 * pulse, 0, TAU);
+        ctx.stroke();
+      });
     }
 
     drawSpace(ctx, theme) {
@@ -730,43 +1747,138 @@
       ctx.stroke();
     }
 
-    drawHeat(ctx) {
-      if (!this.nodes.length) return;
-      const box = this.bounds();
-      const cols = 52;
-      const rows = 34;
-      const cells = new Float32Array(cols * rows);
-      let peak = 0.0001;
-      this.nodes.forEach((n) => {
-        const w = Math.max(0, n.data.debt || 0);
-        if (w < 0.01) return;
-        const gx = ((n.x - box.minX) / Math.max(1, box.width)) * (cols - 1);
-        const gy = ((n.y - box.minY) / Math.max(1, box.height)) * (rows - 1);
-        const radius = 2.4;
-        const x0 = Math.max(0, Math.floor(gx - radius));
-        const x1 = Math.min(cols - 1, Math.ceil(gx + radius));
-        const y0 = Math.max(0, Math.floor(gy - radius));
-        const y1 = Math.min(rows - 1, Math.ceil(gy + radius));
-        for (let y = y0; y <= y1; y += 1) {
-          for (let x = x0; x <= x1; x += 1) {
-            const d2 = (x - gx) ** 2 + (y - gy) ** 2;
-            const add = w * Math.exp(-d2 / 2.1);
-            const i = y * cols + x;
-            cells[i] += add;
-            if (cells[i] > peak) peak = cells[i];
-          }
-        }
+    heatGroup(kind) {
+      return this.nodes.filter((n) => n.data.kind === kind && (n.data.debt || 0) > 0.01);
+    }
+
+    heatPeak(nodes) {
+      return Math.max(0.01, ...nodes.map((n) => n.data.debt || 0));
+    }
+
+    paintHeatBlob(ctx, x, y, radius, t, alpha, dark) {
+      const [r, g, b] = heatRgb(t, dark);
+      const grd = ctx.createRadialGradient(x, y, 0, x, y, radius);
+      grd.addColorStop(0, `rgba(${r},${g},${b},${alpha})`);
+      grd.addColorStop(0.34, `rgba(${r},${g},${b},${alpha * 0.55})`);
+      grd.addColorStop(0.68, `rgba(${r},${g},${b},${alpha * 0.18})`);
+      grd.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, TAU);
+      ctx.fill();
+    }
+
+    drawHeat(ctx, theme) {
+      const customers = this.heatGroup("customer");
+      const orders = this.heatGroup("order");
+      const lines = this.heatGroup("line");
+      if (!customers.length && !orders.length && !lines.length) return;
+      const zoom = this.camera.zoom;
+      const dark = !!theme.dark;
+      ctx.save();
+      ctx.globalCompositeOperation = dark ? "screen" : "source-over";
+      const paint = (nodes, baseR, spanR, a0, a1) => {
+        if (!nodes.length) return;
+        const peak = this.heatPeak(nodes);
+        nodes.slice().sort((a, b) => (a.data.debt || 0) - (b.data.debt || 0)).forEach((n) => {
+          const t = heatTone(n.data.debt, peak);
+          this.paintHeatBlob(ctx, n.x, n.y, baseR + spanR * t, t, a0 + (a1 - a0) * t, dark);
+        });
+      };
+      if (customers.length) paint(customers, 78, 170, dark ? 0.38 : 0.34, dark ? 0.88 : 0.72);
+      else paint(orders, 64, 140, dark ? 0.36 : 0.32, dark ? 0.86 : 0.7);
+      if (customers.length && zoom >= 0.48) paint(orders, 34, 72, dark ? 0.22 : 0.2, dark ? 0.58 : 0.48);
+      if (zoom >= 0.92) paint(lines, 16, 38, dark ? 0.2 : 0.18, dark ? 0.5 : 0.42);
+      ctx.restore();
+    }
+
+    drawHeatMarks(ctx, theme, time) {
+      const marks = this.heatGroup("customer");
+      const foci = marks.length ? marks : this.heatGroup("order");
+      if (!foci.length) return;
+      const zoom = this.camera.zoom;
+      const peak = this.heatPeak(foci);
+      foci.forEach((n) => {
+        const t = heatTone(n.data.debt, peak);
+        const [r, g, b] = heatRgb(t, theme.dark);
+        const pulse = this.reducedMotion ? 1 : 0.72 + 0.28 * Math.sin((time || 0) / 380 + n.x * 0.012);
+        ctx.strokeStyle = `rgba(${r},${g},${b},${0.55 + 0.35 * t})`;
+        ctx.lineWidth = (2.4 + 2.8 * t) / zoom;
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.r + (8 + 7 * pulse) / zoom, 0, TAU);
+        ctx.stroke();
       });
-      const cw = box.width / cols;
-      const ch = box.height / rows;
-      for (let y = 0; y < rows; y += 1) {
-        for (let x = 0; x < cols; x += 1) {
-          const t = cells[y * cols + x] / peak;
-          if (t < 0.06) continue;
-          ctx.fillStyle = t > 0.72 ? "rgba(220,38,38,0.22)" : t > 0.4 ? "rgba(245,158,11,0.16)" : "rgba(14,165,233,0.1)";
-          ctx.fillRect(box.minX + x * cw, box.minY + y * ch, cw + 0.5, ch + 0.5);
-        }
+    }
+
+    worldToScreen(wx, wy, wz = 0) {
+      if (this.spaceMix > 0.01) {
+        const p = this.project(wx, wy, wz);
+        return { x: p.x, y: p.y };
       }
+      return {
+        x: this.width / 2 + this.camera.x + wx * this.camera.zoom,
+        y: this.height / 2 + this.camera.y + wy * this.camera.zoom,
+      };
+    }
+
+    heatCalloutNodes() {
+      const customers = this.heatGroup("customer").sort((a, b) => b.data.debt - a.data.debt);
+      if (customers.length) return customers.slice(0, 4);
+      return this.heatGroup("order").sort((a, b) => b.data.debt - a.data.debt).slice(0, 4);
+    }
+
+    drawHeatCallouts(ctx, theme) {
+      const foci = this.heatCalloutNodes();
+      if (!foci.length) return;
+      const peak = this.heatPeak(foci);
+      const placed = [];
+      ctx.font = "600 11px Segoe UI, sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      foci.forEach((n) => {
+        const origin = this.worldToScreen(n.x, n.y, (n.z || 0) * this.spaceMix);
+        if (origin.x < -48 || origin.y < -48 || origin.x > this.width + 48 || origin.y > this.height + 48) return;
+        const t = heatTone(n.data.debt, peak);
+        const [r, g, b] = heatRgb(t, theme.dark);
+        const name = this.truncate(ctx, n.data.label || "Долг", 118);
+        const amount = compactMoney(n.data.debt);
+        const titleW = ctx.measureText(name).width;
+        ctx.font = "700 10px ui-monospace, Consolas, monospace";
+        const sumW = ctx.measureText(amount).width;
+        ctx.font = "600 11px Segoe UI, sans-serif";
+        const w = Math.max(titleW, sumW) + 28;
+        const h = 34;
+        let x = origin.x + (this.is3d() ? this.view(n).r : n.r * this.camera.zoom) + 16;
+        let y = origin.y - h / 2;
+        x = clamp(x, 14, this.width - w - 14);
+        y = clamp(y, 86, this.height - h - 52);
+        placed.forEach((prev) => {
+          if (Math.abs(prev.y - y) < h + 8 && Math.abs(prev.x - x) < w + 12) y = clamp(prev.y + h + 8, 86, this.height - h - 52);
+        });
+        placed.push({ x, y });
+        ctx.strokeStyle = `rgba(${r},${g},${b},0.55)`;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(origin.x, origin.y);
+        ctx.lineTo(x - 4, y + h / 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 8);
+        ctx.fillStyle = theme.dark ? "rgba(8, 16, 28, 0.88)" : "rgba(255, 255, 255, 0.92)";
+        ctx.fill();
+        ctx.strokeStyle = `rgba(${r},${g},${b},0.85)`;
+        ctx.stroke();
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.beginPath();
+        ctx.arc(x + 10, y + h / 2, 3.2, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = theme.ink;
+        ctx.fillText(name, x + 18, y + 11);
+        ctx.font = "700 10px ui-monospace, Consolas, monospace";
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillText(amount, x + 18, y + 24);
+        ctx.font = "600 11px Segoe UI, sans-serif";
+      });
     }
 
     drawTimeline(ctx, theme) {
@@ -820,7 +1932,7 @@
       if (!this.bridges.length || this.camera.zoom < 0.28) return;
       const selected = this.selected;
       this.bridges.forEach((edge) => {
-        const hot = selected && (edge.source === selected || edge.target === selected);
+        const hot = this.edgeIsHot(edge);
         const color = hot ? hexToRgba(selected.data.color, 0.7) : theme.dark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)";
         this.drawLink(ctx, edge.source, edge.target, {
           lift: 0.18,
@@ -940,7 +2052,7 @@
       const underlay = theme.dark ? "rgba(2,6,14,0.55)" : "rgba(255,255,255,0.78)";
       this.edges.forEach((edge) => {
         if (hideLines && edge.kind === "line" && !selected) return;
-        const hot = !!(selected && (edge.source === selected || edge.target === selected));
+        const hot = this.edgeIsHot(edge);
         const dim = !!(selected && !hot);
         const trunk = edge.kind === "customer";
         const base = (edge.source.data && edge.source.data.color) || (hot && selected ? selected.data.color : "#64748b");
@@ -1030,7 +2142,7 @@
         const mustLabel = selected || hovered || node.match || node.data.kind === "customer"
           || (node.data.kind === "order" && zoom > 0.62)
           || (node.data.kind === "line" && zoom > 1.45);
-        if (this.options.labels && mustLabel) this.drawLabel(ctx, node, theme, zoom, selected || hovered || node.match);
+        if ((this.options.labels && mustLabel) || selected) this.drawLabel(ctx, node, theme, zoom, selected || hovered || node.match);
       });
       ctx.globalAlpha = 1;
     }
@@ -1081,6 +2193,27 @@
       ctx.clearRect(0, 0, w, h);
       ctx.fillStyle = theme.bg;
       ctx.fillRect(0, 0, w, h);
+      if (this.options.heat) {
+        const foci = this.heatGroup("customer");
+        const dots = foci.length ? foci : this.heatGroup("order");
+        if (dots.length) {
+          const peak = this.heatPeak(dots);
+          dots.forEach((n) => {
+            const t = heatTone(n.data.debt, peak);
+            const [r, g, b] = heatRgb(t, theme.dark);
+            const rad = 5 + 11 * t;
+            const x = n.x * scale + ox;
+            const y = n.y * scale + oy;
+            const grd = ctx.createRadialGradient(x, y, 0, x, y, rad);
+            grd.addColorStop(0, `rgba(${r},${g},${b},0.9)`);
+            grd.addColorStop(1, `rgba(${r},${g},${b},0)`);
+            ctx.fillStyle = grd;
+            ctx.beginPath();
+            ctx.arc(x, y, rad, 0, TAU);
+            ctx.fill();
+          });
+        }
+      }
       this.edges.forEach((edge) => {
         ctx.strokeStyle = theme.edge;
         ctx.lineWidth = 0.6;
@@ -1110,6 +2243,9 @@
       const wx = (sx - this.miniMap.ox) / this.miniMap.scale;
       const wy = (sy - this.miniMap.oy) / this.miniMap.scale;
       this.stopTour();
+      this.orbit.targetX = wx;
+      this.orbit.targetY = wy;
+      this.idleUntil = performance.now() + 2000;
       this.animateCamera({ x: -wx * this.camera.zoom, y: -wy * this.camera.zoom, zoom: this.camera.zoom });
     }
 
@@ -1131,10 +2267,14 @@
     fit(animated = true, nodes = this.nodes) {
       if (!nodes.length) return;
       this.stopTour();
+      this.orbitTween = null;
       const box = this.bounds(nodes);
       const zoom = clamp(Math.min((this.width - 110) / Math.max(80, box.width), (this.height - 100) / Math.max(80, box.height)), 0.18, 2.5);
       const x = -((box.minX + box.maxX) / 2) * zoom;
       const y = -((box.minY + box.maxY) / 2) * zoom;
+      this.orbit.targetX = (box.minX + box.maxX) / 2;
+      this.orbit.targetY = (box.minY + box.maxY) / 2;
+      this.orbit.targetZ = 8;
       this.zoomTarget = zoom;
       this.zoomAnchor = { sx: this.width / 2, sy: this.height / 2, wx: -x / zoom, wy: -y / zoom };
       if (!animated || this.reducedMotion) {
@@ -1146,11 +2286,76 @@
       this.animateCamera({ x, y, zoom });
     }
 
+    approachZoom(node) {
+      if (!node) return 1;
+      if (node.data.kind === "line") return 2.05;
+      if (node.data.kind === "order") return 1.36;
+      return 1.16;
+    }
+
+    approach(node) {
+      if (!node) return;
+      const want = this.approachZoom(node);
+      const onTarget = Math.hypot(this.orbit.targetX - node.x, this.orbit.targetY - node.y) < 10;
+      const zoomOk = Math.abs((this.camera.zoom || 1) - want) < 0.08;
+      const centered = Math.hypot(this.camera.x, this.camera.y) < 28;
+      if (this.selected === node && onTarget && zoomOk && centered) return;
+      this.idleUntil = performance.now() + 2600;
+      if (this.is3d() || this.options.space3d) this.flyAround(node, { spin: false });
+      else {
+        this.lockOrbitTarget(node.x, node.y, node.z || 36);
+        this.animateCamera({ x: -node.x * want, y: -node.y * want, zoom: want }, 860);
+      }
+    }
+
     focus(id) {
-      const node = this.nodeMap.get(id);
+      const node = this.findNode(id);
       if (!node) return;
       this.select(node);
-      this.animateCamera({ x: -node.x * 1.5, y: -node.y * 1.5, zoom: 1.5 });
+      this.approach(node);
+    }
+
+    findNode(id) {
+      if (!id) return null;
+      return this.nodeMap.get(id)
+        || this.nodeMap.get(`order:${id}`)
+        || this.nodes.find((n) => n.data.rawId === id || n.data.orderId === id)
+        || null;
+    }
+
+    flyAround(node, { spin = false } = {}) {
+      if (!node) return;
+      this.camTween = null;
+      const z = (node.z || 0) * this.spaceMix || 8;
+      const from = {
+        yaw: this.orbit.yaw,
+        pitch: this.orbit.pitch,
+        zoom: this.camera.zoom || 1,
+        x: this.camera.x,
+        y: this.camera.y,
+        tx: this.orbit.targetX,
+        ty: this.orbit.targetY,
+        tz: this.orbit.targetZ,
+      };
+      const dist = Math.hypot(node.x - from.tx, node.y - from.ty, z - from.tz) + Math.hypot(from.x, from.y);
+      this.orbitTween = {
+        from,
+        to: {
+          yaw: spin ? from.yaw + 0.55 + (node.phase || 0) * 0.18 : from.yaw,
+          pitch: from.pitch,
+          zoom: this.approachZoom(node),
+          x: 0,
+          y: 0,
+          tx: node.x,
+          ty: node.y,
+          tz: z,
+        },
+        start: performance.now(),
+        duration: this.reducedMotion ? 0 : spin ? 1320 : clamp(640 + dist * 0.55, 820, 1600),
+      };
+      this.zoomTarget = this.orbitTween.to.zoom;
+      this.idleUntil = performance.now() + 2800;
+      this.needsFrame = true;
     }
 
     startTour() {
@@ -1174,7 +2379,12 @@
         return;
       }
       this.select(node);
-      this.animateCamera({ x: -node.x * 1.35, y: -node.y * 1.35, zoom: 1.35 });
+      this.idleUntil = performance.now() + 2800;
+      if (this.is3d() || this.options.space3d) this.flyAround(node, { spin: true });
+      else {
+        this.lockOrbitTarget(node.x, node.y, node.z || 36);
+        this.animateCamera({ x: -node.x * 1.35, y: -node.y * 1.35, zoom: 1.35 }, 860);
+      }
       this.tour.timer = setTimeout(() => {
         if (!this.tour) return;
         this.tour.index += 1;
@@ -1199,12 +2409,12 @@
       if (next) this.focus(next.data.id);
     }
 
-    animateCamera(target) {
+    animateCamera(target, duration) {
       this.camTween = {
         from: { ...this.camera },
         to: { x: target.x, y: target.y, zoom: clamp(target.zoom, 0.14, 5.4) },
         start: performance.now(),
-        duration: this.reducedMotion ? 0 : 520,
+        duration: this.reducedMotion ? 0 : (duration ?? 780),
       };
       this.zoomTarget = this.camTween.to.zoom;
       this.zoomAnchor = {
@@ -1217,7 +2427,8 @@
     }
 
     zoomAt(factor, sx, sy) {
-      this.aimZoom(this.zoomTarget * factor, sx, sy);
+      const pivot = sx == null || sy == null ? this.zoomFocusScreen() : { sx, sy };
+      this.aimZoom(this.zoomTarget * factor, pivot.sx, pivot.sy);
     }
 
     transformChanged() {
@@ -1258,22 +2469,65 @@
       return best;
     }
 
+    hitScreen(sx, sy) {
+      let best = null;
+      let bestDepth = Infinity;
+      this.nodes.forEach((n) => {
+        const z = (n.z || 0) * this.spaceMix + this.volumeHeight(n) * 0.7;
+        const p = this.project(n.x, n.y, z);
+        if (!p.visible) return;
+        const r = Math.max(8, (n.r || 6) * p.s);
+        const dx = sx - p.x;
+        const dy = sy - p.y;
+        if (dx * dx + dy * dy <= (r + 10) ** 2 && p.depth < bestDepth) {
+          best = n;
+          bestDepth = p.depth;
+        }
+      });
+      return best;
+    }
+
+    pickNode(point) {
+      return this.is3d() ? this.hitScreen(point.sx, point.sy) : this.hit(point.wx, point.wy);
+    }
+
     pointerDown(e) {
-      if (e.button !== 0) return;
+      if (e.button !== 0 && e.button !== 1) return;
+      if (e.button === 1) e.preventDefault();
       this.stopTour();
+      this.settleZoom();
       const point = this.eventPoint(e);
-      const node = this.hit(point.wx, point.wy);
+      const node = e.button === 1 ? null : this.pickNode(point);
       this.pointer = point;
       this.pendingCapture = e.pointerId;
       this.panVel.x = 0;
       this.panVel.y = 0;
-      this.drag = node
-        ? { type: "node", node, startX: node.x, startY: node.y, moved: false }
-        : { type: "pan", x: this.camera.x, y: this.camera.y, moved: false, lastSx: point.sx, lastSy: point.sy };
-      if (node) {
+      this.orbitVel.yaw = 0;
+      this.orbitVel.pitch = 0;
+      this.idleUntil = performance.now() + 2400;
+      if (e.button === 1) {
+        this.drag = { type: "pan", x: this.camera.x, y: this.camera.y, moved: false, lastSx: point.sx, lastSy: point.sy };
+      } else if (this.is3d() && !node) {
+        this.prepareOrbitPivot();
+        const yaw = this.orbit.yaw;
+        this.drag = {
+          type: "orbit",
+          yaw,
+          pitch: this.orbit.pitch,
+          moved: false,
+          cam: this.cameraWorld(),
+          target: { x: this.orbit.targetX, y: this.orbit.targetY, z: this.orbit.targetZ },
+          pivot: { ...(this.orbitPivot || this.worldAtScreenCenter()) },
+          right: { x: Math.cos(yaw), y: -Math.sin(yaw), z: 0 },
+        };
+      } else if (node) {
+        this.drag = { type: "node", node, startX: node.x, startY: node.y, lastSx: point.sx, lastSy: point.sy, moved: false };
         node.pinned = true;
         this.select(node);
+      } else {
+        this.drag = { type: "pan", x: this.camera.x, y: this.camera.y, moved: false, lastSx: point.sx, lastSy: point.sy };
       }
+      this.syncZoomAnchor();
     }
 
     pointerMove(e) {
@@ -1290,17 +2544,36 @@
               /* already captured */
             }
             this.pendingCapture = null;
-            this.canvas.classList.add("is-dragging");
+            this.canvas.classList.add("is-panning");
           }
         }
-        if (this.drag.type === "pan") {
+        if (this.drag.type === "orbit") {
+          this.applyOrbitAroundPivot(dx, dy, this.drag);
+          this.orbitVel.yaw = -(point.sx - (this.drag.lastSx ?? point.sx)) * 0.00042;
+          this.orbitVel.pitch = -(point.sy - (this.drag.lastSy ?? point.sy)) * 0.00028;
+          this.drag.lastSx = point.sx;
+          this.drag.lastSy = point.sy;
+          this.idleUntil = performance.now() + 2400;
+          this.transformChanged();
+        } else if (this.drag.type === "pan") {
           this.camera.x = this.drag.x + dx;
           this.camera.y = this.drag.y + dy;
           this.panVel.x = point.sx - (this.drag.lastSx ?? point.sx);
           this.panVel.y = point.sy - (this.drag.lastSy ?? point.sy);
           this.drag.lastSx = point.sx;
           this.drag.lastSy = point.sy;
+          this.syncZoomAnchor();
           this.transformChanged();
+        } else if (this.is3d()) {
+          const step = this.worldDeltaFromScreen(this.drag.node, point.sx - this.drag.lastSx, point.sy - this.drag.lastSy);
+          this.drag.node.x += step.x;
+          this.drag.node.y += step.y;
+          this.drag.node.tx = this.drag.node.x;
+          this.drag.node.ty = this.drag.node.y;
+          this.drag.lastSx = point.sx;
+          this.drag.lastSy = point.sy;
+          this.alpha = Math.max(this.alpha, 0.14);
+          this.needsFrame = true;
         } else {
           this.drag.node.x = this.drag.startX + dx / this.camera.zoom;
           this.drag.node.y = this.drag.startY + dy / this.camera.zoom;
@@ -1311,7 +2584,7 @@
         }
         return;
       }
-      this.setHover(this.hit(point.wx, point.wy), { x: point.sx, y: point.sy });
+      this.setHover(this.pickNode(point), { x: point.sx, y: point.sy });
     }
 
     pointerUp(e) {
@@ -1319,14 +2592,18 @@
       const was = this.drag;
       if (was.type === "node") {
         was.node.pinned = false;
-        if (!was.moved) this.select(was.node);
+        if (!was.moved) {
+          this.select(was.node);
+          this.approach(was.node);
+        }
       } else if (!was.moved) {
         this.select(null);
       }
       this.drag = null;
       this.pointer = null;
       this.pendingCapture = null;
-      this.canvas.classList.remove("is-dragging");
+      this.canvas.classList.remove("is-panning");
+      this.syncZoomAnchor();
       try {
         this.canvas.releasePointerCapture(e.pointerId);
       } catch {
@@ -1355,11 +2632,23 @@
       this.needsFrame = true;
     }
 
+    edgeIsHot(edge) {
+      if (!this.selected || !edge?.source || !edge?.target) return false;
+      if (edge.source === this.selected || edge.target === this.selected) return true;
+      return this.hot.has(edge.source.data.id) && this.hot.has(edge.target.data.id);
+    }
+
     buildHot() {
       this.hot.clear();
       const focus = this.selected || this.hovered;
       if (!focus) return;
-      this.hot.add(focus.data.id);
+      let cur = focus;
+      const seen = new Set();
+      while (cur && !seen.has(cur.data.id)) {
+        seen.add(cur.data.id);
+        this.hot.add(cur.data.id);
+        cur = cur.data.parent ? this.nodeMap.get(cur.data.parent) : null;
+      }
       this.edges.forEach((edge) => {
         if (edge.source === focus) this.hot.add(edge.target.data.id);
         if (edge.target === focus) this.hot.add(edge.source.data.id);

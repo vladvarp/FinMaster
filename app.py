@@ -19,6 +19,7 @@ from backend.remote import lan_candidates
 from backend.telegram import BOT as TELEGRAM
 from backend.telegram import send_link as telegram_send_link
 from backend.telegram import set_menu_button as telegram_set_menu
+from backend.telegram import push_open_controls as telegram_push_open
 from backend.tunnel import TUNNEL
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -185,6 +186,10 @@ def _recent_payload() -> list[dict[str, Any]]:
     return recent
 
 
+def _autosave_on() -> bool:
+    return bool(storage.load_config().get("autosave"))
+
+
 def _mobile_url(base: str, token: str) -> str:
     return f"{base.rstrip('/')}/m?t={token}"
 
@@ -199,7 +204,7 @@ def _qr_svg(url: str) -> str:
 def _telegram_sync_menu() -> None:
     """Кнопка Mini App в меню бота. Не поднимает туннель — только текущий HTTPS."""
     settings = storage.remote_settings()
-    token = str(settings.get("telegram_bot_token") or "")
+    token = str(settings.get("telegram_bot_token") or TELEGRAM.token() or "")
     if not token:
         return
     url = ""
@@ -229,15 +234,15 @@ def _telegram_live_url(chat_id: str = "") -> dict[str, Any]:
 
 def _start_telegram(settings: dict[str, Any] | None = None) -> None:
     cfg = settings or storage.remote_settings()
-    token = str(cfg.get("telegram_bot_token") or "")
+    token = str(cfg.get("telegram_bot_token") or TELEGRAM.token() or "").strip()
     if not token:
-        TELEGRAM.stop()
         return
     TELEGRAM.start(
         token,
         int(cfg.get("telegram_offset") or 0),
         on_request=_telegram_live_url,
         on_offset=lambda value: storage.save_remote_settings(telegram_offset=value),
+        on_rotate=_rotate_remote_link,
     )
     _telegram_sync_menu()
 
@@ -337,7 +342,8 @@ def api_autosave():
     data = request.get_json(silent=True) or {}
     enabled = bool(data.get("enabled"))
     storage.set_autosave(enabled)
-    return jsonify({"ok": True, "autosave": enabled})
+    version = REMOTE.notify() if REMOTE.enabled else 0
+    return jsonify({"ok": True, "autosave": enabled, "version": version})
 
 
 @app.post("/api/theme")
@@ -593,7 +599,9 @@ def api_remote_ngrok():
     updates: dict[str, Any] = {}
     if "authtoken" in data:
         token = str(data.get("authtoken") or "").strip()
-        if token:
+        if token and not storage.valid_ngrok_token(token):
+            return jsonify({"error": "Это не токен ngrok. Скопируйте Authtoken с dashboard.ngrok.com."}), 400
+        if storage.valid_ngrok_token(token):
             updates["ngrok_token"] = token
     if "enabled" in data:
         updates["ngrok"] = bool(data.get("enabled"))
@@ -623,7 +631,9 @@ def api_remote_telegram():
     updates: dict[str, Any] = {}
     if "token" in data:
         token = str(data.get("token") or "").strip()
-        if token:
+        if token and not storage.valid_telegram_token(token):
+            return jsonify({"error": "Это не токен бота. Скопируйте его целиком у @BotFather."}), 400
+        if storage.valid_telegram_token(token):
             updates["telegram_bot_token"] = token
     if "chat_id" in data:
         chat = str(data.get("chat_id") or "").strip()
@@ -667,17 +677,32 @@ def api_remote_stop():
     return jsonify({"ok": True, **_remote_public()})
 
 
-@app.post("/api/remote/rotate")
-def api_remote_rotate():
+def _rotate_remote_link() -> dict[str, Any]:
+    """Новая ссылка для телефона: бот и токены ngrok/Telegram не сбрасываются."""
     settings = storage.rotate_remote_token()
     if REMOTE.enabled:
         REMOTE.start(settings["token"])
     payload = _remote_public()
+    link = str(payload.get("public_url") or payload.get("url") or "")
+    chats = [str(settings.get("telegram_chat_id") or "")]
+    chats.extend(TELEGRAM.chat_ids())
+    telegram_push_open(
+        str(settings.get("telegram_bot_token") or TELEGRAM.token() or ""),
+        chats,
+        link,
+        "Новая ссылка готова. Старая закладка больше не работает — нажмите <b>Открыть</b>.",
+    )
+    netlog.add("session", "Выпущена новая ссылка", level="warn", key="rotate")
+    return payload
+
+
+@app.post("/api/remote/rotate")
+def api_remote_rotate():
+    payload = _rotate_remote_link()
     payload["ok"] = True
     g.netlog_text = "Выпущена новая ссылка"
     g.netlog_level = "warn"
     g.netlog_key = "rotate"
-    _telegram_sync_menu()
     return jsonify(payload)
 
 
@@ -711,6 +736,7 @@ def api_remote_log_clear():
 def api_remote_info():
     snap = REMOTE.snapshot(with_doc=False)
     snap.update(_remote_public())
+    snap["autosave"] = _autosave_on()
     return jsonify(snap)
 
 
@@ -752,6 +778,7 @@ def api_remote_pull():
     snap["devices"] = storage.remote_settings().get("devices") or []
     snap["recent"] = _recent_payload()
     snap["library"] = storage.list_library_reports()
+    snap["autosave"] = _autosave_on()
     return jsonify(snap)
 
 
@@ -762,6 +789,7 @@ def api_remote_session():
     snap["recent"] = _recent_payload()
     snap["library"] = storage.list_library_reports()
     snap["desktop_online"] = bool(REMOTE.clients("desktop"))
+    snap["autosave"] = _autosave_on()
     cid = request.args.get("cid") or ""
     name = request.args.get("name") or ""
     if cid:
@@ -858,8 +886,24 @@ def api_remote_nav():
         period=str(data.get("period") or ""),
         order_filter=str(data.get("filter") or ""),
         status=str(data.get("status") or ""),
+        line_id=str(data.get("line_id") or ""),
     )
     return jsonify({"ok": True, "version": version})
+
+
+@app.post("/api/remote/autosave")
+def api_remote_autosave():
+    """Телефон включает или выключает автосохранение на компьютере."""
+    if not REMOTE.enabled:
+        return jsonify({"error": "Сессия закрыта."}), 409
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get("enabled"))
+    storage.set_autosave(enabled)
+    version = REMOTE.notify()
+    g.netlog_text = "Автосохранение включено" if enabled else "Автосохранение выключено"
+    g.netlog_level = "ok"
+    g.netlog_key = "autosave"
+    return jsonify({"ok": True, "autosave": enabled, "version": version})
 
 
 @app.post("/api/remote/leave")

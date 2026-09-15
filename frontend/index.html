@@ -151,7 +151,10 @@
           </div>
           <div class="grid-2">
             <div class="card">
-              <h3>Выручка по дням</h3>
+              <div class="chart-head">
+                <h3>Выручка по дням</h3>
+                <div class="chart-legend" id="dash-line-legend"></div>
+              </div>
               <div class="chart-box"><canvas id="chart-dash-line"></canvas></div>
             </div>
             <div class="card">
@@ -200,8 +203,8 @@
           <div class="card" style="margin-bottom:12px">
             <h3>Фильтры мониторинга</h3>
             <div class="filters">
-              <div class="field"><label>Дата с</label><input type="datetime-local" id="f-from" /></div>
-              <div class="field"><label>Дата по</label><input type="datetime-local" id="f-to" /></div>
+              <div class="field"><label>Дата с</label><input type="date" id="f-from" /></div>
+              <div class="field"><label>Дата по</label><input type="date" id="f-to" /></div>
               <div class="field"><label>Поле даты</label>
                 <select id="f-date-field">
                   <option value="order_date">Дата заказа</option>
@@ -213,7 +216,6 @@
                   <option value="day">По дням</option>
                   <option value="week">По неделям</option>
                   <option value="month">По месяцам</option>
-                  <option value="hour">По часам</option>
                 </select>
               </div>
               <div class="field"><label>Статус</label><select id="f-status"><option value="">Все</option></select></div>
@@ -239,23 +241,26 @@
             <div class="card">
               <h3>Период A</h3>
               <div class="filters" style="grid-template-columns:1fr 1fr">
-                <div class="field"><label>С</label><input type="datetime-local" id="c-a-from" /></div>
-                <div class="field"><label>По</label><input type="datetime-local" id="c-a-to" /></div>
+                <div class="field"><label>С</label><input type="date" id="c-a-from" /></div>
+                <div class="field"><label>По</label><input type="date" id="c-a-to" /></div>
               </div>
               <div id="cmp-a"></div>
             </div>
             <div class="card">
               <h3>Период B</h3>
               <div class="filters" style="grid-template-columns:1fr 1fr">
-                <div class="field"><label>С</label><input type="datetime-local" id="c-b-from" /></div>
-                <div class="field"><label>По</label><input type="datetime-local" id="c-b-to" /></div>
+                <div class="field"><label>С</label><input type="date" id="c-b-from" /></div>
+                <div class="field"><label>По</label><input type="date" id="c-b-to" /></div>
               </div>
               <div id="cmp-b"></div>
             </div>
           </div>
           <div class="grid-2">
             <div class="card">
-              <h3>Динамика</h3>
+              <div class="chart-head">
+                <h3>Динамика</h3>
+                <div class="chart-legend" id="an-line-legend"></div>
+              </div>
               <div class="chart-box"><canvas id="chart-an-line"></canvas></div>
             </div>
             <div class="card">
@@ -321,14 +326,12 @@
 
         <div class="view cloud-view" id="view-cloud">
           <div class="cloud-head">
-            <div>
-              <div class="cloud-eyebrow">LIVE RELATIONSHIP ENGINE</div>
-              <h2>Облако заказов <span class="cloud-live"><i></i> живая физика</span></h2>
-              <p>Интерактивная карта всех заказов и подзаказов: кластеры, орбиты, финансовая ось и созвездия. Тяните узлы, летите по карте и находите очаги долга.</p>
-            </div>
-            <div class="cloud-kpis" id="cloud-kpis"></div>
+            <h2>Облако заказов <span class="cloud-live"><i></i> живая физика</span></h2>
+            <div class="cloud-eyebrow">LIVE RELATIONSHIP ENGINE</div>
           </div>
 
+          <div class="cloud-board" id="cloud-board">
+          <div class="cloud-bar">
           <div class="cloud-toolbar" aria-label="Настройки облака заказов">
             <label class="cloud-search">
               <span>⌕</span>
@@ -369,10 +372,12 @@
             </label>
             <button class="btn cloud-icon-btn" type="button" id="cloud-labels" aria-pressed="true" title="Показать или скрыть подписи">Aa</button>
             <button class="btn cloud-icon-btn" type="button" id="cloud-motion" aria-pressed="true" title="Запустить или остановить физику">◉</button>
-            <button class="btn cloud-icon-btn" type="button" id="cloud-heat" aria-pressed="false" title="Тепловая карта долга">♨</button>
+            <button class="btn cloud-icon-btn" type="button" id="cloud-heat" aria-pressed="false" title="Тепловая карта: где сосредоточен долг">♨</button>
+            <button class="btn cloud-icon-btn" type="button" id="cloud-3d" aria-pressed="false" title="Объёмное пространство">3D</button>
             <button class="btn cloud-icon-btn" type="button" id="cloud-tour" title="Автотур по очагам долга">➤</button>
             <button class="btn cloud-icon-btn" type="button" id="cloud-fit" title="Показать всё">⊙</button>
-            <button class="btn cloud-icon-btn" type="button" id="cloud-fullscreen" title="Развернуть карту">⛶</button>
+          </div>
+          <div class="cloud-kpis" id="cloud-kpis"></div>
           </div>
 
           <div class="cloud-stage" id="cloud-stage">
@@ -385,9 +390,15 @@
                 <button class="btn primary" type="button" id="cloud-add-order">+ Создать заказ</button>
               </div>
               <div class="cloud-tooltip" id="cloud-tooltip" hidden></div>
-              <div class="cloud-hint"><b>Стрелка</b> заказчик → заказ → позиция · <b>колесо</b> масштаб · <b>drag</b> карта · <b>узел</b> сдвинуть · <b>двойной клик</b> открыть · <b>T</b> автотур · <b>Esc</b> свернуть карту</div>
+              <div class="cloud-heat-scale" id="cloud-heat-scale" hidden>
+                <b>Тепло долга</b>
+                <span class="cloud-heat-bar" aria-hidden="true"></span>
+                <span class="cloud-heat-ends"><i>слабый</i><i>сильный</i></span>
+                <small id="cloud-heat-sum">неоплаченных позиций нет</small>
+              </div>
+              <div class="cloud-hint" id="cloud-hint"><b>Стрелка</b> заказчик → заказ → позиция · <b>колесо</b> масштаб · <b>drag</b> карта · <b>узел</b> сдвинуть · <b>двойной клик</b> открыть · <b>T</b> автотур · <b>Esc</b> свернуть карту</div>
               <div class="cloud-zoom">
-                <button type="button" class="cloud-exit-fs" id="cloud-exit-fs" title="Вернуться в обычный режим" aria-label="Вернуться в обычный режим">
+                <button type="button" class="cloud-fs" id="cloud-fs" title="Развернуть карту" aria-label="Развернуть карту" aria-pressed="false">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                   </svg>
@@ -409,6 +420,7 @@
           <div class="cloud-footer">
             <div class="cloud-legend" id="cloud-legend"></div>
             <div class="cloud-tech" id="cloud-tech">адаптивная физика · MST-созвездия · тепловое ядро · живая детализация</div>
+          </div>
           </div>
         </div>
 

@@ -19,6 +19,7 @@
     shareOrderId: null,
     orderFilter: "all",
     focusOrderId: null,
+    focusLineId: null,
     remoteStats: null,
     cash: { filter: "all", day: "", bucket: "", customer: "" },
     cloud: null,
@@ -26,6 +27,7 @@
 
   const LS_NET_CONSOLE = "finmaster.netconsole";
   const LS_CLOUD = "finmaster.cloud";
+  const LS_CHARTS = "finmaster.charts";
   const CLOUD_LAYOUTS = ["galaxy", "orbit", "timeline", "constellation"];
   const CLOUD_COLOR_MODES = ["status", "customer", "debt", "type"];
   const CLOUD_SIZE_MODES = ["amount", "debt", "quantity", "equal"];
@@ -39,6 +41,7 @@
     if (typeof raw.labels === "boolean") out.labels = raw.labels;
     if (typeof raw.motion === "boolean") out.motion = raw.motion;
     if (typeof raw.heat === "boolean") out.heat = raw.heat;
+    if (typeof raw.space3d === "boolean") out.space3d = raw.space3d;
     if (typeof raw.debtOnly === "boolean") out.debtOnly = raw.debtOnly;
     return out;
   }
@@ -60,6 +63,7 @@
       labels: !!s.labels,
       motion: s.motion !== false,
       heat: !!s.heat,
+      space3d: !!s.space3d,
       debtOnly: !!s.debtOnly,
     };
     try {
@@ -177,11 +181,16 @@
 
   function localStamp(d) {
     const p = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
 
   function nowLocal() {
     return localStamp(new Date());
+  }
+
+  function dateDay(v) {
+    const s = String(v || "");
+    return s.length >= 10 ? s.slice(0, 10) : s;
   }
 
   function money(n) {
@@ -388,7 +397,7 @@
       products: [],
       customers: [],
       orders: [],
-      ui: { sidebar_collapsed: false, column_widths: {}, share_fields: [], share_theme: "teal", cloud: {} },
+      ui: { sidebar_collapsed: false, column_widths: {}, share_fields: [], share_theme: "teal", cloud: {}, line_series: {} },
     };
   }
 
@@ -638,7 +647,7 @@
     if (period === "today") return stamp.slice(0, 10) === dayKey;
     if (period === "week") {
       const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
-      return stamp >= `${from.getFullYear()}-${pad(from.getMonth() + 1)}-${pad(from.getDate())}T00:00`;
+      return dateDay(stamp) >= `${from.getFullYear()}-${pad(from.getMonth() + 1)}-${pad(from.getDate())}`;
     }
     if (period === "month") return stamp.startsWith(`${now.getFullYear()}-${pad(now.getMonth() + 1)}`);
     if (period === "year") return stamp.startsWith(String(now.getFullYear()));
@@ -743,7 +752,7 @@
 
     return allRows().filter(({ order, line, totals }) => {
       if (q && !matchesSearch(order, line, q)) return false;
-      const dt = line[dateField] || "";
+      const dt = dateDay(line[dateField]);
       if (from && dt && dt < from) return false;
       if (to && dt && dt > to) return false;
       if (from && !dt) return false;
@@ -761,7 +770,7 @@
 
   function periodStats(from, to, dateField = "order_date") {
     const rows = allRows().filter(({ line }) => {
-      const dt = line[dateField] || "";
+      const dt = dateDay(line[dateField]);
       if (from && (!dt || dt < from)) return false;
       if (to && (!dt || dt > to)) return false;
       return true;
@@ -791,10 +800,9 @@
 
   function groupKey(iso, mode) {
     if (!iso) return "без даты";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+    const d = parseDay(iso);
+    if (!d) return dateDay(iso) || String(iso);
     const p = (n) => String(n).padStart(2, "0");
-    if (mode === "hour") return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:00`;
     if (mode === "month") return `${d.getFullYear()}-${p(d.getMonth() + 1)}`;
     if (mode === "week") {
       const tmp = new Date(d);
@@ -901,14 +909,14 @@
     const topProduct = topBy(rows, ({ line }) => line.product, ({ totals }) => totals.after);
 
     const monthAgo = localStamp(new Date(now.getTime() - 30 * 86400000));
-    const overdue = rows.filter(({ line, totals }) => totals.unpaid > 0.005 && line.order_date && line.order_date < monthAgo);
+    const overdue = rows.filter(({ line, totals }) => totals.unpaid > 0.005 && line.order_date && dateDay(line.order_date) < monthAgo);
     const overdueSum = overdue.reduce((acc, r) => acc + r.totals.unpaid, 0);
 
     const twoMonthsAgo = localStamp(new Date(now.getTime() - 60 * 86400000));
     const recentOrders = new Set();
     const olderOrders = new Set();
     rows.forEach(({ order, line }) => {
-      const d = line.order_date || "";
+      const d = dateDay(line.order_date);
       if (!d) return;
       if (d >= monthAgo) recentOrders.add(order.id);
       else if (d >= twoMonthsAgo) olderOrders.add(order.id);
@@ -998,30 +1006,146 @@
     ].join("");
   }
 
+  const LINE_METRICS = [
+    { id: "after", label: "Выручка", color: "#0f766e", fill: true, on: true },
+    { id: "paid", label: "Оплачено", color: "#059669", on: true },
+    { id: "unpaid", label: "Долг", color: "#dc2626", on: true },
+    { id: "cost", label: "Расход", color: "#d97706", on: true },
+    { id: "net", label: "Чистыми", color: "#6366f1", dashed: true, on: false },
+  ];
+  const LINE_CHARTS = ["dash", "analytics"];
+  const LINE_LEGEND_ID = { dash: "dash-line-legend", analytics: "an-line-legend" };
+
+  function defaultLineSeries() {
+    const out = {};
+    LINE_METRICS.forEach((m) => {
+      out[m.id] = !!m.on;
+    });
+    return out;
+  }
+
+  function sanitizeLineSeries(raw) {
+    const out = defaultLineSeries();
+    if (raw && typeof raw === "object") {
+      LINE_METRICS.forEach((m) => {
+        if (typeof raw[m.id] === "boolean") out[m.id] = raw[m.id];
+      });
+    }
+    if (LINE_METRICS.every((m) => !out[m.id])) out.after = true;
+    return out;
+  }
+
+  function sanitizeChartSeries(raw) {
+    const blank = () => ({ dash: defaultLineSeries(), analytics: defaultLineSeries() });
+    if (!raw || typeof raw !== "object") return blank();
+    const flat = LINE_METRICS.some((m) => typeof raw[m.id] === "boolean") && raw.dash == null && raw.analytics == null;
+    if (flat) {
+      const shared = sanitizeLineSeries(raw);
+      return { dash: { ...shared }, analytics: { ...shared } };
+    }
+    return {
+      dash: sanitizeLineSeries(raw.dash),
+      analytics: sanitizeLineSeries(raw.analytics),
+    };
+  }
+
+  function loadStoredChartSeries() {
+    try {
+      return sanitizeChartSeries(JSON.parse(localStorage.getItem(LS_CHARTS) || "null"));
+    } catch {
+      return sanitizeChartSeries(null);
+    }
+  }
+
+  const chartPrefs = { series: loadStoredChartSeries() };
+
+  function persistChartPrefs() {
+    const payload = sanitizeChartSeries(chartPrefs.series);
+    chartPrefs.series = payload;
+    try {
+      localStorage.setItem(LS_CHARTS, JSON.stringify(payload));
+    } catch {
+      /* ignore */
+    }
+    if (state.doc) ensureUi().line_series = payload;
+  }
+
+  function adoptChartsFromDocument() {
+    const saved = state.doc?.ui?.line_series;
+    if (saved && typeof saved === "object" && Object.keys(saved).length) {
+      chartPrefs.series = sanitizeChartSeries(saved);
+    }
+    persistChartPrefs();
+  }
+
+  function lineChartId(canvas) {
+    return canvas?.id === "chart-an-line" ? "analytics" : "dash";
+  }
+
+  function lineSeriesOn(chart) {
+    const id = LINE_CHARTS.includes(chart) ? chart : "dash";
+    return chartPrefs.series[id] || defaultLineSeries();
+  }
+
+  function renderLineLegend(chart) {
+    const on = lineSeriesOn(chart);
+    const el = $(LINE_LEGEND_ID[chart] || LINE_LEGEND_ID.dash);
+    if (!el) return;
+    el.innerHTML = LINE_METRICS.map(
+      (m) =>
+        `<button type="button" class="chart-leg ${on[m.id] ? "on" : ""}" data-line-chart="${chart}" data-line-series="${m.id}" title="${on[m.id] ? "Скрыть ряд" : "Показать ряд"}">
+          <i style="background:${m.color}"></i>${m.label}
+        </button>`
+    ).join("");
+  }
+
+  function trendDatasets(rows, group, dateField, lastN, chart) {
+    const map = new Map();
+    rows.forEach(({ line, totals }) => {
+      const k = groupKey(line[dateField] || line.order_date, group);
+      let b = map.get(k);
+      if (!b) {
+        b = { after: 0, paid: 0, unpaid: 0, cost: 0 };
+        map.set(k, b);
+      }
+      if (totals.expense) b.cost += totals.cost;
+      else {
+        b.after += totals.after;
+        b.paid += totals.paid;
+        b.unpaid += totals.unpaid;
+      }
+    });
+    let labels = [...map.keys()].sort();
+    if (lastN) labels = labels.slice(-lastN);
+    const on = lineSeriesOn(chart);
+    const datasets = LINE_METRICS.filter((m) => on[m.id]).map((m) => ({
+      label: m.label,
+      color: m.color,
+      fill: !!m.fill,
+      dashed: !!m.dashed,
+      values: labels.map((k) => {
+        const b = map.get(k) || { after: 0, paid: 0, unpaid: 0, cost: 0 };
+        if (m.id === "net") return round2(b.after - b.cost);
+        return b[m.id] || 0;
+      }),
+    }));
+    return { labels, datasets };
+  }
+
+  function paintTrendLine(canvas, rows, group, dateField, lastN) {
+    const chart = lineChartId(canvas);
+    renderLineLegend(chart);
+    if (!canvas) return;
+    const { labels, datasets } = trendDatasets(rows, group, dateField, lastN, chart);
+    FinCharts.line(canvas, { labels, datasets });
+  }
+
   function renderDashboard() {
     renderDashFocus();
     renderKpis();
     renderInsights();
     const rows = dashRows();
-    const byDay = {};
-    const costByDay = {};
-    let dashCost = 0;
-    rows.forEach(({ line, totals }) => {
-      const k = groupKey(line.order_date, "day");
-      byDay[k] = (byDay[k] || 0) + totals.after;
-      if (totals.cost) {
-        costByDay[k] = (costByDay[k] || 0) + totals.cost;
-        dashCost += totals.cost;
-      }
-    });
-    const labels = [...new Set([...Object.keys(byDay), ...Object.keys(costByDay)])].sort().slice(-14);
-    FinCharts.line($("chart-dash-line"), {
-      labels,
-      datasets: [
-        { values: labels.map((k) => byDay[k] || 0), color: "#0f766e", label: "Выручка" },
-        ...(dashCost ? [{ values: labels.map((k) => costByDay[k] || 0), color: "#d97706", label: "Расходы" }] : []),
-      ],
-    });
+    paintTrendLine($("chart-dash-line"), rows, "day", "order_date", 14);
     const byStatus = {};
     rows.forEach(({ line, totals }) => {
       const name = line.status || "Без статуса";
@@ -1143,10 +1267,31 @@
       ${order.notes ? `<div class="focus-notes">${esc(order.notes)}</div>` : ""}`;
   }
 
-  function setFocusOrder(id) {
-    state.focusOrderId = id || null;
+  function setFocusOrder(id, lineId) {
+    const nextOrder = id || null;
+    const nextLine = nextOrder ? (lineId || null) : null;
+    const same = state.focusOrderId === nextOrder && state.focusLineId === nextLine;
+    state.focusOrderId = nextOrder;
+    state.focusLineId = nextLine;
+    if (state.view === "cloud") {
+      if (nextOrder) {
+        renderCloud();
+        applyCloudFocus({ fly: !same });
+      }
+      return;
+    }
     if (state.view === "dashboard") renderDashboard();
     else setView("dashboard");
+  }
+
+  function applyCloudFocus({ fly = false } = {}) {
+    if (state.view !== "cloud" || !orderCloud || !state.focusOrderId) return;
+    const lineId = state.focusLineId ? `line:${state.focusOrderId}:${state.focusLineId}` : "";
+    const orderId = `order:${state.focusOrderId}`;
+    const node = (lineId && orderCloud.findNode(lineId)) || orderCloud.findNode(orderId);
+    if (!node) return;
+    if (fly) orderCloud.focus(node.data.id);
+    else if (orderCloud.selected !== node) orderCloud.select(node);
   }
 
   const EXPR_MAP = {
@@ -1233,9 +1378,9 @@
     ["unit", "Ед.", 72],
     ["price", "Цена", 90],
     ["discount", "Скидка %", 80],
-    ["order_date", "Дата заказа", 170],
+    ["order_date", "Дата заказа", 132],
     ["paid", "Оплачено", 90],
-    ["payment_date", "Дата оплаты", 170],
+    ["payment_date", "Дата оплаты", 132],
     ["unpaid", "Не оплачено", 110],
     ["total", "Итог", 120],
     ["status", "Статус", 140],
@@ -1264,7 +1409,7 @@
       const cal =
         key === "order_date" || key === "payment_date"
           ? `<span class="th-cal" title="Дата всем строкам заказа">
-              <input type="datetime-local" data-g="${key}" />
+              <input type="date" data-g="${key}" />
             </span>`
           : "";
       const resize = key === "actions" || key === "drag" ? "" : `<span class="col-resizer" data-col="${key}"></span>`;
@@ -1443,9 +1588,9 @@
       <td><select data-lk="unit">${optionList(unique([line.unit, ...units]), line.unit)}</select></td>
       <td class="num">${exprInput(line, "price_expr")}</td>
       <td class="num">${exprInput(line, "discount_expr")}</td>
-      <td><input data-lk="order_date" type="datetime-local" value="${esc((line.order_date || "").slice(0, 16))}" /></td>
+      <td><input data-lk="order_date" type="date" value="${esc(dateDay(line.order_date))}" /></td>
       <td class="num">${exprInput(line, "paid_expr")}</td>
-      <td><input data-lk="payment_date" type="datetime-local" value="${esc((line.payment_date || "").slice(0, 16))}" /></td>
+      <td><input data-lk="payment_date" type="date" value="${esc(dateDay(line.payment_date))}" /></td>
       <td class="num computed">${esc(money(t.unpaid))}</td>
       <td class="num computed">${esc(money(t.after))}<div style="color:#94a3b8;font-weight:500;font-size:11px">до скидки ${esc(money(t.total))}</div></td>
       <td><select data-lk="status">${optionList(unique([line.status, ...statusNames]), line.status)}</select></td>
@@ -1485,7 +1630,7 @@
       <td><input data-lk="product" autocomplete="off" spellcheck="false" value="${esc(line.product)}" placeholder="за что" /></td>
       <td>${calc}</td>
       ${amount}
-      <td><input data-lk="order_date" type="datetime-local" value="${esc((line.order_date || "").slice(0, 16))}" /></td>
+      <td><input data-lk="order_date" type="date" value="${esc(dateDay(line.order_date))}" /></td>
       <td class="num computed">−${esc(money(t.cost))}</td>
       <td><div class="row-actions">
         <button class="btn icon small" data-act="dupline" title="Дублировать строку">⧉</button>
@@ -1848,21 +1993,7 @@
     const s = summarize(rows);
     const group = $("f-group").value;
     const dateField = $("f-date-field").value;
-    const series = {};
-    const costSeries = {};
-    rows.forEach(({ line, totals }) => {
-      const k = groupKey(line[dateField], group);
-      series[k] = (series[k] || 0) + totals.after;
-      if (totals.cost) costSeries[k] = (costSeries[k] || 0) + totals.cost;
-    });
-    const labels = [...new Set([...Object.keys(series), ...Object.keys(costSeries)])].sort();
-    FinCharts.line($("chart-an-line"), {
-      labels,
-      datasets: [
-        { values: labels.map((k) => series[k] || 0), color: "#2563eb", label: "Выручка" },
-        ...(s.cost ? [{ values: labels.map((k) => costSeries[k] || 0), color: "#d97706", label: "Расходы" }] : []),
-      ],
-    });
+    paintTrendLine($("chart-an-line"), rows, group, dateField);
 
     const a = periodStats($("c-a-from").value, $("c-a-to").value, dateField);
     const b = periodStats($("c-b-from").value, $("c-b-to").value, dateField);
@@ -1896,7 +2027,7 @@
             <td class="num">${totals.expense ? `−${esc(money(totals.cost))}` : esc(money(totals.after))}</td>
             <td class="num">${totals.expense ? "—" : esc(money(totals.paid))}</td>
             <td class="num">${totals.expense ? "—" : esc(money(totals.unpaid))}</td>
-            <td>${esc((line.order_date || "").replace("T", " "))}</td>
+            <td>${esc(dateDay(line.order_date))}</td>
             <td>${
               totals.expense
                 ? `<span class="pill expense-pill">${esc(kindLabel(totals.kind))}</span>`
@@ -1982,6 +2113,8 @@
 
   function parseDay(iso) {
     if (!iso) return null;
+    const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
     const d = new Date(iso);
     return Number.isNaN(d.getTime()) ? null : dayStart(d);
   }
@@ -2193,8 +2326,8 @@
     FinCharts.line($("chart-cash-line"), {
       labels,
       datasets: [
-        { values: plan, color: "#0f766e", label: "Если платят в срок" },
-        { values: real, color: "#c9a227", label: "С учётом дисциплины" },
+        { values: plan, color: "#0f766e", label: "Если платят в срок", fill: true },
+        { values: real, color: "#c9a227", label: "С учётом дисциплины", dashed: true },
       ],
     });
   }
@@ -2614,6 +2747,7 @@
         labels: true,
         motion: true,
         heat: false,
+        space3d: false,
         ...loadStoredCloud(),
       };
     }
@@ -2745,7 +2879,7 @@
         paid: totals.paid,
         debt: totals.debt,
         count: lines.length,
-        time: first?.order_date ? new Date(first.order_date).getTime() : NaN,
+        time: first?.order_date ? parseDay(first.order_date)?.getTime() ?? NaN : NaN,
       };
       orderNode.color = cloudNodeColor("order", orderNode);
       orderNode.radius = cloudRadius("order", orderNode, maxima);
@@ -2775,7 +2909,7 @@
           discount: t.discount,
           orderDate: line.order_date || "",
           paymentDate: line.payment_date || "",
-          time: line.order_date ? new Date(line.order_date).getTime() : orderNode.time,
+          time: line.order_date ? parseDay(line.order_date)?.getTime() ?? orderNode.time : orderNode.time,
         };
         lineNode.color = cloudNodeColor("line", lineNode);
         lineNode.radius = cloudRadius("line", lineNode, maxima);
@@ -2818,6 +2952,7 @@
       items = [...map.entries()].slice(0, 9);
     }
     $("cloud-legend").innerHTML = [
+      ...(cloudState().heat ? [`<span class="cloud-legend-heat" title="Цвет показывает, где сосредоточен долг"><i></i>тепло долга: слабый → сильный</span>`] : []),
       `<span class="cloud-legend-kind"><i class="customer"></i>заказчик</span>`,
       `<span class="cloud-legend-kind"><i class="order"></i>заказ</span>`,
       `<span class="cloud-legend-kind"><i class="line"></i>позиция</span>`,
@@ -2926,7 +3061,41 @@
     $("cloud-motion")?.setAttribute("aria-pressed", String(s.motion !== false));
     $("cloud-heat")?.setAttribute("aria-pressed", String(!!s.heat));
     $("cloud-heat")?.classList.toggle("active", !!s.heat);
+    $("cloud-3d")?.setAttribute("aria-pressed", String(!!s.space3d));
+    $("cloud-3d")?.classList.toggle("active", !!s.space3d);
     if ($("cloud-motion")) $("cloud-motion").textContent = s.motion === false ? "Ⅱ" : "◉";
+    const hint = $("cloud-hint");
+    if (hint) {
+      hint.innerHTML = s.space3d
+        ? `<b>3D</b> левая — обзор · <b>средняя</b> сдвиг · <b>колесо</b> масштаб · <b>узел</b> сдвинуть · <b>двойной клик</b> открыть · <b>T</b> автотур`
+        : `<b>Стрелка</b> заказчик → заказ → позиция · <b>колесо</b> масштаб · <b>drag</b> карта · <b>узел</b> сдвинуть · <b>двойной клик</b> открыть · <b>T</b> автотур · <b>Esc</b> свернуть карту`;
+    }
+    $("cloud-canvas-wrap")?.classList.toggle("space-3d", !!s.space3d);
+  }
+
+  function heatFociWord(n) {
+    const abs = Math.abs(Math.round(n)) % 100;
+    const tail = abs % 10;
+    if (abs > 10 && abs < 20) return "очагов";
+    if (tail === 1) return "очаг";
+    if (tail >= 2 && tail <= 4) return "очага";
+    return "очагов";
+  }
+
+  function syncCloudHeatScale(graph) {
+    const on = !!cloudState().heat;
+    const empty = $("cloud-empty") && !$("cloud-empty").hidden;
+    const el = $("cloud-heat-scale");
+    if (el) el.hidden = !on || empty;
+    $("cloud-canvas-wrap")?.classList.toggle("heat-on", on);
+    const sum = $("cloud-heat-sum");
+    if (!sum || !on) return;
+    const nodes = (graph || cloudGraphData()).nodes || [];
+    const debt = nodes.filter((n) => n.kind === "line").reduce((acc, n) => acc + (n.debt || 0), 0);
+    const foci = nodes.filter((n) => n.kind === "customer" && (n.debt || 0) > 0.01).length;
+    sum.textContent = debt > 0.01
+      ? `в кадре ${money(debt)}${foci ? ` · ${foci} ${heatFociWord(foci)}` : ""}`
+      : "неоплаченных позиций нет";
   }
 
   function renderCloud() {
@@ -2946,15 +3115,18 @@
       if (note) note.textContent = hasOrders ? "Измените запрос или выключите фильтр долгов." : "Добавьте первый заказ — связи появятся здесь автоматически.";
       if (add) add.hidden = hasOrders;
     }
+    syncCloudHeatScale(graph);
     const engine = ensureOrderCloud();
     engine?.update(graph, {
       layout: cloudState().layout,
       labels: cloudState().labels,
       motion: cloudState().motion,
       heat: cloudState().heat,
+      space3d: cloudState().space3d,
       query: cloudState().query,
     });
-    $("cloud-tech").textContent = `${graph.nodes.length} узлов · ${graph.edges.length} связей · MST-созвездия · тепловое ядро`;
+    $("cloud-tech").textContent = `${graph.nodes.length} узлов · ${graph.edges.length} связей · MST-созвездия · ${cloudState().space3d ? "3D" : "2D"}${cloudState().heat ? " · тепло долга" : ""}`;
+    if (state.focusLineId) applyCloudFocus({ fly: false });
   }
 
   function bindCloud() {
@@ -3006,16 +3178,25 @@
       e.currentTarget.setAttribute("aria-pressed", String(cloudState().heat));
       e.currentTarget.classList.toggle("active", cloudState().heat);
       orderCloud?.setOptions({ heat: cloudState().heat });
+      syncCloudHeatScale();
+      renderCloudLegend(cloudGraphData());
+    });
+    $("cloud-3d")?.addEventListener("click", (e) => {
+      cloudState().space3d = !cloudState().space3d;
+      persistCloudPrefs();
+      e.currentTarget.setAttribute("aria-pressed", String(cloudState().space3d));
+      e.currentTarget.classList.toggle("active", cloudState().space3d);
+      orderCloud?.setOptions({ space3d: cloudState().space3d });
+      syncCloudControls();
     });
     $("cloud-tour")?.addEventListener("click", () => {
       if (!orderCloud?.startTour()) toast("Для автотура нужны заказы или долги");
       else toast("Автотур по очагам долга · Esc остановить");
     });
     $("cloud-fit")?.addEventListener("click", () => orderCloud?.fit());
-    $("cloud-zoom-in")?.addEventListener("click", () => orderCloud?.zoomAt(1.22, orderCloud.width / 2, orderCloud.height / 2));
-    $("cloud-zoom-out")?.addEventListener("click", () => orderCloud?.zoomAt(1 / 1.22, orderCloud.width / 2, orderCloud.height / 2));
-    $("cloud-fullscreen")?.addEventListener("click", () => toggleCloudFullscreen());
-    $("cloud-exit-fs")?.addEventListener("click", () => toggleCloudFullscreen(false));
+    $("cloud-zoom-in")?.addEventListener("click", () => orderCloud?.zoomAt(1.22));
+    $("cloud-zoom-out")?.addEventListener("click", () => orderCloud?.zoomAt(1 / 1.22));
+    $("cloud-fs")?.addEventListener("click", () => toggleCloudFullscreen());
     $("cloud-add-order")?.addEventListener("click", () => {
       state.doc.orders.push(emptyOrder());
       markDirty();
@@ -3045,19 +3226,21 @@
   }
 
   function cloudFullscreenOn() {
-    return cloudFullscreenElement() === $("cloud-stage");
+    const board = $("cloud-board");
+    const el = cloudFullscreenElement();
+    return !!board && (el === board || board.contains(el));
   }
 
   async function toggleCloudFullscreen(force) {
-    const stage = $("cloud-stage");
-    if (!stage) return;
+    const board = $("cloud-board");
+    if (!board) return;
     try {
       if (force === false || (force == null && cloudFullscreenOn())) {
         const exit = document.exitFullscreen || document.webkitExitFullscreen;
         if (exit) await exit.call(document);
       } else if (!cloudFullscreenOn()) {
-        const enter = stage.requestFullscreen || stage.webkitRequestFullscreen;
-        if (enter) await enter.call(stage);
+        const enter = board.requestFullscreen || board.webkitRequestFullscreen;
+        if (enter) await enter.call(board);
       }
     } catch {
       toast("Полноэкранный режим недоступен в этом окне");
@@ -3066,10 +3249,13 @@
 
   function syncCloudFullscreen() {
     const on = cloudFullscreenOn();
+    $("cloud-board")?.classList.toggle("is-fullscreen", on);
     $("cloud-stage")?.classList.toggle("is-fullscreen", on);
-    $("cloud-fullscreen")?.classList.toggle("active", on);
-    $("cloud-fullscreen")?.setAttribute("title", on ? "Вернуться в окно" : "Развернуть карту");
-    $("cloud-exit-fs")?.setAttribute("aria-hidden", String(!on));
+    const fs = $("cloud-fs");
+    fs?.classList.toggle("on", on);
+    fs?.setAttribute("aria-pressed", String(on));
+    fs?.setAttribute("title", on ? "Вернуться в окно" : "Развернуть карту");
+    fs?.setAttribute("aria-label", on ? "Вернуться в окно" : "Развернуть карту");
     requestAnimationFrame(() => orderCloud?.resize?.());
   }
 
@@ -3198,19 +3384,20 @@
       const now = new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0);
       const prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0);
-      const prevEnd = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0);
-      prevEnd.setMinutes(prevEnd.getMinutes() - 1);
+      const prevEnd = new Date(now.getFullYear(), now.getMonth(), 0);
       setDT("c-b-from", prevStart);
       setDT("c-b-to", prevEnd);
       setDT("c-a-from", monthStart);
       setDT("c-a-to", now);
     }
     renderAll();
+    if (name === "cloud") applyCloudFocus({ fly: true });
   }
 
   function createNew() {
     state.doc = emptyDoc();
     persistCloudPrefs();
+    persistChartPrefs();
     state.path = null;
     historyReset();
     setClean();
@@ -3238,6 +3425,7 @@
     state.doc = res.document;
     state.path = res.path;
     adoptCloudFromDocument();
+    adoptChartsFromDocument();
     historyReset();
     if (res.recent) renderRecent(res.recent);
     else if (res.path) pushLocalRecent(res.path, res.document.title);
@@ -3335,8 +3523,8 @@
         totals.expense ? totals.cost : "",
         totals.expense ? "" : totals.paid,
         totals.expense ? "" : totals.unpaid,
-        line.order_date,
-        totals.expense ? "" : line.payment_date,
+        line.order_date ? dateDay(line.order_date) : "",
+        totals.expense ? "" : line.payment_date ? dateDay(line.payment_date) : "",
         totals.expense ? kindLabel(totals.kind) : line.status,
       ].map((v) => `"${String(v ?? "").replaceAll('"', '""')}"`);
       lines.push(vals.join(";"));
@@ -3582,6 +3770,7 @@
       } else if (e.target.closest("#focus-open")) {
         const id = state.focusOrderId;
         state.focusOrderId = null;
+        state.focusLineId = null;
         if (id) gotoOrder(id);
       }
     });
@@ -4095,8 +4284,8 @@
     });
     $("btn-preset-today").addEventListener("click", () => {
       const d = new Date();
-      setDT("f-from", new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0));
-      setDT("f-to", new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59));
+      setDT("f-from", new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+      setDT("f-to", new Date(d.getFullYear(), d.getMonth(), d.getDate()));
       renderAnalytics();
     });
     $("btn-preset-week").addEventListener("click", () => {
@@ -4118,6 +4307,20 @@
       setDT("f-from", new Date(d.getFullYear(), 0, 1, 0, 0));
       setDT("f-to", d);
       renderAnalytics();
+    });
+
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-line-series]");
+      if (!btn || !state.doc) return;
+      const id = btn.dataset.lineSeries;
+      const chart = LINE_CHARTS.includes(btn.dataset.lineChart) ? btn.dataset.lineChart : "dash";
+      const on = lineSeriesOn(chart);
+      const next = !on[id];
+      if (!next && LINE_METRICS.every((m) => (m.id === id ? false : on[m.id]))) return;
+      chartPrefs.series[chart] = { ...on, [id]: next };
+      persistChartPrefs();
+      if (chart === "analytics") paintTrendLine($("chart-an-line"), analyticsRows(), $("f-group").value, $("f-date-field").value);
+      else paintTrendLine($("chart-dash-line"), dashRows(), "day", "order_date", 14);
     });
 
     $("btn-save").addEventListener("click", () => save());
@@ -4241,6 +4444,7 @@
         state.doc = JSON.parse(text);
         state.path = file.name;
         adoptCloudFromDocument();
+        adoptChartsFromDocument();
         historyReset();
         pushLocalRecent(file.name, state.doc.title);
         setClean();
@@ -4422,7 +4626,7 @@
 
   function setDT(id, date) {
     const p = (n) => String(n).padStart(2, "0");
-    $(id).value = `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}T${p(date.getHours())}:${p(date.getMinutes())}`;
+    $(id).value = `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
   }
 
   function onNew() {
@@ -4821,7 +5025,7 @@
 
   function fmtShareDate(value) {
     if (!value) return "—";
-    return String(value).replace("T", " ").slice(0, 16);
+    return dateDay(value) || "—";
   }
 
   function customerOrg(name) {
@@ -5820,6 +6024,21 @@
           setView("cloud");
           $("cloud-heat")?.setAttribute("aria-pressed", "true");
           $("cloud-heat")?.classList.add("active");
+          syncCloudHeatScale();
+        },
+      },
+      {
+        group: "Облако",
+        ico: "3D",
+        title: "Облако: объёмное пространство",
+        sub: "переключить карту в 3D",
+        run: () => {
+          cloudState().space3d = true;
+          persistCloudPrefs();
+          setView("cloud");
+          $("cloud-3d")?.setAttribute("aria-pressed", "true");
+          $("cloud-3d")?.classList.add("active");
+          orderCloud?.setOptions({ space3d: true });
         },
       },
       {
@@ -6649,6 +6868,7 @@
           remote.docVersion = data.doc_version || 0;
           applyRemoteDoc(data.document);
         }
+        if (typeof data.autosave === "boolean") applyRemoteAutosave(data.autosave);
         if (data.nav && data.nav.seq > remote.lastNav) {
           remote.lastNav = data.nav.seq;
           applyRemoteNav(data.nav);
@@ -6659,6 +6879,16 @@
       }
     }
     remote.polling = false;
+  }
+
+  function applyRemoteAutosave(enabled) {
+    if (typeof enabled !== "boolean") return;
+    const el = $("autosave");
+    if (el) el.checked = enabled;
+    if (state.autosave === enabled) return;
+    state.autosave = enabled;
+    if (enabled) save({ silent: true });
+    else clearTimeout(state.autosaveTimer);
   }
 
   function revealRemoteWorkspace() {
@@ -6686,10 +6916,19 @@
     toast("Изменения с телефона применены");
   }
 
+  function showCloudOverview() {
+    state.focusOrderId = null;
+    state.focusLineId = null;
+    if (state.view !== "cloud" || !orderCloud) return;
+    orderCloud.select(null);
+    orderCloud.fit();
+  }
+
   function applyRemoteNav(nav) {
     if (!nav || !nav.view) return;
     if (nav.view === "files") {
       if (!state.doc || $("app-shell")?.hidden) renderStartLists();
+      showCloudOverview();
       return;
     }
     if (!revealRemoteWorkspace()) return;
@@ -6697,12 +6936,31 @@
       const order = (state.doc.orders || []).find((o) => o.id === nav.order_id);
       if (!order) return;
       state.remoteStats = null;
-      setFocusOrder(order.id);
-      toast(`Телефон открыл заказ №${order.number || "—"}`);
+      const sameOrder = state.focusOrderId === order.id;
+      setFocusOrder(order.id, nav.line_id || "");
+      if (!sameOrder) toast(`Телефон открыл заказ №${order.number || "—"}`);
       return;
     }
     const hadFocus = !!state.focusOrderId;
+    if (state.view === "cloud") {
+      if (nav.view === "stats") {
+        const next = {
+          period: nav.period || "all",
+          filter: nav.filter || "all",
+          status: nav.status || "",
+        };
+        const changed = JSON.stringify(state.remoteStats) !== JSON.stringify(next);
+        state.remoteStats = next;
+        showCloudOverview();
+        if (changed && remoteStatsActive()) toast(`Сводка с телефона: ${remoteStatsLabel()}`);
+        return;
+      }
+      showCloudOverview();
+      state.remoteStats = null;
+      return;
+    }
     state.focusOrderId = null;
+    state.focusLineId = null;
     if (nav.view === "stats") {
       const next = {
         period: nav.period || "all",
@@ -6744,6 +7002,8 @@
       if (ok) toast(back ? "Действие отменено с телефона" : "Действие возвращено с телефона");
     } else if (cmd.type === "new") {
       state.doc = emptyDoc();
+      persistCloudPrefs();
+      persistChartPrefs();
       state.path = "";
       historyReset();
       setClean();
@@ -6882,11 +7142,18 @@
     $("remote-start")?.addEventListener("click", remoteStart);
     $("remote-stop")?.addEventListener("click", remoteStop);
     $("remote-rotate")?.addEventListener("click", async () => {
-      if (!confirm("Старая закладка на телефоне перестанет работать. Создать новую ссылку?")) return;
+      const ok = await askConfirm({
+        title: "Новая ссылка",
+        text: "Старая закладка на телефоне перестанет работать. Бот останется на связи, кнопка «Открыть» обновится сама.",
+        ok: "Создать ссылку",
+        cancel: "Отмена",
+        danger: true,
+      });
+      if (!ok) return;
       try {
         const data = await apiPost("/api/remote/rotate", {});
         renderRemoteModal(data);
-        toast("Ссылка обновлена — отсканируйте QR ещё раз");
+        toast("Ссылка обновлена — в боте нажмите «Открыть»");
       } catch (err) {
         toast(`Не удалось сменить ссылку: ${err.message || err}`);
       }
