@@ -562,7 +562,7 @@ const FinCharts = (() => {
     const { items } = inst.opts;
     const values = inst.current[0] || [];
     const targets = inst.target[0] || [];
-    const total = targets.reduce((s, v) => s + v, 0);
+    const total = targets.reduce((s, v) => s + Math.max(0, v), 0);
     if (!items.length || total <= 0) {
       inst.geom = null;
       drawEmpty(ctx, w, h, "Нет данных для диаграммы");
@@ -573,16 +573,24 @@ const FinCharts = (() => {
     const cy = wide ? h / 2 : h * 0.42;
     const r = Math.min(wide ? w * 0.3 : w * 0.34, h * (wide ? 0.4 : 0.34));
     const inner = r * 0.62;
-    const drawTotal = values.reduce((s, v) => s + v, 0) || 1;
+    const drawTotal = values.reduce((s, v) => s + Math.max(0, v), 0) || 1;
     const gap = 0.016;
     let a = -Math.PI / 2;
     const segs = [];
 
     items.forEach((item, i) => {
-      const share = (values[i] || 0) / drawTotal;
+      const share = Math.max(0, values[i] || 0) / drawTotal;
       const sweep = share * Math.PI * 2;
       if (sweep <= 0.0005) {
         segs.push({ a0: a, a1: a, item, i });
+        return;
+      }
+      const pad = sweep > gap * 2 ? gap / 2 : Math.min(gap / 4, sweep / 4);
+      const a0 = a + pad;
+      const a1 = a + sweep - pad;
+      if (a1 <= a0) {
+        segs.push({ a0: a, a1: a + sweep, item, i });
+        a += sweep;
         return;
       }
       const hovered = inst.hover === i;
@@ -596,8 +604,8 @@ const FinCharts = (() => {
       grad.addColorStop(1, color);
 
       ctx.beginPath();
-      ctx.arc(cx + ox, cy + oy, r + (hovered ? 2 : 0), a + gap / 2, a + sweep - gap / 2);
-      ctx.arc(cx + ox, cy + oy, inner, a + sweep - gap / 2, a + gap / 2, true);
+      ctx.arc(cx + ox, cy + oy, r + (hovered ? 2 : 0), a0, a1);
+      ctx.arc(cx + ox, cy + oy, inner, a1, a0, true);
       ctx.closePath();
       ctx.fillStyle = grad;
       if (hovered) {

@@ -869,6 +869,46 @@ def api_remote_leave():
     return jsonify({"ok": True})
 
 
+@app.post("/api/remote/snapshot-png")
+def api_remote_snapshot_png():
+    """Mini App не умеет сохранить blob в Загрузки — бот кладёт PNG в Telegram."""
+    if not REMOTE.enabled:
+        return jsonify({"error": "Сессия закрыта."}), 409
+    data = request.get_json(silent=True) or {}
+    raw = str(data.get("png") or "").strip()
+    if raw.startswith("data:") and "," in raw:
+        raw = raw.split(",", 1)[1]
+    try:
+        png = base64.b64decode(raw, validate=False)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Не удалось прочитать картинку."}), 400
+    if len(png) < 32 or png[:8] != b"\x89PNG\r\n\x1a\n":
+        return jsonify({"error": "Это не PNG-снимок."}), 400
+    if len(png) > 6 * 1024 * 1024:
+        return jsonify({"error": "Снимок слишком большой для Telegram."}), 400
+    mode = str(data.get("mode") or "share").strip().lower()
+    if mode not in {"share", "save"}:
+        mode = "share"
+    try:
+        user_id = int(data.get("user_id") or 0)
+    except (TypeError, ValueError):
+        user_id = 0
+    try:
+        result = TELEGRAM.deliver_webapp_snapshot(
+            png,
+            str(data.get("filename") or "finmaster-snapshot.png"),
+            str(data.get("caption") or "Снимок заказа"),
+            mode,
+            user_id,
+        )
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 409
+    g.netlog_text = "Mini App отправил снимок в Telegram"
+    g.netlog_level = "ok"
+    g.netlog_key = "snap-png"
+    return jsonify(result)
+
+
 def _window_is_fullscreen() -> bool:
     window = WINDOW
     native = getattr(window, "native", None) if window is not None else None

@@ -2291,8 +2291,8 @@
       <div class="preview-wrap"><div class="preview" id="snap-preview" style="background:${theme.bg};color:${theme.ink}"></div></div>
 
       <div class="stack">
-        <button type="button" class="btn primary wide" id="snap-share">Поделиться картинкой</button>
-        <button type="button" class="btn wide" id="snap-download">Сохранить PNG в телефон</button>
+        <button type="button" class="btn primary wide" id="snap-share">${telegramApp ? "Поделиться в Telegram" : "Поделиться картинкой"}</button>
+        <button type="button" class="btn wide" id="snap-download">${telegramApp ? "Прислать PNG в чат" : "Сохранить PNG в телефон"}</button>
         <button type="button" class="btn wide" id="snap-text">Скопировать текстом</button>
       </div>`;
 
@@ -2589,7 +2589,7 @@
 
   function snapFileName() {
     const order = snapOrder();
-    const base = [order?.number ? `zakaz-${order.number}` : "snimok", order?.customer]
+    const base = [order?.number ? `zakaz-${order.number}` : "snimok", order?.name]
       .filter(Boolean)
       .join("-")
       .replace(/[^\wа-яё\-]+/gi, "-")
@@ -2601,8 +2601,55 @@
     return new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png"));
   }
 
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const s = String(reader.result || "");
+        const i = s.indexOf(",");
+        resolve(i >= 0 ? s.slice(i + 1) : s);
+      };
+      reader.onerror = () => reject(new Error("Не удалось прочитать картинку"));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function telegramUserId() {
+    const user = telegramApp && telegramApp.initDataUnsafe && telegramApp.initDataUnsafe.user;
+    const id = user && user.id;
+    return Number(id) || 0;
+  }
+
+  async function sendSnapshotToTelegram(mode) {
+    const canvas = snapToCanvas();
+    const blob = await canvasBlob(canvas);
+    if (!blob) throw new Error("Не удалось создать картинку");
+    return api("/api/remote/snapshot-png", {
+      method: "POST",
+      body: JSON.stringify({
+        png: await blobToBase64(blob),
+        filename: snapFileName(),
+        caption: snapTitle(snapOrder()),
+        mode,
+        user_id: telegramUserId(),
+      }),
+    });
+  }
+
   async function snapShare() {
     try {
+      if (telegramApp) {
+        const res = await sendSnapshotToTelegram("share");
+        if (res.share_id && typeof telegramApp.shareMessage === "function") {
+          telegramApp.shareMessage(res.share_id, (ok) => {
+            if (ok) toast("Снимок отправлен");
+          });
+          toast("Выберите чат — если окно не открылось, снимок уже у бота");
+          return;
+        }
+        toast("Снимок в чате с ботом — перешлите заказчику");
+        return;
+      }
       const canvas = snapToCanvas();
       const blob = await canvasBlob(canvas);
       if (!blob) throw new Error("Не удалось создать картинку");
@@ -2625,6 +2672,11 @@
 
   async function snapDownload() {
     try {
+      if (telegramApp) {
+        await sendSnapshotToTelegram("save");
+        toast("PNG в чате с ботом — откройте файл и сохраните");
+        return;
+      }
       const canvas = snapToCanvas();
       const blob = await canvasBlob(canvas);
       if (!blob) throw new Error("Не удалось создать картинку");

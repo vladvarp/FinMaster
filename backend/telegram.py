@@ -211,8 +211,8 @@ def send_html(
     return int(mid) if mid is not None else None
 
 
-def send_photo(token: str, chat_id: str, png: bytes, caption: str, filename: str) -> None:
-    _call_file(
+def send_photo(token: str, chat_id: str, png: bytes, caption: str, filename: str) -> dict[str, Any]:
+    return _call_file(
         token,
         "sendPhoto",
         {"chat_id": chat_id, "caption": caption[:1024]},
@@ -223,11 +223,54 @@ def send_photo(token: str, chat_id: str, png: bytes, caption: str, filename: str
     )
 
 
-def send_document(token: str, chat_id: str, body: bytes, filename: str, caption: str = "") -> None:
+def send_document(
+    token: str,
+    chat_id: str,
+    body: bytes,
+    filename: str,
+    caption: str = "",
+    mime: str = "text/plain",
+) -> dict[str, Any]:
     fields: dict[str, Any] = {"chat_id": chat_id}
     if caption:
         fields["caption"] = caption[:1024]
-    _call_file(token, "sendDocument", fields, "document", filename, body, "text/plain")
+    return _call_file(token, "sendDocument", fields, "document", filename, body, mime)
+
+
+def _photo_file_id(data: dict[str, Any]) -> str:
+    result = data.get("result") if isinstance(data, dict) else {}
+    photos = result.get("photo") if isinstance(result, dict) else None
+    if not isinstance(photos, list) or not photos:
+        return ""
+    last = photos[-1] if isinstance(photos[-1], dict) else {}
+    return str(last.get("file_id") or "")
+
+
+def _prepared_share_id(token: str, user_id: int, file_id: str, caption: str) -> str:
+    if not token or not user_id or not file_id:
+        return ""
+    try:
+        data = _call(
+            token,
+            "savePreparedInlineMessage",
+            {
+                "user_id": int(user_id),
+                "result": {
+                    "type": "photo",
+                    "id": "snap",
+                    "photo_file_id": file_id,
+                    "caption": caption[:1024],
+                },
+                "allow_user_chats": True,
+                "allow_bot_chats": True,
+                "allow_group_chats": True,
+                "allow_channel_chats": True,
+            },
+        )
+    except RuntimeError:
+        return ""
+    result = data.get("result") if isinstance(data, dict) else {}
+    return str(result.get("id") or "") if isinstance(result, dict) else ""
 
 
 def _status(info: Any) -> dict[str, Any]:
@@ -435,6 +478,36 @@ class TelegramBot:
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             return {"listening": self._running and bool(self._token), "error": self._error}
+
+    def deliver_webapp_snapshot(
+        self,
+        png: bytes,
+        filename: str,
+        caption: str,
+        mode: str = "share",
+        user_id: int = 0,
+    ) -> dict[str, Any]:
+        token, _, running = self._state()
+        if not token or not running:
+            raise RuntimeError("Бот Telegram выключен. Включите его в окне «Телефон».")
+        chat_id = str(storage.remote_settings().get("telegram_chat_id") or "").strip()
+        if not chat_id:
+            raise RuntimeError("Напишите боту /start — без привязанного чата снимок некуда отправить.")
+        name = str(filename or "finmaster-snapshot.png").replace("\\", "_").replace("/", "_")
+        if not name.lower().endswith(".png"):
+            name = f"{name}.png"
+        title = str(caption or "Снимок заказа")[:1024]
+        if mode == "save":
+            send_document(token, chat_id, png, name, title, "image/png")
+            netlog.add("telegram", "Mini App отправил PNG в чат", source=f"chat {chat_id}", key=f"tg-snap-{chat_id}")
+            return {"ok": True, "via": "chat"}
+        sent = send_photo(token, chat_id, png, title, name)
+        uid = int(user_id or 0)
+        if uid <= 0 and chat_id.lstrip("-").isdigit():
+            uid = int(chat_id)
+        share_id = _prepared_share_id(token, uid, _photo_file_id(sent), title)
+        netlog.add("telegram", "Mini App отправил снимок", source=f"chat {chat_id}", key=f"tg-snap-{chat_id}")
+        return {"ok": True, "via": "chat", "share_id": share_id}
 
     def start(
         self,
