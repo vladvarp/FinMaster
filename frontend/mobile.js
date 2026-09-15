@@ -42,6 +42,7 @@
       hideStamp: false,
       title: "",
       fieldsOpen: false,
+      linesOpen: false,
     },
     device: null,
     deviceFactsOpen: false,
@@ -890,19 +891,26 @@
       .sort((a, b) => compareOrders(a, b, state.sort));
   }
 
-  function orderQueue() {
+  function orderQueue(orderId = state.orderId) {
     const shown = visibleOrders();
-    if (shown.some((o) => o.id === state.orderId)) return shown;
+    if (shown.some((o) => o.id === orderId)) return shown;
     return orders()
       .slice()
       .sort((a, b) => compareOrders(a, b, state.sort));
   }
 
-  function neighborOrder(dir) {
-    const list = orderQueue();
-    const i = list.findIndex((o) => o.id === state.orderId);
+  function neighborOrder(dir, orderId = state.orderId) {
+    const list = orderQueue(orderId);
+    const i = list.findIndex((o) => o.id === orderId);
     if (i < 0) return null;
     return list[i + dir] || null;
+  }
+
+  function flashSwipe(screen, dir) {
+    if (!screen) return;
+    screen.classList.remove("swipe-next", "swipe-prev");
+    void screen.offsetWidth;
+    screen.classList.add(dir > 0 ? "swipe-next" : "swipe-prev");
   }
 
   function showNeighborOrder(dir) {
@@ -912,12 +920,25 @@
     if (!next) return false;
     state.headOpen = false;
     setView("order", next.id);
-    const screen = $("screen-order");
-    if (screen) {
-      screen.classList.remove("swipe-next", "swipe-prev");
-      void screen.offsetWidth;
-      screen.classList.add(dir > 0 ? "swipe-next" : "swipe-prev");
-    }
+    flashSwipe($("screen-order"), dir);
+    try {
+      navigator.vibrate?.(10);
+    } catch (_) {}
+    return true;
+  }
+
+  function showNeighborSnap(dir) {
+    if (state.view !== "snapshot") return false;
+    if (!$("sheet").hidden) return false;
+    const current = snapOrder();
+    if (!current) return false;
+    const next = neighborOrder(dir, current.id);
+    if (!next) return false;
+    state.snap.orderId = next.id;
+    state.snap.lines = null;
+    state.snap.linesOpen = false;
+    renderSnapshot();
+    flashSwipe($("screen-snapshot"), dir);
     try {
       navigator.vibrate?.(10);
     } catch (_) {}
@@ -2234,12 +2255,17 @@
         </div>
       </article>
 
-      <h3 class="section">Позиции в снимке</h3>
-      <div class="list tight">${lines
-        .map((line, i) => {
-          const on = picked.includes(line);
-          const t = lineTotals(line);
-          return `<label class="pick-row ${on ? "on" : ""} ${t.expense ? "cost" : ""}">
+      <article class="card fold ${state.snap.linesOpen ? "" : "closed"}">
+        <button type="button" class="fold-head" id="snap-lines-fold">
+          <span>Позиции в снимке</span>
+          <span class="fold-side"><small id="snap-lines-meta">${picked.length} из ${lines.length}</small><span class="fold-ico">▾</span></span>
+        </button>
+        <div class="fold-body">
+          <div class="list tight">${lines
+            .map((line, i) => {
+              const on = picked.includes(line);
+              const t = lineTotals(line);
+              return `<label class="pick-row ${on ? "on" : ""} ${t.expense ? "cost" : ""}">
             <input type="checkbox" data-snap-line="${esc(line.id)}" ${on ? "checked" : ""} />
             <span class="pr-main"><strong>${i + 1}. ${esc(line.product || line.order_type || "Без названия")}</strong>
             <small>${esc(
@@ -2249,8 +2275,10 @@
             )}</small></span>
             <b>${t.expense ? `−${esc(money(t.cost))}` : esc(money(t.after))}</b>
           </label>`;
-        })
-        .join("")}</div>
+            })
+            .join("")}</div>
+        </div>
+      </article>
 
       <article class="card fold ${state.snap.fieldsOpen ? "" : "closed"}">
         <button type="button" class="fold-head" id="snap-fields-fold">
@@ -3162,54 +3190,68 @@
     window.visualViewport?.addEventListener("scroll", dockEditorToViewport);
 
     const orderScreen = $("screen-order");
-    let swipe = null;
-    const swipeIgnore = (el) => el.closest("input, textarea, select, button, a, .sheet, .editor");
-    orderScreen.addEventListener(
-      "touchstart",
-      (e) => {
-        if (state.view !== "order" || e.touches.length !== 1 || swipeIgnore(e.target)) {
+    const snapScreen = $("screen-snapshot");
+    const swipeIgnore = (el) => el.closest("input, textarea, select, button, a, .sheet, .editor, .preview-wrap");
+    const bindSwipeNav = (screen, active, go) => {
+      if (!screen) return;
+      let swipe = null;
+      screen.addEventListener(
+        "touchstart",
+        (e) => {
+          if (!active() || e.touches.length !== 1 || swipeIgnore(e.target)) {
+            swipe = null;
+            return;
+          }
+          const t = e.touches[0];
+          swipe = { x: t.clientX, y: t.clientY, at: Date.now() };
+        },
+        { passive: true }
+      );
+      screen.addEventListener(
+        "touchmove",
+        (e) => {
+          if (!swipe || e.touches.length !== 1) {
+            swipe = null;
+            return;
+          }
+          const t = e.touches[0];
+          const dx = t.clientX - swipe.x;
+          const dy = t.clientY - swipe.y;
+          if (Math.abs(dy) > 28 && Math.abs(dy) >= Math.abs(dx)) swipe = null;
+        },
+        { passive: true }
+      );
+      screen.addEventListener(
+        "touchend",
+        (e) => {
+          if (!swipe) return;
+          const t = e.changedTouches[0];
+          const dx = t.clientX - swipe.x;
+          const dy = t.clientY - swipe.y;
+          const dt = Date.now() - swipe.at;
           swipe = null;
-          return;
-        }
-        const t = e.touches[0];
-        swipe = { x: t.clientX, y: t.clientY, at: Date.now() };
-      },
-      { passive: true }
-    );
-    orderScreen.addEventListener(
-      "touchmove",
-      (e) => {
-        if (!swipe || e.touches.length !== 1) {
-          swipe = null;
-          return;
-        }
-        const t = e.touches[0];
-        const dx = t.clientX - swipe.x;
-        const dy = t.clientY - swipe.y;
-        if (Math.abs(dy) > 28 && Math.abs(dy) >= Math.abs(dx)) swipe = null;
-      },
-      { passive: true }
-    );
-    orderScreen.addEventListener(
-      "touchend",
-      (e) => {
-        if (!swipe) return;
-        const t = e.changedTouches[0];
-        const dx = t.clientX - swipe.x;
-        const dy = t.clientY - swipe.y;
-        const dt = Date.now() - swipe.at;
+          if (dt > 650 || Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+          go(dx < 0 ? 1 : -1);
+        },
+        { passive: true }
+      );
+      screen.addEventListener("touchcancel", () => {
         swipe = null;
-        if (dt > 650 || Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
-        showNeighborOrder(dx < 0 ? 1 : -1);
-      },
-      { passive: true }
+      });
+      screen.addEventListener("animationend", (e) => {
+        if (e.target === screen) screen.classList.remove("swipe-next", "swipe-prev");
+      });
+    };
+    bindSwipeNav(
+      orderScreen,
+      () => state.view === "order" && $("editor").hidden && $("sheet").hidden,
+      showNeighborOrder
     );
-    orderScreen.addEventListener("touchcancel", () => {
-      swipe = null;
-    });
-    orderScreen.addEventListener("animationend", (e) => {
-      if (e.target === orderScreen) orderScreen.classList.remove("swipe-next", "swipe-prev");
-    });
+    bindSwipeNav(
+      snapScreen,
+      () => state.view === "snapshot" && $("sheet").hidden,
+      showNeighborSnap
+    );
 
     document.addEventListener("touchstart", (e) => {
       const input = e.target.closest("#editor-body input.expr-input");
@@ -3292,6 +3334,11 @@
         if (e.target.checked) state.snap.lines.add(snapLine);
         else state.snap.lines.delete(snapLine);
         e.target.closest(".pick-row")?.classList.toggle("on", e.target.checked);
+        const meta = $("snap-lines-meta");
+        if (meta) {
+          const all = snapCandidates(order);
+          meta.textContent = `${snapLines(order).length} из ${all.length}`;
+        }
         renderSnapPreview();
         return;
       }
@@ -3366,6 +3413,11 @@
         e.target.closest(".fold")?.classList.toggle("closed", !state.snap.fieldsOpen);
         return;
       }
+      if (e.target.closest("#snap-lines-fold")) {
+        state.snap.linesOpen = !state.snap.linesOpen;
+        e.target.closest(".fold")?.classList.toggle("closed", !state.snap.linesOpen);
+        return;
+      }
       const preset = e.target.closest("[data-preset]");
       if (preset) {
         state.snap.fields = (SNAP_PRESETS[preset.dataset.preset] || SNAP_PRESETS.invoice).slice();
@@ -3408,6 +3460,7 @@
           (item) => {
             state.snap.orderId = item.value;
             state.snap.lines = null;
+            state.snap.linesOpen = false;
             renderSnapshot();
           }
         );
@@ -3677,6 +3730,7 @@
     $("btn-order-snapshot").addEventListener("click", () => {
       state.snap.orderId = state.orderId;
       state.snap.lines = null;
+      state.snap.linesOpen = false;
       openSnapshot();
     });
 
