@@ -19,13 +19,19 @@
 
   const jitter = (id, salt = 0) => (hash(`${id}:${salt}`) / 4294967295) * 2 - 1;
 
-  const hexToRgba = (hex, alpha) => {
+  const hexRgb = (hex) => {
     const raw = String(hex || "#64748b").replace("#", "");
     const value = raw.length === 3 ? raw.split("").map((c) => c + c).join("") : raw;
     const n = Number.parseInt(value, 16);
-    if (!Number.isFinite(n)) return `rgba(100,116,139,${alpha})`;
-    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+    if (!Number.isFinite(n)) return [100, 116, 139];
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   };
+
+  const rgbCss = (rgb, alpha) => (alpha == null
+    ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`
+    : `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`);
+
+  const hexToRgba = (hex, alpha) => rgbCss(hexRgb(hex), alpha);
 
   const mixRgb = (a, b, t) => [
     Math.round(a[0] + (b[0] - a[0]) * t),
@@ -411,13 +417,94 @@
       this.needsFrame = true;
     }
 
+    planetOrbit(star, index, planet) {
+      return (star?.r || 19) + 50 + index * (34 + (planet?.r || 12) * 0.42);
+    }
+
+    moonOrbit(planet, count) {
+      return (planet?.r || 10) + 15 + Math.min(18, Math.max(0, count) * 1.35);
+    }
+
+    placeMoons() {
+      const kids = new Map();
+      this.nodes.forEach((n) => {
+        if (n.data.kind !== "line") return;
+        const list = kids.get(n.data.parent) || [];
+        list.push(n);
+        kids.set(n.data.parent, list);
+      });
+      kids.forEach((group) => {
+        const parent = this.nodeMap.get(group[0].data.parent);
+        const ring = this.moonOrbit(parent, group.length);
+        const spin = (parent?.phase || 0) * TAU;
+        group.forEach((n, i) => {
+          const a = (i / Math.max(1, group.length)) * TAU + spin;
+          n.tx = (parent?.tx || 0) + Math.cos(a) * ring;
+          n.ty = (parent?.ty || 0) + Math.sin(a) * ring;
+          n.orbitR = ring;
+        });
+      });
+    }
+
+    layoutSolarSystems(mode) {
+      const customers = this.nodes.filter((n) => n.data.kind === "customer");
+      const byCustomer = new Map(customers.map((n) => [n.data.id, []]));
+      this.nodes.forEach((n) => {
+        if (n.data.kind === "order") byCustomer.get(n.data.parent)?.push(n);
+      });
+      const systems = customers.map((star) => {
+        const planets = (byCustomer.get(star.data.id) || []).slice().sort((a, b) => {
+          const dv = (b.data.value || 0) - (a.data.value || 0);
+          return dv || String(a.data.id).localeCompare(String(b.data.id), "ru");
+        });
+        const last = planets.length
+          ? this.planetOrbit(star, planets.length - 1, planets[planets.length - 1])
+          : star.r + 40;
+        return { star, planets, radius: last + 32 };
+      });
+      if (mode === "ring") {
+        const count = Math.max(1, systems.length);
+        const maxR = Math.max(40, ...systems.map((sys) => sys.radius));
+        const ringR = count <= 1 ? 0 : Math.max(150, ((maxR * 2 + 72) * count) / TAU);
+        systems.forEach((sys, i) => {
+          const a = (i / count) * TAU - Math.PI / 2 + 0.41;
+          sys.star.tx = Math.cos(a) * ringR;
+          sys.star.ty = Math.sin(a) * ringR;
+        });
+      } else {
+        let spiral = 0;
+        systems.forEach((sys, i) => {
+          if (i === 0) {
+            sys.star.tx = 0;
+            sys.star.ty = 0;
+          } else {
+            spiral += sys.radius + 58;
+            const a = i * GOLDEN;
+            sys.star.tx = Math.cos(a) * spiral;
+            sys.star.ty = Math.sin(a) * spiral * 0.92;
+            spiral += sys.radius * 0.06;
+          }
+        });
+      }
+      systems.forEach((sys) => {
+        sys.star.systemR = sys.radius;
+        const spin = (sys.star.phase || 0) * TAU;
+        sys.planets.forEach((planet, oi) => {
+          const orbitR = this.planetOrbit(sys.star, oi, planet);
+          const a = oi * GOLDEN + spin;
+          planet.tx = sys.star.tx + Math.cos(a) * orbitR;
+          planet.ty = sys.star.ty + Math.sin(a) * orbitR;
+          planet.orbitR = orbitR;
+        });
+      });
+      this.placeMoons();
+    }
+
     calculateTargets() {
       const layout = this.options.layout;
       const customers = this.nodes.filter((n) => n.data.kind === "customer");
       const orders = this.nodes.filter((n) => n.data.kind === "order");
       const lines = this.nodes.filter((n) => n.data.kind === "line");
-      const byCustomer = new Map(customers.map((n, i) => [n.data.id, { node: n, index: i, orders: [] }]));
-      orders.forEach((n) => byCustomer.get(n.data.parent)?.orders.push(n));
 
       if (layout === "timeline") {
         const dated = orders.filter((n) => Number.isFinite(n.data.time));
@@ -428,55 +515,22 @@
         const maxValue = Math.max(...values, 1);
         customers.forEach((n, i) => {
           n.tx = -520;
-          n.ty = (i - (customers.length - 1) / 2) * 78;
+          n.ty = (i - (customers.length - 1) / 2) * 96;
         });
         orders.forEach((n) => {
+          const parent = this.nodeMap.get(n.data.parent);
           const ratio = Number.isFinite(n.data.time) ? (n.data.time - min) / (max - min || 1) : 0.15;
           n.tx = -380 + ratio * 860;
-          n.ty = 270 - (Math.log1p(Math.max(0, n.data.value || 0)) / maxValue) * 540 + jitter(n.data.id, 7) * 12;
+          n.ty = (parent?.ty || 0) + jitter(n.data.id, 7) * 28;
         });
-        const kids = new Map();
-        lines.forEach((n) => {
-          const list = kids.get(n.data.parent) || [];
-          list.push(n);
-          kids.set(n.data.parent, list);
-        });
-        kids.forEach((group) => {
-          group.forEach((n, i) => {
-            const parent = this.nodeMap.get(n.data.parent);
-            const a = (i / Math.max(1, group.length)) * Math.PI - Math.PI / 2;
-            n.tx = (parent?.tx || 0) + Math.cos(a) * 26;
-            n.ty = (parent?.ty || 0) + 38 + Math.sin(a) * 10 + i * 4;
-          });
-        });
+        this.placeMoons();
         this.timeline = { min, max, maxValue };
         this.assignDepth();
         return;
       }
 
       if (layout === "orbit") {
-        const customerCount = Math.max(1, customers.length);
-        customers.forEach((n, i) => {
-          const a = (i / customerCount) * TAU - Math.PI / 2;
-          const ring = 90 + customerCount * 6;
-          n.tx = Math.cos(a) * ring;
-          n.ty = Math.sin(a) * ring;
-        });
-        orders.forEach((n, i) => {
-          const a = i * GOLDEN;
-          const ring = 200 + Math.sqrt(i + 1) * 34;
-          n.tx = Math.cos(a) * ring;
-          n.ty = Math.sin(a) * ring;
-        });
-        lines.forEach((n) => {
-          const parent = this.nodeMap.get(n.data.parent);
-          const siblings = lines.filter((x) => x.data.parent === n.data.parent);
-          const at = Math.max(0, siblings.indexOf(n));
-          const a = (at / Math.max(1, siblings.length)) * TAU + jitter(n.data.parent, 8);
-          const ring = 44 + Math.min(30, siblings.length * 2.2);
-          n.tx = (parent?.tx || 0) + Math.cos(a) * ring;
-          n.ty = (parent?.ty || 0) + Math.sin(a) * ring;
-        });
+        this.layoutSolarSystems("ring");
         this.assignDepth();
         return;
       }
@@ -508,64 +562,21 @@
           n.tx = lerp(parent?.tx || 0, c.x, 0.55) + jitter(n.data.id, 3) * 36;
           n.ty = lerp(parent?.ty || 0, c.y, 0.55) + jitter(n.data.id, 4) * 36;
         });
-        types.forEach((group, type) => {
-          const c = centers.get(type);
-          group.forEach((n, i) => {
-            const parent = this.nodeMap.get(n.data.parent);
-            const a = i * GOLDEN;
-            const ring = 22 + Math.sqrt(i + 1) * 16;
-            n.tx = lerp(parent?.tx || 0, c.x, 0.35) + Math.cos(a) * ring;
-            n.ty = lerp(parent?.ty || 0, c.y, 0.35) + Math.sin(a) * ring;
-          });
-        });
+        this.placeMoons();
         this.assignDepth();
         return;
       }
 
-      customers.forEach((n, i) => {
-        const a = i * GOLDEN;
-        const radius = i ? 140 + Math.sqrt(i) * 165 : 0;
-        n.tx = Math.cos(a) * radius;
-        n.ty = Math.sin(a) * radius * 0.74;
-        const group = byCustomer.get(n.data.id);
-        const count = group?.orders.length || 0;
-        (group?.orders || []).forEach((order, oi) => {
-          const oa = (oi / Math.max(1, count)) * TAU + jitter(n.data.id, 5) * 0.8;
-          const ring = 72 + Math.floor(oi / 8) * 58;
-          order.tx = n.tx + Math.cos(oa) * ring;
-          order.ty = n.ty + Math.sin(oa) * ring;
-        });
-      });
-      const kids = new Map();
-      lines.forEach((n) => {
-        const list = kids.get(n.data.parent) || [];
-        list.push(n);
-        kids.set(n.data.parent, list);
-      });
-      kids.forEach((group) => {
-        group.forEach((n, i) => {
-          const parent = this.nodeMap.get(n.data.parent);
-          const a = (i / Math.max(1, group.length)) * TAU + jitter(n.data.id, 11);
-          const ring = 30 + Math.min(34, group.length * 2.4);
-          n.tx = (parent?.tx || 0) + Math.cos(a) * ring;
-          n.ty = (parent?.ty || 0) + Math.sin(a) * ring;
-        });
-      });
+      this.layoutSolarSystems("spiral");
       this.assignDepth();
     }
 
     assignDepth() {
-      const layout = this.options.layout;
-      this.nodes.forEach((n, i) => {
-        const j = jitter(n.data.id, 19);
-        const k = jitter(n.data.id, 23);
-        if (layout === "timeline") {
-          n.tz = n.data.kind === "customer" ? (n.ty || 0) * 0.12 : n.data.kind === "order" ? 48 + j * 20 : 92 + k * 24;
-        } else if (layout === "orbit") {
-          n.tz = n.data.kind === "customer" ? j * 16 : n.data.kind === "order" ? 36 + Math.hypot(n.tx || 0, n.ty || 0) * 0.08 + j * 18 : 88 + k * 26;
-        } else {
-          n.tz = n.data.kind === "customer" ? (i % 7) * 6 + j * 14 : n.data.kind === "order" ? 58 + j * 24 : 112 + k * 30;
-        }
+      this.nodes.forEach((n) => {
+        const tilt = jitter(n.data.id, 19);
+        if (n.data.kind === "customer") n.tz = 0;
+        else if (n.data.kind === "order") n.tz = 5 + tilt * 7;
+        else n.tz = 9 + jitter(n.data.id, 23) * 9;
       });
     }
 
@@ -608,11 +619,12 @@
 
       this.nodes.forEach((n) => {
         if (n.pinned) return;
-        const targetStrength = this.options.layout === "galaxy" ? 0.0062 : 0.013;
+        const targetStrength = 0.014;
         n.vx += (n.tx - n.x) * targetStrength * alpha * step;
         n.vy += (n.ty - n.y) * targetStrength * alpha * step;
         this.grid.near(n.x, n.y, 1).forEach((other) => {
           if (other.index <= n.index) return;
+          const related = n.data.parent === other.data.id || other.data.parent === n.data.id;
           let dx = other.x - n.x;
           let dy = other.y - n.y;
           let d2 = dx * dx + dy * dy;
@@ -622,7 +634,8 @@
             d2 = dx * dx + dy * dy;
           }
           const d = Math.sqrt(d2);
-          const min = n.r + other.r + (n.data.kind === "customer" || other.data.kind === "customer" ? 16 : 7);
+          const pad = related ? 5 : (n.data.kind === "customer" || other.data.kind === "customer" ? 18 : 8);
+          const min = n.r + other.r + pad;
           if (d >= min * 1.75) return;
           const force = ((min * 1.75 - d) / Math.max(d, 1)) * 0.058 * alpha;
           const fx = dx * force;
@@ -644,8 +657,9 @@
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         const dist = Math.hypot(dx, dy) || 1;
-        const ideal = edge.kind === "customer" ? 84 : 44;
-        const force = (dist - ideal) * (edge.kind === "customer" ? 0.0019 : 0.0031) * alpha * step;
+        const ideal = Math.hypot((b.tx ?? b.x) - (a.tx ?? a.x), (b.ty ?? b.y) - (a.ty ?? a.y))
+          || (edge.kind === "customer" ? 90 : 28);
+        const force = (dist - ideal) * (edge.kind === "customer" ? 0.0014 : 0.0024) * alpha * step;
         const fx = (dx / dist) * force;
         const fy = (dy / dist) * force;
         if (!a.pinned) {
@@ -1087,7 +1101,8 @@
         ctx.translate(this.width / 2 + this.camera.x, this.height / 2 + this.camera.y);
         ctx.scale(this.camera.zoom, this.camera.zoom);
         if (this.options.layout === "timeline") this.drawTimeline(ctx, t);
-        this.drawHulls(ctx, t);
+        if (this.options.layout === "constellation" || this.options.layout === "timeline") this.drawHulls(ctx, t);
+        this.drawOrbitRings(ctx, t);
         if (this.options.heat) this.drawHeat(ctx, t);
         this.drawBridges(ctx, t, time);
         this.drawEdges(ctx, t, time);
@@ -1106,9 +1121,10 @@
 
     drawScene3d(ctx, theme, time) {
       this.drawSpace3d(ctx, theme);
-      this.drawStems3d(ctx, theme);
+      this.drawShadows3d(ctx, theme);
       if (this.options.heat) this.drawHeat3d(ctx, theme);
-      this.drawHulls3d(ctx, theme);
+      if (this.options.layout === "constellation" || this.options.layout === "timeline") this.drawHulls3d(ctx, theme);
+      this.drawOrbitRings3d(ctx, theme);
       this.drawLinks3d(ctx, theme, time);
       this.drawNodes3d(ctx, theme, time);
       if (this.options.heat) this.drawHeatMarks3d(ctx, theme, time);
@@ -1170,6 +1186,122 @@
       near.addColorStop(1, theme.dark ? "rgba(2,6,14,0.28)" : "rgba(15,23,42,0.06)");
       ctx.fillStyle = near;
       ctx.fillRect(0, 0, this.width, this.height);
+    }
+
+    drawShadows3d(ctx, theme) {
+      if (this.spaceMix < 0.2) return;
+      this.nodes.forEach((n) => {
+        if (n.data.kind === "customer") return;
+        if (n.data.kind === "line" && this.camera.zoom < 0.42) return;
+        const foot = this.project(n.x, n.y, 0);
+        if (!this.projectedOk(foot)) return;
+        const r = Math.max(2.2, n.r * 0.52 * Math.min(foot.s, 3.2));
+        ctx.fillStyle = theme.dark ? "rgba(0,0,0,0.24)" : "rgba(15,23,42,0.1)";
+        ctx.beginPath();
+        ctx.ellipse(foot.x, foot.y, r, Math.max(1.1, r * 0.36), 0, 0, TAU);
+        ctx.fill();
+      });
+    }
+
+    strokeWorldCircle(ctx, x, y, z, radius, color, alpha) {
+      if (radius < 8 || alpha < 0.01) return;
+      const steps = radius > 140 ? 56 : 40;
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i <= steps; i += 1) {
+        const a = (i / steps) * TAU;
+        const p = this.project(x + Math.cos(a) * radius, y + Math.sin(a) * radius, z);
+        if (!this.projectedOk(p)) {
+          started = false;
+          continue;
+        }
+        if (!started) {
+          ctx.moveTo(p.x, p.y);
+          started = true;
+        } else ctx.lineTo(p.x, p.y);
+      }
+      ctx.strokeStyle = hexToRgba(color, alpha);
+      ctx.stroke();
+    }
+
+    drawOrbitRings3d(ctx, theme) {
+      if (this.options.layout === "timeline") return;
+      const zoom = this.camera.zoom;
+      if (zoom < 0.2) return;
+      const base = (theme.dark ? 0.18 : 0.12) * this.spaceMix;
+      ctx.lineCap = "round";
+      ctx.lineWidth = 1.05;
+      this.nodes.forEach((n) => {
+        if (n.data.kind !== "order") return;
+        const parent = this.nodeMap.get(n.data.parent);
+        if (!parent) return;
+        const r = Math.hypot(n.x - parent.x, n.y - parent.y);
+        if (r < 18) return;
+        const hot = this.hot.has(n.data.id) || this.hot.has(parent.data.id);
+        this.strokeWorldCircle(
+          ctx,
+          parent.x,
+          parent.y,
+          (parent.z || 0) * this.spaceMix,
+          r,
+          parent.data.color || n.data.color || "#64748b",
+          base * (hot ? 1.6 : 0.7),
+        );
+      });
+      if (zoom < 0.48) return;
+      ctx.lineWidth = 0.9;
+      this.nodes.forEach((n) => {
+        if (n.data.kind !== "line") return;
+        const parent = this.nodeMap.get(n.data.parent);
+        if (!parent) return;
+        const r = Math.hypot(n.x - parent.x, n.y - parent.y);
+        if (r < 8) return;
+        const hot = this.hot.has(n.data.id) || this.hot.has(parent.data.id);
+        this.strokeWorldCircle(
+          ctx,
+          parent.x,
+          parent.y,
+          (parent.z || 0) * this.spaceMix,
+          r,
+          parent.data.color || n.data.color || "#64748b",
+          base * (hot ? 1.15 : 0.42),
+        );
+      });
+    }
+
+    drawOrbitRings(ctx, theme) {
+      if (this.options.layout === "timeline") return;
+      const zoom = this.camera.zoom;
+      if (zoom < 0.28) return;
+      const base = theme.dark ? 0.16 : 0.11;
+      ctx.lineCap = "round";
+      this.nodes.forEach((n) => {
+        if (n.data.kind !== "order") return;
+        const parent = this.nodeMap.get(n.data.parent);
+        if (!parent) return;
+        const r = Math.hypot(n.x - parent.x, n.y - parent.y);
+        if (r < 18) return;
+        const hot = this.hot.has(n.data.id) || this.hot.has(parent.data.id);
+        ctx.beginPath();
+        ctx.arc(parent.x, parent.y, r, 0, TAU);
+        ctx.strokeStyle = hexToRgba(parent.data.color || n.data.color || "#64748b", base * (hot ? 1.5 : 0.65));
+        ctx.lineWidth = (hot ? 1.15 : 0.85) / zoom;
+        ctx.stroke();
+      });
+      if (zoom < 0.7) return;
+      this.nodes.forEach((n) => {
+        if (n.data.kind !== "line") return;
+        const parent = this.nodeMap.get(n.data.parent);
+        if (!parent) return;
+        const r = Math.hypot(n.x - parent.x, n.y - parent.y);
+        if (r < 8) return;
+        const hot = this.hot.has(n.data.id) || this.hot.has(parent.data.id);
+        ctx.beginPath();
+        ctx.arc(parent.x, parent.y, r, 0, TAU);
+        ctx.strokeStyle = hexToRgba(parent.data.color || n.data.color || "#64748b", base * (hot ? 1.1 : 0.4));
+        ctx.lineWidth = 0.7 / zoom;
+        ctx.stroke();
+      });
     }
 
     drawStems3d(ctx, theme) {
@@ -1250,7 +1382,7 @@
           dashed,
           flow: !dashed && motion && (!selected || hot),
           time,
-          arrows: !dashed,
+          arrows: hot,
           hot,
           dim,
           packets: dashed ? 0 : hot ? 2 : trunk ? 1 : 0,
@@ -1330,10 +1462,8 @@
       ctx.fill();
     }
 
-    volumeHeight(node) {
-      if (node.data.kind === "customer") return Math.max(18, node.r * 1.45);
-      if (node.data.kind === "order") return Math.max(14, node.r * 1.85);
-      return Math.max(9, node.r * 1.7);
+    volumeHeight() {
+      return 0;
     }
 
     drawVolumeFallback(ctx, node, color, selected, theme) {
@@ -1598,56 +1728,55 @@
       return { x: hx, y: hy, r: holeR * 1.18, s: core.s, depth: core.depth, hole: true };
     }
 
-    drawPrism3d(ctx, node, color, selected, theme) {
-      const order = node.data.kind === "order";
-      const hw = order ? node.r * 1.08 : node.r * 0.74;
-      const hd = order ? node.r * 0.8 : node.r * 0.74;
-      const z0 = (node.z || 0) * this.spaceMix;
-      const z1 = z0 + this.volumeHeight(node);
-      const pts = [
-        [node.x - hw, node.y - hd, z0],
-        [node.x + hw, node.y - hd, z0],
-        [node.x + hw, node.y + hd, z0],
-        [node.x - hw, node.y + hd, z0],
-        [node.x - hw, node.y - hd, z1],
-        [node.x + hw, node.y - hd, z1],
-        [node.x + hw, node.y + hd, z1],
-        [node.x - hw, node.y + hd, z1],
-      ].map(([x, y, z]) => this.project(x, y, z));
-      if (pts.some((p) => !this.projectedOk(p))) {
-        return this.drawVolumeFallback(ctx, node, color, selected, theme);
+    paintSphere(ctx, x, y, r, color, opt) {
+      const rgb = hexRgb(color);
+      const light = mixRgb(rgb, [255, 244, 220], 0.5);
+      const shade = mixRgb(rgb, [8, 10, 18], 0.58);
+      if (opt.atmosphere && r > 5) {
+        const halo = ctx.createRadialGradient(x, y, r * 0.68, x, y, r * 1.4);
+        halo.addColorStop(0, rgbCss(rgb, 0));
+        halo.addColorStop(0.62, rgbCss(rgb, opt.dark ? 0.11 : 0.08));
+        halo.addColorStop(1, rgbCss(rgb, 0));
+        ctx.fillStyle = halo;
+        ctx.beginPath();
+        ctx.arc(x, y, r * 1.4, 0, TAU);
+        ctx.fill();
       }
-      const faces = [
-        [0, 1, 2, 3, 0.42],
-        [4, 5, 6, 7, 1],
-        [0, 1, 5, 4, 0.78],
-        [1, 2, 6, 5, 0.62],
-        [2, 3, 7, 6, 0.7],
-        [3, 0, 4, 7, 0.86],
-      ];
-      faces
-        .map((face) => {
-          const verts = face.slice(0, 4).map((i) => pts[i]);
-          const visible = verts.every((v) => this.projectedOk(v));
-          const depth = verts.reduce((sum, v) => sum + v.depth, 0) / 4;
-          return { verts, visible, depth, shade: face[4] };
-        })
-        .filter((face) => face.visible)
-        .sort((a, b) => b.depth - a.depth)
-        .forEach((face) => {
-          ctx.beginPath();
-          ctx.moveTo(face.verts[0].x, face.verts[0].y);
-          for (let i = 1; i < face.verts.length; i += 1) ctx.lineTo(face.verts[i].x, face.verts[i].y);
-          ctx.closePath();
-          ctx.fillStyle = hexToRgba(color, (theme.dark ? 0.94 : 0.97) * face.shade);
-          ctx.fill();
-          ctx.strokeStyle = hexToRgba(color, selected ? 0.95 : 0.4);
-          ctx.lineWidth = selected ? 1.5 : 0.9;
-          ctx.stroke();
-        });
-      const top = this.project(node.x, node.y, z1);
-      if (!this.projectedOk(top)) return this.drawVolumeFallback(ctx, node, color, selected, theme);
-      return { x: top.x, y: top.y, r: Math.max(4, hw * top.s), s: top.s, depth: top.depth };
+      const g = ctx.createRadialGradient(x - r * 0.34, y - r * 0.36, r * 0.06, x + r * 0.1, y + r * 0.14, r);
+      g.addColorStop(0, rgbCss(light));
+      g.addColorStop(0.4, rgbCss(rgb));
+      g.addColorStop(1, rgbCss(shade));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, TAU);
+      ctx.fill();
+      if (r > 7) {
+        ctx.fillStyle = "rgba(255,255,255,0.2)";
+        ctx.beginPath();
+        ctx.ellipse(x - r * 0.28, y - r * 0.3, r * 0.18, r * 0.11, -0.5, 0, TAU);
+        ctx.fill();
+      }
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, TAU);
+      ctx.strokeStyle = hexToRgba(color, opt.selected ? 0.9 : 0.28);
+      ctx.lineWidth = opt.lineWidth || 1;
+      ctx.stroke();
+    }
+
+    drawBody3d(ctx, node, color, selected, theme) {
+      const planet = node.data.kind === "order";
+      const z = (node.z || 0) * this.spaceMix;
+      const p = this.project(node.x, node.y, z);
+      if (!this.projectedOk(p)) return this.drawVolumeFallback(ctx, node, color, selected, theme);
+      const r = Math.max(planet ? 4.6 : 3, node.r * Math.min(p.s, 3.4) * (planet ? 1.02 : 0.82));
+      if (r > Math.max(this.width, this.height) * 0.45) return null;
+      this.paintSphere(ctx, p.x, p.y, r, color, {
+        selected,
+        atmosphere: planet && r > 5.5,
+        lineWidth: selected ? 1.45 : 0.85,
+        dark: !!theme.dark,
+      });
+      return { x: p.x, y: p.y, r, s: p.s, depth: p.depth };
     }
 
     drawNodes3d(ctx, theme, time) {
@@ -1666,7 +1795,7 @@
         const hovered = node === this.hovered;
         const cap = node.data.kind === "customer"
           ? this.drawBlackHole3d(ctx, node, selected, theme, time)
-          : this.drawPrism3d(ctx, node, color, selected, theme);
+          : this.drawBody3d(ctx, node, color, selected, theme);
         if (!cap) return;
         if ((selected || hovered) && !cap.hole && cap.r > 4 && cap.r < Math.max(this.width, this.height) * 0.55) {
           ctx.strokeStyle = hexToRgba(color, selected ? 0.5 : 0.3);
@@ -2069,7 +2198,7 @@
           dashed: false,
           flow,
           time,
-          arrows: true,
+          arrows: hot,
           hot,
           dim,
           packets: !flow ? 0 : hot ? 2 : trunk ? 1 : 0,
@@ -2113,6 +2242,16 @@
         ctx.lineWidth = (selected ? 1.5 : 1) / zoom;
         ctx.beginPath();
         if (node.data.kind === "customer") {
+          const rgb = hexRgb(color);
+          const corona = ctx.createRadialGradient(node.x, node.y, r * 0.2, node.x, node.y, r * 1.55);
+          corona.addColorStop(0, rgbCss(rgb, theme.dark ? 0.22 : 0.16));
+          corona.addColorStop(1, rgbCss(rgb, 0));
+          ctx.fillStyle = corona;
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, r * 1.55, 0, TAU);
+          ctx.fill();
+          ctx.fillStyle = fill;
+          ctx.beginPath();
           ctx.arc(node.x, node.y, r, 0, TAU);
           ctx.fill();
           ctx.stroke();
@@ -2120,14 +2259,13 @@
           ctx.arc(node.x, node.y, Math.max(3, r * 0.38), 0, TAU);
           ctx.fillStyle = theme.bg;
           ctx.fill();
-        } else if (node.data.kind === "order") {
-          this.roundedBox(ctx, node.x, node.y, r * 1.7, r * 1.15, 2.2 / zoom);
-          ctx.fill();
-          ctx.stroke();
         } else {
-          this.roundedBox(ctx, node.x, node.y, r * 1.15, r * 1.15, 1.2 / zoom);
-          ctx.fill();
-          ctx.stroke();
+          this.paintSphere(ctx, node.x, node.y, node.data.kind === "order" ? r : r * 0.86, color, {
+            selected,
+            atmosphere: node.data.kind === "order" && zoom > 0.45,
+            lineWidth: (selected ? 1.5 : 1) / zoom,
+            dark: !!theme.dark,
+          });
         }
 
         if (node.data.debt > 0.005) {
@@ -2145,12 +2283,6 @@
         if ((this.options.labels && mustLabel) || selected) this.drawLabel(ctx, node, theme, zoom, selected || hovered || node.match);
       });
       ctx.globalAlpha = 1;
-    }
-
-    roundedBox(ctx, x, y, w, h, radius) {
-      const rw = w / 2;
-      const rh = h / 2;
-      ctx.roundRect(x - rw, y - rh, w, h, radius);
     }
 
     drawLabel(ctx, node, theme, zoom, emphasized) {
@@ -2455,13 +2587,9 @@
       this.nodes.forEach((n) => {
         const dx = Math.abs(x - n.x);
         const dy = Math.abs(y - n.y);
-        const inside = n.data.kind === "order"
-          ? dx <= n.r * 0.9 + padding && dy <= n.r * 0.62 + padding
-          : n.data.kind === "line"
-            ? dx <= n.r * 0.65 + padding && dy <= n.r * 0.65 + padding
-            : dx * dx + dy * dy <= (n.r + padding) ** 2;
         const d = dx * dx + dy * dy;
-        if (inside && d < bestD) {
+        const rad = n.r + padding;
+        if (d <= rad * rad && d < bestD) {
           best = n;
           bestD = d;
         }

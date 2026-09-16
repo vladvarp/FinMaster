@@ -3025,8 +3025,8 @@ html[data-theme="dark"] .kpi:hover { box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
 .cloud-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 13px; min-width: 0; }
 .cloud-legend > span { display: inline-flex; align-items: center; gap: 5px; max-width: 170px; color: var(--muted); font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cloud-legend i { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; background: #64748b; }
-.cloud-legend-kind i.customer { width: 9px; height: 9px; background: transparent; border: 2px solid var(--accent); }
-.cloud-legend-kind i.order { width: 8px; height: 6px; border-radius: 1px; background: var(--accent-2); }
+.cloud-legend-kind i.customer { width: 10px; height: 10px; background: transparent; border: 2px solid var(--accent); }
+.cloud-legend-kind i.order { width: 8px; height: 8px; background: var(--accent-2); }
 .cloud-legend-kind i.line { width: 5px; height: 5px; background: var(--muted); }
 .cloud-legend-link { max-width: none; }
 .cloud-legend-link::before {

@@ -2953,9 +2953,9 @@
     }
     $("cloud-legend").innerHTML = [
       ...(cloudState().heat ? [`<span class="cloud-legend-heat" title="Цвет показывает, где сосредоточен долг"><i></i>тепло долга: слабый → сильный</span>`] : []),
-      `<span class="cloud-legend-kind"><i class="customer"></i>заказчик</span>`,
-      `<span class="cloud-legend-kind"><i class="order"></i>заказ</span>`,
-      `<span class="cloud-legend-kind"><i class="line"></i>позиция</span>`,
+      `<span class="cloud-legend-kind"><i class="customer"></i>звезда — заказчик</span>`,
+      `<span class="cloud-legend-kind"><i class="order"></i>планета — заказ</span>`,
+      `<span class="cloud-legend-kind"><i class="line"></i>спутник — позиция</span>`,
       `<span class="cloud-legend-link trunk" title="Стрелка и бегущие штрихи показывают направление">заказчик → заказ</span>`,
       `<span class="cloud-legend-link branch" title="От заказа к его позициям">заказ → позиция</span>`,
       `<span class="cloud-legend-link bridge" title="Пунктир между близкими заказчиками">связь заказчиков</span>`,
