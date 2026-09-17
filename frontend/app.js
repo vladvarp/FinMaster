@@ -1445,6 +1445,34 @@
     return `с ${started} · ${days} дн.`;
   }
 
+  function customerIsBlank(c) {
+    return !String(c.organization || "").trim()
+      && !String(c.phone || "").trim()
+      && !String(c.email || "").trim()
+      && !String(c.address || "").trim()
+      && !(Number(c.rating) > 0);
+  }
+
+  /** Обрывки вроде «Я», «Ян», если в заказах уже есть полное имя. */
+  function pruneDraftCustomers() {
+    const list = state.doc.customers || [];
+    if (!list.length) return;
+    const used = new Set();
+    for (const order of state.doc.orders || []) {
+      const key = catalogNameKey(order.customer);
+      if (key) used.add(key);
+    }
+    const keys = list.map((c) => catalogNameKey(c.name));
+    const next = list.filter((c, i) => {
+      const key = keys[i];
+      if (!key) return false;
+      if (used.has(key)) return true;
+      if (!customerIsBlank(c)) return true;
+      return !keys.some((other, j) => j !== i && other.startsWith(key) && other.length > key.length);
+    });
+    if (next.length !== list.length) state.doc.customers = next;
+  }
+
   function syncCustomersFromOrders() {
     const list = state.doc.customers || (state.doc.customers = []);
     list.forEach((c) => {
@@ -1453,10 +1481,11 @@
     (state.doc.orders || []).forEach((order) => {
       const name = String(order.customer || "").trim();
       if (!name) return;
-      if (!list.some((c) => c.name === name)) {
+      if (!list.some((c) => catalogNameKey(c.name) === catalogNameKey(name))) {
         list.push({ id: uid(), name, organization: "", phone: "", email: "", address: "", rating: 0 });
       }
     });
+    pruneDraftCustomers();
   }
 
   function starRatingHtml(value) {
@@ -4690,7 +4719,7 @@
         card.querySelector(".note-btn")?.classList.toggle("has-note", !!String(e.target.value || "").trim());
       }
       if (e.target.dataset.k === "name" && !state.path) state.doc.title = e.target.value || state.doc.title;
-      if (e.target.dataset.k === "customer") {
+      if (e.target.dataset.k === "customer" && e.type === "change") {
         syncCustomersFromOrders();
         const list = state.doc.customers || [];
         $("customer-list").innerHTML = unique(list.map((c) => c.name)).map((c) => `<option value="${esc(c)}">`).join("");

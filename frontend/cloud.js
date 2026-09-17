@@ -210,6 +210,7 @@
       this.options = { layout: "galaxy", labels: true, motion: true, heat: false, space3d: false, query: "" };
       this.hovered = null;
       this.selected = null;
+      this.viewPinned = false;
       this.pointer = null;
       this.drag = null;
       this.pendingCapture = null;
@@ -270,7 +271,9 @@
         const pixels = Math.max(-140, Math.min(140, dy));
         const rect = this.canvas.getBoundingClientRect();
         const cursor = { sx: e.clientX - rect.left, sy: e.clientY - rect.top };
-        const pivot = this.selected || this.is3d() ? this.zoomFocusScreen() : cursor;
+        const pivot = this.viewPinned && this.selected
+          ? this.zoomFocusScreen()
+          : this.is3d() ? this.zoomFocusScreen() : cursor;
         this.aimZoom(this.zoomTarget * Math.exp(-pixels * 0.00092), pivot.sx, pivot.sy);
       }, { passive: false });
       this.canvas.addEventListener("dblclick", (e) => {
@@ -732,8 +735,7 @@
         moving = this.easeZoom(dt) || moving;
       }
       if (!this.drag && (Math.abs(this.panVel.x) > 0.12 || Math.abs(this.panVel.y) > 0.12)) {
-        this.camera.x += this.panVel.x * step;
-        this.camera.y += this.panVel.y * step;
+        this.panCamera(this.panVel.x * step, this.panVel.y * step);
         this.panVel.x *= 0.9 ** step;
         this.panVel.y *= 0.9 ** step;
         this.syncZoomAnchor();
@@ -813,7 +815,7 @@
     }
 
     zoomFocusScreen() {
-      if (this.selected) {
+      if (this.viewPinned && this.selected) {
         const p = this.view(this.selected);
         if (p.visible && Number.isFinite(p.x) && Number.isFinite(p.y)) return { sx: p.x, sy: p.y };
       }
@@ -930,7 +932,15 @@
     }
 
     projectedOk(p) {
-      return !!(p && p.visible && Number.isFinite(p.x) && Number.isFinite(p.y) && p.s > 0.05 && p.s < 14);
+      if (!(p && p.visible && Number.isFinite(p.x) && Number.isFinite(p.y) && p.s > 0.05)) return false;
+      if (this.spaceMix > 0.01 && p.s >= 14) return false;
+      return true;
+    }
+
+    onScreen(p, pad = 0) {
+      return this.projectedOk(p)
+        && p.x >= -pad && p.x <= this.width + pad
+        && p.y >= -pad && p.y <= this.height + pad;
     }
 
     cameraWorld() {
@@ -1021,10 +1031,58 @@
       };
     }
 
+    absorbScreenPanIntoOrbit() {
+      if (!this.is3d()) return;
+      if (Math.abs(this.camera.x) < 0.35 && Math.abs(this.camera.y) < 0.35) {
+        this.camera.x = 0;
+        this.camera.y = 0;
+        return;
+      }
+      const here = this.worldAtScreenCenter();
+      this.orbit.targetX = here.x;
+      this.orbit.targetY = here.y;
+      this.camera.x = 0;
+      this.camera.y = 0;
+    }
+
+    panCamera(dx, dy) {
+      if (!dx && !dy) return;
+      this.viewPinned = false;
+      if (this.is3d()) {
+        this.absorbScreenPanIntoOrbit();
+        const z = this.orbit.targetZ;
+        const tx = this.orbit.targetX;
+        const ty = this.orbit.targetY;
+        const p0 = this.project(tx, ty, z);
+        const px = this.project(tx + 1, ty, z);
+        const py = this.project(tx, ty + 1, z);
+        const ax = px.x - p0.x;
+        const ay = px.y - p0.y;
+        const bx = py.x - p0.x;
+        const by = py.y - p0.y;
+        const det = ax * by - ay * bx;
+        let wx;
+        let wy;
+        if (Math.abs(det) < 1e-5) {
+          const s = Math.max(0.2, p0.s || this.camera.zoom || 1);
+          wx = dx / s;
+          wy = dy / s;
+        } else {
+          wx = (dx * by - dy * bx) / det;
+          wy = (dy * ax - dx * ay) / det;
+        }
+        this.orbit.targetX -= wx;
+        this.orbit.targetY -= wy;
+      } else {
+        this.camera.x += dx;
+        this.camera.y += dy;
+      }
+    }
+
     prepareOrbitPivot() {
       this.camTween = null;
       this.orbitTween = null;
-      if (this.selected) {
+      if (this.viewPinned && this.selected) {
         this.orbitPivot = {
           x: this.selected.x,
           y: this.selected.y,
@@ -1208,17 +1266,24 @@
       const steps = radius > 140 ? 56 : 40;
       ctx.beginPath();
       let started = false;
+      let last = null;
       for (let i = 0; i <= steps; i += 1) {
         const a = (i / steps) * TAU;
         const p = this.project(x + Math.cos(a) * radius, y + Math.sin(a) * radius, z);
-        if (!this.projectedOk(p)) {
+        if (!this.projectedOk(p) || (last && Math.hypot(p.x - last.x, p.y - last.y) > 160)) {
           started = false;
+          last = this.projectedOk(p) ? p : null;
+          if (!started && last) {
+            ctx.moveTo(last.x, last.y);
+            started = true;
+          }
           continue;
         }
         if (!started) {
           ctx.moveTo(p.x, p.y);
           started = true;
         } else ctx.lineTo(p.x, p.y);
+        last = p;
       }
       ctx.strokeStyle = hexToRgba(color, alpha);
       ctx.stroke();
@@ -1340,8 +1405,9 @@
       sources.slice().sort((a, b) => (a.data.debt || 0) - (b.data.debt || 0)).forEach((n) => {
         const t = heatTone(n.data.debt, peak);
         const p = this.view(n);
-        if (!p.visible) return;
-        this.paintHeatBlob(ctx, p.x, p.y, (70 + 150 * t) * p.s, t, (dark ? 0.42 : 0.36) + 0.32 * t, dark);
+        if (!this.onScreen(p, 80)) return;
+        const rad = Math.min((70 + 150 * t) * p.s, Math.max(this.width, this.height) * 0.35);
+        this.paintHeatBlob(ctx, p.x, p.y, rad, t, (dark ? 0.42 : 0.36) + 0.32 * t, dark);
       });
       ctx.restore();
     }
@@ -1480,252 +1546,79 @@
       return { x: p.x, y: p.y, r, s: p.s, depth: p.depth };
     }
 
-    clipDiskHalf(ctx, nx, ny, span) {
-      const qx = -ny;
-      const qy = nx;
-      ctx.beginPath();
-      ctx.moveTo(nx * span * 0.02 + qx * span, ny * span * 0.02 + qy * span);
-      ctx.lineTo(nx * span + qx * span, ny * span + qy * span);
-      ctx.lineTo(nx * span - qx * span, ny * span - qy * span);
-      ctx.lineTo(nx * span * 0.02 - qx * span, ny * span * 0.02 - qy * span);
-      ctx.closePath();
-      ctx.clip();
+    starMetrics(node) {
+      const r = node.r || 19;
+      const mass = clamp((r - 16) / 16, 0, 1);
+      const brightness = clamp(0.4 + Math.log1p(Math.max(0, node.data.value || 0)) / 14, 0.4, 1);
+      return { mass, brightness, color: node.data.color || "#f59e0b" };
     }
 
-    paintAccretionDisk(ctx, inner, outer, opt) {
-      const phase = opt.phase || 0;
-      const tilt = opt.tilt || 0;
-      const dopX = opt.dopX || 1;
-      const dopY = opt.dopY || 0;
-      const doppler = opt.doppler || 0.35;
-      const alpha = 0.34 + tilt * 0.66;
-      const ring = ctx.createRadialGradient(0, 0, inner * 0.86, 0, 0, outer);
-      ring.addColorStop(0, "rgba(0,0,0,0)");
-      ring.addColorStop(0.1, "rgba(0,0,0,0)");
-      ring.addColorStop(0.14, `rgba(255,228,186,${0.4 * alpha})`);
-      ring.addColorStop(0.2, `rgba(255,132,42,${0.7 * alpha})`);
-      ring.addColorStop(0.32, `rgba(160,36,12,${0.48 * alpha})`);
-      ring.addColorStop(0.52, `rgba(68,14,8,${0.18 * alpha})`);
-      ring.addColorStop(0.78, `rgba(24,6,4,${0.05 * alpha})`);
-      ring.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = ring;
+    paintStar(ctx, x, y, r, color, opt) {
+      const rgb = hexRgb(color);
+      const brightness = opt.brightness ?? 0.7;
+      const mass = opt.mass ?? 0.5;
+      const pulse = opt.reduced ? 1 : 0.94 + 0.06 * Math.sin((opt.time || 0) / 480);
+      const core = mixRgb(rgb, [255, 250, 240], 0.32 + brightness * 0.5);
+      const glowR = r * (2.05 + mass * 1.7);
+      const glow = ctx.createRadialGradient(x, y, r * 0.12, x, y, glowR);
+      glow.addColorStop(0, rgbCss(core, 0.62 * brightness * pulse));
+      glow.addColorStop(0.16, rgbCss(rgb, 0.32 * brightness));
+      glow.addColorStop(0.42, rgbCss(rgb, (opt.dark ? 0.16 : 0.11) * brightness));
+      glow.addColorStop(1, rgbCss(rgb, 0));
+      ctx.fillStyle = glow;
       ctx.beginPath();
-      ctx.arc(0, 0, outer, 0, TAU);
+      ctx.arc(x, y, glowR, 0, TAU);
       ctx.fill();
-      const reach = outer * 1.05;
-      const heat = ctx.createLinearGradient(-reach * dopX, -reach * dopY, reach * dopX, reach * dopY);
-      heat.addColorStop(0, `rgba(16,4,4,${0.24 * doppler})`);
-      heat.addColorStop(0.42, "rgba(0,0,0,0)");
-      heat.addColorStop(0.72, `rgba(255,168,72,${0.14 * doppler})`);
-      heat.addColorStop(1, `rgba(255,236,196,${0.36 * doppler})`);
-      ctx.fillStyle = heat;
-      ctx.beginPath();
-      ctx.arc(0, 0, outer * 0.96, 0, TAU);
-      ctx.fill();
-      if ((opt.detail || 0) < 9) return;
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
+      ctx.translate(x, y);
+      ctx.rotate(0.14);
       ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      for (let arm = 0; arm < 4; arm += 1) {
+      const spike = r * (1.65 + mass * 1.15);
+      ctx.strokeStyle = rgbCss(core, 0.2 * brightness * pulse);
+      ctx.lineWidth = Math.max(0.7, r * 0.07);
+      for (let i = 0; i < 4; i += 1) {
+        const a = (i * Math.PI) / 2;
         ctx.beginPath();
-        const base = arm * (TAU / 4) + phase;
-        for (let i = 0; i <= 32; i += 1) {
-          const t = i / 32;
-          const r = inner + (outer - inner) * (0.08 + 0.92 * t * t);
-          const a = base + t * 2.15;
-          const x = Math.cos(a) * r;
-          const y = Math.sin(a) * r;
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.strokeStyle = `rgba(255,186,110,${0.08 + tilt * 0.09})`;
-        ctx.lineWidth = Math.max(0.35, (outer - inner) * 0.022);
+        ctx.moveTo(Math.cos(a) * r * 0.25, Math.sin(a) * r * 0.25);
+        ctx.lineTo(Math.cos(a) * spike, Math.sin(a) * spike);
         ctx.stroke();
-      }
-      ctx.beginPath();
-      ctx.arc(0, 0, inner * 1.04, 0, TAU);
-      ctx.strokeStyle = `rgba(255,214,160,${0.26 + tilt * 0.22})`;
-      ctx.lineWidth = Math.max(0.4, inner * 0.045);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    paintPhotonWrap(ctx, hx, hy, holeR, ux, uy, tilt, beamX, beamY) {
-      const inner = holeR * 0.985;
-      const outer = holeR * (1.058 + tilt * 0.07);
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(hx, hy, outer, 0, TAU);
-      ctx.arc(hx, hy, inner, 0, TAU, true);
-      ctx.closePath();
-      ctx.clip();
-      const glow = ctx.createRadialGradient(hx, hy, inner, hx, hy, outer);
-      glow.addColorStop(0, "rgba(40,12,6,0.12)");
-      glow.addColorStop(0.42, `rgba(255,152,64,${0.3 + tilt * 0.2})`);
-      glow.addColorStop(1, "rgba(80,20,8,0)");
-      ctx.fillStyle = glow;
-      ctx.fillRect(hx - outer - 2, hy - outer - 2, outer * 2 + 4, outer * 2 + 4);
-      if (Math.hypot(beamX, beamY) > 0.05) {
-        const bx = hx + beamX * holeR * 0.32;
-        const by = hy + beamY * holeR * 0.32;
-        const beam = ctx.createRadialGradient(bx, by, 0, bx, by, holeR * 0.82);
-        beam.addColorStop(0, `rgba(255,232,190,${0.2 + tilt * 0.12})`);
-        beam.addColorStop(0.45, `rgba(255,140,48,${0.1 + tilt * 0.08})`);
-        beam.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.globalCompositeOperation = "lighter";
-        ctx.fillStyle = beam;
-        ctx.beginPath();
-        ctx.arc(bx, by, holeR * 0.82, 0, TAU);
-        ctx.fill();
-      }
-      const polar = Math.hypot(ux, uy) > 0.2 && tilt > 0.1;
-      if (polar) {
-        ctx.globalCompositeOperation = "lighter";
-        ctx.save();
-        ctx.translate(hx, hy);
-        ctx.rotate(Math.atan2(uy, ux));
-        ctx.lineCap = "round";
-        const span = 0.7 + tilt * 0.38;
-        ctx.beginPath();
-        ctx.arc(0, 0, holeR * 1.02, -span, span);
-        ctx.strokeStyle = `rgba(255,210,140,${0.22 + tilt * 0.48})`;
-        ctx.lineWidth = Math.max(1.2, holeR * (0.075 + tilt * 0.09));
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(0, 0, holeR * 1.02, Math.PI - span * 0.72, Math.PI + span * 0.72);
-        ctx.strokeStyle = `rgba(255,130,55,${0.12 + tilt * 0.3})`;
-        ctx.lineWidth = Math.max(1, holeR * (0.05 + tilt * 0.07));
-        ctx.stroke();
-        ctx.restore();
       }
       ctx.restore();
+      const ball = ctx.createRadialGradient(x - r * 0.2, y - r * 0.22, r * 0.06, x, y, r);
+      ball.addColorStop(0, rgbCss(mixRgb(core, [255, 255, 255], 0.4)));
+      ball.addColorStop(0.38, rgbCss(core));
+      ball.addColorStop(1, rgbCss(mixRgb(rgb, [28, 16, 8], 0.12)));
+      ctx.fillStyle = ball;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, TAU);
+      ctx.fill();
+      if (opt.selected) {
+        ctx.beginPath();
+        ctx.arc(x, y, r * 1.24, 0, TAU);
+        ctx.strokeStyle = rgbCss(core, 0.5);
+        ctx.lineWidth = opt.lineWidth || Math.max(1, r * 0.05);
+        ctx.stroke();
+      }
     }
 
-    paintPhotonRing(ctx, hx, hy, holeR, tilt, selected) {
-      ctx.beginPath();
-      ctx.arc(hx, hy, holeR * 1.016, 0, TAU);
-      ctx.strokeStyle = selected ? "rgba(255,228,186,0.94)" : "rgba(255,198,132,0.82)";
-      ctx.lineWidth = Math.max(1.05, holeR * (0.036 + tilt * 0.012));
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(hx, hy, holeR * 1.068, 0, TAU);
-      ctx.strokeStyle = `rgba(255,120,40,${0.14 + tilt * 0.12})`;
-      ctx.lineWidth = Math.max(0.7, holeR * 0.018);
-      ctx.stroke();
-    }
-
-    drawBlackHole3d(ctx, node, selected, theme, time) {
+    drawStar3d(ctx, node, selected, theme, time) {
       const z = (node.z || 0) * this.spaceMix;
       const core = this.project(node.x, node.y, z);
       if (!this.projectedOk(core)) return null;
       const s = Math.min(core.s, 3.6);
-      const holeR = Math.max(5.5, node.r * s * 0.92);
-      if (holeR > Math.max(this.width, this.height) * 0.55) return null;
-      const hx = core.x;
-      const hy = core.y;
-      const px = this.project(node.x + 1, node.y, z);
-      const py = this.project(node.x, node.y + 1, z);
-      const ax = px.x - hx;
-      const ay = px.y - hy;
-      const bx = py.x - hx;
-      const by = py.y - hy;
-      const axesOk = this.projectedOk(px) && this.projectedOk(py)
-        && Math.hypot(ax, ay) > 0.04 && Math.hypot(bx, by) > 0.04;
-      const aLen = Math.hypot(ax, ay);
-      const bLen = Math.hypot(bx, by);
-      const face = Math.min(aLen, bLen) / Math.max(aLen, bLen, 1e-6);
-      const tilt = clamp(1 - face, 0, 1);
-      const inner = node.r * 0.98;
-      const outer = node.r * (1.52 + tilt * 0.38);
-      const cam = this.cameraWorld();
-      const tx = cam.x - node.x;
-      const ty = cam.y - node.y;
-      const len = Math.hypot(tx, ty);
-      const nx = len > 1e-3 ? tx / len : 1;
-      const ny = len > 1e-3 ? ty / len : 0;
-      const dopX = -ny;
-      const dopY = nx;
-      const doppler = clamp(len / 90, 0.22, 1);
-      const moving = this.options.motion && !this.reducedMotion;
-      const phase = moving ? (time || 0) * 0.00016 : 0;
-      const diskOpt = { phase, tilt, dopX, dopY, doppler, detail: holeR };
-      const night = !theme || theme.dark;
-      const bloom = ctx.createRadialGradient(hx, hy, holeR * 0.55, hx, hy, holeR * 2.45);
-      bloom.addColorStop(0, "rgba(0,0,0,0)");
-      bloom.addColorStop(0.4, `rgba(255,96,32,${(night ? 0.055 : 0.04) + tilt * 0.035})`);
-      bloom.addColorStop(0.76, "rgba(80,16,8,0.04)");
-      bloom.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = bloom;
-      ctx.beginPath();
-      ctx.arc(hx, hy, holeR * 2.45, 0, TAU);
-      ctx.fill();
-      const split = axesOk && len > 6;
-      if (axesOk) {
-        ctx.save();
-        ctx.translate(hx, hy);
-        ctx.transform(ax, ay, bx, by, 0, 0);
-        if (split) this.clipDiskHalf(ctx, -nx, -ny, outer * 5);
-        this.paintAccretionDisk(ctx, inner, outer, diskOpt);
-        ctx.restore();
-      }
-      let ux = 0;
-      let uy = 0;
-      const up = this.project(node.x, node.y, z + 10);
-      if (this.projectedOk(up)) {
-        ux = up.x - hx;
-        uy = up.y - hy;
-        const ul = Math.hypot(ux, uy);
-        if (ul > 0.35) {
-          ux /= ul;
-          uy /= ul;
-        } else {
-          ux = 0;
-          uy = 0;
-        }
-      }
-      let beamX = 0;
-      let beamY = 0;
-      const beam = this.project(node.x + dopX, node.y + dopY, z);
-      if (this.projectedOk(beam)) {
-        beamX = beam.x - hx;
-        beamY = beam.y - hy;
-        const bl = Math.hypot(beamX, beamY) || 1;
-        beamX /= bl;
-        beamY /= bl;
-      }
-      this.paintPhotonWrap(ctx, hx, hy, holeR, ux, uy, tilt, beamX, beamY);
-      const horizon = ctx.createRadialGradient(hx, hy, holeR * 0.08, hx, hy, holeR);
-      horizon.addColorStop(0, "#000000");
-      horizon.addColorStop(0.78, "#000000");
-      horizon.addColorStop(0.93, "#050201");
-      horizon.addColorStop(1, "#140804");
-      ctx.fillStyle = horizon;
-      ctx.beginPath();
-      ctx.arc(hx, hy, holeR, 0, TAU);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(hx, hy, holeR * 0.992, 0, TAU);
-      ctx.strokeStyle = "rgba(0,0,0,0.85)";
-      ctx.lineWidth = Math.max(0.8, holeR * 0.028);
-      ctx.stroke();
-      this.paintPhotonRing(ctx, hx, hy, holeR, tilt, selected);
-      if (split) {
-        ctx.save();
-        ctx.translate(hx, hy);
-        ctx.transform(ax, ay, bx, by, 0, 0);
-        this.clipDiskHalf(ctx, nx, ny, outer * 5);
-        this.paintAccretionDisk(ctx, inner, outer, diskOpt);
-        ctx.restore();
-      }
-      if (selected) {
-        ctx.beginPath();
-        ctx.arc(hx, hy, holeR * 1.28, 0, TAU);
-        ctx.strokeStyle = "rgba(255,214,170,0.22)";
-        ctx.lineWidth = Math.max(1, holeR * 0.028);
-        ctx.stroke();
-      }
-      return { x: hx, y: hy, r: holeR * 1.18, s: core.s, depth: core.depth, hole: true };
+      const metrics = this.starMetrics(node);
+      const r = Math.max(6, node.r * s * (0.92 + metrics.mass * 0.18));
+      if (r > Math.max(this.width, this.height) * 0.5) return null;
+      this.paintStar(ctx, core.x, core.y, r, metrics.color, {
+        selected,
+        brightness: metrics.brightness,
+        mass: metrics.mass,
+        time,
+        dark: !theme || theme.dark,
+        reduced: this.reducedMotion || !this.options.motion,
+      });
+      return { x: core.x, y: core.y, r: r * 1.15, s: core.s, depth: core.depth, star: true };
     }
 
     paintSphere(ctx, x, y, r, color, opt) {
@@ -1794,10 +1687,10 @@
         const selected = node === this.selected;
         const hovered = node === this.hovered;
         const cap = node.data.kind === "customer"
-          ? this.drawBlackHole3d(ctx, node, selected, theme, time)
+          ? this.drawStar3d(ctx, node, selected, theme, time)
           : this.drawBody3d(ctx, node, color, selected, theme);
         if (!cap) return;
-        if ((selected || hovered) && !cap.hole && cap.r > 4 && cap.r < Math.max(this.width, this.height) * 0.55) {
+        if ((selected || hovered) && !cap.star && cap.r > 4 && cap.r < Math.max(this.width, this.height) * 0.55) {
           ctx.strokeStyle = hexToRgba(color, selected ? 0.5 : 0.3);
           ctx.lineWidth = 1.2;
           ctx.beginPath();
@@ -1844,7 +1737,7 @@
       const peak = this.heatPeak(foci);
       foci.forEach((n) => {
         const p = this.view(n);
-        if (!p.visible) return;
+        if (!this.onScreen(p, 24)) return;
         const t = heatTone(n.data.debt, peak);
         const [r, g, b] = heatRgb(t, theme.dark);
         const pulse = this.reducedMotion ? 1 : 0.72 + 0.28 * Math.sin((time || 0) / 380 + n.x * 0.012);
@@ -1951,9 +1844,12 @@
     }
 
     heatCalloutNodes() {
-      const customers = this.heatGroup("customer").sort((a, b) => b.data.debt - a.data.debt);
+      const visible = (kind) => this.heatGroup(kind)
+        .filter((n) => this.onScreen(this.view(n), 0))
+        .sort((a, b) => b.data.debt - a.data.debt);
+      const customers = visible("customer");
       if (customers.length) return customers.slice(0, 4);
-      return this.heatGroup("order").sort((a, b) => b.data.debt - a.data.debt).slice(0, 4);
+      return visible("order").slice(0, 4);
     }
 
     drawHeatCallouts(ctx, theme) {
@@ -1965,8 +1861,10 @@
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       foci.forEach((n) => {
-        const origin = this.worldToScreen(n.x, n.y, (n.z || 0) * this.spaceMix);
-        if (origin.x < -48 || origin.y < -48 || origin.x > this.width + 48 || origin.y > this.height + 48) return;
+        const origin = this.spaceMix > 0.01
+          ? this.project(n.x, n.y, (n.z || 0) * this.spaceMix)
+          : { x: this.width / 2 + this.camera.x + n.x * this.camera.zoom, y: this.height / 2 + this.camera.y + n.y * this.camera.zoom, s: 1, visible: true };
+        if (!this.onScreen(origin, 0)) return;
         const t = heatTone(n.data.debt, peak);
         const [r, g, b] = heatRgb(t, theme.dark);
         const name = this.truncate(ctx, n.data.label || "Долг", 118);
@@ -1977,7 +1875,8 @@
         ctx.font = "600 11px Segoe UI, sans-serif";
         const w = Math.max(titleW, sumW) + 28;
         const h = 34;
-        let x = origin.x + (this.is3d() ? this.view(n).r : n.r * this.camera.zoom) + 16;
+        const nodeR = this.is3d() ? this.view(n).r : n.r * this.camera.zoom;
+        let x = origin.x + nodeR + 16;
         let y = origin.y - h / 2;
         x = clamp(x, 14, this.width - w - 14);
         y = clamp(y, 86, this.height - h - 52);
@@ -2234,31 +2133,17 @@
           ctx.stroke();
         }
 
-        const fill = ctx.createLinearGradient(node.x - r, node.y - r, node.x + r, node.y + r);
-        fill.addColorStop(0, hexToRgba(color, theme.dark ? 0.92 : 0.95));
-        fill.addColorStop(1, hexToRgba(color, theme.dark ? 0.72 : 0.78));
-        ctx.fillStyle = fill;
-        ctx.strokeStyle = hexToRgba(color, selected ? 0.95 : 0.5);
-        ctx.lineWidth = (selected ? 1.5 : 1) / zoom;
-        ctx.beginPath();
         if (node.data.kind === "customer") {
-          const rgb = hexRgb(color);
-          const corona = ctx.createRadialGradient(node.x, node.y, r * 0.2, node.x, node.y, r * 1.55);
-          corona.addColorStop(0, rgbCss(rgb, theme.dark ? 0.22 : 0.16));
-          corona.addColorStop(1, rgbCss(rgb, 0));
-          ctx.fillStyle = corona;
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, r * 1.55, 0, TAU);
-          ctx.fill();
-          ctx.fillStyle = fill;
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, r, 0, TAU);
-          ctx.fill();
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, Math.max(3, r * 0.38), 0, TAU);
-          ctx.fillStyle = theme.bg;
-          ctx.fill();
+          const metrics = this.starMetrics(node);
+          this.paintStar(ctx, node.x, node.y, r, metrics.color, {
+            selected,
+            brightness: metrics.brightness,
+            mass: metrics.mass,
+            time,
+            dark: !!theme.dark,
+            reduced: this.reducedMotion || !this.options.motion,
+            lineWidth: (selected ? 1.5 : 1) / zoom,
+          });
         } else {
           this.paintSphere(ctx, node.x, node.y, node.data.kind === "order" ? r : r * 0.86, color, {
             selected,
@@ -2375,6 +2260,7 @@
       const wx = (sx - this.miniMap.ox) / this.miniMap.scale;
       const wy = (sy - this.miniMap.oy) / this.miniMap.scale;
       this.stopTour();
+      this.viewPinned = false;
       this.orbit.targetX = wx;
       this.orbit.targetY = wy;
       this.idleUntil = performance.now() + 2000;
@@ -2400,6 +2286,7 @@
       if (!nodes.length) return;
       this.stopTour();
       this.orbitTween = null;
+      this.viewPinned = false;
       const box = this.bounds(nodes);
       const zoom = clamp(Math.min((this.width - 110) / Math.max(80, box.width), (this.height - 100) / Math.max(80, box.height)), 0.18, 2.5);
       const x = -((box.minX + box.maxX) / 2) * zoom;
@@ -2431,7 +2318,11 @@
       const onTarget = Math.hypot(this.orbit.targetX - node.x, this.orbit.targetY - node.y) < 10;
       const zoomOk = Math.abs((this.camera.zoom || 1) - want) < 0.08;
       const centered = Math.hypot(this.camera.x, this.camera.y) < 28;
-      if (this.selected === node && onTarget && zoomOk && centered) return;
+      if (this.selected === node && onTarget && zoomOk && centered) {
+        this.viewPinned = true;
+        return;
+      }
+      this.viewPinned = true;
       this.idleUntil = performance.now() + 2600;
       if (this.is3d() || this.options.space3d) this.flyAround(node, { spin: false });
       else {
@@ -2457,6 +2348,7 @@
 
     flyAround(node, { spin = false } = {}) {
       if (!node) return;
+      this.viewPinned = true;
       this.camTween = null;
       const z = (node.z || 0) * this.spaceMix || 8;
       const from = {
@@ -2634,7 +2526,8 @@
       this.orbitVel.pitch = 0;
       this.idleUntil = performance.now() + 2400;
       if (e.button === 1) {
-        this.drag = { type: "pan", x: this.camera.x, y: this.camera.y, moved: false, lastSx: point.sx, lastSy: point.sy };
+        this.absorbScreenPanIntoOrbit();
+        this.drag = { type: "pan", moved: false, lastSx: point.sx, lastSy: point.sy };
       } else if (this.is3d() && !node) {
         this.prepareOrbitPivot();
         const yaw = this.orbit.yaw;
@@ -2653,7 +2546,7 @@
         node.pinned = true;
         this.select(node);
       } else {
-        this.drag = { type: "pan", x: this.camera.x, y: this.camera.y, moved: false, lastSx: point.sx, lastSy: point.sy };
+        this.drag = { type: "pan", moved: false, lastSx: point.sx, lastSy: point.sy };
       }
       this.syncZoomAnchor();
     }
@@ -2684,10 +2577,11 @@
           this.idleUntil = performance.now() + 2400;
           this.transformChanged();
         } else if (this.drag.type === "pan") {
-          this.camera.x = this.drag.x + dx;
-          this.camera.y = this.drag.y + dy;
-          this.panVel.x = point.sx - (this.drag.lastSx ?? point.sx);
-          this.panVel.y = point.sy - (this.drag.lastSy ?? point.sy);
+          const ddx = point.sx - (this.drag.lastSx ?? point.sx);
+          const ddy = point.sy - (this.drag.lastSy ?? point.sy);
+          this.panCamera(ddx, ddy);
+          this.panVel.x = ddx;
+          this.panVel.y = ddy;
           this.drag.lastSx = point.sx;
           this.drag.lastSy = point.sy;
           this.syncZoomAnchor();
@@ -2755,6 +2649,7 @@
 
     select(node) {
       this.selected = node;
+      if (!node) this.viewPinned = false;
       this.buildHot();
       this.onSelect(node?.data || null);
       this.needsFrame = true;
