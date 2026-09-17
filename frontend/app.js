@@ -26,7 +26,7 @@
   };
 
   const LS_NET_CONSOLE = "finmaster.netconsole";
-  const LS_CLOUD = "finmaster.cloud";
+  const LS_START_VIEW = "finmaster.startView";
   const LS_CHARTS = "finmaster.charts";
   const CLOUD_LAYOUTS = ["galaxy", "orbit", "timeline", "constellation"];
   const CLOUD_COLOR_MODES = ["status", "customer", "debt", "type"];
@@ -1285,7 +1285,7 @@
   }
 
   function applyCloudFocus({ fly = false } = {}) {
-    if (state.view !== "cloud" || !orderCloud || !state.focusOrderId) return;
+    if (state.view !== "cloud" || !orderCloud || !state.focusOrderId || cloudState().catalog) return;
     const lineId = state.focusLineId ? `line:${state.focusOrderId}:${state.focusLineId}` : "";
     const orderId = `order:${state.focusOrderId}`;
     const node = (lineId && orderCloud.findNode(lineId)) || orderCloud.findNode(orderId);
@@ -1420,7 +1420,13 @@
   function applySidebar() {
     const shell = $("app-shell");
     if (!shell || !state.doc) return;
-    shell.classList.toggle("sidebar-collapsed", !!ensureUi().sidebar_collapsed);
+    const collapsed = !!ensureUi().sidebar_collapsed;
+    shell.classList.toggle("sidebar-collapsed", collapsed);
+    const btn = $("btn-toggle-sidebar");
+    if (btn) {
+      btn.title = collapsed ? "Развернуть панель" : "Свернуть панель";
+      btn.setAttribute("aria-label", btn.title);
+    }
   }
 
   function customerTenure(c) {
@@ -2763,7 +2769,91 @@
 
   /* ==== Облако заказов: интерактивный граф ==== */
   const CLOUD_COLORS = ["#0f766e", "#2563eb", "#7c3aed", "#d97706", "#db2777", "#0891b2", "#059669", "#e11d48", "#4f46e5", "#ca8a04"];
+  const GALAXY_TYPES = [
+    ["spiral", "спиральная"],
+    ["barred", "пересечённая"],
+    ["elliptical", "эллиптическая"],
+    ["lenticular", "линзовидная"],
+    ["flocculent", "клочковатая"],
+    ["irregular", "неправильная"],
+  ];
+  const GALAXY_COLORS = {
+    spiral: "#84a4d6",
+    barred: "#94aac8",
+    elliptical: "#d6c4a8",
+    lenticular: "#bab0a4",
+    flocculent: "#769cd2",
+    irregular: "#608ec4",
+  };
   let orderCloud = null;
+  let startCloud = null;
+  let unsavedWait = null;
+
+  function startViewMode() {
+    try {
+      return localStorage.getItem(LS_START_VIEW) === "galaxies" ? "galaxies" : "list";
+    } catch {
+      return "list";
+    }
+  }
+
+  function persistStartView(mode) {
+    try {
+      localStorage.setItem(LS_START_VIEW, mode === "galaxies" ? "galaxies" : "list");
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function galaxyTypeFor(path) {
+    return GALAXY_TYPES[cloudHash(path) % GALAXY_TYPES.length][0];
+  }
+
+  function galaxyVolume(item) {
+    return Math.max(1, Number(item.lines) || 0, (Number(item.orders) || 0) * 2, (Number(item.bytes) || 0) / 2400);
+  }
+
+  function galaxyItems() {
+    const lib = state.library?.items || [];
+    const seen = new Set(lib.map((item) => String(item.path || "").replace(/\//g, "\\").toLowerCase()));
+    const extra = (state.recentItems || []).filter((item) => {
+      if (item.exists === false) return false;
+      const key = String(item.path || "").replace(/\//g, "\\").toLowerCase();
+      return key && !seen.has(key);
+    });
+    return [
+      ...lib.map((item) => ({ ...item, origin: "library" })),
+      ...extra.map((item) => ({ ...item, origin: "recent" })),
+    ];
+  }
+
+  function galaxyGraphData(items = galaxyItems()) {
+    const vols = items.map((item) => galaxyVolume(item));
+    const peak = Math.max(1, ...vols);
+    return {
+      nodes: items.map((item) => {
+        const type = galaxyTypeFor(item.path);
+        const volume = galaxyVolume(item);
+        const mass = Math.log1p(volume) / Math.log1p(peak);
+        return {
+          id: `galaxy:${item.path}`,
+          kind: "galaxy",
+          label: item.title || item.name || "Отчёт",
+          path: item.path,
+          origin: item.origin,
+          galaxy: type,
+          volume,
+          orders: item.orders || 0,
+          lines: item.lines || 0,
+          value: item.value || 0,
+          current: samePath(item.path, state.path),
+          color: GALAXY_COLORS[type] || GALAXY_COLORS.spiral,
+          radius: 26 + mass * 56,
+        };
+      }),
+      edges: [],
+    };
+  }
 
   function cloudState() {
     if (!state.cloud) {
@@ -2777,8 +2867,10 @@
         motion: true,
         heat: false,
         space3d: false,
+        catalog: false,
         ...loadStoredCloud(),
       };
+      state.cloud.catalog = false;
     }
     return state.cloud;
   }
@@ -3000,10 +3092,29 @@
     const box = $("cloud-inspector");
     if (!box) return;
     if (!node) {
-      box.innerHTML = `<div class="cloud-inspector-idle">
+      box.innerHTML = cloudState().catalog
+        ? `<div class="cloud-inspector-idle">
+        <div class="cloud-scan"><span></span></div>
+        <strong>Выберите галактику</strong>
+        <p>Каждый отчёт — отдельная галактика. Нажмите, чтобы влететь внутрь и открыть файл.</p>
+      </div>`
+        : `<div class="cloud-inspector-idle">
         <div class="cloud-scan"><span></span></div>
         <strong>Выберите объект</strong>
         <p>Наведите на узел для быстрой справки. Нажмите, чтобы зафиксировать подробности.</p>
+      </div>`;
+      return;
+    }
+    if (node.kind === "galaxy") {
+      const typeLabel = (GALAXY_TYPES.find((row) => row[0] === node.galaxy) || ["", "галактика"])[1];
+      const origin = node.origin === "recent" ? "Недавний файл" : "Папка FinMaster";
+      box.innerHTML = `<div class="cloud-detail">
+        <div class="cloud-detail-top"><span class="cloud-detail-dot" style="--node:${esc(node.color)}"></span><span>Галактика</span></div>
+        <h3>${esc(node.label)}</h3>
+        <p>${esc(origin)} · ${esc(typeLabel)}</p>
+        <div class="cloud-detail-metrics">${cloudMetric("Заказы", String(node.orders || 0))}${cloudMetric("Позиции", String(node.lines || 0))}${cloudMetric("Оборот", money(node.value || 0))}</div>
+        <div class="cloud-detail-row"><span>Файл</span><b>${esc(node.path || "—")}</b></div>
+        <div class="cloud-detail-actions"><button class="btn primary" type="button" data-cloud-galaxy="${esc(node.path)}">${node.current ? "Войти в систему" : "Открыть отчёт"}</button></div>
       </div>`;
       return;
     }
@@ -3051,8 +3162,11 @@
       tip.hidden = true;
       return;
     }
-    const kind = node.kind === "customer" ? "Заказчик" : node.kind === "order" ? "Заказ" : "Позиция";
-    tip.innerHTML = `<small>${kind}</small><b>${esc(node.label)}</b><span>${esc(money(node.value))}${node.debt > 0.005 ? ` · долг ${esc(money(node.debt))}` : ""}</span>`;
+    const kind = node.kind === "galaxy" ? "Галактика" : node.kind === "customer" ? "Заказчик" : node.kind === "order" ? "Заказ" : "Позиция";
+    const extra = node.kind === "galaxy"
+      ? `${node.origin === "recent" ? "недавний" : "FinMaster"} · ${node.orders || 0} зак.`
+      : `${esc(money(node.value))}${node.debt > 0.005 ? ` · долг ${esc(money(node.debt))}` : ""}`;
+    tip.innerHTML = `<small>${kind}</small><b>${esc(node.label)}</b><span>${extra}</span>`;
     tip.hidden = false;
     const wrap = $("cloud-canvas-wrap").getBoundingClientRect();
     const tw = tip.offsetWidth || 220;
@@ -3069,6 +3183,10 @@
       onHover: renderCloudTooltip,
       onSelect: renderCloudInspector,
       onOpen: (node) => {
+        if (node.kind === "galaxy") {
+          openGalaxy(node);
+          return;
+        }
         const id = node.kind === "order" ? node.rawId : node.kind === "line" ? node.orderId : null;
         if (id) gotoOrder(id);
       },
@@ -3095,11 +3213,13 @@
     if ($("cloud-motion")) $("cloud-motion").textContent = s.motion === false ? "Ⅱ" : "◉";
     const hint = $("cloud-hint");
     if (hint) {
-      hint.innerHTML = s.space3d
+      hint.innerHTML = s.catalog
+        ? `<b>Галактики</b> двойной клик — войти в отчёт · <b>левая</b> обзор · <b>средняя</b> сдвиг · <b>колесо</b> масштаб`
+        : s.space3d
         ? `<b>3D</b> левая — обзор · <b>средняя</b> сдвиг · <b>колесо</b> масштаб · <b>узел</b> сдвинуть · <b>двойной клик</b> открыть · <b>T</b> автотур`
         : `<b>Стрелка</b> заказчик → заказ → позиция · <b>колесо</b> масштаб · <b>drag</b> карта · <b>узел</b> сдвинуть · <b>двойной клик</b> открыть · <b>T</b> автотур · <b>Esc</b> свернуть карту`;
     }
-    $("cloud-canvas-wrap")?.classList.toggle("space-3d", !!s.space3d);
+    $("cloud-canvas-wrap")?.classList.toggle("space-3d", !!s.space3d || !!s.catalog);
   }
 
   function heatFociWord(n) {
@@ -3127,7 +3247,63 @@
       : "неоплаченных позиций нет";
   }
 
+  function renderGalaxyCloud() {
+    syncCloudControls();
+    const items = galaxyItems();
+    const graph = galaxyGraphData(items);
+    $("cloud-kpis").innerHTML = `
+      <div><span>Галактики</span><b>${items.length}</b></div>
+      <div><span>FinMaster</span><b>${items.filter((item) => item.origin === "library").length}</b></div>
+      <div><span>Недавние</span><b>${items.filter((item) => item.origin === "recent").length}</b></div>`;
+    $("cloud-legend").innerHTML = [
+      `<span class="cloud-legend-kind"><i class="customer"></i>галактика — отчёт</span>`,
+      `<span class="cloud-legend-link trunk" title="Файлы из папки Documents/FinMaster">папка FinMaster</span>`,
+      `<span class="cloud-legend-link bridge" title="Недавние файлы вне папки">недавние вне папки</span>`,
+      ...GALAXY_TYPES.map(([id, label]) => `<span title="${esc(label)}"><i style="background:${esc(GALAXY_COLORS[id])}"></i>${esc(label)}</span>`),
+    ].join("");
+    const empty = !items.length;
+    $("cloud-empty").hidden = !empty;
+    $("cloud-canvas")?.classList.toggle("is-empty", empty);
+    if (empty) {
+      const title = $("cloud-empty").querySelector("strong");
+      const note = $("cloud-empty").querySelector(":scope > span");
+      const add = $("cloud-add-order");
+      if (title) title.textContent = "Галактик пока нет";
+      if (note) note.textContent = "Сохраните отчёт в папку FinMaster или откройте файл — он появится здесь.";
+      if (add) add.hidden = true;
+    }
+    const el = $("cloud-heat-scale");
+    if (el) el.hidden = true;
+    const engine = ensureOrderCloud();
+    engine?.update(graph, {
+      catalog: true,
+      labels: true,
+      motion: cloudState().motion !== false,
+      heat: false,
+      space3d: true,
+      query: cloudState().query,
+      openOnClick: false,
+    });
+    $("cloud-tech").textContent = `${items.length} галактик · размер по объёму отчёта · 3D`;
+    renderCloudInspector(orderCloud?.selected?.data || null);
+  }
+
   function renderCloud() {
+    const catalog = !!cloudState().catalog;
+    $("cloud-board")?.classList.toggle("is-catalog", catalog);
+    $("cloud-galaxies")?.setAttribute("aria-pressed", String(catalog));
+    $("cloud-galaxies")?.classList.toggle("active", catalog);
+    if ($("cloud-title")) {
+      $("cloud-title").innerHTML = catalog
+        ? `Галактики <span class="cloud-live"><i></i> отчёты</span>`
+        : `Облако заказов <span class="cloud-live"><i></i> живая физика</span>`;
+    }
+    if ($("cloud-eyebrow")) $("cloud-eyebrow").textContent = catalog ? "REPORT GALAXIES" : "LIVE RELATIONSHIP ENGINE";
+    if ($("cloud-search")) $("cloud-search").placeholder = catalog ? "Название отчёта…" : "Номер, заказчик, работа, продукт…";
+    if (catalog) {
+      renderGalaxyCloud();
+      return;
+    }
     syncCloudControls();
     const graph = cloudGraphData();
     renderCloudKpis(graph);
@@ -3153,6 +3329,8 @@
       heat: cloudState().heat,
       space3d: cloudState().space3d,
       query: cloudState().query,
+      catalog: false,
+      openOnClick: false,
     });
     $("cloud-tech").textContent = `${graph.nodes.length} узлов · ${graph.edges.length} связей · MST-созвездия · ${cloudState().space3d ? "3D" : "2D"}${cloudState().heat ? " · тепло долга" : ""}`;
     if (state.focusLineId) applyCloudFocus({ fly: false });
@@ -3218,6 +3396,11 @@
       orderCloud?.setOptions({ space3d: cloudState().space3d });
       syncCloudControls();
     });
+    $("cloud-galaxies")?.addEventListener("click", () => {
+      cloudState().catalog = !cloudState().catalog;
+      renderCloud();
+      setTimeout(() => orderCloud?.fit(), 80);
+    });
     $("cloud-tour")?.addEventListener("click", () => {
       if (!orderCloud?.startTour()) toast("Для автотура нужны заказы или долги");
       else toast("Автотур по очагам долга · Esc остановить");
@@ -3236,7 +3419,9 @@
       const snapshot = e.target.closest("[data-cloud-snapshot]");
       const customer = e.target.closest("[data-cloud-customer]");
       const focus = e.target.closest("[data-cloud-focus]");
+      const galaxy = e.target.closest("[data-cloud-galaxy]");
       if (open) gotoOrder(open.dataset.cloudOpen);
+      else if (galaxy) openGalaxy({ path: galaxy.dataset.cloudGalaxy, id: `galaxy:${galaxy.dataset.cloudGalaxy}` });
       else if (snapshot) openShare(findOrder(snapshot.dataset.cloudSnapshot));
       else if (focus) orderCloud?.focus(focus.dataset.cloudFocus);
       else if (customer) {
@@ -3450,13 +3635,14 @@
     $("file-input").click();
   }
 
-  function applyLoaded(res, { keepView = false } = {}) {
+  function applyLoaded(res, { keepView = false, view = "" } = {}) {
     const stay = keepView && !!state.view && $("app-shell") && !$("app-shell").hidden;
-    const view = stay ? state.view : "dashboard";
+    const next = view || (stay ? state.view : "dashboard");
     state.doc = res.document;
     state.path = res.path;
     state.focusOrderId = null;
     state.focusLineId = null;
+    cloudState().catalog = false;
     adoptCloudFromDocument();
     adoptChartsFromDocument();
     historyReset();
@@ -3464,8 +3650,8 @@
     else if (res.path) pushLocalRecent(res.path, res.document.title);
     setClean();
     showApp();
-    setView(view);
-    if (view === "cloud") showCloudOverview();
+    setView(next);
+    if (next === "cloud") showCloudOverview();
     remotePublish();
     toast("Отчёт открыт");
   }
@@ -3480,6 +3666,122 @@
       return;
     }
     toast("В браузерном режиме откройте файл через кнопку «Открыть».");
+  }
+
+  function restoreNewModal() {
+    if ($("new-modal-title")) $("new-modal-title").textContent = "Создать новый отчёт?";
+    if ($("new-modal-text")) $("new-modal-text").textContent = "Текущий файл будет закрыт. Несохранённые изменения нужно сохранить заранее.";
+    if ($("new-save")) $("new-save").textContent = "Сохранить и создать";
+    if ($("new-discard")) $("new-discard").textContent = "Создать без сохранения";
+  }
+
+  function confirmSwitchReport() {
+    if (!state.dirty) return Promise.resolve(true);
+    restoreNewModal();
+    if ($("new-modal-title")) $("new-modal-title").textContent = "Отчёт не сохранён";
+    if ($("new-modal-text")) $("new-modal-text").textContent = "Вы переходите в другую галактику. Сохранить текущий отчёт перед открытием?";
+    if ($("new-save")) $("new-save").textContent = "Сохранить и открыть";
+    if ($("new-discard")) $("new-discard").textContent = "Открыть без сохранения";
+    $("new-modal").classList.add("open");
+    return new Promise((resolve) => {
+      unsavedWait = resolve;
+    });
+  }
+
+  async function openGalaxy(data, { fromStart = false } = {}) {
+    const path = data?.path;
+    if (!path) return;
+    const same = samePath(path, state.path) && state.doc;
+    if (!fromStart && !same && state.doc && !$("app-shell")?.hidden) {
+      const choice = await confirmSwitchReport();
+      if (choice === "cancel" || choice === false) return;
+      if (choice === "save") {
+        const ok = await save();
+        if (!ok) return;
+      }
+    }
+    const engine = fromStart ? startCloud : orderCloud;
+    const node = engine?.findNode?.(data.id || `galaxy:${path}`) || engine?.findNode?.(path);
+    if (node && engine.flyInto) await engine.flyInto(node);
+    if (same && !fromStart) {
+      cloudState().catalog = false;
+      renderCloud();
+      setTimeout(() => orderCloud?.fit(), 40);
+      return;
+    }
+    await openPath(path, { keepView: !fromStart && !!state.doc && !$("app-shell")?.hidden, view: "cloud" });
+  }
+
+  function applyStartView(mode) {
+    const view = mode === "galaxies" ? "galaxies" : "list";
+    persistStartView(view);
+    $("start-inner")?.classList.toggle("is-galaxies", view === "galaxies");
+    if ($("start-lists")) $("start-lists").hidden = view === "galaxies";
+    if ($("start-galaxy")) $("start-galaxy").hidden = view !== "galaxies";
+    $("start-view-toggle")?.querySelectorAll("[data-start-view]").forEach((btn) => {
+      const on = btn.dataset.startView === view;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-selected", String(on));
+    });
+    if (view === "galaxies") {
+      requestAnimationFrame(() => {
+        renderStartGalaxies();
+        startCloud?.resize();
+        startCloud?.fit(false);
+      });
+    }
+  }
+
+  function ensureStartCloud() {
+    if (startCloud || !window.FinOrderCloud || !$("start-galaxy-canvas")) return startCloud;
+    startCloud = window.FinOrderCloud.create({
+      canvas: $("start-galaxy-canvas"),
+      onHover: (node, point) => {
+        const tip = $("start-galaxy-tip");
+        if (!tip) return;
+        if (!node || !point) {
+          tip.hidden = true;
+          return;
+        }
+        tip.innerHTML = `<b>${esc(node.label)}</b><span>${node.origin === "recent" ? "недавний файл" : "папка FinMaster"}</span>`;
+        tip.hidden = false;
+        const wrap = $("start-galaxy").getBoundingClientRect();
+        const tw = tip.offsetWidth || 200;
+        const th = tip.offsetHeight || 48;
+        tip.style.left = `${Math.max(10, Math.min(wrap.width - tw - 10, point.x + 16))}px`;
+        tip.style.top = `${Math.max(10, Math.min(wrap.height - th - 10, point.y + 16))}px`;
+      },
+      onSelect: () => {},
+      onOpen: (node) => {
+        if (node?.kind === "galaxy") openGalaxy(node, { fromStart: true });
+      },
+    });
+    startCloud.setOptions({ catalog: true, labels: true, motion: true, heat: false, space3d: true, openOnClick: true });
+    return startCloud;
+  }
+
+  function renderStartGalaxies() {
+    const engine = ensureStartCloud();
+    engine?.update(galaxyGraphData(), {
+      catalog: true,
+      labels: true,
+      motion: true,
+      heat: false,
+      space3d: true,
+      query: "",
+      openOnClick: true,
+    });
+  }
+
+  function showGalaxyCatalog() {
+    cloudState().catalog = true;
+    if ($("app-shell")?.hidden || !state.doc) {
+      applyStartView("galaxies");
+      return;
+    }
+    if (state.view !== "cloud") setView("cloud");
+    else renderCloud();
+    setTimeout(() => orderCloud?.fit(), 80);
   }
 
   async function save({ as = false, silent = false } = {}) {
@@ -3647,18 +3949,27 @@
           payload = {};
         }
       } else {
-        renderRecentItems(localRecent());
+        state.recentItems = localRecent();
+        state.library = null;
+        renderRecentItems(state.recentItems);
         renderLibrary(null);
+        applyStartView(startViewMode());
         return;
       }
     }
-    renderRecentItems(payload.recent || []);
-    renderLibrary(payload.library || null);
+    state.recentItems = payload.recent || [];
+    state.library = payload.library || null;
+    renderRecentItems(state.recentItems);
+    renderLibrary(state.library);
+    applyStartView(startViewMode());
   }
 
   async function renderRecent(list) {
     if (list) {
+      state.recentItems = list;
       renderRecentItems(list);
+      if (cloudState().catalog && state.view === "cloud") renderGalaxyCloud();
+      if ($("start-screen") && !$("start-screen").classList.contains("hidden") && startViewMode() === "galaxies") renderStartGalaxies();
       return;
     }
     await renderStartLists();
@@ -4440,6 +4751,10 @@
         toast(String(err.message || "Не удалось открыть папку"));
       }
     });
+    $("start-view-toggle")?.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-start-view]");
+      if (btn) applyStartView(btn.dataset.startView);
+    });
     $("library-list")?.addEventListener("click", (e) => {
       const del = e.target.closest("[data-library-delete]");
       if (del) {
@@ -4531,13 +4846,38 @@
       else window.close();
     });
 
-    $("new-cancel").addEventListener("click", () => $("new-modal").classList.remove("open"));
+    $("new-cancel").addEventListener("click", () => {
+      $("new-modal").classList.remove("open");
+      if (unsavedWait) {
+        const done = unsavedWait;
+        unsavedWait = null;
+        restoreNewModal();
+        done("cancel");
+      }
+    });
+    $("new-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("new-modal")) $("new-cancel").click();
+    });
     $("new-discard").addEventListener("click", async () => {
       $("new-modal").classList.remove("open");
+      if (unsavedWait) {
+        const done = unsavedWait;
+        unsavedWait = null;
+        restoreNewModal();
+        done("discard");
+        return;
+      }
       await createNew();
     });
     $("new-save").addEventListener("click", async () => {
       $("new-modal").classList.remove("open");
+      if (unsavedWait) {
+        const done = unsavedWait;
+        unsavedWait = null;
+        restoreNewModal();
+        done("save");
+        return;
+      }
       const ok = await save();
       if (ok) await createNew();
     });
@@ -4664,7 +5004,10 @@
   }
 
   function onNew() {
-    if (state.dirty) $("new-modal").classList.add("open");
+    if (state.dirty) {
+      restoreNewModal();
+      $("new-modal").classList.add("open");
+    }
     else createNew();
   }
 
@@ -5969,7 +6312,7 @@
       },
       {
         group: "Действия",
-        ico: "☰",
+        ico: "⊏",
         title: ensureUi().sidebar_collapsed ? "Развернуть боковую панель" : "Свернуть боковую панель",
         run: () => {
           ensureUi().sidebar_collapsed = !ensureUi().sidebar_collapsed;
@@ -6961,8 +7304,8 @@
   function applyRemoteNav(nav) {
     if (!nav || !nav.view) return;
     if (nav.view === "files") {
+      showGalaxyCatalog();
       if (!state.doc || $("app-shell")?.hidden) renderStartLists();
-      showCloudOverview();
       return;
     }
     if (!revealRemoteWorkspace()) return;
@@ -6977,6 +7320,10 @@
     }
     const hadFocus = !!state.focusOrderId;
     if (state.view === "cloud") {
+      if (cloudState().catalog) {
+        cloudState().catalog = false;
+        renderCloud();
+      }
       if (nav.view === "stats") {
         const next = {
           period: nav.period || "all",
@@ -7067,8 +7414,18 @@
 
   function applyRemoteLists(data) {
     if (!data) return;
-    if (data.library) renderLibrary(data.library);
-    if (Array.isArray(data.recent)) renderRecentItems(data.recent);
+    if (data.library) {
+      state.library = data.library;
+      renderLibrary(data.library);
+    }
+    if (Array.isArray(data.recent)) {
+      state.recentItems = data.recent;
+      renderRecentItems(data.recent);
+    }
+    if (cloudState().catalog && state.view === "cloud") renderGalaxyCloud();
+    if ($("start-screen") && !$("start-screen").classList.contains("hidden") && startViewMode() === "galaxies") {
+      renderStartGalaxies();
+    }
   }
 
   function bindRemote() {

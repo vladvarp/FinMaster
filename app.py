@@ -182,7 +182,11 @@ def _recent_payload() -> list[dict[str, Any]]:
         path = item.get("path")
         if not path:
             continue
-        recent.append({**item, "exists": os.path.exists(path)})
+        exists = os.path.exists(path)
+        row = {**item, "exists": exists}
+        if exists:
+            row = storage.with_volume(row)
+        recent.append(row)
     return recent
 
 

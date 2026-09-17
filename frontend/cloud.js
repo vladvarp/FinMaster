@@ -207,7 +207,7 @@
       this.spaceMix = 0;
       this.spaceTarget = 0;
       this.idleUntil = 0;
-      this.options = { layout: "galaxy", labels: true, motion: true, heat: false, space3d: false, query: "" };
+      this.options = { layout: "galaxy", labels: true, motion: true, heat: false, space3d: false, query: "", catalog: false, openOnClick: false };
       this.hovered = null;
       this.selected = null;
       this.viewPinned = false;
@@ -221,7 +221,7 @@
       this.lastTime = performance.now();
       this.needsFrame = true;
       this.tour = null;
-      this.stars = this.makeStars(160);
+      this.stars = this.makeStars(420);
       this.dust = this.makeDust(48);
       this.reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
       this.bind();
@@ -239,6 +239,7 @@
         z: 0.25 + (hash(`sz:${i}`) / 4294967295) * 0.9,
         s: 0.4 + (hash(`ss:${i}`) / 4294967295) * 1.6,
         tw: hash(`st:${i}`) / 4294967295,
+        hue: hash(`sh:${i}`) % 2,
       }));
     }
 
@@ -278,7 +279,9 @@
       }, { passive: false });
       this.canvas.addEventListener("dblclick", (e) => {
         const node = this.pickNode(this.eventPoint(e));
-        if (node) this.onOpen(node.data);
+        if (!node) return;
+        if (node.data.kind === "galaxy" && this.options.openOnClick) return;
+        this.onOpen(node.data);
       });
       this.canvas.addEventListener("keydown", (e) => this.onKey(e));
       if (this.minimap) {
@@ -346,7 +349,7 @@
         if (!Number.isFinite(node.vz)) node.vz = 0;
         node.data = data;
         node.index = index;
-        node.r = data.radius || (data.kind === "customer" ? 19 : data.kind === "order" ? 12 : 6);
+        node.r = data.radius || (data.kind === "galaxy" ? 36 : data.kind === "customer" ? 19 : data.kind === "order" ? 12 : 6);
         node.match = this.nodeMatches(data);
         return node;
       });
@@ -375,7 +378,7 @@
     nodeMatches(data) {
       const q = String(this.options.query || "").trim().toLocaleLowerCase("ru");
       if (!q) return false;
-      return [data.label, data.customer, data.product, data.status, data.type, data.number, data.name]
+      return [data.label, data.customer, data.product, data.status, data.type, data.number, data.name, data.path, data.origin]
         .filter(Boolean)
         .join(" ")
         .toLocaleLowerCase("ru")
@@ -393,7 +396,8 @@
     }
 
     setOptions(options) {
-      const layoutChanged = options.layout && options.layout !== this.options.layout;
+      const layoutChanged = (options.layout && options.layout !== this.options.layout)
+        || (options.catalog !== undefined && options.catalog !== this.options.catalog);
       const queryChanged = options.query !== undefined && options.query !== this.options.query;
       const spaceChanged = options.space3d !== undefined && options.space3d !== this.options.space3d;
       this.options = { ...this.options, ...options };
@@ -503,7 +507,16 @@
       this.placeMoons();
     }
 
+    isCatalog() {
+      return !!this.options.catalog;
+    }
+
     calculateTargets() {
+      if (this.isCatalog()) {
+        this.layoutGalaxies();
+        this.assignDepth();
+        return;
+      }
       const layout = this.options.layout;
       const customers = this.nodes.filter((n) => n.data.kind === "customer");
       const orders = this.nodes.filter((n) => n.data.kind === "order");
@@ -574,16 +587,40 @@
       this.assignDepth();
     }
 
+    layoutGalaxies() {
+      const nodes = this.nodes.filter((n) => n.data.kind === "galaxy");
+      let spiral = 0;
+      nodes.forEach((n, i) => {
+        if (i === 0) {
+          n.tx = 0;
+          n.ty = 0;
+        } else {
+          spiral += (n.r + (nodes[i - 1]?.r || 32)) * 2.05 + 64;
+          const a = i * GOLDEN + 0.27;
+          n.tx = Math.cos(a) * spiral;
+          n.ty = Math.sin(a) * spiral * 0.82;
+        }
+        n.tz = jitter(n.data.id, 21) * 38;
+        n.x = n.tx;
+        n.y = n.ty;
+        n.z = n.tz;
+        n.vx = 0;
+        n.vy = 0;
+      });
+    }
+
     assignDepth() {
       this.nodes.forEach((n) => {
         const tilt = jitter(n.data.id, 19);
-        if (n.data.kind === "customer") n.tz = 0;
+        if (n.data.kind === "galaxy") n.tz = n.tz || tilt * 26;
+        else if (n.data.kind === "customer") n.tz = 0;
         else if (n.data.kind === "order") n.tz = 5 + tilt * 7;
         else n.tz = 9 + jitter(n.data.id, 23) * 9;
       });
     }
 
     buildBridges() {
+      if (this.isCatalog()) return [];
       const customers = this.nodes.filter((n) => n.data.kind === "customer");
       if (customers.length < 2) return [];
       const types = new Map();
@@ -615,6 +652,15 @@
     simulate(dt) {
       const step = Math.min(1.7, dt / 16.67);
       this.stepDepth(step);
+      if (this.isCatalog()) {
+        this.nodes.forEach((n) => {
+          if (n.pinned) return;
+          n.x += ((n.tx ?? n.x) - n.x) * 0.06 * step;
+          n.y += ((n.ty ?? n.y) - n.y) * 0.06 * step;
+        });
+        this.alpha *= 0.94 ** step;
+        return;
+      }
       if (!this.options.motion || this.reducedMotion || this.alpha < 0.002) return;
       const alpha = this.alpha;
       this.grid.clear();
@@ -805,8 +851,13 @@
       return true;
     }
 
+    zoomRange() {
+      return this.isCatalog() ? { min: 0.08, max: 16 } : { min: 0.14, max: 5.4 };
+    }
+
     applyZoom(next) {
-      const zoom = clamp(next, 0.14, 5.4);
+      const range = this.zoomRange();
+      const zoom = clamp(next, range.min, range.max);
       const anchor = this.zoomAnchor;
       this.camera.zoom = zoom;
       this.camera.x = anchor.sx - this.width / 2 - anchor.wx * zoom;
@@ -840,7 +891,8 @@
 
     settleZoom() {
       this.camTween = null;
-      const target = clamp(this.zoomTarget, 0.14, 5.4);
+      const range = this.zoomRange();
+      const target = clamp(this.zoomTarget, range.min, range.max);
       if (Math.abs((this.camera.zoom || 1) - target) > 0.0002) this.applyZoom(target);
       this.zoomTarget = target;
     }
@@ -850,7 +902,8 @@
       this.orbitTween = null;
       const zoom = this.camera.zoom || 1;
       const pivot = sx == null || sy == null ? this.zoomFocusScreen() : { sx, sy };
-      this.zoomTarget = clamp(target, 0.14, 5.4);
+      const range = this.zoomRange();
+      this.zoomTarget = clamp(target, range.min, range.max);
       this.zoomAnchor = {
         sx: pivot.sx,
         sy: pivot.sy,
@@ -861,6 +914,19 @@
     }
 
     theme() {
+      if (this.isCatalog()) {
+        return {
+          dark: true,
+          bg: "#03060c",
+          bg2: "#070b14",
+          nebula: ["rgba(36,52,92,0.16)", "rgba(78,42,70,0.08)", "rgba(18,70,88,0.07)"],
+          grid: "rgba(0,0,0,0)",
+          ink: "#e8eef6",
+          muted: "#93a4bb",
+          edge: "rgba(148,163,184,.12)",
+          hull: "rgba(0,0,0,0)",
+        };
+      }
       const dark = document.documentElement.getAttribute("data-theme") === "dark";
       return dark
         ? {
@@ -1158,14 +1224,16 @@
         this.drawSpace(ctx, t);
         ctx.translate(this.width / 2 + this.camera.x, this.height / 2 + this.camera.y);
         ctx.scale(this.camera.zoom, this.camera.zoom);
-        if (this.options.layout === "timeline") this.drawTimeline(ctx, t);
-        if (this.options.layout === "constellation" || this.options.layout === "timeline") this.drawHulls(ctx, t);
-        this.drawOrbitRings(ctx, t);
-        if (this.options.heat) this.drawHeat(ctx, t);
-        this.drawBridges(ctx, t, time);
-        this.drawEdges(ctx, t, time);
+        if (!this.isCatalog()) {
+          if (this.options.layout === "timeline") this.drawTimeline(ctx, t);
+          if (this.options.layout === "constellation" || this.options.layout === "timeline") this.drawHulls(ctx, t);
+          this.drawOrbitRings(ctx, t);
+          if (this.options.heat) this.drawHeat(ctx, t);
+          this.drawBridges(ctx, t, time);
+          this.drawEdges(ctx, t, time);
+        }
         this.drawNodes(ctx, t, time);
-        if (this.options.heat) this.drawHeatMarks(ctx, t, time);
+        if (!this.isCatalog() && this.options.heat) this.drawHeatMarks(ctx, t, time);
       }
       ctx.restore();
       if (this.options.heat) {
@@ -1179,6 +1247,10 @@
 
     drawScene3d(ctx, theme, time) {
       this.drawSpace3d(ctx, theme);
+      if (this.isCatalog()) {
+        this.drawNodes3d(ctx, theme, time);
+        return;
+      }
       this.drawShadows3d(ctx, theme);
       if (this.options.heat) this.drawHeat3d(ctx, theme);
       if (this.options.layout === "constellation" || this.options.layout === "timeline") this.drawHulls3d(ctx, theme);
@@ -1189,6 +1261,10 @@
     }
 
     drawSpace3d(ctx, theme) {
+      if (this.isCatalog()) {
+        this.drawCatalogVoid(ctx, theme, true);
+        return;
+      }
       ctx.fillStyle = theme.bg;
       ctx.fillRect(0, 0, this.width, this.height);
       const fog = ctx.createRadialGradient(this.width * 0.5, this.height * 0.42, 40, this.width * 0.5, this.height * 0.5, Math.max(this.width, this.height) * 0.72);
@@ -1639,6 +1715,153 @@
       }
     }
 
+    galaxyPalette(type, seed) {
+      const palettes = {
+        spiral: { core: [255, 226, 186], disk: [168, 178, 198], arm: [132, 164, 214], dust: [42, 32, 28] },
+        barred: { core: [255, 214, 168], disk: [176, 168, 158], arm: [148, 170, 206], dust: [48, 34, 28] },
+        elliptical: { core: [255, 232, 196], disk: [214, 196, 168], arm: [198, 178, 150], dust: [70, 56, 44] },
+        lenticular: { core: [248, 228, 196], disk: [186, 176, 164], arm: [170, 164, 158], dust: [36, 28, 24] },
+        flocculent: { core: [255, 220, 190], disk: [154, 166, 188], arm: [118, 156, 210], dust: [40, 34, 38] },
+        irregular: { core: [236, 214, 190], disk: [140, 152, 168], arm: [96, 142, 196], dust: [32, 28, 30] },
+      };
+      const base = palettes[type] || palettes.spiral;
+      const shift = ((seed % 17) - 8) * 1.6;
+      const tint = (rgb) => [
+        clamp(Math.round(rgb[0] + shift), 0, 255),
+        clamp(Math.round(rgb[1] + shift * 0.4), 0, 255),
+        clamp(Math.round(rgb[2] - shift * 0.5), 0, 255),
+      ];
+      return { core: tint(base.core), disk: tint(base.disk), arm: tint(base.arm), dust: base.dust };
+    }
+
+    paintGalaxy(ctx, x, y, r, data, opt) {
+      const type = data.galaxy || "spiral";
+      const seed = hash(data.id || data.path || "g");
+      const pal = this.galaxyPalette(type, seed);
+      const u = (key) => hash(`${seed}:${key}`) / 4294967295;
+      const dark = opt.dark !== false;
+      const tilt = type === "elliptical" ? 0.58 + u("t") * 0.3 : 0.26 + u("t") * 0.5;
+      const rot = (u("r") - 0.5) * 1.35;
+      const current = !!data.current;
+      const add = "lighter";
+      const arms = type === "spiral" || type === "barred" ? 2 : type === "flocculent" ? 5 : 0;
+      const pitch = type === "flocculent" ? 0.31 : 0.19 + u("p") * 0.05;
+      const armPhase = u("ph") * TAU;
+      const armWidth = type === "flocculent" ? 0.55 : 0.22;
+      const armDensity = (th, rad) => {
+        if (!arms) return 0;
+        let best = 0;
+        for (let k = 0; k < arms; k += 1) {
+          const ideal = Math.log(Math.max(0.08, rad / (r * 0.08))) / pitch;
+          const a = th - armPhase - k * (TAU / arms) - ideal;
+          const d = Math.abs(Math.atan2(Math.sin(a), Math.cos(a)));
+          best = Math.max(best, Math.exp(-((d / armWidth) ** 2)));
+        }
+        return best;
+      };
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rot);
+
+      const haloR = r * (type === "elliptical" ? 2.55 : 2.2);
+      const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, haloR);
+      halo.addColorStop(0, rgbCss(pal.core, dark ? 0.16 : 0.1));
+      halo.addColorStop(0.22, rgbCss(pal.disk, dark ? 0.08 : 0.06));
+      halo.addColorStop(1, rgbCss(pal.disk, 0));
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, haloR, haloR * (type === "elliptical" ? tilt : Math.max(0.55, tilt)), 0, 0, TAU);
+      ctx.fill();
+
+      ctx.globalCompositeOperation = add;
+      const diskR = r * 1.08;
+      const disk = ctx.createRadialGradient(0, 0, r * 0.02, 0, 0, diskR);
+      disk.addColorStop(0, rgbCss(mixRgb(pal.core, [255, 255, 255], 0.15), dark ? 0.42 : 0.28));
+      disk.addColorStop(0.18, rgbCss(pal.core, dark ? 0.22 : 0.16));
+      disk.addColorStop(0.55, rgbCss(pal.disk, dark ? 0.1 : 0.08));
+      disk.addColorStop(1, rgbCss(pal.arm, 0));
+      ctx.fillStyle = disk;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, diskR, diskR * tilt, 0, 0, TAU);
+      ctx.fill();
+
+      if (type === "barred") {
+        const bar = ctx.createLinearGradient(-r * 0.7, 0, r * 0.7, 0);
+        bar.addColorStop(0, rgbCss(pal.core, 0));
+        bar.addColorStop(0.5, rgbCss(pal.core, dark ? 0.28 : 0.18));
+        bar.addColorStop(1, rgbCss(pal.core, 0));
+        ctx.fillStyle = bar;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r * 0.68, r * 0.075 * tilt, 0.04, 0, TAU);
+        ctx.fill();
+      }
+
+      const starN = Math.round(clamp(r * (r < 90 ? 2.4 : 1.15), 36, 220));
+      for (let i = 0; i < starN; i += 1) {
+        const rad = Math.pow(u(`sr${i}`), type === "elliptical" ? 0.72 : 0.52) * r;
+        const th = u(`st${i}`) * TAU;
+        let dens = Math.exp(-rad / (r * (type === "elliptical" ? 0.38 : 0.5)));
+        const arm = armDensity(th, rad);
+        if (type === "irregular") dens *= 0.35 + 0.9 * (0.5 + 0.5 * Math.sin(th * 2.2 + u("irr") * 4));
+        else dens = dens * (0.28 + arm * 0.85) + (type === "elliptical" || type === "lenticular" ? dens * 0.55 : 0);
+        if (u(`sk${i}`) > dens + 0.08) continue;
+        const px = Math.cos(th) * rad;
+        const py = Math.sin(th) * rad * tilt;
+        const young = arm > 0.35 && rad > r * 0.18;
+        const col = rad < r * 0.16 ? pal.core : young ? pal.arm : pal.disk;
+        const sz = 0.35 + u(`ss${i}`) * (young ? 1.25 : 0.75);
+        ctx.fillStyle = rgbCss(col, (dark ? 0.22 : 0.16) + dens * 0.42);
+        ctx.fillRect(px, py, sz, sz);
+      }
+
+      if (type === "irregular") {
+        const blobs = 3 + (seed % 3);
+        for (let i = 0; i < blobs; i += 1) {
+          const a = u(`ib${i}`) * TAU;
+          const d = r * (0.16 + u(`id${i}`) * 0.46);
+          const br = r * (0.12 + u(`is${i}`) * 0.16);
+          const px = Math.cos(a) * d;
+          const py = Math.sin(a) * d * tilt;
+          const g = ctx.createRadialGradient(px, py, 0, px, py, br);
+          g.addColorStop(0, rgbCss(i % 2 ? pal.arm : pal.core, dark ? 0.22 : 0.16));
+          g.addColorStop(1, rgbCss(pal.disk, 0));
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.arc(px, py, br, 0, TAU);
+          ctx.fill();
+        }
+      }
+
+      if (type === "spiral" || type === "barred" || type === "lenticular") {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.fillStyle = rgbCss(pal.dust, dark ? (type === "lenticular" ? 0.28 : 0.16) : 0.1);
+        ctx.beginPath();
+        ctx.ellipse(0, r * 0.03, r * 0.7, r * (type === "lenticular" ? 0.055 : 0.038) * tilt, 0.1, 0, TAU);
+        ctx.fill();
+      }
+
+      ctx.globalCompositeOperation = add;
+      const bulgeR = r * (type === "elliptical" ? 0.58 : type === "lenticular" ? 0.38 : 0.24);
+      const bulge = ctx.createRadialGradient(-bulgeR * 0.1, -bulgeR * 0.08, 0, 0, 0, bulgeR);
+      bulge.addColorStop(0, rgbCss(mixRgb(pal.core, [255, 255, 255], 0.42), dark ? 0.78 : 0.62));
+      bulge.addColorStop(0.4, rgbCss(pal.core, dark ? 0.32 : 0.24));
+      bulge.addColorStop(1, rgbCss(pal.core, 0));
+      ctx.fillStyle = bulge;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, bulgeR, bulgeR * (type === "elliptical" ? 0.8 : 0.88), 0, 0, TAU);
+      ctx.fill();
+
+      ctx.restore();
+      if (opt.selected || opt.hovered || current) {
+        ctx.beginPath();
+        ctx.ellipse(x, y, r * 1.16, r * 1.16 * tilt, rot, 0, TAU);
+        ctx.strokeStyle = rgbCss(pal.core, current || opt.selected ? 0.32 : 0.16);
+        ctx.lineWidth = opt.lineWidth || Math.max(0.7, r * 0.018);
+        ctx.stroke();
+      }
+    }
+
     drawStar3d(ctx, node, selected, theme, time) {
       const z = (node.z || 0) * this.spaceMix;
       const core = this.project(node.x, node.y, z);
@@ -1693,6 +1916,20 @@
       ctx.stroke();
     }
 
+    drawGalaxy3d(ctx, node, selected, hovered, theme) {
+      const z = (node.z || 0) * this.spaceMix;
+      const p = this.project(node.x, node.y, z);
+      if (!this.projectedOk(p)) return null;
+      const r = Math.max(8, node.r * Math.min(p.s, this.isCatalog() ? 22 : 2.4));
+      this.paintGalaxy(ctx, p.x, p.y, r, node.data, {
+        selected,
+        hovered,
+        dark: true,
+        lineWidth: selected ? 1.2 : 0.8,
+      });
+      return { x: p.x, y: p.y, r: r * 1.08, s: p.s, depth: p.depth, star: true };
+    }
+
     drawBody3d(ctx, node, color, selected, theme) {
       const planet = node.data.kind === "order";
       const z = (node.z || 0) * this.spaceMix;
@@ -1723,7 +1960,9 @@
         const color = node.data.color || "#64748b";
         const selected = node === this.selected;
         const hovered = node === this.hovered;
-        const cap = node.data.kind === "customer"
+        const cap = node.data.kind === "galaxy"
+          ? this.drawGalaxy3d(ctx, node, selected, hovered, theme)
+          : node.data.kind === "customer"
           ? this.drawStar3d(ctx, node, selected, theme, time)
           : this.drawBody3d(ctx, node, color, selected, theme);
         if (!cap) return;
@@ -1742,18 +1981,19 @@
           ctx.stroke();
         }
         const screen = { ...p, x: cap.x, y: cap.y, r: cap.r, s: cap.s };
-        const mustLabel = selected || hovered || node.match || node.data.kind === "customer"
+        const mustLabel = selected || hovered || node.match || node.data.kind === "customer" || node.data.kind === "galaxy"
           || (node.data.kind === "order" && cap.s > 0.55)
           || (node.data.kind === "line" && cap.s > 1.2);
-        if ((this.options.labels && mustLabel) || selected) this.drawLabel3d(ctx, node, screen, theme, selected || hovered || node.match);
+        const alwaysGalaxy = this.isCatalog() && node.data.kind === "galaxy";
+        if ((this.options.labels && mustLabel) || selected || alwaysGalaxy) this.drawLabel3d(ctx, node, screen, theme, selected || hovered || node.match || alwaysGalaxy);
       });
       ctx.globalAlpha = 1;
     }
 
     drawLabel3d(ctx, node, p, theme, emphasized) {
-      const fontSize = clamp(node.data.kind === "customer" ? 12 : 11, 8, 15);
-      ctx.font = `${node.data.kind === "customer" ? 650 : 500} ${fontSize}px Segoe UI, sans-serif`;
-      const label = this.truncate(ctx, node.data.label || "Без названия", node.data.kind === "line" ? 120 : 170);
+      const fontSize = clamp(node.data.kind === "galaxy" || node.data.kind === "customer" ? 12 : 11, 8, 15);
+      ctx.font = `${node.data.kind === "customer" || node.data.kind === "galaxy" ? 650 : 500} ${fontSize}px Segoe UI, sans-serif`;
+      const label = this.truncate(ctx, node.data.label || "Без названия", node.data.kind === "galaxy" ? 200 : node.data.kind === "line" ? 120 : 170);
       const x = p.x + p.r + 8;
       const y = p.y + fontSize * 0.35;
       if (emphasized) {
@@ -1786,7 +2026,47 @@
       });
     }
 
+    drawCatalogVoid(ctx, theme, parallax) {
+      const w = this.width;
+      const h = this.height;
+      ctx.fillStyle = theme.bg || "#03060c";
+      ctx.fillRect(0, 0, w, h);
+      const yaw = parallax ? this.orbit.yaw : 0;
+      const pitch = parallax ? this.orbit.pitch : 0;
+      const cx = w * 0.5 + Math.sin(yaw) * 28;
+      const cy = h * 0.46 + (pitch - 0.68) * 36;
+      const wash = ctx.createRadialGradient(cx, cy, 12, w * 0.5, h * 0.5, Math.max(w, h) * 0.78);
+      wash.addColorStop(0, "rgba(22, 34, 58, 0.55)");
+      wash.addColorStop(0.38, "rgba(12, 18, 36, 0.28)");
+      wash.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = wash;
+      ctx.fillRect(0, 0, w, h);
+      const band = ctx.createLinearGradient(0, h * 0.38, w, h * 0.62);
+      band.addColorStop(0, "rgba(0,0,0,0)");
+      band.addColorStop(0.45, "rgba(48, 58, 86, 0.1)");
+      band.addColorStop(0.55, "rgba(70, 52, 64, 0.08)");
+      band.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = band;
+      ctx.fillRect(0, 0, w, h);
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      this.stars.forEach((s) => {
+        const x = ((((s.x * 0.5 + 0.5 + yaw * 0.035 * s.z) % 1) + 1) % 1) * w;
+        const y = ((((s.y * 0.5 + 0.5 + pitch * 0.028 * s.z) % 1) + 1) % 1) * h;
+        const tw = this.reducedMotion ? 0.7 : 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(performance.now() * 0.0006 + s.tw * TAU));
+        const a = (0.18 + s.s * 0.22) * tw;
+        const size = s.s < 1.4 ? 1 : 1.35;
+        ctx.fillStyle = s.hue ? `rgba(210,222,255,${a})` : `rgba(255,248,236,${a})`;
+        ctx.fillRect(x, y, size, size);
+      });
+      ctx.restore();
+    }
+
     drawSpace(ctx, theme) {
+      if (this.isCatalog()) {
+        this.drawCatalogVoid(ctx, theme, false);
+        return;
+      }
       ctx.fillStyle = theme.bg;
       ctx.fillRect(0, 0, this.width, this.height);
       const gap = clamp(52 * this.camera.zoom, 28, 88);
@@ -2162,7 +2442,7 @@
         const hovered = !ghost && node === this.hovered;
         const r = node.r;
 
-        if ((selected || hovered) && zoom > 0.28) {
+        if ((selected || hovered) && zoom > 0.28 && node.data.kind !== "galaxy") {
           ctx.strokeStyle = hexToRgba(color, selected ? 0.45 : 0.28);
           ctx.lineWidth = 1 / zoom;
           ctx.beginPath();
@@ -2170,7 +2450,14 @@
           ctx.stroke();
         }
 
-        if (node.data.kind === "customer") {
+        if (node.data.kind === "galaxy") {
+          this.paintGalaxy(ctx, node.x, node.y, r, node.data, {
+            selected,
+            hovered,
+            dark: !!theme.dark,
+            lineWidth: (selected ? 1.4 : 1) / zoom,
+          });
+        } else if (node.data.kind === "customer") {
           const metrics = this.starMetrics(node);
           this.paintStar(ctx, node.x, node.y, r, metrics.color, {
             selected,
@@ -2199,18 +2486,19 @@
         }
 
         if (ghost) return;
-        const mustLabel = selected || hovered || node.match || node.data.kind === "customer"
+        const mustLabel = selected || hovered || node.match || node.data.kind === "customer" || node.data.kind === "galaxy"
           || (node.data.kind === "order" && zoom > 0.62)
           || (node.data.kind === "line" && zoom > 1.45);
-        if ((this.options.labels && mustLabel) || selected) this.drawLabel(ctx, node, theme, zoom, selected || hovered || node.match);
+        const alwaysGalaxy = this.isCatalog() && node.data.kind === "galaxy";
+        if ((this.options.labels && mustLabel) || selected || alwaysGalaxy) this.drawLabel(ctx, node, theme, zoom, selected || hovered || node.match || alwaysGalaxy);
       });
       ctx.globalAlpha = 1;
     }
 
     drawLabel(ctx, node, theme, zoom, emphasized) {
-      const fontSize = clamp((node.data.kind === "customer" ? 12 : 11) / Math.sqrt(zoom), 7.5, 15);
-      const max = node.data.kind === "line" ? 140 : 190;
-      ctx.font = `${node.data.kind === "customer" ? 650 : 500} ${fontSize}px Segoe UI, sans-serif`;
+      const fontSize = clamp((node.data.kind === "galaxy" || node.data.kind === "customer" ? 12 : 11) / Math.sqrt(zoom), 7.5, 15);
+      const max = node.data.kind === "line" ? 140 : node.data.kind === "galaxy" ? 220 : 190;
+      ctx.font = `${node.data.kind === "customer" || node.data.kind === "galaxy" ? 650 : 500} ${fontSize}px Segoe UI, sans-serif`;
       const label = this.truncate(ctx, node.data.label || "Без названия", max / Math.sqrt(zoom));
       const x = node.x + node.r + 8 / zoom;
       const y = node.y + fontSize * 0.35;
@@ -2279,7 +2567,7 @@
       this.nodes.forEach((n) => {
         ctx.fillStyle = n.data.color;
         ctx.beginPath();
-        ctx.arc(n.x * scale + ox, n.y * scale + oy, n.data.kind === "customer" ? 2.7 : 1.5, 0, TAU);
+        ctx.arc(n.x * scale + ox, n.y * scale + oy, n.data.kind === "galaxy" ? 4 : n.data.kind === "customer" ? 2.7 : 1.5, 0, TAU);
         ctx.fill();
       });
       const left = (-this.width / 2 - this.camera.x) / this.camera.zoom;
@@ -2393,7 +2681,8 @@
         const cp = Math.max(0.42, Math.abs(Math.cos(this.orbit.pitch || 0.68)));
         zoom *= Math.min(1, cp / 0.78);
       }
-      return clamp(zoom, 0.14, 5.4);
+      const range = this.zoomRange();
+      return clamp(zoom, range.min, range.max);
     }
 
     approachZoom(node) {
@@ -2420,6 +2709,53 @@
       }
     }
 
+    flyInto(node, duration = 1480) {
+      if (!node) return Promise.resolve();
+      this.stopTour();
+      this.select(node);
+      this.viewPinned = true;
+      const ms = this.reducedMotion ? 0 : duration;
+      const range = this.zoomRange();
+      const fill = (Math.min(this.width, this.height) * 0.92) / Math.max(12, node.r);
+      const zoom = clamp(fill, Math.max(range.min, 2.8), range.max);
+      const z = (node.z || 0) * this.spaceMix || 8;
+      if (this.is3d() || this.options.space3d) {
+        this.camTween = null;
+        const from = {
+          yaw: this.orbit.yaw,
+          pitch: this.orbit.pitch,
+          zoom: this.camera.zoom || 1,
+          x: this.camera.x,
+          y: this.camera.y,
+          tx: this.orbit.targetX,
+          ty: this.orbit.targetY,
+          tz: this.orbit.targetZ,
+        };
+        this.orbitTween = {
+          from,
+          to: {
+            yaw: from.yaw + 0.28,
+            pitch: clamp(from.pitch - 0.2, 0.26, 0.92),
+            zoom,
+            x: 0,
+            y: 0,
+            tx: node.x,
+            ty: node.y,
+            tz: z,
+          },
+          start: performance.now(),
+          duration: ms,
+        };
+        this.zoomTarget = zoom;
+        this.needsFrame = true;
+      } else {
+        this.lockOrbitTarget(node.x, node.y, z);
+        this.animateCamera({ x: -node.x * zoom, y: -node.y * zoom, zoom }, ms || 1);
+      }
+      this.idleUntil = performance.now() + ms + 500;
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
     focus(id) {
       const node = this.findNode(id);
       if (!node) return;
@@ -2431,7 +2767,7 @@
       if (!id) return null;
       return this.nodeMap.get(id)
         || this.nodeMap.get(`order:${id}`)
-        || this.nodes.find((n) => n.data.rawId === id || n.data.orderId === id)
+        || this.nodes.find((n) => n.data.rawId === id || n.data.orderId === id || n.data.path === id)
         || null;
     }
 
@@ -2525,7 +2861,7 @@
     animateCamera(target, duration) {
       this.camTween = {
         from: { ...this.camera },
-        to: { x: target.x, y: target.y, zoom: clamp(target.zoom, 0.14, 5.4) },
+        to: { x: target.x, y: target.y, zoom: clamp(target.zoom, this.zoomRange().min, this.zoomRange().max) },
         start: performance.now(),
         duration: this.reducedMotion ? 0 : (duration ?? 780),
       };
@@ -2569,7 +2905,7 @@
         const dx = Math.abs(x - n.x);
         const dy = Math.abs(y - n.y);
         const d = dx * dx + dy * dy;
-        const rad = n.r + padding;
+        const rad = (n.data.kind === "galaxy" ? n.r * 1.2 : n.r) + padding;
         if (d <= rad * rad && d < bestD) {
           best = n;
           bestD = d;
@@ -2585,7 +2921,7 @@
         const z = (n.z || 0) * this.spaceMix + this.volumeHeight(n) * 0.7;
         const p = this.project(n.x, n.y, z);
         if (!p.visible) return;
-        const r = Math.max(8, (n.r || 6) * p.s);
+        const r = Math.max(8, (n.r || 6) * p.s * (n.data.kind === "galaxy" ? 1.15 : 1));
         const dx = sx - p.x;
         const dy = sy - p.y;
         if (dx * dx + dy * dy <= (r + 10) ** 2 && p.depth < bestDepth) {
@@ -2630,6 +2966,25 @@
           pivot: { ...(this.orbitPivot || this.worldAtScreenCenter()) },
           right: { x: Math.cos(yaw), y: -Math.sin(yaw), z: 0 },
         };
+      } else if (this.isCatalog() && node) {
+        this.select(node);
+        if (this.is3d()) {
+          this.prepareOrbitPivot();
+          const yaw = this.orbit.yaw;
+          this.drag = {
+            type: "orbit",
+            yaw,
+            pitch: this.orbit.pitch,
+            moved: false,
+            clickNode: node,
+            cam: this.cameraWorld(),
+            target: { x: this.orbit.targetX, y: this.orbit.targetY, z: this.orbit.targetZ },
+            pivot: { ...(this.orbitPivot || this.worldAtScreenCenter()) },
+            right: { x: Math.cos(yaw), y: -Math.sin(yaw), z: 0 },
+          };
+        } else {
+          this.drag = { type: "pan", moved: false, lastSx: point.sx, lastSy: point.sy, clickNode: node };
+        }
       } else if (node) {
         this.drag = { type: "node", node, startX: node.x, startY: node.y, lastSx: point.sx, lastSy: point.sy, moved: false };
         node.pinned = true;
@@ -2701,11 +3056,16 @@
     pointerUp(e) {
       if (!this.drag) return;
       const was = this.drag;
-      if (was.type === "node") {
+      if (was.clickNode && !was.moved) {
+        this.select(was.clickNode);
+        if (this.options.openOnClick) this.onOpen(was.clickNode.data);
+      } else if (was.type === "node") {
         was.node.pinned = false;
         if (!was.moved) {
           this.select(was.node);
-          this.approach(was.node);
+          if (was.node.data.kind === "galaxy") {
+            if (this.options.openOnClick) this.onOpen(was.node.data);
+          } else this.approach(was.node);
         }
       } else if (!was.moved) {
         this.select(null);

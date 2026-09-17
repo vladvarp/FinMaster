@@ -53,6 +53,8 @@
     snapReturn: null,
     homeScreen: "",
     waitingForDoc: false,
+    expectPath: "",
+    offline: false,
     exprField: "",
     exprInput: null,
     exprSystemKb: false,
@@ -60,7 +62,26 @@
 
   /* ================= утилиты ================= */
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let sleepWake = null;
+  const sleep = (ms) => new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      if (sleepWake === resolve) sleepWake = null;
+      resolve();
+    }, ms);
+    sleepWake = () => {
+      clearTimeout(timer);
+      sleepWake = null;
+      resolve();
+    };
+  });
+  function wakeSleep() {
+    sleepWake?.();
+  }
+
+  function sameFile(a, b) {
+    const n = (p) => String(p || "").replace(/\//g, "\\").toLowerCase();
+    return !!a && !!b && n(a) === n(b);
+  }
 
   function uid() {
     if (crypto.randomUUID) return crypto.randomUUID();
@@ -325,6 +346,18 @@
     if (kind === "ok") bar._t = setTimeout(() => bar.classList.remove("show"), 1600);
   }
 
+  function noteOffline() {
+    state.offline = true;
+    setSync("err", "нет связи с компьютером");
+  }
+
+  function noteOnline() {
+    if (!state.offline) return;
+    state.offline = false;
+    setSync("ok", "подключено");
+    wakeSleep();
+  }
+
   function isTyping() {
     const el = document.activeElement;
     return !!el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
@@ -453,6 +486,7 @@
       err.suggested = data.suggested || "";
       throw err;
     }
+    noteOnline();
     return data;
   }
 
@@ -654,10 +688,11 @@
         if (typeof data.version === "number") state.version = Math.max(state.version, data.version);
         if (typeof data.autosave === "boolean") applyAutosave(data.autosave);
         if (data.changed) applySnapshot(data);
+        else noteOnline();
         if (state.version <= before) await sleep(400);
       } catch (err) {
         if (state.stopped) return;
-        setSync("err", "нет связи с компьютером");
+        noteOffline();
         await sleep(2000);
       }
     }
@@ -670,6 +705,10 @@
   function applySnapshot(data, initial = false) {
     if (typeof data.version === "number") state.version = Math.max(state.version, data.version);
     if (typeof data.autosave === "boolean") applyAutosave(data.autosave);
+    const prevPath = state.path;
+    const prevHadDoc = !!state.doc;
+    const pathChanged = !!(data.path && prevPath && !sameFile(data.path, prevPath));
+    const expectHit = !!(state.expectPath && data.path && sameFile(data.path, state.expectPath));
     if (typeof data.path === "string") state.path = data.path;
     if (typeof data.dirty === "boolean") state.dirty = data.dirty;
     if (Array.isArray(data.clients)) state.clients = data.clients;
@@ -686,17 +725,21 @@
     }
     const fresh = typeof data.doc_version === "number" ? data.doc_version > state.docVersion : true;
     if (typeof data.doc_version === "number") state.docVersion = Math.max(state.docVersion, data.doc_version);
-    if (!initial && !fresh) return;
-    if (!initial && data.origin === state.cid) return;
-    if (!initial && (state.pushTimer || state.pushing)) return;
-    if (!initial && isTyping()) {
+    if (!initial && !fresh && !pathChanged && !expectHit) return;
+    if (!initial && data.origin === state.cid && !pathChanged && !expectHit) return;
+    if (!initial && (state.pushTimer || state.pushing) && !pathChanged && !expectHit) return;
+    if (!initial && isTyping() && !pathChanged && !expectHit) {
       state.pending = data.document;
       return;
     }
-    const wasEmpty = !state.doc;
     state.doc = data.document;
-    if (!initial) setSync("ok", "обновлено с компьютера");
-    if (wasEmpty && state.waitingForDoc && state.view === "files") {
+    const opened = !initial && (!prevHadDoc || pathChanged || expectHit);
+    if (expectHit) state.expectPath = "";
+    if (!initial) {
+      state.offline = false;
+      setSync("ok", opened ? "отчёт открыт" : "обновлено с компьютера");
+    }
+    if (opened && (state.view === "files" || state.waitingForDoc)) {
       state.waitingForDoc = false;
       setView("orders");
       return;
@@ -747,6 +790,24 @@
     } catch (err) {
       toast(`Не удалось: ${err.message || err}`);
       return false;
+    }
+  }
+
+  async function waitForOpenedReport(path) {
+    state.expectPath = path;
+    wakeSleep();
+    for (let i = 0; i < 24; i += 1) {
+      try {
+        const data = await api("/api/remote/session");
+        if (data.document && data.path && sameFile(data.path, path)) {
+          applySnapshot(data);
+          if (state.view === "files") setView("orders");
+          return;
+        }
+      } catch {
+        /* компьютер ещё поднимается */
+      }
+      await sleep(160);
     }
   }
 
@@ -3192,7 +3253,7 @@
       if (state.stopped) return;
       const timedOut = err?.name === "AbortError";
       toast(timedOut ? "Нет ответа от компьютера" : "Нет связи с компьютером");
-      setSync("err", timedOut ? "нет ответа" : "нет связи с компьютером");
+      noteOffline();
     } finally {
       clearTimeout(timer);
       state.pinging = false;
@@ -3676,7 +3737,11 @@
       }
       const openFile = e.target.closest("[data-open-file]");
       if (openFile) {
-        if (await command("open", { path: openFile.dataset.openFile })) toast("Открываю на компьютере…");
+        const path = openFile.dataset.openFile;
+        if (await command("open", { path })) {
+          toast("Открываю на компьютере…");
+          await waitForOpenedReport(path);
+        }
         return;
       }
       const delFile = e.target.closest("[data-delete-file]");

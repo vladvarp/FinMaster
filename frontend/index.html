@@ -19,7 +19,7 @@
 </head>
 <body>
   <div class="start" id="start-screen">
-    <div class="start-inner">
+    <div class="start-inner" id="start-inner">
       <div class="start-hero">
         <div>
           <div class="brand" style="padding:0 0 12px">
@@ -35,6 +35,10 @@
           </div>
           <h2>Рабочие отчёты</h2>
           <p>Создайте новый файл отчёта или откройте недавний — как книгу Excel. Все заказы, оплаты и аналитика хранятся в одном файле.</p>
+          <div class="start-view-toggle" id="start-view-toggle" role="tablist" aria-label="Вид списка отчётов">
+            <button type="button" class="active" data-start-view="list" role="tab" aria-selected="true">Список</button>
+            <button type="button" data-start-view="galaxies" role="tab" aria-selected="false">Галактики</button>
+          </div>
         </div>
         <div class="start-actions">
           <button class="btn primary" type="button" id="btn-start-new" onclick="window.finmasterNew && window.finmasterNew()">Новый отчёт</button>
@@ -45,7 +49,12 @@
           <button class="btn js-theme-toggle" type="button" title="Тема">Тема</button>
         </div>
       </div>
-      <div class="start-lists">
+      <div class="start-galaxy" id="start-galaxy" hidden>
+        <canvas id="start-galaxy-canvas" aria-label="Галактики отчётов"></canvas>
+        <div class="start-galaxy-tip" id="start-galaxy-tip" hidden></div>
+        <p class="start-galaxy-hint">Каждый отчёт — отдельная галактика. Нажмите, чтобы открыть.</p>
+      </div>
+      <div class="start-lists" id="start-lists">
         <section class="start-col">
           <div class="start-col-head">
             <div>
@@ -67,7 +76,12 @@
   <div class="app" id="app-shell" hidden>
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-head">
-        <button class="btn ghost icon" type="button" id="btn-toggle-sidebar" title="Свернуть / развернуть панель">☰</button>
+        <button class="btn ghost icon" type="button" id="btn-toggle-sidebar" title="Свернуть / развернуть панель" aria-label="Свернуть боковую панель">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="3.5" y="4.5" width="17" height="15" rx="2.2" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M9.5 4.5v15" stroke="currentColor" stroke-width="1.8"/>
+          </svg>
+        </button>
         <div class="brand">
           <svg width="38" height="38" viewBox="0 0 42 42" fill="none">
             <rect width="42" height="42" rx="12" fill="#0f766e"/>
@@ -326,8 +340,9 @@
 
         <div class="view cloud-view" id="view-cloud">
           <div class="cloud-head">
-            <h2>Облако заказов <span class="cloud-live"><i></i> живая физика</span></h2>
-            <div class="cloud-eyebrow">LIVE RELATIONSHIP ENGINE</div>
+            <h2 id="cloud-title">Облако заказов <span class="cloud-live"><i></i> живая физика</span></h2>
+            <div class="cloud-kpis" id="cloud-kpis"></div>
+            <div class="cloud-eyebrow" id="cloud-eyebrow">LIVE RELATIONSHIP ENGINE</div>
           </div>
 
           <div class="cloud-board" id="cloud-board">
@@ -370,6 +385,7 @@
               <span></span>
               Только долг
             </label>
+            <button class="btn cloud-text-btn" type="button" id="cloud-galaxies" aria-pressed="false" title="Карта галактик: все отчёты">Галактики</button>
             <button class="btn cloud-icon-btn" type="button" id="cloud-labels" aria-pressed="true" title="Показать или скрыть подписи">Aa</button>
             <button class="btn cloud-icon-btn" type="button" id="cloud-motion" aria-pressed="true" title="Запустить или остановить физику">◉</button>
             <button class="btn cloud-icon-btn" type="button" id="cloud-heat" aria-pressed="false" title="Тепловая карта: где сосредоточен долг">♨</button>
@@ -377,7 +393,6 @@
             <button class="btn cloud-icon-btn" type="button" id="cloud-tour" title="Автотур по очагам долга">➤</button>
             <button class="btn cloud-icon-btn" type="button" id="cloud-fit" title="Показать всё">⊙</button>
           </div>
-          <div class="cloud-kpis" id="cloud-kpis"></div>
           </div>
 
           <div class="cloud-stage" id="cloud-stage">
@@ -484,8 +499,8 @@
 
   <div class="modal" id="new-modal">
     <div class="modal-card">
-      <h3>Создать новый отчёт?</h3>
-      <p>Текущий файл будет закрыт. Несохранённые изменения нужно сохранить заранее.</p>
+      <h3 id="new-modal-title">Создать новый отчёт?</h3>
+      <p id="new-modal-text">Текущий файл будет закрыт. Несохранённые изменения нужно сохранить заранее.</p>
       <div class="modal-actions">
         <button class="btn" id="new-cancel">Отмена</button>
         <button class="btn" id="new-save">Сохранить и создать</button>

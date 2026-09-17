@@ -17,6 +17,7 @@ _TELEGRAM_TOKEN_RE = re.compile(r"^\d{5,}:[A-Za-z0-9_-]{20,}$")
 _LOCK = threading.RLock()
 _CACHE: dict[str, Any] | None = None
 _SECRETS = {"ngrok_token": "", "telegram_bot_token": "", "telegram_chat_id": ""}
+_VOLUME_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 def config_dir() -> str:
@@ -341,6 +342,70 @@ def default_reports_dir() -> str:
     return path
 
 
+def report_volume(path: str) -> dict[str, Any]:
+    """Лёгкая сводка файла: размер, заказы, позиции, сумма — для размера галактики."""
+    empty = {"bytes": 0, "orders": 0, "lines": 0, "value": 0.0, "title": ""}
+    try:
+        stamp = os.path.getmtime(path)
+        size = os.path.getsize(path)
+    except OSError:
+        return empty
+    cached = _VOLUME_CACHE.get(path)
+    if cached and cached[0] == stamp:
+        return dict(cached[1])
+    out: dict[str, Any] = {"bytes": int(size), "orders": 0, "lines": 0, "value": 0.0, "title": ""}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        if isinstance(doc, dict):
+            out["title"] = str(doc.get("title") or "").strip()
+            orders = doc.get("orders") if isinstance(doc.get("orders"), list) else []
+            out["orders"] = len(orders)
+            value = 0.0
+            lines_n = 0
+            for order in orders:
+                if not isinstance(order, dict):
+                    continue
+                rows = order.get("lines") if isinstance(order.get("lines"), list) else []
+                lines_n += len(rows)
+                for line in rows:
+                    if not isinstance(line, dict):
+                        continue
+                    try:
+                        qty = float(line.get("quantity") or 0)
+                        price = float(line.get("price") or 0)
+                        disc = min(100.0, max(0.0, float(line.get("discount") or 0)))
+                        value += qty * price * (1.0 - disc / 100.0)
+                    except (TypeError, ValueError):
+                        continue
+            out["lines"] = lines_n
+            out["value"] = round(value, 2)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError, MemoryError):
+        pass
+    _VOLUME_CACHE[path] = (stamp, out)
+    return dict(out)
+
+
+def with_volume(item: dict[str, Any]) -> dict[str, Any]:
+    path = str(item.get("path") or "")
+    if not path:
+        return item
+    vol = report_volume(path)
+    out = {
+        **item,
+        "bytes": vol.get("bytes") or 0,
+        "orders": vol.get("orders") or 0,
+        "lines": vol.get("lines") or 0,
+        "value": vol.get("value") or 0,
+    }
+    title = str(vol.get("title") or "").strip()
+    if title and not str(item.get("title") or "").strip():
+        out["title"] = title
+    elif title and item.get("title") == os.path.splitext(os.path.basename(path))[0]:
+        out["title"] = title
+    return out
+
+
 def list_library_reports() -> dict[str, Any]:
     folder = os.path.abspath(default_reports_dir())
     items: list[dict[str, Any]] = []
@@ -359,12 +424,14 @@ def list_library_reports() -> dict[str, Any]:
         except OSError:
             continue
         items.append(
-            {
-                "path": os.path.abspath(path),
-                "title": os.path.splitext(name)[0],
-                "name": name,
-                "modified_at": datetime.fromtimestamp(stamp).astimezone().replace(microsecond=0).isoformat(),
-            }
+            with_volume(
+                {
+                    "path": os.path.abspath(path),
+                    "title": os.path.splitext(name)[0],
+                    "name": name,
+                    "modified_at": datetime.fromtimestamp(stamp).astimezone().replace(microsecond=0).isoformat(),
+                }
+            )
         )
     items.sort(key=lambda item: item.get("modified_at") or "", reverse=True)
     return {"path": folder, "items": items}
