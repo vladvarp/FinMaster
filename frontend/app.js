@@ -3450,9 +3450,13 @@
     $("file-input").click();
   }
 
-  function applyLoaded(res) {
+  function applyLoaded(res, { keepView = false } = {}) {
+    const stay = keepView && !!state.view && $("app-shell") && !$("app-shell").hidden;
+    const view = stay ? state.view : "dashboard";
     state.doc = res.document;
     state.path = res.path;
+    state.focusOrderId = null;
+    state.focusLineId = null;
     adoptCloudFromDocument();
     adoptChartsFromDocument();
     historyReset();
@@ -3460,15 +3464,16 @@
     else if (res.path) pushLocalRecent(res.path, res.document.title);
     setClean();
     showApp();
-    setView("dashboard");
+    setView(view);
+    if (view === "cloud") showCloudOverview();
     remotePublish();
     toast("Отчёт открыт");
   }
 
-  async function openPath(path) {
+  async function openPath(path, opts) {
     if (state.desktop) {
       try {
-        applyLoaded(await apiPost("/api/open-path", { path }));
+        applyLoaded(await apiPost("/api/open-path", { path }), opts);
       } catch (err) {
         toast("Не удалось открыть файл. Возможно, он перемещён.");
       }
@@ -7023,21 +7028,26 @@
       toast(ok ? "Отчёт сохранён с телефона" : "Телефон просил сохранить — укажите файл на компьютере");
       if (!ok) await save();
     } else if (cmd.type === "open" && cmd.path) {
-      await openPath(cmd.path);
+      await openPath(cmd.path, { keepView: true });
       toast("Отчёт открыт по команде с телефона");
     } else if (cmd.type === "undo" || cmd.type === "redo") {
       const back = cmd.type === "undo";
       const ok = historyGo(back ? -1 : 1);
       if (ok) toast(back ? "Действие отменено с телефона" : "Действие возвращено с телефона");
     } else if (cmd.type === "new") {
+      const stay = !!state.view && $("app-shell") && !$("app-shell").hidden;
+      const view = stay ? state.view : "dashboard";
       state.doc = emptyDoc();
+      state.focusOrderId = null;
+      state.focusLineId = null;
       persistCloudPrefs();
       persistChartPrefs();
       state.path = "";
       historyReset();
       setClean();
       showApp();
-      setView("dashboard");
+      setView(view);
+      if (view === "cloud") showCloudOverview();
       toast("Новый отчёт создан с телефона");
     } else if (cmd.type === "delete") {
       applyRemoteLists(cmd);
