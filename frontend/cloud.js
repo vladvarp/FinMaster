@@ -1555,48 +1555,85 @@
 
     paintStar(ctx, x, y, r, color, opt) {
       const rgb = hexRgb(color);
-      const brightness = opt.brightness ?? 0.7;
-      const mass = opt.mass ?? 0.5;
+      const brightness = clamp(opt.brightness ?? 0.7, 0, 1);
+      const mass = clamp(opt.mass ?? 0.5, 0, 1);
       const pulse = opt.reduced ? 1 : 0.94 + 0.06 * Math.sin((opt.time || 0) / 480);
-      const core = mixRgb(rgb, [255, 250, 240], 0.32 + brightness * 0.5);
-      const glowR = r * (2.05 + mass * 1.7);
-      const glow = ctx.createRadialGradient(x, y, r * 0.12, x, y, glowR);
-      glow.addColorStop(0, rgbCss(core, 0.62 * brightness * pulse));
-      glow.addColorStop(0.16, rgbCss(rgb, 0.32 * brightness));
-      glow.addColorStop(0.42, rgbCss(rgb, (opt.dark ? 0.16 : 0.11) * brightness));
-      glow.addColorStop(1, rgbCss(rgb, 0));
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(x, y, glowR, 0, TAU);
-      ctx.fill();
+      const glow = mixRgb(rgb, [255, 246, 220], 0.18 + brightness * 0.42);
+      const hot = mixRgb(glow, [255, 255, 255], 0.28 + brightness * 0.55);
+      const b = brightness * pulse;
+      const dark = !!opt.dark;
+      const add = dark ? "lighter" : "source-over";
+      const haloR = r * (2.6 + mass * 1.6 + b * 1.1);
+      const beam = r * (2.4 + mass * 1.8 + b * 2.4);
+      const haze = r * (0.28 + mass * 0.1 + b * 0.16);
+      const needle = r * (0.07 + b * 0.05);
+
       ctx.save();
-      ctx.globalCompositeOperation = "lighter";
       ctx.translate(x, y);
-      ctx.rotate(0.14);
-      ctx.lineCap = "round";
-      const spike = r * (1.65 + mass * 1.15);
-      ctx.strokeStyle = rgbCss(core, 0.2 * brightness * pulse);
-      ctx.lineWidth = Math.max(0.7, r * 0.07);
-      for (let i = 0; i < 4; i += 1) {
-        const a = (i * Math.PI) / 2;
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(a) * r * 0.25, Math.sin(a) * r * 0.25);
-        ctx.lineTo(Math.cos(a) * spike, Math.sin(a) * spike);
-        ctx.stroke();
-      }
-      ctx.restore();
-      const ball = ctx.createRadialGradient(x - r * 0.2, y - r * 0.22, r * 0.06, x, y, r);
-      ball.addColorStop(0, rgbCss(mixRgb(core, [255, 255, 255], 0.4)));
-      ball.addColorStop(0.38, rgbCss(core));
-      ball.addColorStop(1, rgbCss(mixRgb(rgb, [28, 16, 8], 0.12)));
-      ctx.fillStyle = ball;
+
+      const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, haloR);
+      halo.addColorStop(0, rgbCss(hot, (dark ? 0.5 : 0.42) * b));
+      halo.addColorStop(0.2, rgbCss(rgb, (dark ? 0.26 : 0.2) * b));
+      halo.addColorStop(0.55, rgbCss(rgb, (dark ? 0.1 : 0.07) * b));
+      halo.addColorStop(1, rgbCss(rgb, 0));
+      ctx.fillStyle = halo;
       ctx.beginPath();
-      ctx.arc(x, y, r, 0, TAU);
+      ctx.arc(0, 0, haloR, 0, TAU);
       ctx.fill();
+
+      const flare = (angle, length, width, alpha) => {
+        ctx.save();
+        ctx.rotate(angle);
+        ctx.scale(1, Math.max(0.018, width / Math.max(length, 1)));
+        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, length);
+        g.addColorStop(0, rgbCss(hot, alpha));
+        g.addColorStop(0.1, rgbCss(glow, alpha * 0.72));
+        g.addColorStop(0.38, rgbCss(rgb, alpha * 0.22));
+        g.addColorStop(1, rgbCss(rgb, 0));
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(0, 0, length, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+      };
+
+      ctx.globalCompositeOperation = add;
+      const strength = (dark ? 0.42 : 0.28) * (0.35 + b * 0.65);
+      flare(0.04, beam, haze, strength);
+      flare(Math.PI / 2 + 0.04, beam * 0.78, haze * 0.82, strength * 0.82);
+      flare(0.04, beam * 1.12, needle, strength * 0.9);
+      flare(Math.PI / 2 + 0.04, beam * 0.88, needle * 0.85, strength * 0.7);
+      flare(Math.PI / 4, beam * 0.38, haze * 0.22, strength * 0.18);
+      flare(-Math.PI / 4, beam * 0.38, haze * 0.22, strength * 0.18);
+
+      ctx.globalCompositeOperation = "source-over";
+      const coreR = r * (0.78 + mass * 0.08);
+      const photosphere = ctx.createRadialGradient(-coreR * 0.16, -coreR * 0.18, 0, 0, 0, coreR);
+      photosphere.addColorStop(0, rgbCss(mixRgb(hot, [255, 255, 255], 0.5 + b * 0.35), 0.98));
+      photosphere.addColorStop(0.32, rgbCss(hot, 0.96));
+      photosphere.addColorStop(0.7, rgbCss(glow, 0.78));
+      photosphere.addColorStop(1, rgbCss(rgb, 0.08));
+      ctx.fillStyle = photosphere;
+      ctx.beginPath();
+      ctx.arc(0, 0, coreR, 0, TAU);
+      ctx.fill();
+
+      ctx.globalCompositeOperation = add;
+      const sparkR = r * (0.42 + b * 0.38);
+      const spark = ctx.createRadialGradient(0, 0, 0, 0, 0, sparkR);
+      spark.addColorStop(0, rgbCss([255, 255, 255], (dark ? 0.72 : 0.48) * b));
+      spark.addColorStop(0.4, rgbCss(hot, (dark ? 0.32 : 0.2) * b));
+      spark.addColorStop(1, rgbCss(hot, 0));
+      ctx.fillStyle = spark;
+      ctx.beginPath();
+      ctx.arc(0, 0, sparkR, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+
       if (opt.selected) {
         ctx.beginPath();
-        ctx.arc(x, y, r * 1.24, 0, TAU);
-        ctx.strokeStyle = rgbCss(core, 0.5);
+        ctx.arc(x, y, r * 1.28, 0, TAU);
+        ctx.strokeStyle = rgbCss(hot, 0.5);
         ctx.lineWidth = opt.lineWidth || Math.max(1, r * 0.05);
         ctx.stroke();
       }
@@ -2305,18 +2342,70 @@
       this.animateCamera({ x, y, zoom });
     }
 
+    approachSubtree(node) {
+      if (!node) return [];
+      const kids = this.nodes.filter((n) => n.data.parent === node.data.id);
+      if (node.data.kind === "line") return [node];
+      if (node.data.kind === "order") return [node, ...kids];
+      return [node, ...kids.flatMap((k) => this.approachSubtree(k))];
+    }
+
+    approachRadius(node) {
+      const kind = node?.data?.kind;
+      const cx = node.x;
+      const cy = node.y;
+      let radius = (node.r || 8) + 12;
+      this.approachSubtree(node).forEach((n) => {
+        const body = n.r || 0;
+        radius = Math.max(radius, Math.hypot(n.x - cx, n.y - cy) + body);
+        radius = Math.max(radius, Math.hypot((n.tx ?? n.x) - cx, (n.ty ?? n.y) - cy) + body);
+      });
+      if (kind === "customer") {
+        const orders = this.nodes.filter((n) => n.data.parent === node.data.id);
+        orders.forEach((planet, i) => {
+          const moons = this.nodes.filter((n) => n.data.parent === planet.data.id);
+          const orbit = planet.orbitR || this.planetOrbit(node, i, planet);
+          const moonRing = moons.length ? this.moonOrbit(planet, moons.length) : 0;
+          const moonR = moons.reduce((m, n) => Math.max(m, n.r || 0), 0);
+          radius = Math.max(radius, orbit + moonRing + moonR);
+        });
+        if (node.systemR) radius = Math.max(radius, node.systemR);
+        radius = Math.max(radius, (node.r || 19) + 36);
+      } else if (kind === "order") {
+        const moons = this.nodes.filter((n) => n.data.parent === node.data.id);
+        const moonR = moons.reduce((m, n) => Math.max(m, n.r || 0), 4);
+        radius = Math.max(radius, this.moonOrbit(node, moons.length) + moonR + 10);
+      } else {
+        radius = Math.max((node.r || 6) * 2.15 + 10, 16);
+      }
+      return radius * (kind === "line" ? 1.12 : 1.18);
+    }
+
+    zoomToFitRadius(radius) {
+      const span = Math.max(36, radius * 2);
+      const innerW = Math.max(120, this.width - 108);
+      const innerH = Math.max(110, this.height - 96);
+      let zoom = Math.min(innerW / span, innerH / span);
+      if (this.is3d() || this.options.space3d) {
+        const dist = Math.max(48, this.orbit.dist || 1080);
+        const focal = Math.max(48, this.orbit.focal || 920);
+        zoom *= dist / focal;
+        const cp = Math.max(0.42, Math.abs(Math.cos(this.orbit.pitch || 0.68)));
+        zoom *= Math.min(1, cp / 0.78);
+      }
+      return clamp(zoom, 0.14, 5.4);
+    }
+
     approachZoom(node) {
       if (!node) return 1;
-      if (node.data.kind === "line") return 2.05;
-      if (node.data.kind === "order") return 1.36;
-      return 1.16;
+      return this.zoomToFitRadius(this.approachRadius(node));
     }
 
     approach(node) {
       if (!node) return;
       const want = this.approachZoom(node);
       const onTarget = Math.hypot(this.orbit.targetX - node.x, this.orbit.targetY - node.y) < 10;
-      const zoomOk = Math.abs((this.camera.zoom || 1) - want) < 0.08;
+      const zoomOk = Math.abs((this.camera.zoom || 1) - want) < Math.max(0.08, want * 0.07);
       const centered = Math.hypot(this.camera.x, this.camera.y) < 28;
       if (this.selected === node && onTarget && zoomOk && centered) {
         this.viewPinned = true;
