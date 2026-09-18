@@ -165,10 +165,7 @@
     syncDirty();
     updateHistoryButtons();
     history.busy = false;
-    if (state.autosave) {
-      clearTimeout(state.autosaveTimer);
-      state.autosaveTimer = setTimeout(() => save({ silent: true }), 800);
-    }
+    scheduleAutosave();
     return true;
   }
 
@@ -552,6 +549,15 @@
     if (state.doc) renderAll();
   }
 
+  function scheduleAutosave() {
+    if (!state.autosave || !state.doc) return;
+    clearTimeout(state.autosaveTimer);
+    state.autosaveTimer = setTimeout(() => {
+      if (!state.autosave || !state.doc || !state.dirty) return;
+      save({ silent: true });
+    }, 800);
+  }
+
   function markDirty() {
     if (!state.doc) return;
     state.dirty = true;
@@ -560,10 +566,7 @@
     updateChrome();
     syncDirty();
     remotePublish();
-    if (state.autosave) {
-      clearTimeout(state.autosaveTimer);
-      state.autosaveTimer = setTimeout(() => save({ silent: true }), 800);
-    }
+    scheduleAutosave();
   }
 
   function setClean() {
@@ -2808,6 +2811,7 @@
   const TL_MIN_DAYS = 3;
   const TL_DEFAULT_DAYS = 21;
   const TL_NAV_LANES = 12;
+  const DEFAULT_WEEKENDS = [5, 6];
   let calDrag = null;
   let calNav = null;
   let calSkipClick = false;
@@ -2823,9 +2827,109 @@
     return days;
   }
 
+  function weekdayIndex(d) {
+    return (d.getDay() + 6) % 7;
+  }
+
+  function normalizeWeekends(raw) {
+    if (!Array.isArray(raw)) return DEFAULT_WEEKENDS.slice();
+    const out = [];
+    raw.forEach((v) => {
+      const n = Number(v);
+      if (Number.isInteger(n) && n >= 0 && n <= 6 && !out.includes(n)) out.push(n);
+    });
+    return out.sort((a, b) => a - b);
+  }
+
+  function normalizeDayList(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    raw.forEach((v) => {
+      const key = dateDay(v);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(key) && !out.includes(key)) out.push(key);
+    });
+    return out.sort();
+  }
+
+  function calendarOffSettings() {
+    const saved = ensureUi().calendar || {};
+    const weekends = "weekends" in saved ? normalizeWeekends(saved.weekends) : DEFAULT_WEEKENDS.slice();
+    const workDays = normalizeDayList(saved.work_days);
+    const workSet = new Set(workDays);
+    const offDays = normalizeDayList(saved.off_days).filter((key) => !workSet.has(key));
+    return { weekends, offDays, workDays };
+  }
+
+  function pruneOffLists(weekends, offDays, workDays) {
+    const off = offDays.filter((key) => {
+      const d = parseDay(key);
+      return d && !weekends.includes(weekdayIndex(d));
+    });
+    const work = workDays.filter((key) => {
+      const d = parseDay(key);
+      return d && weekends.includes(weekdayIndex(d));
+    });
+    return { offDays: off, workDays: work };
+  }
+
+  function writeCalendarOff({ weekends, offDays, workDays } = {}) {
+    const cur = calendarOffSettings();
+    const nextW = weekends ?? cur.weekends;
+    const pruned = pruneOffLists(nextW, offDays ?? cur.offDays, workDays ?? cur.workDays);
+    const ui = ensureUi();
+    ui.calendar = {
+      ...(ui.calendar || {}),
+      weekends: nextW,
+      off_days: pruned.offDays,
+      work_days: pruned.workDays,
+    };
+  }
+
   function isWeekend(d) {
-    const w = d.getDay();
-    return w === 0 || w === 6;
+    return !!dayToneClass(d);
+  }
+
+  function isGlobalWeekend(d) {
+    const off = calendarOffSettings();
+    if (off.workDays.includes(dayKey(d))) return false;
+    return off.weekends.includes(weekdayIndex(d));
+  }
+
+  function dayToneClass(d) {
+    const key = dayKey(d);
+    const off = calendarOffSettings();
+    if (off.workDays.includes(key)) return "";
+    if (off.offDays.includes(key)) return "is-off-day";
+    if (off.weekends.includes(weekdayIndex(d))) return "is-weekend";
+    return "";
+  }
+
+  function calendarDayNotes() {
+    const raw = ensureUi().calendar?.day_notes;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    const out = {};
+    Object.keys(raw).forEach((key) => {
+      const day = dateDay(key);
+      const text = String(raw[key] || "").trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(day) && text) out[day] = text.slice(0, 2000);
+    });
+    return out;
+  }
+
+  function dayNote(d) {
+    return calendarDayNotes()[typeof d === "string" ? d : dayKey(d)] || "";
+  }
+
+  function setDayNote(key, text) {
+    if (!key) return;
+    const notes = calendarDayNotes();
+    const clean = String(text || "").trim().slice(0, 2000);
+    if (clean) notes[key] = clean;
+    else delete notes[key];
+    const ui = ensureUi();
+    ui.calendar = { ...(ui.calendar || {}), day_notes: notes };
+    persistCalendar();
+    markDirty();
   }
 
   function calFmtDay(d, withYear = false) {
@@ -2885,11 +2989,11 @@
       return "now";
     }
     if (!start && end) {
-      if (end < today) return "done";
+      if (end <= today) return "done";
       return "now";
     }
     if (today < start) return "planned";
-    if (today > end) return "done";
+    if (end <= today) return "done";
     return "now";
   }
 
@@ -2919,17 +3023,59 @@
     return String(a.number).localeCompare(String(b.number), "ru", { numeric: true });
   }
 
+  function firstWorkOnOrAfter(day, limit) {
+    const cap = dayStart(limit || addDays(day, 16));
+    for (let d = dayStart(day); d <= cap; d = addDays(d, 1)) {
+      if (!isWeekend(d)) return d;
+    }
+    return null;
+  }
+
   function orderCoversDay(order, day) {
+    if (isWeekend(day)) return false;
     const { start, end } = workSpan(order);
     if (!start && !end) return false;
     const d = dayStart(day);
     const today = dayStart(new Date());
     if (start && !end) {
-      if (start > today) return dayKey(d) === dayKey(start);
+      if (start > today) {
+        const shown = isWeekend(start) ? firstWorkOnOrAfter(start) : start;
+        return shown && dayKey(d) === dayKey(shown);
+      }
       return d >= start && d <= today;
     }
     if (!start && end) return d <= end;
     return d >= start && d <= end;
+  }
+
+  function splitWorkSegments(from, till) {
+    if (!from || !till || from > till) return [];
+    const segments = [];
+    let segStart = null;
+    let prev = null;
+    for (let d = dayStart(from); d <= till; d = addDays(d, 1)) {
+      if (!isWeekend(d)) {
+        if (!segStart) segStart = d;
+        prev = d;
+      } else if (segStart) {
+        segments.push({ from: segStart, till: prev });
+        segStart = null;
+        prev = null;
+      }
+    }
+    if (segStart) segments.push({ from: segStart, till: prev });
+    return segments;
+  }
+
+  function orderWorkSegments(order, clipFrom, clipTo, today = dayStart(new Date())) {
+    const span = orderDrawSpan(order, today);
+    if (!span) return [];
+    let from = span.from;
+    let till = span.till;
+    if (clipFrom && from < clipFrom) from = clipFrom;
+    if (clipTo && till > clipTo) till = clipTo;
+    if (from > till) return [];
+    return splitWorkSegments(from, till);
   }
 
   function workDurationDays(order) {
@@ -2971,14 +3117,26 @@
   function persistCalendar() {
     if (!state.doc) return;
     const cal = calendarState();
-    ensureUi().calendar = { mode: cal.mode, filter: cal.filter };
+    const off = calendarOffSettings();
+    const pruned = pruneOffLists(off.weekends, off.offDays, off.workDays);
+    ensureUi().calendar = {
+      mode: cal.mode,
+      filter: cal.filter,
+      weekends: off.weekends,
+      off_days: pruned.offDays,
+      work_days: pruned.workDays,
+      day_notes: calendarDayNotes(),
+    };
   }
 
   function orderDrawSpan(order, today = dayStart(new Date())) {
     const { start, end } = workSpan(order);
     if (!start && !end) return null;
     if (start && !end) {
-      if (start > today) return { from: start, till: start };
+      if (start > today) {
+        const from = isWeekend(start) ? firstWorkOnOrAfter(start) : start;
+        return from ? { from, till: from } : null;
+      }
       return { from: start, till: today };
     }
     if (!start && end) return { from: end, till: end };
@@ -3007,7 +3165,8 @@
     if (!cal.viewDays) cal.viewDays = Math.min(TL_DEFAULT_DAYS, full.span);
     cal.viewDays = Math.max(TL_MIN_DAYS, Math.min(full.span, Math.round(cal.viewDays)));
     if (!(cal.viewFrom instanceof Date) || Number.isNaN(cal.viewFrom.getTime())) {
-      cal.viewFrom = full.today < full.from ? full.from : dayStart(full.today);
+      const today = full.today < full.from ? full.from : dayStart(full.today);
+      cal.viewFrom = addDays(today, -Math.floor((cal.viewDays - 1) / 2));
     } else {
       cal.viewFrom = dayStart(cal.viewFrom);
     }
@@ -3234,6 +3393,18 @@
         return `<button type="button" class="btn ${cal.filter === id ? "active" : ""}" data-cal-filter="${id}" role="menuitem">${esc(label)}<span class="chip-count">${n}</span></button>`;
       }).join("");
     }
+    const off = calendarOffSettings();
+    const weekendBtn = $("btn-cal-weekends");
+    const weekendMenu = $("cal-weekend-menu");
+    const weekendOpen = weekendMenu && !weekendMenu.hidden;
+    const customOff =
+      off.weekends.join() !== DEFAULT_WEEKENDS.join() || off.offDays.length > 0 || off.workDays.length > 0;
+    weekendBtn?.classList.toggle("active", customOff);
+    weekendBtn?.setAttribute("aria-expanded", String(!!weekendOpen));
+    if (weekendMenu) {
+      weekendMenu.innerHTML = weekendMenuHtml();
+      weekendMenu.hidden = !weekendOpen;
+    }
     $("cal-kpis").innerHTML = `
       <div class="kpi ${nowCount ? "ok" : ""}"><div class="label">Идёт сейчас</div><div class="value">${nowCount}</div><div class="sub">в работе, в том числе без дедлайна</div></div>
       <div class="kpi"><div class="label">Старт на неделе</div><div class="value">${startWeek}</div><div class="sub">с ${calFmtDay(weekFrom)}</div></div>
@@ -3336,7 +3507,9 @@
     const items = calendarOrders()
       .map((order) => {
         const span = orderDrawSpan(order, today);
-        return span ? { order, span } : null;
+        if (!span) return null;
+        const segs = splitWorkSegments(span.from, span.till);
+        return segs.length ? { order, span, segs } : null;
       })
       .filter(Boolean)
       .sort((a, b) => compareTimelineOrders(a.order, b.order, today) || a.span.from - b.span.from || a.span.till - b.span.till);
@@ -3358,10 +3531,7 @@
     const full = win.full || clampTimelineView();
     const n = win.days.length;
     const dated = list.filter((order) => workStatus(order) !== "nodate");
-    const visible = dated.filter((order) => {
-      const span = orderDrawSpan(order, win.today);
-      return span && span.till >= win.from && span.from <= win.to;
-    });
+    const visible = dated.filter((order) => orderWorkSegments(order, win.from, win.to, win.today).length);
     const box = timelineViewBox(full, win.from, n);
     const ticks = full.days
       .filter((day) => day.getDate() === 1)
@@ -3374,14 +3544,16 @@
     const laneItems = timelineLaneItems(win.today);
     const laneCount = Math.max(1, ...laneItems.map((item) => item.lanes), 1);
     const navBars = laneItems
-      .map((item) => {
-        const from = Math.max(0, dayDiff(full.from, item.span.from));
-        const till = Math.min(full.span - 1, dayDiff(full.from, item.span.till));
-        if (till < from) return "";
-        const len = till - from + 1;
+      .flatMap((item) => {
         const title = `${orderNum(item.order)} ${orderTitle(item.order)}`.trim();
         const due = orderDeadline(item.order, win.today);
-        return `<div class="tl-nav-bar ${due ? "has-deadline" : ""}" data-cal-id="${esc(item.order.id)}" style="--lane:${item.lane};--from:${from};--len:${len};--span:${full.span};--bar:${esc(calendarBarColor(item.order))}" title="${esc(title)}${due ? ` · до ${calFmtDay(due, true)}` : ""}"></div>`;
+        return item.segs.map((seg) => {
+          const from = Math.max(0, dayDiff(full.from, seg.from));
+          const till = Math.min(full.span - 1, dayDiff(full.from, seg.till));
+          if (till < from) return "";
+          const len = till - from + 1;
+          return `<div class="tl-nav-bar ${due ? "has-deadline" : ""}" data-cal-id="${esc(item.order.id)}" style="--lane:${item.lane};--from:${from};--len:${len};--span:${full.span};--bar:${esc(calendarBarColor(item.order))}" title="${esc(title)}${due ? ` · до ${calFmtDay(due, true)}` : ""}"></div>`;
+        });
       })
       .join("");
     const todayInFull = win.today >= full.from && win.today <= full.to;
@@ -3395,7 +3567,8 @@
         const first = day.getDate() === 1;
         const showNum = !dense || monday || first;
         const label = first ? RU_MONTHS_NOM[day.getMonth()].slice(0, 3) : RU_WEEKDAYS[(day.getDay() + 6) % 7];
-        return `<div class="gantt-day ${isWeekend(day) ? "is-weekend" : ""} ${dayKey(day) === dayKey(win.today) ? "is-today" : ""} ${hot ? "is-hot" : ""} ${showNum ? "" : "is-slim"}" data-cal-day="${key}">
+        const note = dayNote(key);
+        return `<div class="gantt-day ${dayToneClass(day)} ${note ? "has-note" : ""} ${dayKey(day) === dayKey(win.today) ? "is-today" : ""} ${hot ? "is-hot" : ""} ${showNum ? "" : "is-slim"}" data-cal-day="${key}" title="${esc(note)}">
           <span>${showNum ? day.getDate() : ""}</span><small>${showNum ? esc(label) : ""}</small>
         </div>`;
       })
@@ -3407,29 +3580,29 @@
       .sort((a, b) => compareTimelineOrders(a, b, win.today))
       .map((order) => {
         const meta = workStatusMeta(order);
-        const { start, end } = workSpan(order);
-        const today = win.today;
-        let from = start || win.from;
-        let till = end || (start && start <= today ? today : start || win.from);
-        if (from < win.from) from = win.from;
-        if (till > win.to) till = win.to;
-        if (from > till) return "";
-        const left = dayDiff(win.from, from);
-        const span = dayDiff(from, till) + 1;
+        const segs = orderWorkSegments(order, win.from, win.to, win.today);
+        if (!segs.length) return "";
         const due = orderDeadline(order, win.today);
         const label = `${orderNum(order)} ${orderTitle(order)}`.trim();
         const tip = due ? `${label} · дедлайн ${calFmtDay(due, true)}` : label;
+        const bars = segs
+          .map((seg, i) => {
+            const left = dayDiff(win.from, seg.from);
+            const span = dayDiff(seg.from, seg.till) + 1;
+            const first = i === 0;
+            const last = i === segs.length - 1;
+            return `<div class="gantt-bar tone-${meta.tone} ${meta.id === "now" ? "is-live" : ""} ${due && last ? "has-deadline" : ""}" data-cal-id="${esc(order.id)}" data-cal-drag="move" style="--from:${left};--span:${span};--bar:${esc(calendarBarColor(order))}" title="${esc(tip)}">
+              ${first ? `<i class="gantt-h start" data-cal-drag="start"></i>` : "<i></i>"}
+              ${last ? `<i class="gantt-h end" data-cal-drag="end"></i>` : "<i></i>"}
+            </div>`;
+          })
+          .join("");
         return `<div class="gantt-row ${calSelectedClass(order.id)} ${due ? "has-deadline" : ""}">
           <button type="button" class="gantt-label" data-cal-id="${esc(order.id)}">
             <b>${esc(orderNum(order))} ${esc(orderTitle(order))}</b>
             <small>${esc(order.customer || "без заказчика")} · ${esc(meta.label)}${workDurationDays(order) ? ` · ${workDurationDays(order)} дн.` : ""}${due ? ` · до ${calFmtDay(due)}` : ""}</small>
           </button>
-          <div class="gantt-track" data-cal-track="${esc(order.id)}">
-            <div class="gantt-bar tone-${meta.tone} ${meta.id === "now" ? "is-live" : ""} ${due ? "has-deadline" : ""}" data-cal-id="${esc(order.id)}" data-cal-drag="move" style="--from:${left};--span:${span};--bar:${esc(calendarBarColor(order))}" title="${esc(tip)}">
-              <i class="gantt-h start" data-cal-drag="start"></i>
-              <i class="gantt-h end" data-cal-drag="end"></i>
-            </div>
-          </div>
+          <div class="gantt-track" data-cal-track="${esc(order.id)}">${bars}</div>
         </div>`;
       })
       .join("");
@@ -3472,13 +3645,15 @@
       const shown = items.slice(0, 3);
       const more = items.length - shown.length;
       const hot = (load.map[key] || 0) >= CAL_HOT_LOAD;
-      cells.push(`<div class="cal-cell ${inMonth ? "" : "is-out"} ${isWeekend(d) ? "is-weekend" : ""} ${key === dayKey(win.today) ? "is-today" : ""} ${calendarState().pick === key ? "is-pick" : ""} ${hot ? "is-hot" : ""}" data-cal-day="${key}">
+      const note = dayNote(key);
+      cells.push(`<div class="cal-cell ${inMonth ? "" : "is-out"} ${dayToneClass(d)} ${note ? "has-note" : ""} ${key === dayKey(win.today) ? "is-today" : ""} ${calendarState().pick === key ? "is-pick" : ""} ${hot ? "is-hot" : ""}" data-cal-day="${key}">
         <div class="cal-cell-n">${d.getDate()}${items.length ? `<b>${items.length}</b>` : ""}</div>
+        ${note ? `<div class="cal-day-memo">${esc(note)}</div>` : ""}
         ${shown.map((order) => calChipHtml(order, d)).join("")}
         ${more > 0 ? `<div class="cal-more">ещё ${more}</div>` : ""}
       </div>`);
     }
-    return `<div class="cal-weekdays">${RU_WEEKDAYS.map((w, i) => `<div class="${i >= 5 ? "is-weekend" : ""}">${w}</div>`).join("")}</div>
+    return `<div class="cal-weekdays">${RU_WEEKDAYS.map((w, i) => `<div class="${calendarOffSettings().weekends.includes(i) ? "is-weekend" : ""}">${w}</div>`).join("")}</div>
       <div class="cal-month">${cells.join("")}</div>`;
   }
 
@@ -3491,13 +3666,15 @@
         const ends = items.filter((order) => dateDay(order.work_end) === key);
         const n = load.map[key] || 0;
         const pct = Math.min(100, (n / Math.max(CAL_HOT_LOAD, load.peak || 1)) * 100);
-        return `<div class="cal-col ${isWeekend(day) ? "is-weekend" : ""} ${key === dayKey(win.today) ? "is-today" : ""} ${calendarState().pick === key ? "is-pick" : ""} ${n >= CAL_HOT_LOAD ? "is-hot" : ""}" data-cal-day="${key}">
+        const note = dayNote(key);
+        return `<div class="cal-col ${dayToneClass(day)} ${note ? "has-note" : ""} ${key === dayKey(win.today) ? "is-today" : ""} ${calendarState().pick === key ? "is-pick" : ""} ${n >= CAL_HOT_LOAD ? "is-hot" : ""}" data-cal-day="${key}">
           <div class="cal-col-head">
             <strong>${RU_WEEKDAYS[(day.getDay() + 6) % 7]}</strong>
             <span>${calFmtDay(day)}</span>
             <em>${n} зак.</em>
           </div>
           <div class="cal-load"><i style="width:${pct}%"></i></div>
+          ${note ? `<div class="cal-day-memo">${esc(note)}</div>` : ""}
           ${starts.length ? `<div class="cal-col-sec">Старт</div>${starts.map((order) => calChipHtml(order, day)).join("")}` : ""}
           ${items.filter((order) => dateDay(order.work_start) !== key && dateDay(order.work_end) !== key).length ? `<div class="cal-col-sec">В работе</div>${items.filter((order) => dateDay(order.work_start) !== key && dateDay(order.work_end) !== key).map((order) => calChipHtml(order, day)).join("")}` : ""}
           ${ends.length ? `<div class="cal-col-sec">Финиш</div>${ends.map((order) => calChipHtml(order, day)).join("")}` : ""}
@@ -3545,13 +3722,27 @@
           </div>
         </div>`
       : `<div class="cal-sel idle">Выберите заказ на доске — здесь можно поставить старт и финиш, сдвинуть или открыть карточку.</div>`;
+    const pickOff = pick ? isWeekend(pick) : false;
+    const pickKey = pick ? dayKey(pick) : "";
+    const offSets = calendarOffSettings();
+    const pickMark = !pick
+      ? ""
+      : offSets.offDays.includes(pickKey)
+        ? " · выходной точечно"
+        : offSets.workDays.includes(pickKey)
+          ? " · рабочий точечно"
+          : pickOff
+            ? " · выходной"
+            : "";
     const pickBlock = pick
       ? `<div class="cal-block">
-          <h3>${esc(calFmtDay(pick, true))}${pickItems.length >= CAL_HOT_LOAD ? " · перегруз" : ""}</h3>
+          <h3>${esc(calFmtDay(pick, true))}${pickMark}${pickItems.length >= CAL_HOT_LOAD ? " · перегруз" : ""}</h3>
           <div class="cal-actions">
+            <button type="button" class="btn small" data-cal-act="toggle-off">${pickOff ? "Сделать рабочим" : "Сделать выходным"}</button>
             <button type="button" class="btn small" data-cal-act="pick-start" ${selected ? "" : "disabled"}>Старт выбранного</button>
             <button type="button" class="btn small" data-cal-act="pick-end" ${selected ? "" : "disabled"}>Финиш выбранного</button>
           </div>
+          <div class="field cal-day-note"><label>Заметка</label><textarea rows="3" data-cal-note="${esc(pickKey)}" placeholder="Что в этот день">${esc(dayNote(pickKey))}</textarea></div>
           ${pickItems.length ? pickItems.map((order) => calChipHtml(order, pick)).join("") : `<div class="cal-col-empty">в этот день никто не отмечен</div>`}
         </div>`
       : "";
@@ -3568,6 +3759,68 @@
       <div class="cal-block"><h3>Без дат <span>${nodate.length}</span></h3>${fillAll}${
         nodate.length ? nodate.map((order) => calChipHtml(order)).join("") : `<div class="cal-col-empty">Все заказы размечены.</div>`
       }</div>`;
+  }
+
+  function weekendMenuHtml() {
+    const off = calendarOffSettings();
+    const days = RU_WEEKDAYS.map(
+      (name, i) =>
+        `<button type="button" class="btn ${off.weekends.includes(i) ? "active" : ""}" data-cal-weekend="${i}" role="menuitemcheckbox" aria-checked="${off.weekends.includes(i)}">${esc(name)}</button>`
+    ).join("");
+    return `<div class="cal-weekend-label">Дни недели</div>
+      <div class="cal-weekend-days">${days}</div>
+      <div class="cal-weekend-hint">Отдельный день — клик по дате справа: «Сделать выходным» или «Сделать рабочим».</div>`;
+  }
+
+  function commitCalendarOff(patch, toastText) {
+    historyCommit();
+    writeCalendarOff(patch);
+    persistCalendar();
+    historyCommit();
+    markDirty();
+    renderCalendar();
+    if (toastText) toast(toastText);
+  }
+
+  function toggleWeekdayWeekend(wd) {
+    if (!Number.isInteger(wd) || wd < 0 || wd > 6) return;
+    const off = calendarOffSettings();
+    const weekends = off.weekends.includes(wd) ? off.weekends.filter((x) => x !== wd) : off.weekends.concat(wd).sort((a, b) => a - b);
+    commitCalendarOff({ weekends }, weekends.includes(wd) ? `${RU_WEEKDAYS[wd]} — выходной` : `${RU_WEEKDAYS[wd]} — рабочий`);
+  }
+
+  function setPointDay(key, kind) {
+    const d = parseDay(key);
+    if (!d) {
+      toast("Выберите дату");
+      return;
+    }
+    const iso = dayKey(d);
+    const off = calendarOffSettings();
+    const offDays = new Set(off.offDays);
+    const workDays = new Set(off.workDays);
+    const recurring = off.weekends.includes(weekdayIndex(d));
+    if (kind === "off") {
+      workDays.delete(iso);
+      if (recurring) commitCalendarOff({ offDays: [...offDays], workDays: [...workDays] }, "Выходной");
+      else {
+        offDays.add(iso);
+        commitCalendarOff({ offDays: [...offDays].sort(), workDays: [...workDays].sort() }, "Выходной на дату");
+      }
+    } else {
+      offDays.delete(iso);
+      if (!recurring) commitCalendarOff({ offDays: [...offDays], workDays: [...workDays] }, "Рабочий день");
+      else {
+        workDays.add(iso);
+        commitCalendarOff({ offDays: [...offDays].sort(), workDays: [...workDays].sort() }, "Рабочий на дату");
+      }
+    }
+  }
+
+  function togglePickedOffDay(key) {
+    const d = parseDay(key);
+    if (!d) return;
+    setPointDay(dayKey(d), isWeekend(d) ? "work" : "off");
   }
 
   function calendarPlanText() {
@@ -3649,6 +3902,7 @@
       calSkipClick = false;
       return;
     }
+    if (e.target.closest("textarea, [data-cal-note]")) return;
     const mode = e.target.closest("[data-cal-mode]");
     if (mode) {
       const cal = calendarState();
@@ -3663,9 +3917,25 @@
       const menu = $("cal-filter-menu");
       const btn = $("btn-cal-filter");
       if (!menu) return;
+      closeWeekendMenu();
       const open = menu.hidden;
       menu.hidden = !open;
       btn?.setAttribute("aria-expanded", String(open));
+      return;
+    }
+    if (e.target.closest("#btn-cal-weekends")) {
+      const menu = $("cal-weekend-menu");
+      const btn = $("btn-cal-weekends");
+      if (!menu) return;
+      closeCalFilter();
+      const open = menu.hidden;
+      menu.hidden = !open;
+      btn?.setAttribute("aria-expanded", String(open));
+      return;
+    }
+    const weekendDay = e.target.closest("[data-cal-weekend]");
+    if (weekendDay) {
+      toggleWeekdayWeekend(Number(weekendDay.dataset.calWeekend));
       return;
     }
     const filter = e.target.closest("[data-cal-filter]");
@@ -3737,6 +4007,11 @@
       if (cal.selected) gotoOrder(cal.selected);
       return;
     }
+    if (act === "toggle-off") {
+      if (!cal.pick) return;
+      togglePickedOffDay(cal.pick);
+      return;
+    }
     if (act === "pick-start" || act === "pick-end") {
       if (!cal.pick) return;
       applyCalendarOrder((order) => {
@@ -3775,6 +4050,14 @@
       return;
     }
     const field = e.target.dataset.calField;
+    if (e.target.dataset.calNote != null) {
+      historyCommit();
+      setDayNote(e.target.dataset.calNote, e.target.value);
+      historyCommit();
+      markDirty();
+      renderCalendar();
+      return;
+    }
     if (!field) return;
     applyCalendarOrder((order) => {
       order[field] = e.target.value;
@@ -3873,16 +4156,23 @@
     bar.style.width = `${(len / n) * 100}%`;
     bar.classList.toggle("has-deadline", !!orderDeadline(order));
     bar.classList.toggle("is-live", workStatus(order) === "now");
+    const track = bar.closest(".gantt-track");
+    track?.querySelectorAll(".gantt-bar").forEach((el) => {
+      if (el !== bar) el.hidden = true;
+    });
     const full = calDrag.full;
-    const navBar = document.querySelector(`.tl-nav-bar[data-cal-id="${cssEscape(order.id)}"]`);
-    if (navBar && full) {
-      const navFrom = Math.max(0, dayDiff(full.from, span.from));
-      const navTill = Math.min(full.span - 1, dayDiff(full.from, span.till));
-      if (navTill >= navFrom) {
-        navBar.style.setProperty("--from", String(navFrom));
-        navBar.style.setProperty("--len", String(navTill - navFrom + 1));
-      }
-    }
+    const navBars = document.querySelectorAll(`.tl-nav-bar[data-cal-id="${cssEscape(order.id)}"]`);
+    navBars.forEach((navBar, i) => {
+      if (i === 0 && full) {
+        const navFrom = Math.max(0, dayDiff(full.from, span.from));
+        const navTill = Math.min(full.span - 1, dayDiff(full.from, span.till));
+        if (navTill >= navFrom) {
+          navBar.hidden = false;
+          navBar.style.setProperty("--from", String(navFrom));
+          navBar.style.setProperty("--len", String(navTill - navFrom + 1));
+        }
+      } else navBar.hidden = true;
+    });
   }
 
   function onCalPointerMove(e) {
@@ -4032,7 +4322,11 @@
     if (cell) cell.classList.add("is-hover");
     if (!tip) return;
     tip.hidden = false;
-    tip.textContent = `${RU_WEEKDAYS_FULL[(day.getDay() + 6) % 7]}, ${calFmtDay(day, true)}`;
+    const tone = dayToneClass(day);
+    const note = dayNote(day);
+    const mark = tone === "is-off-day" ? " · выходной точечно" : tone === "is-weekend" ? " · выходной" : "";
+    const extra = note ? ` · ${note.length > 80 ? `${note.slice(0, 80)}…` : note}` : "";
+    tip.textContent = `${RU_WEEKDAYS_FULL[weekdayIndex(day)]}, ${calFmtDay(day, true)}${mark}${extra}`;
     const follow = !!(calDrag && pointer && Number.isFinite(pointer.clientX));
     if (follow) {
       tip.classList.add("is-follow");
@@ -4076,6 +4370,17 @@
     $("btn-cal-filter")?.setAttribute("aria-expanded", "false");
   }
 
+  function closeWeekendMenu() {
+    const menu = $("cal-weekend-menu");
+    if (menu) menu.hidden = true;
+    $("btn-cal-weekends")?.setAttribute("aria-expanded", "false");
+  }
+
+  function closeCalMenus() {
+    closeCalFilter();
+    closeWeekendMenu();
+  }
+
   function bindCalendar() {
     $("view-calendar")?.addEventListener("click", onCalClick);
     $("view-calendar")?.addEventListener("change", onCalChange);
@@ -4087,8 +4392,8 @@
     window.addEventListener("pointerup", onCalPointerUp);
     window.addEventListener("pointercancel", onCalPointerUp);
     document.addEventListener("click", (e) => {
-      if (e.target.closest("#cal-filter")) return;
-      closeCalFilter();
+      if (e.target.closest("#cal-filter") || e.target.closest("#cal-weekends")) return;
+      closeCalMenus();
     });
   }
 
@@ -6304,7 +6609,12 @@
         }
         if ($("cal-filter-menu") && !$("cal-filter-menu").hidden) {
           e.preventDefault();
-          closeCalFilter();
+          closeCalMenus();
+          return;
+        }
+        if ($("cal-weekend-menu") && !$("cal-weekend-menu").hidden) {
+          e.preventDefault();
+          closeCalMenus();
           return;
         }
       }
@@ -8706,7 +9016,7 @@
     if (el) el.checked = enabled;
     if (state.autosave === enabled) return;
     state.autosave = enabled;
-    if (enabled) save({ silent: true });
+    if (enabled) scheduleAutosave();
     else clearTimeout(state.autosaveTimer);
   }
 
@@ -8732,6 +9042,7 @@
     syncDirty();
     historySchedule();
     remote.applying = false;
+    scheduleAutosave();
     toast("Изменения с телефона применены");
   }
 

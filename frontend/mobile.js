@@ -326,13 +326,14 @@
   const RU_MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
   const RU_MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
   const RU_WEEKDAYS = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
+  const DEFAULT_WEEKENDS = [5, 6];
   const WORK_STATUS = {
-    nodate: { label: "без дат" },
-    planned: { label: "запланирован" },
-    now: { label: "идёт сейчас" },
-    done: { label: "завершён" },
-    overdue: { label: "просрочен" },
-    cancelled: { label: "снят" },
+    nodate: { label: "без дат", tone: "mute", color: "#64748b" },
+    planned: { label: "запланирован", tone: "wait", color: "#d97706" },
+    now: { label: "идёт сейчас", tone: "now", color: "#0f766e" },
+    done: { label: "завершён", tone: "ok", color: "#059669" },
+    overdue: { label: "просрочен", tone: "warn", color: "#dc2626" },
+    cancelled: { label: "снят", tone: "mute", color: "#64748b" },
   };
 
   function dayStart(d) {
@@ -340,13 +341,11 @@
   }
 
   function parseDay(iso) {
-    const s = dateValue(iso);
-    if (s.length < 10) return null;
-    const y = Number(s.slice(0, 4));
-    const m = Number(s.slice(5, 7));
-    const d = Number(s.slice(8, 10));
-    if (!y || !m || !d) return null;
-    return new Date(y, m - 1, d);
+    if (!iso) return null;
+    const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? null : dayStart(d);
   }
 
   function addDays(d, n) {
@@ -366,6 +365,66 @@
   function mondayOf(d) {
     const x = dayStart(d);
     return addDays(x, -((x.getDay() + 6) % 7));
+  }
+
+  function weekdayIndex(d) {
+    return (d.getDay() + 6) % 7;
+  }
+
+  function calendarOffSettings() {
+    const saved = state.doc?.ui?.calendar || {};
+    const weekends = Array.isArray(saved.weekends)
+      ? [...new Set(saved.weekends.map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))].sort((a, b) => a - b)
+      : DEFAULT_WEEKENDS.slice();
+    const workDays = Array.isArray(saved.work_days) ? saved.work_days.map(String) : [];
+    const offDays = Array.isArray(saved.off_days) ? saved.off_days.map(String) : [];
+    return { weekends, offDays, workDays };
+  }
+
+  function isWeekend(d) {
+    return !!dayToneClass(d);
+  }
+
+  function isGlobalWeekend(d) {
+    const off = calendarOffSettings();
+    if (off.workDays.includes(dayKey(d))) return false;
+    return off.weekends.includes(weekdayIndex(d));
+  }
+
+  function dayToneClass(d) {
+    const key = dayKey(d);
+    const off = calendarOffSettings();
+    if (off.workDays.includes(key)) return "";
+    if (off.offDays.includes(key)) return "is-off-day";
+    if (off.weekends.includes(weekdayIndex(d))) return "is-weekend";
+    return "";
+  }
+
+  function calendarDayNotes() {
+    const raw = state.doc?.ui?.calendar?.day_notes;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    const out = {};
+    Object.keys(raw).forEach((key) => {
+      const day = dateValue(key);
+      const text = String(raw[key] || "").trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(day) && text) out[day] = text.slice(0, 2000);
+    });
+    return out;
+  }
+
+  function dayNote(d) {
+    return calendarDayNotes()[typeof d === "string" ? d : dayKey(d)] || "";
+  }
+
+  function setDayNote(key, text) {
+    if (!key || !state.doc) return;
+    if (!state.doc.ui || typeof state.doc.ui !== "object") state.doc.ui = {};
+    if (!state.doc.ui.calendar || typeof state.doc.ui.calendar !== "object") state.doc.ui.calendar = {};
+    const notes = calendarDayNotes();
+    const clean = String(text || "").trim().slice(0, 2000);
+    if (clean) notes[key] = clean;
+    else delete notes[key];
+    state.doc.ui.calendar.day_notes = notes;
   }
 
   function calFmtDay(d) {
@@ -399,9 +458,9 @@
       if (start > today) return "planned";
       return "now";
     }
-    if (!start && end) return end < today ? "done" : "now";
+    if (!start && end) return end <= today ? "done" : "now";
     if (today < start) return "planned";
-    if (today > end) return "done";
+    if (end <= today) return "done";
     return "now";
   }
 
@@ -410,14 +469,54 @@
     return { id, ...(WORK_STATUS[id] || WORK_STATUS.nodate) };
   }
 
+  function calendarRole(order, day) {
+    const key = dayKey(day);
+    const start = dateValue(order.work_start);
+    const end = dateValue(order.work_end);
+    if (start === key && end === key) return "день";
+    if (start === key) return "старт";
+    if (end === key) return "финиш";
+    return "в работе";
+  }
+
+  function workEndLabel(order) {
+    const end = dateValue(order.work_end);
+    if (end) return end;
+    const id = workStatus(order);
+    if (id === "planned") return "без дедлайна";
+    if (id === "now") return "без дедлайна";
+    return "нет конца";
+  }
+
+  function mcalDayTone(covering) {
+    if (!covering.length) return "";
+    const ids = covering.map((order) => workStatus(order));
+    if (ids.includes("now")) return "has-now";
+    if (ids.includes("planned")) return "has-planned";
+    if (ids.includes("overdue")) return "has-overdue";
+    return "has-done";
+  }
+
+  function firstWorkOnOrAfter(day, limit) {
+    const cap = dayStart(limit || addDays(day, 16));
+    for (let d = dayStart(day); d <= cap; d = addDays(d, 1)) {
+      if (!isWeekend(d)) return d;
+    }
+    return null;
+  }
+
   function orderCoversDay(order, day) {
+    if (isWeekend(day)) return false;
     const start = parseDay(order.work_start);
     const end = parseDay(order.work_end);
     if (!start && !end) return false;
     const d = dayStart(day);
     const today = dayStart(new Date());
     if (start && !end) {
-      if (start > today) return dayKey(d) === dayKey(start);
+      if (start > today) {
+        const shown = isWeekend(start) ? firstWorkOnOrAfter(start) : start;
+        return shown && dayKey(d) === dayKey(shown);
+      }
       return d >= start && d <= today;
     }
     if (!start && end) return d <= end;
@@ -434,6 +533,31 @@
       order.work_end = today;
     }
     normalizeWorkDates(order);
+  }
+
+  function clearWorkDate(order, which) {
+    if (which === "start") order.work_start = "";
+    else order.work_end = "";
+    normalizeWorkDates(order);
+  }
+
+  function workActButtons(order, forCalendar) {
+    const start = dateValue(order.work_start);
+    const end = dateValue(order.work_end);
+    const idAttr = forCalendar ? ` data-cal-work="${esc(order.id)}"` : "";
+    const startBtns = start
+      ? `<label class="btn small mcal-datebtn">Сменить начальную дату<input type="date" value="${esc(start)}" data-cal-date="work_start"${idAttr}></label>
+         <button type="button" class="btn small danger-ghost" data-work-act="clear-start"${idAttr}>Убрать начальную дату</button>`
+      : `<button type="button" class="btn small" data-work-act="start"${idAttr}>Начать сегодня</button>`;
+    const endBtns = end
+      ? `<label class="btn small mcal-datebtn">Сменить конечную дату<input type="date" value="${esc(end)}" data-cal-date="work_end"${idAttr}></label>
+         <button type="button" class="btn small danger-ghost" data-work-act="clear-end"${idAttr}>Убрать конечную дату</button>`
+      : `<button type="button" class="btn small" data-work-act="end"${idAttr}>Закончить сегодня</button>`;
+    return startBtns + endBtns;
+  }
+
+  function latestDaysFirst(from, to) {
+    return rangeDays(from, to).slice().reverse();
   }
 
   function fmtDate(v) {
@@ -838,15 +962,18 @@
       else if (!initial) renderCurrent();
       return;
     }
-    const fresh = typeof data.doc_version === "number" ? data.doc_version > state.docVersion : true;
-    if (typeof data.doc_version === "number") state.docVersion = Math.max(state.docVersion, data.doc_version);
+    const incomingVer = typeof data.doc_version === "number" ? data.doc_version : null;
+    const fresh = incomingVer == null ? true : incomingVer > state.docVersion;
     if (!initial && !fresh && !pathChanged && !expectHit) return;
-    if (!initial && data.origin === state.cid && !pathChanged && !expectHit) return;
-    if (!initial && (state.pushTimer || state.pushing) && !pathChanged && !expectHit) return;
-    if (!initial && isTyping() && !pathChanged && !expectHit) {
-      state.pending = data.document;
+    if (!initial && data.origin === state.cid && !pathChanged && !expectHit) {
+      if (incomingVer != null) state.docVersion = Math.max(state.docVersion, incomingVer);
       return;
     }
+    if (!initial && (state.pushTimer || state.pushing || isTyping()) && !pathChanged && !expectHit) {
+      if (data.document) state.pending = data.document;
+      return;
+    }
+    if (incomingVer != null) state.docVersion = Math.max(state.docVersion, incomingVer);
     state.doc = data.document;
     const opened = !initial && (!prevHadDoc || pathChanged || expectHit);
     if (expectHit) state.expectPath = "";
@@ -1455,8 +1582,7 @@
         </div>
         <div class="work-row">
           <span class="work-pill work-pill-${esc(workStatus(order))}">${esc(workStatusMeta(order).label)}</span>
-          <button type="button" class="btn small" data-work-act="start">Начать сегодня</button>
-          <button type="button" class="btn small" data-work-act="end">Закончить сегодня</button>
+          ${workActButtons(order, false)}
         </div>
         <div class="field last"><label>Заметки</label><textarea rows="3" ${a("notes")}>${esc(order.notes || "")}</textarea></div>
       </div>
@@ -2143,6 +2269,7 @@
     if (!requireDocument()) return;
     const cal = state.cal;
     if (!cal.anchor) cal.anchor = dayStart(new Date());
+    if (cal.mode !== "classic") cal.mode = "extended";
     const today = dayStart(new Date());
     const all = orders();
     const list = cal.filter === "all" ? all : all.filter((order) => workStatus(order) === cal.filter);
@@ -2150,7 +2277,6 @@
     const overdue = all.filter((order) => workStatus(order) === "overdue");
     const nodate = all.filter((order) => workStatus(order) === "nodate");
     const modes = [
-      ["timeline", "Таймлайн"],
       ["classic", "Классический"],
       ["extended", "Неделя"],
     ];
@@ -2164,7 +2290,12 @@
     ];
     let title = "";
     let board = "";
-    if (cal.mode === "classic") {
+    if (cal.filter === "nodate") {
+      title = "Без дат";
+      board = nodate.length
+        ? nodate.map((order) => mcalOrderCard(order)).join("")
+        : `<div class="empty">Нет заказов без дат.</div>`;
+    } else if (cal.mode === "classic") {
       const from = new Date(cal.anchor.getFullYear(), cal.anchor.getMonth(), 1);
       const to = new Date(cal.anchor.getFullYear(), cal.anchor.getMonth() + 1, 0);
       title = `${RU_MONTHS_NOM[from.getMonth()]} ${from.getFullYear()}`;
@@ -2174,44 +2305,51 @@
       const cells = [];
       for (let d = gridFrom; d <= gridTo; d = addDays(d, 1)) {
         const key = dayKey(d);
-        const n = list.filter((order) => orderCoversDay(order, d)).length;
+        const covering = list.filter((order) => orderCoversDay(order, d));
+        const n = covering.length;
         const inMonth = d.getMonth() === from.getMonth();
-        cells.push(`<button type="button" class="mcal-cell ${inMonth ? "" : "is-out"} ${key === dayKey(today) ? "is-today" : ""} ${n ? "has" : ""}" data-cal-day="${key}">
-          <b>${d.getDate()}</b>${n ? `<i>${n}</i>` : ""}
+        const note = dayNote(key);
+        cells.push(`<button type="button" class="mcal-cell ${inMonth ? "" : "is-out"} ${dayToneClass(d)} ${note ? "has-note" : ""} ${key === dayKey(today) ? "is-today" : ""} ${mcalDayTone(covering)}" data-cal-day="${key}">
+          <b>${d.getDate()}</b>${n ? `<i>${n}</i>` : ""}${note ? `<em class="mcal-memo">${esc(note)}</em>` : ""}
         </button>`);
       }
-      board = `<div class="mcal-weekdays">${RU_WEEKDAYS.map((w) => `<span>${w}</span>`).join("")}</div>
+      board = `<div class="mcal-weekdays">${RU_WEEKDAYS.map((w, i) => `<span class="${calendarOffSettings().weekends.includes(i) ? "is-weekend" : ""}">${w}</span>`).join("")}</div>
         <div class="mcal-month">${cells.join("")}</div>`;
       if (cal.pick) {
         const pick = parseDay(cal.pick);
         const items = list.filter((order) => orderCoversDay(order, pick));
-        board += `<div class="mcal-daylist"><h3>${esc(calFmtDay(pick))}</h3>${
-          items.length ? items.map(mcalOrderCard).join("") : `<div class="empty">В этот день никто не отмечен.</div>`
-        }</div>`;
+        const pickKey = dayKey(pick);
+        board += `<div class="mcal-daylist"><h3>${esc(calFmtDay(pick))}</h3>
+          <label class="mcal-note">Заметка<textarea rows="2" data-cal-note="${esc(pickKey)}" placeholder="Что в этот день">${esc(dayNote(pickKey))}</textarea></label>
+          ${items.length ? items.map((order) => mcalOrderCard(order, pick)).join("") : `<div class="empty">В этот день никто не отмечен.</div>`}
+        </div>`;
       }
     } else if (cal.mode === "extended") {
       const from = mondayOf(cal.anchor);
       const to = addDays(from, 6);
       title = `${from.getDate()}–${calFmtDay(to)}`;
-      board = `<div class="mcal-week">${rangeDays(from, to)
+      const weekDays = latestDaysFirst(from, to).filter((day) => !isGlobalWeekend(day));
+      board = weekDays.length
+        ? `<div class="mcal-week">${weekDays
         .map((day) => {
           const key = dayKey(day);
           const items = list.filter((order) => orderCoversDay(order, day));
-          return `<div class="mcal-col ${key === dayKey(today) ? "is-today" : ""}">
+          const starts = items.filter((order) => dateValue(order.work_start) === key);
+          const ends = items.filter((order) => dateValue(order.work_end) === key);
+          const running = items.filter((order) => dateValue(order.work_start) !== key && dateValue(order.work_end) !== key);
+          const note = dayNote(key);
+          const block = (title, rows) =>
+            rows.length ? `<div class="mcal-sec">${esc(title)}</div>${rows.map((order) => mcalOrderCard(order, day)).join("")}` : "";
+          return `<div class="mcal-col ${dayToneClass(day)} ${key === dayKey(today) ? "is-today" : ""} ${mcalDayTone(items)}" data-cal-day="${key}">
             <div class="mcal-col-h"><b>${RU_WEEKDAYS[(day.getDay() + 6) % 7]}</b><span>${day.getDate()}</span><i>${items.length}</i></div>
-            ${items.length ? items.map(mcalOrderCard).join("") : `<div class="empty">пусто</div>`}
+            ${note && cal.pick !== key ? `<div class="mcal-memo">${esc(note)}</div>` : ""}
+            ${cal.pick === key ? `<label class="mcal-note">Заметка<textarea rows="2" data-cal-note="${esc(key)}" placeholder="Что в этот день">${esc(note)}</textarea></label>` : ""}
+            ${block("Старт", starts)}${block("В работе", running)}${block("Финиш", ends)}
+            ${items.length ? "" : `<div class="empty">пусто</div>`}
           </div>`;
         })
-        .join("")}</div>`;
-    } else {
-      const from = mondayOf(cal.anchor);
-      const to = addDays(from, 13);
-      title = `${from.getDate()}–${calFmtDay(to)}`;
-      const dated = list
-        .filter((order) => workStatus(order) !== "nodate")
-        .filter((order) => rangeDays(from, to).some((day) => orderCoversDay(order, day)))
-        .sort((a, b) => String(a.work_start || "").localeCompare(String(b.work_start || "")));
-      board = dated.length ? dated.map(mcalOrderCard).join("") : `<div class="empty">В эти две недели нет отмеченных заказов.</div>`;
+        .join("")}</div>`
+        : `<div class="empty">На этой неделе нет рабочих дней.</div>`;
     }
     const year = cal.anchor.getFullYear();
     const month = cal.anchor.getMonth();
@@ -2228,12 +2366,16 @@
       <div class="mcal-modes">${modes
         .map(([id, label]) => `<button type="button" class="chip ${cal.mode === id ? "active" : ""}" data-cal-mode="${id}">${label}</button>`)
         .join("")}</div>
-      <div class="mcal-nav">
+      ${
+        cal.filter === "nodate"
+          ? ""
+          : `<div class="mcal-nav">
         <button type="button" class="btn" data-cal-nav="-1">‹</button>
         <button type="button" class="btn" data-cal-nav="0">Сегодня</button>
         ${titleHtml}
         <button type="button" class="btn" data-cal-nav="1">›</button>
-      </div>
+      </div>`
+      }
       <div class="mcal-kpis">
         <div><span>Идёт</span><b>${now.length}</b></div>
         <div class="${overdue.length ? "warn" : ""}"><span>Просрочены</span><b>${overdue.length}</b></div>
@@ -2243,7 +2385,6 @@
         .map(([id, label]) => `<button type="button" class="chip ${cal.filter === id ? "active" : ""}" data-cal-filter="${id}">${label}</button>`)
         .join("")}</div>
       ${board}
-      ${now.length && cal.mode !== "extended" ? `<h3 class="section">В работе</h3>${now.map(mcalOrderCard).join("")}` : ""}
     `;
   }
 
@@ -2253,20 +2394,19 @@
     return days;
   }
 
-  function mcalOrderCard(order) {
+  function mcalOrderCard(order, day) {
     const meta = workStatusMeta(order);
     const t = orderTotals(order);
-    return `<article class="card order-item mcal-order" data-open="${esc(order.id)}">
+    const role = day ? calendarRole(order, day) : "";
+    return `<article class="card order-item mcal-order tone-${esc(meta.tone)}" data-open="${esc(order.id)}" style="--tint:${esc(meta.color)}">
       <div class="oi-top"><span class="oi-num">${esc(order.number || "—")}</span><span class="oi-sep">—</span><span class="oi-customer">${esc(order.name || "без названия")}</span></div>
-      <div class="oi-name">${esc(order.customer || "Без заказчика")} · ${esc(dateValue(order.work_start) || "нет старта")} → ${esc(dateValue(order.work_end) || "идёт")}</div>
+      <div class="oi-name">${esc(order.customer || "Без заказчика")} · ${esc(dateValue(order.work_start) || "нет старта")} → ${esc(workEndLabel(order))}</div>
       <div class="oi-foot">
         <span class="work-pill work-pill-${esc(meta.id)}">${esc(meta.label)}</span>
+        ${role ? `<span class="mcal-role">${esc(role)}</span>` : ""}
         <span class="sum">${esc(money(t.after))}</span>
       </div>
-      <div class="mcal-acts">
-        <button type="button" class="btn small" data-cal-work="${esc(order.id)}" data-work-act="start">Начать сегодня</button>
-        <button type="button" class="btn small" data-cal-work="${esc(order.id)}" data-work-act="end">Закончить сегодня</button>
-      </div>
+      <div class="mcal-acts">${workActButtons(order, true)}</div>
     </article>`;
   }
 
@@ -3625,7 +3765,10 @@
       order[field] = el.value;
       if (field === "work_start" || field === "work_end") {
         normalizeWorkDates(order);
-        if (el.type === "date") el.value = order[field] || "";
+        touchDoc();
+        pushSoon();
+        renderOrder();
+        return;
       }
       if (field === "number" || field === "name") renderOrderTopOnly(order);
     }
@@ -3850,6 +3993,26 @@
         renderCalendar();
         return;
       }
+      if (e.target.dataset.calNote != null) {
+        setDayNote(e.target.dataset.calNote, e.target.value);
+        touchDoc();
+        pushSoon();
+        if (state.view === "calendar") renderCalendar();
+        return;
+      }
+      if (e.target.dataset.calDate) {
+        const id = e.target.dataset.calWork || state.orderId;
+        const order = orders().find((o) => o.id === id) || currentOrder();
+        if (!order) return;
+        order[e.target.dataset.calDate] = e.target.value;
+        normalizeWorkDates(order);
+        touchDoc();
+        pushSoon();
+        if (state.view === "calendar") renderCalendar();
+        else renderOrder();
+        toast(e.target.dataset.calDate === "work_start" ? "Начало обновлено" : "Конец обновлён");
+        return;
+      }
       if (e.target.id === "snap-hide-labels") {
         state.snap.hideLabels = e.target.checked;
         saveSnapPrefs();
@@ -3901,12 +4064,18 @@
         const id = workBtn.dataset.calWork || state.orderId;
         const order = orders().find((o) => o.id === id) || currentOrder();
         if (!order) return;
-        setWorkToday(order, workBtn.dataset.workAct);
+        const act = workBtn.dataset.workAct;
+        if (act === "clear-start" || act === "clear-end") {
+          clearWorkDate(order, act === "clear-start" ? "start" : "end");
+          toast(act === "clear-start" ? "Начало убрано" : "Конец убран");
+        } else {
+          setWorkToday(order, act);
+          toast(act === "start" ? "Старт — сегодня" : "Финиш — сегодня");
+        }
         touchDoc();
         pushSoon();
         if (state.view === "calendar") renderCalendar();
         else renderOrder();
-        toast(workBtn.dataset.workAct === "start" ? "Старт — сегодня" : "Финиш — сегодня");
         return;
       }
       const calMode = e.target.closest("[data-cal-mode]");
@@ -3932,13 +4101,14 @@
         return;
       }
       const calDay = e.target.closest("[data-cal-day]");
-      if (calDay) {
+      if (calDay && !e.target.closest("[data-open], textarea, .mcal-acts")) {
         state.cal.pick = state.cal.pick === calDay.dataset.calDay ? "" : calDay.dataset.calDay;
         renderCalendar();
         return;
       }
       const open = e.target.closest("[data-open]");
       if (open) {
+        if (e.target.closest("button, input, label, select, textarea, a, .mcal-acts")) return;
         setView("order", open.dataset.open);
         return;
       }

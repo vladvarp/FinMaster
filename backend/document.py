@@ -34,6 +34,7 @@ CLOUD_COLOR_MODES = ("status", "customer", "debt", "type")
 CLOUD_SIZE_MODES = ("amount", "debt", "quantity", "equal")
 CALENDAR_MODES = ("timeline", "classic", "extended")
 CALENDAR_FILTERS = ("all", "now", "planned", "done", "overdue", "nodate")
+DEFAULT_WEEKENDS = [5, 6]
 
 
 def _day_iso(value: Any) -> str:
@@ -45,6 +46,49 @@ def _day_iso(value: Any) -> str:
     return ""
 
 
+def _weekday_list(raw: Any) -> list[int]:
+    out: list[int] = []
+    seen: set[int] = set()
+    if not isinstance(raw, list):
+        return list(DEFAULT_WEEKENDS)
+    for item in raw:
+        try:
+            number = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= number <= 6 and number not in seen:
+            seen.add(number)
+            out.append(number)
+    out.sort()
+    return out
+
+
+def _iso_day_list(raw: Any) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        day = _day_iso(item)
+        if day and day not in seen:
+            seen.add(day)
+            out.append(day)
+    out.sort()
+    return out
+
+
+def _day_notes(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, val in raw.items():
+        day = _day_iso(key)
+        text = str(val or "").strip()
+        if day and text:
+            out[day] = text[:2000]
+    return out
+
+
 def _calendar_ui(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         return {}
@@ -53,6 +97,17 @@ def _calendar_ui(raw: Any) -> dict[str, Any]:
         out["mode"] = raw["mode"]
     if raw.get("filter") in CALENDAR_FILTERS:
         out["filter"] = raw["filter"]
+    if "weekends" in raw:
+        out["weekends"] = _weekday_list(raw.get("weekends"))
+    work_days = _iso_day_list(raw.get("work_days"))
+    off_days = [day for day in _iso_day_list(raw.get("off_days")) if day not in set(work_days)]
+    if off_days:
+        out["off_days"] = off_days
+    if work_days:
+        out["work_days"] = work_days
+    notes = _day_notes(raw.get("day_notes"))
+    if notes:
+        out["day_notes"] = notes
     return out
 
 
