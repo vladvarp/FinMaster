@@ -1516,11 +1516,13 @@ html[data-theme="dark"] .search input,
 html[data-theme="dark"] .field input:not([type="checkbox"]),
 html[data-theme="dark"] .field select,
 html[data-theme="dark"] .field textarea,
-html[data-theme="dark"] .btn {
+html[data-theme="dark"] .btn,
+html[data-theme="dark"] .cal-pick {
   background: #1b2538;
   color: var(--ink);
   border-color: var(--line);
 }
+html[data-theme="dark"] .cal-pick:hover { background: #243044; }
 html[data-theme="dark"] .btn:hover { background: #243044; }
 html[data-theme="dark"] .btn.primary {
   background: var(--accent);
@@ -3291,13 +3293,35 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
 }
 
 /* ==== Календарь работ ==== */
+.cal-modes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .cal-modes .btn.active {
   background: var(--accent);
   border-color: transparent;
   color: #fff;
 }
 .cal-nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.cal-nav strong { min-width: 180px; text-align: center; font-size: 15px; }
+.cal-title {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 180px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 700;
+}
+.cal-pick {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: inherit;
+  border-radius: 11px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+.cal-pick:hover { background: #f8fafc; }
 .cal-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); margin-bottom: 12px; }
 .cal-tools {
   display: flex;
@@ -3305,6 +3329,12 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
   align-items: center;
   gap: 12px;
   margin: 0 0 12px;
+  flex-wrap: wrap;
+}
+.cal-tools-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
 }
 .cal-filter { position: relative; }

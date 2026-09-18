@@ -113,9 +113,9 @@
           <button data-view="orders" title="Заказы"><span class="nav-ico">☰</span><span class="nav-label">Заказы</span></button>
           <button data-view="dashboard" class="active" title="Дашборд"><span class="nav-ico">⌂</span><span class="nav-label">Дашборд</span></button>
 
-          <button data-view="analytics" title="Аналитика"><span class="nav-ico">▦</span><span class="nav-label">Аналитика</span></button>
+          <button data-view="analytics" title="Аналитика"><span class="nav-ico">◷</span><span class="nav-label">Аналитика</span></button>
           <button data-view="cashflow" title="Касса: платёжный календарь и дебиторка"><span class="nav-ico">₽</span><span class="nav-label">Касса</span></button>
-          <button data-view="calendar" title="Календарь работ: когда заказы начаты, идут и закончены"><span class="nav-ico">◷</span><span class="nav-label">Календарь</span></button>
+          <button data-view="calendar" title="Календарь работ: когда заказы начаты, идут и закончены"><span class="nav-ico">▦</span><span class="nav-label">Календарь</span></button>
           <button data-view="cloud" title="Облако заказов: интерактивная карта связей"><span class="nav-ico">✣</span><span class="nav-label">Облако</span></button>
           <button data-view="customers" title="Заказчики"><span class="nav-ico">◉</span><span class="nav-label">Заказчики</span></button>
           <button data-view="catalogs" title="Справочники"><span class="nav-ico">⚙</span><span class="nav-label">Справочники</span></button>
@@ -334,28 +334,28 @@
         </div>
 
         <div class="view cal-view" id="view-calendar">
-          <div class="toolbar">
-            <div class="left cal-modes" role="tablist" aria-label="Вид календаря">
-              <button type="button" class="btn" data-cal-mode="timeline" title="Диаграмма Ганта по дням">Таймлайн</button>
-              <button type="button" class="btn" data-cal-mode="classic" title="Месячная сетка">Классический</button>
-              <button type="button" class="btn" data-cal-mode="extended" title="Неделя с загрузкой цеха">Расширенный</button>
-            </div>
-          </div>
           <div class="kpis cal-kpis" id="cal-kpis"></div>
           <div class="cal-tools">
-            <div class="cal-filter" id="cal-filter">
-              <button type="button" class="btn" id="btn-cal-filter" title="Фильтр заказов" aria-haspopup="menu" aria-expanded="false" aria-controls="cal-filter-menu">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M4 5h16l-6.2 7.4v5.1L10.2 19v-6.6L4 5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-                </svg>
-                <span id="cal-filter-label">Все</span>
-              </button>
-              <div class="cal-filter-menu" id="cal-filter-menu" hidden role="menu"></div>
+            <div class="cal-tools-left">
+              <div class="cal-filter" id="cal-filter">
+                <button type="button" class="btn" id="btn-cal-filter" title="Фильтр заказов" aria-haspopup="menu" aria-expanded="false" aria-controls="cal-filter-menu">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M4 5h16l-6.2 7.4v5.1L10.2 19v-6.6L4 5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                  </svg>
+                  <span id="cal-filter-label">Все</span>
+                </button>
+                <div class="cal-filter-menu" id="cal-filter-menu" hidden role="menu"></div>
+              </div>
+              <div class="cal-modes" role="tablist" aria-label="Вид календаря">
+                <button type="button" class="btn" data-cal-mode="timeline" title="Диаграмма Ганта по дням">Таймлайн</button>
+                <button type="button" class="btn" data-cal-mode="classic" title="Месячная сетка">Классический</button>
+                <button type="button" class="btn" data-cal-mode="extended" title="Неделя: старты, в работе и финиши">Неделя</button>
+              </div>
             </div>
             <div class="cal-nav">
               <button class="btn" type="button" id="cal-prev" title="Предыдущий период (←)">‹</button>
               <button class="btn" type="button" id="cal-today" title="К сегодняшнему дню (T)">Сегодня</button>
-              <strong id="cal-title"></strong>
+              <div class="cal-title" id="cal-title"></div>
               <button class="btn" type="button" id="cal-next" title="Следующий период (→)">›</button>
               <button class="btn" type="button" id="cal-copy" title="Скопировать план работ на видимый период">План работ</button>
             </div>
@@ -798,9 +798,10 @@
           <div class="help-row"><span>Запятая превращается в точку</span><span><kbd>2,5</kbd> → <kbd>2.5</kbd></span></div>
           <h4>Календарь</h4>
           <div class="help-row"><span>Предыдущий / следующий период</span><span><kbd>←</kbd><kbd>→</kbd></span></div>
+          <div class="help-row"><span>В классическом: предыдущий / следующий год</span><span><kbd>Shift</kbd><kbd>←</kbd><kbd>→</kbd></span></div>
           <div class="help-row"><span>К сегодняшнему дню</span><span><kbd>T</kbd></span></div>
           <div class="help-row"><span>Масштаб / прокрутка дней в таймлайне</span><span>колесо на навигаторе / на линейке дней</span></div>
-          <div class="help-row"><span>Таймлайн / классический / расширенный</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span></div>
+          <div class="help-row"><span>Таймлайн / классический / неделя</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span></div>
           <h4>Облако</h4>
           <div class="help-row"><span>Поиск по карте</span><span><kbd>/</kbd></span></div>
           <div class="help-row"><span>Показать всё / автотур</span><span><kbd>F</kbd> / <kbd>T</kbd></span></div>

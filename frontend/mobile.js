@@ -2152,7 +2152,7 @@
     const modes = [
       ["timeline", "Таймлайн"],
       ["classic", "Классический"],
-      ["extended", "Расширенный"],
+      ["extended", "Неделя"],
     ];
     const filters = [
       ["all", "Все"],
@@ -2213,6 +2213,17 @@
         .sort((a, b) => String(a.work_start || "").localeCompare(String(b.work_start || "")));
       board = dated.length ? dated.map(mcalOrderCard).join("") : `<div class="empty">В эти две недели нет отмеченных заказов.</div>`;
     }
+    const year = cal.anchor.getFullYear();
+    const month = cal.anchor.getMonth();
+    const y0 = Math.min(year, today.getFullYear()) - 15;
+    const y1 = Math.max(year, today.getFullYear()) + 10;
+    let yearOpts = "";
+    for (let y = y0; y <= y1; y++) yearOpts += `<option value="${y}" ${y === year ? "selected" : ""}>${y}</option>`;
+    const titleHtml =
+      cal.mode === "classic"
+        ? `<select class="mcal-pick" data-cal-month aria-label="Месяц">${RU_MONTHS_NOM.map((name, i) => `<option value="${i}" ${i === month ? "selected" : ""}>${esc(name)}</option>`).join("")}</select>
+           <select class="mcal-pick" data-cal-year aria-label="Год">${yearOpts}</select>`
+        : `<strong>${esc(title)}</strong>`;
     $("calendar-body").innerHTML = `
       <div class="mcal-modes">${modes
         .map(([id, label]) => `<button type="button" class="chip ${cal.mode === id ? "active" : ""}" data-cal-mode="${id}">${label}</button>`)
@@ -2220,7 +2231,7 @@
       <div class="mcal-nav">
         <button type="button" class="btn" data-cal-nav="-1">‹</button>
         <button type="button" class="btn" data-cal-nav="0">Сегодня</button>
-        <strong>${esc(title)}</strong>
+        ${titleHtml}
         <button type="button" class="btn" data-cal-nav="1">›</button>
       </div>
       <div class="mcal-kpis">
@@ -3829,6 +3840,16 @@
 
     document.addEventListener("change", (e) => {
       if (e.target.id === "device-name" || e.target.id === "snap-title" || e.target.id === "search") return;
+      if (e.target.dataset.calMonth != null || e.target.dataset.calYear != null) {
+        if (!state.cal.anchor) state.cal.anchor = dayStart(new Date());
+        const monthEl = document.querySelector("[data-cal-month]");
+        const yearEl = document.querySelector("[data-cal-year]");
+        const month = monthEl ? Number(monthEl.value) : state.cal.anchor.getMonth();
+        const year = yearEl ? Number(yearEl.value) : state.cal.anchor.getFullYear();
+        state.cal.anchor = new Date(year, month, 1);
+        renderCalendar();
+        return;
+      }
       if (e.target.id === "snap-hide-labels") {
         state.snap.hideLabels = e.target.checked;
         saveSnapPrefs();

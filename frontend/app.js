@@ -3059,16 +3059,43 @@
     return { from, to: days[days.length - 1], days, today: full.today, full, title: calFmtRange(from, days[days.length - 1]) };
   }
 
-  function calendarShift(dir) {
+  function calendarShift(dir, unit = "period") {
     const cal = calendarState();
-    if (cal.mode === "classic") cal.anchor = new Date(cal.anchor.getFullYear(), cal.anchor.getMonth() + dir, 1);
-    else if (cal.mode === "timeline") {
+    if (!(cal.anchor instanceof Date) || Number.isNaN(cal.anchor.getTime())) cal.anchor = dayStart(new Date());
+    if (cal.mode === "classic") {
+      if (unit === "year") cal.anchor = new Date(cal.anchor.getFullYear() + dir, cal.anchor.getMonth(), 1);
+      else cal.anchor = new Date(cal.anchor.getFullYear(), cal.anchor.getMonth() + dir, 1);
+    } else if (cal.mode === "timeline") {
       const step = Math.max(1, Math.floor((cal.viewDays || TL_DEFAULT_DAYS) / 2));
       cal.viewFrom = addDays(cal.viewFrom || dayStart(new Date()), dir * step);
       clampTimelineView();
       cal.anchor = cal.viewFrom;
     } else cal.anchor = addDays(mondayOf(cal.anchor), dir * 7);
     renderCalendar();
+  }
+
+  function calendarYearOptions(year) {
+    const now = new Date().getFullYear();
+    const from = Math.min(year, now) - 15;
+    const to = Math.max(year, now) + 10;
+    let html = "";
+    for (let y = from; y <= to; y++) html += `<option value="${y}" ${y === year ? "selected" : ""}>${y}</option>`;
+    return html;
+  }
+
+  function paintCalTitle(win) {
+    const host = $("cal-title");
+    if (!host) return;
+    const cal = calendarState();
+    if (cal.mode !== "classic") {
+      host.textContent = win.title;
+      return;
+    }
+    const year = win.from.getFullYear();
+    const month = win.from.getMonth();
+    host.innerHTML = `
+      <select class="cal-pick" id="cal-month-pick" aria-label="Месяц">${RU_MONTHS_NOM.map((name, i) => `<option value="${i}" ${i === month ? "selected" : ""}>${esc(name)}</option>`).join("")}</select>
+      <select class="cal-pick" id="cal-year-pick" aria-label="Год">${calendarYearOptions(year)}</select>`;
   }
 
   function calendarOrdersAll() {
@@ -3189,7 +3216,7 @@
     const load = calendarLoadMap(all.filter((order) => workStatus(order) !== "cancelled"), win.days);
     const peakLabel = load.peakKey ? calFmtDay(parseDay(load.peakKey)) : "—";
 
-    $("cal-title").textContent = win.title;
+    paintCalTitle(win);
     document.querySelectorAll("[data-cal-mode]").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.calMode === cal.mode);
     });
@@ -3265,7 +3292,7 @@
     const meta = $("tl-nav-meta-view");
     if (meta) meta.textContent = `видно ${cal.viewDays} дн. · ${calFmtRange(cal.viewFrom, addDays(cal.viewFrom, cal.viewDays - 1))}`;
     const title = $("cal-title");
-    if (title) title.textContent = calFmtRange(cal.viewFrom, addDays(cal.viewFrom, cal.viewDays - 1));
+    if (title && calendarState().mode === "timeline") title.textContent = calFmtRange(cal.viewFrom, addDays(cal.viewFrom, cal.viewDays - 1));
     refreshTimelineGantt();
   }
 
@@ -3738,6 +3765,15 @@
   }
 
   function onCalChange(e) {
+    if (e.target.id === "cal-month-pick" || e.target.id === "cal-year-pick") {
+      const cal = calendarState();
+      if (!(cal.anchor instanceof Date) || Number.isNaN(cal.anchor.getTime())) cal.anchor = dayStart(new Date());
+      const month = Number($("cal-month-pick")?.value ?? cal.anchor.getMonth());
+      const year = Number($("cal-year-pick")?.value ?? cal.anchor.getFullYear());
+      cal.anchor = new Date(year, month, 1);
+      renderCalendar();
+      return;
+    }
     const field = e.target.dataset.calField;
     if (!field) return;
     applyCalendarOrder((order) => {
@@ -6280,12 +6316,12 @@
       if (state.view === "calendar" && !ctrl && !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) {
         if (e.key === "ArrowLeft") {
           e.preventDefault();
-          calendarShift(-1);
+          calendarShift(-1, e.shiftKey && calendarState().mode === "classic" ? "year" : "period");
           return;
         }
         if (e.key === "ArrowRight") {
           e.preventDefault();
-          calendarShift(1);
+          calendarShift(1, e.shiftKey && calendarState().mode === "classic" ? "year" : "period");
           return;
         }
         if (e.key === "t" || e.key === "T") {
@@ -7637,9 +7673,9 @@
     const items = [
       { group: "Разделы", ico: "⌂", title: "Дашборд", sub: "KPI, инсайты и графики", run: () => setView("dashboard") },
       { group: "Разделы", ico: "☰", title: "Заказы", sub: "таблицы заказов и позиций", run: () => setView("orders") },
-      { group: "Разделы", ico: "▦", title: "Аналитика", sub: "фильтры, сравнение периодов", run: () => setView("analytics") },
+      { group: "Разделы", ico: "◷", title: "Аналитика", sub: "фильтры, сравнение периодов", run: () => setView("analytics") },
       { group: "Разделы", ico: "₽", title: "Касса", sub: "платёжный календарь и дебиторка", run: () => setView("cashflow") },
-      { group: "Разделы", ico: "◷", title: "Календарь", sub: "старт, финиш и что идёт сейчас", run: () => setView("calendar") },
+      { group: "Разделы", ico: "▦", title: "Календарь", sub: "старт, финиш и что идёт сейчас", run: () => setView("calendar") },
       { group: "Разделы", ico: "✣", title: "Облако заказов", sub: "живая карта заказов и позиций", run: () => setView("cloud") },
       { group: "Разделы", ico: "◉", title: "Заказчики", sub: "контакты и рейтинг", run: () => setView("customers") },
       { group: "Разделы", ico: "⚙", title: "Справочники", sub: "статусы, единицы, продукты", run: () => setView("catalogs") },
@@ -7730,7 +7766,7 @@
       },
       {
         group: "Фильтры",
-        ico: "◷",
+        ico: "▦",
         title: "Календарь: идёт сейчас",
         sub: "заказы в работе сегодня",
         run: () => {
