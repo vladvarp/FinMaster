@@ -881,7 +881,7 @@ def api_remote_nav():
         return jsonify({"error": "Сессия закрыта."}), 409
     data = request.get_json(silent=True) or {}
     view = str(data.get("view") or "")
-    if view not in {"orders", "order", "stats", "files", "snapshot"}:
+    if view not in {"orders", "order", "stats", "files", "snapshot", "calendar"}:
         return jsonify({"error": "Неизвестный экран."}), 400
     version = REMOTE.set_nav(
         view,

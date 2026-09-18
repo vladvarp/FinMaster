@@ -292,22 +292,22 @@
     }
 
     onKey(e) {
-      if (e.key === "+" || e.key === "=") {
-        e.preventDefault();
+        if (e.key === "+" || e.key === "=") {
+          e.preventDefault();
         this.zoomAt(1.22);
-      } else if (e.key === "-") {
-        e.preventDefault();
+        } else if (e.key === "-") {
+          e.preventDefault();
         this.zoomAt(1 / 1.22);
-      } else if (e.key.toLowerCase() === "f") {
-        e.preventDefault();
-        this.fit();
+        } else if (e.key.toLowerCase() === "f") {
+          e.preventDefault();
+          this.fit();
       } else if (e.key.toLowerCase() === "t") {
         e.preventDefault();
         this.startTour();
-      } else if (e.key === "Escape") {
+        } else if (e.key === "Escape") {
         if (document.fullscreenElement || document.webkitFullscreenElement) return;
         this.stopTour();
-        this.select(null);
+          this.select(null);
       } else if (e.key === "Enter" && this.selected) {
         e.preventDefault();
         this.onOpen(this.selected.data);
@@ -1222,17 +1222,17 @@
       if (this.spaceMix > 0.004) this.drawScene3d(ctx, t, time);
       else {
         this.drawSpace(ctx, t);
-        ctx.translate(this.width / 2 + this.camera.x, this.height / 2 + this.camera.y);
-        ctx.scale(this.camera.zoom, this.camera.zoom);
+      ctx.translate(this.width / 2 + this.camera.x, this.height / 2 + this.camera.y);
+      ctx.scale(this.camera.zoom, this.camera.zoom);
         if (!this.isCatalog()) {
-          if (this.options.layout === "timeline") this.drawTimeline(ctx, t);
+      if (this.options.layout === "timeline") this.drawTimeline(ctx, t);
           if (this.options.layout === "constellation" || this.options.layout === "timeline") this.drawHulls(ctx, t);
           this.drawOrbitRings(ctx, t);
           if (this.options.heat) this.drawHeat(ctx, t);
           this.drawBridges(ctx, t, time);
-          this.drawEdges(ctx, t, time);
+      this.drawEdges(ctx, t, time);
         }
-        this.drawNodes(ctx, t, time);
+      this.drawNodes(ctx, t, time);
         if (!this.isCatalog() && this.options.heat) this.drawHeatMarks(ctx, t, time);
       }
       ctx.restore();
@@ -2326,15 +2326,15 @@
       const s = size / this.camera.zoom;
       const nx = -ty;
       const ny = tx;
-      ctx.beginPath();
+          ctx.beginPath();
       ctx.moveTo(x + tx * s, y + ty * s);
       ctx.lineTo(x - tx * s * 0.72 + nx * s * 0.58, y - ty * s * 0.72 + ny * s * 0.58);
       ctx.lineTo(x - tx * s * 0.36, y - ty * s * 0.36);
       ctx.lineTo(x - tx * s * 0.72 - nx * s * 0.58, y - ty * s * 0.72 - ny * s * 0.58);
       ctx.closePath();
       ctx.fillStyle = color;
-      ctx.fill();
-    }
+          ctx.fill();
+        }
 
     drawLink(ctx, source, target, opt) {
       const zoom = this.camera.zoom;

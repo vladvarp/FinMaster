@@ -12,7 +12,7 @@
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/favicon.png" />
-    <link rel="stylesheet" href="/mobile.css?v=52" />
+    <link rel="stylesheet" href="/mobile.css?v=53" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -73,6 +73,11 @@
         <div id="stats-body"></div>
       </section>
 
+      <!-- Календарь работ -->
+      <section class="screen" id="screen-calendar" hidden>
+        <div id="calendar-body"></div>
+      </section>
+
       <!-- Снимок для заказчика -->
       <section class="screen" id="screen-snapshot" hidden>
         <div id="snapshot-body"></div>
@@ -86,6 +91,7 @@
 
     <nav class="tabbar" id="tabbar">
       <button type="button" data-tab="orders" class="active"><span>▤</span>Заказы</button>
+      <button type="button" data-tab="calendar"><span>◷</span>Календарь</button>
       <button type="button" data-tab="stats"><span>◔</span>Сводка</button>
       <button type="button" data-tab="snapshot"><span>◨</span>Снимок</button>
       <button type="button" data-tab="files"><span>◈</span>Отчёты</button>
@@ -130,6 +136,6 @@
     </div>
 
     <div class="toast" id="toast"></div>
-    <script src="/mobile.js?v=52"></script>
+    <script src="/mobile.js?v=53"></script>
   </body>
 </html>

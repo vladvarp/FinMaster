@@ -22,6 +22,7 @@
     focusLineId: null,
     remoteStats: null,
     cash: { filter: "all", day: "", bucket: "", customer: "" },
+    calendar: null,
     cloud: null,
   };
 
@@ -154,6 +155,11 @@
     history.busy = true;
     history.index = next;
     state.doc = doc;
+    if (state.calendar) {
+      const saved = ensureUi().calendar || {};
+      if (CALENDAR_MODES.includes(saved.mode)) state.calendar.mode = saved.mode;
+      if (CALENDAR_FILTERS.some(([id]) => id === saved.filter)) state.calendar.filter = saved.filter;
+    }
     state.dirty = true;
     renderAll();
     syncDirty();
@@ -433,6 +439,8 @@
       name: "",
       notes: "",
       created_at: nowLocal(),
+      work_start: "",
+      work_end: "",
       lines: [emptyLine()],
     };
   }
@@ -1564,6 +1572,13 @@
               <button class="btn small" data-act="dup">Дублировать</button>
               <button class="btn small danger" data-act="del">Удалить</button>
             </div>
+          </div>
+          <div class="order-work">
+            <div class="field"><label>Начало работ</label><input data-k="work_start" type="date" value="${esc(dateDay(order.work_start))}" /></div>
+            <div class="field"><label>Конец работ</label><input data-k="work_end" type="date" value="${esc(dateDay(order.work_end))}" /></div>
+            <span class="work-pill work-pill-${esc(workStatus(order))}">${esc(workStatusMeta(order).label)}</span>
+            <button class="btn small" type="button" data-act="work-start-today" title="Поставить начало на сегодня">Начать сегодня</button>
+            <button class="btn small" type="button" data-act="work-end-today" title="Поставить конец на сегодня">Закончить сегодня</button>
           </div>
           <div class="order-notes">
             <label>Заметки к заказу</label>
@@ -2767,6 +2782,1280 @@
     $("cash-debtors")?.addEventListener("click", onCashDebtorsClick);
   }
 
+  /* ==== Календарь работ ==== */
+  const CALENDAR_MODES = ["timeline", "classic", "extended"];
+  const CALENDAR_FILTERS = [
+    ["all", "Все"],
+    ["now", "Идёт сейчас"],
+    ["planned", "Запланированы"],
+    ["done", "Завершены"],
+    ["overdue", "Просрочены"],
+    ["nodate", "Без дат"],
+  ];
+  const RU_MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+  const RU_MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+  const RU_WEEKDAYS = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
+  const RU_WEEKDAYS_FULL = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"];
+  const WORK_STATUS = {
+    nodate: { label: "без дат", tone: "mute" },
+    planned: { label: "запланирован", tone: "wait" },
+    now: { label: "идёт сейчас", tone: "now" },
+    done: { label: "завершён", tone: "ok" },
+    overdue: { label: "просрочен", tone: "warn" },
+    cancelled: { label: "снят", tone: "mute" },
+  };
+  const CAL_HOT_LOAD = 4;
+  const TL_MIN_DAYS = 3;
+  const TL_DEFAULT_DAYS = 21;
+  const TL_NAV_LANES = 12;
+  let calDrag = null;
+  let calNav = null;
+  let calSkipClick = false;
+
+  function mondayOf(d) {
+    const x = dayStart(d);
+    return addDays(x, -((x.getDay() + 6) % 7));
+  }
+
+  function rangeDays(from, to) {
+    const days = [];
+    for (let d = dayStart(from); d <= to; d = addDays(d, 1)) days.push(d);
+    return days;
+  }
+
+  function isWeekend(d) {
+    const w = d.getDay();
+    return w === 0 || w === 6;
+  }
+
+  function calFmtDay(d, withYear = false) {
+    const text = `${d.getDate()} ${RU_MONTHS_GEN[d.getMonth()]}`;
+    return withYear ? `${text} ${d.getFullYear()}` : text;
+  }
+
+  function calFmtRange(from, to) {
+    if (from.getFullYear() === to.getFullYear() && from.getMonth() === to.getMonth()) {
+      return `${from.getDate()}–${calFmtDay(to, true)}`;
+    }
+    if (from.getFullYear() === to.getFullYear()) {
+      return `${calFmtDay(from)} — ${calFmtDay(to, true)}`;
+    }
+    return `${calFmtDay(from, true)} — ${calFmtDay(to, true)}`;
+  }
+
+  function orderIsOff(order) {
+    const income = (order.lines || []).filter((line) => !isExpenseLine(line));
+    if (!income.length) return false;
+    return income.every((line) => /отмен|аннул|черн/i.test(line.status || ""));
+  }
+
+  function normalizeWorkDates(order) {
+    const start = dateDay(order.work_start);
+    const end = dateDay(order.work_end);
+    order.work_start = start;
+    order.work_end = end;
+    if (start && end && end < start) {
+      order.work_start = end;
+      order.work_end = start;
+    }
+    return order;
+  }
+
+  function workSpan(order) {
+    return {
+      start: parseDay(order.work_start),
+      end: parseDay(order.work_end),
+      startKey: dateDay(order.work_start),
+      endKey: dateDay(order.work_end),
+    };
+  }
+
+  function orderDeadline(order, today = dayStart(new Date())) {
+    const end = parseDay(order.work_end);
+    if (!end || end <= today) return null;
+    return end;
+  }
+
+  function workStatus(order, today = dayStart(new Date())) {
+    if (orderIsOff(order)) return "cancelled";
+    const { start, end } = workSpan(order);
+    if (!start && !end) return "nodate";
+    if (start && !end) {
+      if (start > today) return "planned";
+      return "now";
+    }
+    if (!start && end) {
+      if (end < today) return "done";
+      return "now";
+    }
+    if (today < start) return "planned";
+    if (today > end) return "done";
+    return "now";
+  }
+
+  function workStatusMeta(order) {
+    const id = workStatus(order);
+    return { id, ...(WORK_STATUS[id] || WORK_STATUS.nodate) };
+  }
+
+  const TL_STATUS_RANK = { now: 0, overdue: 1, planned: 2, done: 3, cancelled: 4, nodate: 5 };
+
+  function timelineFreshness(order, today) {
+    const { start, end } = workSpan(order);
+    const st = workStatus(order, today);
+    if (st === "now" || st === "overdue") return start ? start.getTime() : today.getTime();
+    if (st === "planned") return start ? -start.getTime() : Number.NEGATIVE_INFINITY;
+    if (st === "done") return (end || start || today).getTime();
+    return 0;
+  }
+
+  function compareTimelineOrders(a, b, today) {
+    const ra = TL_STATUS_RANK[workStatus(a, today)] ?? 9;
+    const rb = TL_STATUS_RANK[workStatus(b, today)] ?? 9;
+    if (ra !== rb) return ra - rb;
+    const fa = timelineFreshness(a, today);
+    const fb = timelineFreshness(b, today);
+    if (fa !== fb) return fb - fa;
+    return String(a.number).localeCompare(String(b.number), "ru", { numeric: true });
+  }
+
+  function orderCoversDay(order, day) {
+    const { start, end } = workSpan(order);
+    if (!start && !end) return false;
+    const d = dayStart(day);
+    const today = dayStart(new Date());
+    if (start && !end) {
+      if (start > today) return dayKey(d) === dayKey(start);
+      return d >= start && d <= today;
+    }
+    if (!start && end) return d <= end;
+    return d >= start && d <= end;
+  }
+
+  function workDurationDays(order) {
+    const { start, end } = workSpan(order);
+    if (start && end) return dayDiff(start, end) + 1;
+    if (start && !end) return dayDiff(start, dayStart(new Date())) + 1;
+    return 0;
+  }
+
+  function lineDateRange(order) {
+    const keys = (order.lines || [])
+      .filter((line) => !isExpenseLine(line))
+      .map((line) => dateDay(line.order_date))
+      .filter(Boolean)
+      .sort();
+    if (!keys.length) return null;
+    return { start: keys[0], end: keys[keys.length - 1] };
+  }
+
+  function calendarState() {
+    if (!state.calendar) {
+      const saved = ensureUi().calendar || {};
+      state.calendar = {
+        mode: CALENDAR_MODES.includes(saved.mode) ? saved.mode : "timeline",
+        filter: CALENDAR_FILTERS.some(([id]) => id === saved.filter) ? saved.filter : "all",
+        selected: "",
+        pick: "",
+        anchor: dayStart(new Date()),
+        viewFrom: null,
+        viewDays: TL_DEFAULT_DAYS,
+      };
+    }
+    if (!(state.calendar.anchor instanceof Date) || Number.isNaN(state.calendar.anchor.getTime())) {
+      state.calendar.anchor = dayStart(new Date());
+    }
+    return state.calendar;
+  }
+
+  function persistCalendar() {
+    if (!state.doc) return;
+    const cal = calendarState();
+    ensureUi().calendar = { mode: cal.mode, filter: cal.filter };
+  }
+
+  function orderDrawSpan(order, today = dayStart(new Date())) {
+    const { start, end } = workSpan(order);
+    if (!start && !end) return null;
+    if (start && !end) {
+      if (start > today) return { from: start, till: start };
+      return { from: start, till: today };
+    }
+    if (!start && end) return { from: end, till: end };
+    return { from: start, till: end };
+  }
+
+  function timelineFullRange() {
+    const today = dayStart(new Date());
+    let from = addDays(today, -14);
+    let to = addDays(today, 42);
+    calendarOrders().forEach((order) => {
+      const span = orderDrawSpan(order, today);
+      if (!span) return;
+      if (span.from < from) from = span.from;
+      if (span.till > to) to = span.till;
+    });
+    from = mondayOf(addDays(from, -7));
+    to = addDays(mondayOf(addDays(to, 14)), 6);
+    const days = rangeDays(from, to);
+    return { from, to, days, span: days.length, today };
+  }
+
+  function clampTimelineView() {
+    const cal = calendarState();
+    const full = timelineFullRange();
+    if (!cal.viewDays) cal.viewDays = Math.min(TL_DEFAULT_DAYS, full.span);
+    cal.viewDays = Math.max(TL_MIN_DAYS, Math.min(full.span, Math.round(cal.viewDays)));
+    if (!(cal.viewFrom instanceof Date) || Number.isNaN(cal.viewFrom.getTime())) {
+      cal.viewFrom = full.today < full.from ? full.from : dayStart(full.today);
+    } else {
+      cal.viewFrom = dayStart(cal.viewFrom);
+    }
+    const last = addDays(full.to, 1 - cal.viewDays);
+    if (cal.viewFrom < full.from) cal.viewFrom = full.from;
+    if (last >= full.from && cal.viewFrom > last) cal.viewFrom = last;
+    return full;
+  }
+
+  function goTimelineToday() {
+    const cal = calendarState();
+    const today = dayStart(new Date());
+    cal.anchor = today;
+    if (cal.mode === "timeline") {
+      if (!cal.viewDays) cal.viewDays = TL_DEFAULT_DAYS;
+      cal.viewFrom = addDays(today, -Math.floor((cal.viewDays - 1) / 2));
+      clampTimelineView();
+    }
+  }
+
+  function calendarWindow() {
+    const cal = calendarState();
+    const anchor = dayStart(cal.anchor || new Date());
+    const today = dayStart(new Date());
+    if (cal.mode === "classic") {
+      const from = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+      const to = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
+      const gridFrom = mondayOf(from);
+      let gridTo = addDays(gridFrom, 41);
+      while (gridTo < to) gridTo = addDays(gridTo, 7);
+      return {
+        from,
+        to,
+        days: rangeDays(from, to),
+        gridFrom,
+        gridTo,
+        today,
+        title: `${RU_MONTHS_NOM[from.getMonth()]} ${from.getFullYear()}`,
+      };
+    }
+    if (cal.mode === "extended") {
+      const from = mondayOf(anchor);
+      const to = addDays(from, 6);
+      return { from, to, days: rangeDays(from, to), today, title: calFmtRange(from, to) };
+    }
+    const full = clampTimelineView();
+    const from = calendarState().viewFrom;
+    const days = rangeDays(from, addDays(from, calendarState().viewDays - 1));
+    return { from, to: days[days.length - 1], days, today: full.today, full, title: calFmtRange(from, days[days.length - 1]) };
+  }
+
+  function calendarShift(dir) {
+    const cal = calendarState();
+    if (cal.mode === "classic") cal.anchor = new Date(cal.anchor.getFullYear(), cal.anchor.getMonth() + dir, 1);
+    else if (cal.mode === "timeline") {
+      const step = Math.max(1, Math.floor((cal.viewDays || TL_DEFAULT_DAYS) / 2));
+      cal.viewFrom = addDays(cal.viewFrom || dayStart(new Date()), dir * step);
+      clampTimelineView();
+      cal.anchor = cal.viewFrom;
+    } else cal.anchor = addDays(mondayOf(cal.anchor), dir * 7);
+    renderCalendar();
+  }
+
+  function calendarOrdersAll() {
+    const q = state.search.trim().toLowerCase();
+    return (state.doc.orders || []).filter((order) => {
+      if (!q) return true;
+      const hay = [order.number, order.customer, order.name, order.notes].join(" ").toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
+  function calendarOrders(filter = calendarState().filter) {
+    return calendarOrdersAll().filter((order) => filter === "all" || workStatus(order) === filter);
+  }
+
+  function calendarLoadMap(orders, days) {
+    const map = {};
+    let peak = 0;
+    let peakKey = "";
+    days.forEach((day) => {
+      const key = dayKey(day);
+      const n = orders.filter((order) => orderCoversDay(order, day) && workStatus(order) !== "cancelled").length;
+      map[key] = n;
+      if (n > peak) {
+        peak = n;
+        peakKey = key;
+      }
+    });
+    return { map, peak, peakKey };
+  }
+
+  function calendarBarColor(order) {
+    const first = (order.lines || []).find((line) => !isExpenseLine(line));
+    return statusColor(first?.status) || "#0f766e";
+  }
+
+  function setWorkToday(order, which) {
+    const today = dayKey(dayStart(new Date()));
+    if (which === "start") {
+      order.work_start = today;
+      if (order.work_end && order.work_end < today) order.work_end = "";
+    } else {
+      if (!order.work_start) order.work_start = today;
+      order.work_end = today;
+    }
+    normalizeWorkDates(order);
+  }
+
+  function shiftWorkDates(order, days) {
+    const { start, end } = workSpan(order);
+    if (start) order.work_start = dayKey(addDays(start, days));
+    if (end) order.work_end = dayKey(addDays(end, days));
+    if (!start && !end) {
+      const today = dayStart(new Date());
+      order.work_start = dayKey(addDays(today, days));
+    }
+    normalizeWorkDates(order);
+  }
+
+  function fillWorkFromLines(order) {
+    const range = lineDateRange(order);
+    if (!range) return false;
+    if (!order.work_start) order.work_start = range.start;
+    if (!order.work_end) order.work_end = range.end;
+    normalizeWorkDates(order);
+    return true;
+  }
+
+  function calendarRole(order, day) {
+    const key = dayKey(day);
+    const start = dateDay(order.work_start);
+    const end = dateDay(order.work_end);
+    if (start === key && end === key) return "день";
+    if (start === key) return "старт";
+    if (end === key) return "финиш";
+    return "в работе";
+  }
+
+  function orderNum(order) {
+    return String(order?.number || "—").replace(/^№+\s*/, "") || "—";
+  }
+
+  function orderTitle(order) {
+    return String(order?.name || "").trim() || "без названия";
+  }
+
+  function calChipHtml(order, day) {
+    const meta = workStatusMeta(order);
+    const role = day ? calendarRole(order, day) : meta.label;
+    const due = orderDeadline(order);
+    const dueText = due ? `до ${calFmtDay(due)}` : "";
+    return `<button type="button" class="cal-chip tone-${meta.tone} ${due ? "has-deadline" : ""}" data-cal-id="${esc(order.id)}" title="${esc(`${orderNum(order)} ${orderTitle(order)} · ${meta.label}${due ? ` · дедлайн ${calFmtDay(due, true)}` : ""}`)}" style="--bar:${esc(calendarBarColor(order))}">
+      <b>${esc(orderNum(order))}</b>
+      <span>${esc(orderTitle(order))}</span>
+      <i>${esc(dueText || role)}</i>
+    </button>`;
+  }
+
+  function renderCalendar() {
+    if (!state.doc || !$("cal-board")) return;
+    const cal = calendarState();
+    const win = calendarWindow();
+    const all = calendarOrdersAll();
+    const list = calendarOrders();
+    const weekFrom = mondayOf(win.today);
+    const weekTo = addDays(weekFrom, 6);
+    const nowCount = all.filter((order) => workStatus(order) === "now").length;
+    const startWeek = all.filter((order) => {
+      const key = dateDay(order.work_start);
+      return key && key >= dayKey(weekFrom) && key <= dayKey(weekTo);
+    }).length;
+    const endWeek = all.filter((order) => {
+      const key = dateDay(order.work_end);
+      return key && key >= dayKey(weekFrom) && key <= dayKey(weekTo);
+    }).length;
+    const overdue = all.filter((order) => workStatus(order) === "overdue").length;
+    const nodate = all.filter((order) => workStatus(order) === "nodate").length;
+    const load = calendarLoadMap(all.filter((order) => workStatus(order) !== "cancelled"), win.days);
+    const peakLabel = load.peakKey ? calFmtDay(parseDay(load.peakKey)) : "—";
+
+    $("cal-title").textContent = win.title;
+    document.querySelectorAll("[data-cal-mode]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.calMode === cal.mode);
+    });
+    const filterMeta = CALENDAR_FILTERS.find(([id]) => id === cal.filter) || CALENDAR_FILTERS[0];
+    const filterBtn = $("btn-cal-filter");
+    const filterMenu = $("cal-filter-menu");
+    const filterLabel = $("cal-filter-label");
+    if (filterLabel) filterLabel.textContent = `${filterMeta[1]} · ${calendarOrders(cal.filter).length}`;
+    filterBtn?.classList.toggle("active", cal.filter !== "all");
+    filterBtn?.setAttribute("aria-expanded", "false");
+    if (filterMenu) {
+      filterMenu.hidden = true;
+      filterMenu.innerHTML = CALENDAR_FILTERS.map(([id, label]) => {
+        const n = calendarOrders(id).length;
+        return `<button type="button" class="btn ${cal.filter === id ? "active" : ""}" data-cal-filter="${id}" role="menuitem">${esc(label)}<span class="chip-count">${n}</span></button>`;
+      }).join("");
+    }
+    $("cal-kpis").innerHTML = `
+      <div class="kpi ${nowCount ? "ok" : ""}"><div class="label">Идёт сейчас</div><div class="value">${nowCount}</div><div class="sub">в работе, в том числе без дедлайна</div></div>
+      <div class="kpi"><div class="label">Старт на неделе</div><div class="value">${startWeek}</div><div class="sub">с ${calFmtDay(weekFrom)}</div></div>
+      <div class="kpi"><div class="label">Финиш на неделе</div><div class="value">${endWeek}</div><div class="sub">до ${calFmtDay(weekTo)}</div></div>
+      <div class="kpi ${overdue ? "warn" : ""}"><div class="label">Просрочены</div><div class="value">${overdue}</div><div class="sub">без даты конца дедлайна нет</div></div>
+      <div class="kpi"><div class="label">Без дат</div><div class="value">${nodate}</div><div class="sub">ещё не отмечены на календаре</div></div>
+      <div class="kpi ${load.peak >= CAL_HOT_LOAD ? "warn" : ""}"><div class="label">Пик загрузки</div><div class="value">${load.peak}</div><div class="sub">${load.peak ? `${peakLabel} · одновременно` : "нет пересечений"}</div></div>`;
+
+    const board = $("cal-board");
+    const keepY = board.scrollTop;
+    if (cal.mode === "classic") board.innerHTML = renderClassicCalendar(win, list, load);
+    else if (cal.mode === "extended") board.innerHTML = renderExtendedCalendar(win, list, load);
+    else board.innerHTML = renderTimelineCalendar(win, list, load);
+    board.scrollTop = keepY;
+    $("cal-side").innerHTML = renderCalendarSide(win, all, list);
+    const reveal = cal.revealDay ? parseDay(cal.revealDay) : null;
+    cal.revealDay = "";
+    requestAnimationFrame(() => {
+      if (reveal && cal.mode !== "timeline") {
+        const cell = document.querySelector(`[data-cal-day="${cssEscape(dayKey(reveal))}"]`);
+        cell?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    });
+  }
+
+  function timelineDayFromX(track, clientX, full) {
+    const rect = track.getBoundingClientRect();
+    if (!rect.width || !full.days.length) return full.from;
+    const t = Math.max(0, Math.min(0.999, (clientX - rect.left) / rect.width));
+    return full.days[Math.floor(t * full.days.length)];
+  }
+
+  function timelineViewBox(full, viewFrom, viewDays) {
+    if (!full.span) return { left: 0, width: 100 };
+    const left = (dayDiff(full.from, viewFrom) / full.span) * 100;
+    const width = (viewDays / full.span) * 100;
+    return { left, width };
+  }
+
+  function paintNavView() {
+    const full = clampTimelineView();
+    const cal = calendarState();
+    const box = timelineViewBox(full, cal.viewFrom, cal.viewDays);
+    const view = $("tl-nav-view");
+    const sl = $("tl-nav-shade-l");
+    const sr = $("tl-nav-shade-r");
+    if (view) {
+      view.style.left = `${box.left}%`;
+      view.style.width = `${box.width}%`;
+    }
+    if (sl) sl.style.width = `${box.left}%`;
+    if (sr) {
+      sr.style.left = `${box.left + box.width}%`;
+      sr.style.width = `${Math.max(0, 100 - box.left - box.width)}%`;
+    }
+    const meta = $("tl-nav-meta-view");
+    if (meta) meta.textContent = `видно ${cal.viewDays} дн. · ${calFmtRange(cal.viewFrom, addDays(cal.viewFrom, cal.viewDays - 1))}`;
+    const title = $("cal-title");
+    if (title) title.textContent = calFmtRange(cal.viewFrom, addDays(cal.viewFrom, cal.viewDays - 1));
+    refreshTimelineGantt();
+  }
+
+  function refreshTimelineGantt() {
+    const host = $("gantt-scroll");
+    if (!host) return;
+    const win = calendarWindow();
+    const list = calendarOrders();
+    const load = calendarLoadMap(
+      calendarOrdersAll().filter((order) => workStatus(order) !== "cancelled"),
+      win.days
+    );
+    const tmp = document.createElement("div");
+    tmp.innerHTML = renderTimelineCalendar(win, list, load);
+    const next = tmp.querySelector("#gantt-scroll");
+    if (next) host.replaceWith(next);
+  }
+
+  function timelineZoomAt(ratio, factor) {
+    const full = clampTimelineView();
+    const cal = calendarState();
+    const focus = full.days[Math.min(full.span - 1, Math.max(0, Math.floor(ratio * full.span)))];
+    const oldFrom = cal.viewFrom;
+    const oldDays = cal.viewDays;
+    let next = Math.round(oldDays * factor);
+    if (factor < 1 && next >= oldDays) next = oldDays - 1;
+    if (factor > 1 && next <= oldDays) next = oldDays + 1;
+    const oldStart = dayDiff(full.from, oldFrom);
+    const focusIdx = dayDiff(full.from, focus);
+    let local = 0.5;
+    if (oldDays > 1 && focusIdx >= oldStart && focusIdx < oldStart + oldDays) {
+      local = (focusIdx - oldStart) / (oldDays - 1);
+    }
+    cal.viewDays = next;
+    clampTimelineView();
+    cal.viewFrom = addDays(focus, -Math.round(local * (cal.viewDays - 1)));
+    clampTimelineView();
+  }
+
+  function timelineLaneItems(today) {
+    const items = calendarOrders()
+      .map((order) => {
+        const span = orderDrawSpan(order, today);
+        return span ? { order, span } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => compareTimelineOrders(a.order, b.order, today) || a.span.from - b.span.from || a.span.till - b.span.till);
+    const ends = [];
+    return items.map((item) => {
+      let lane = ends.findIndex((till) => item.span.from > till);
+      if (lane < 0) {
+        if (ends.length >= TL_NAV_LANES) lane = items.indexOf(item) % TL_NAV_LANES;
+        else {
+          lane = ends.length;
+          ends.push(item.span.till);
+        }
+      } else ends[lane] = item.span.till;
+      return { ...item, lane, lanes: Math.max(ends.length, 1) };
+    });
+  }
+
+  function renderTimelineCalendar(win, list, load) {
+    const full = win.full || clampTimelineView();
+    const n = win.days.length;
+    const dated = list.filter((order) => workStatus(order) !== "nodate");
+    const visible = dated.filter((order) => {
+      const span = orderDrawSpan(order, win.today);
+      return span && span.till >= win.from && span.from <= win.to;
+    });
+    const box = timelineViewBox(full, win.from, n);
+    const ticks = full.days
+      .filter((day) => day.getDate() === 1)
+      .map((day) => {
+        const left = (dayDiff(full.from, day) / full.span) * 100;
+        const label = day.getMonth() === 0 ? `${RU_MONTHS_NOM[day.getMonth()].slice(0, 3)} ${day.getFullYear()}` : RU_MONTHS_NOM[day.getMonth()].slice(0, 3);
+        return `<div class="tl-nav-tick" style="left:${left}%" title="${esc(calFmtDay(day, true))}">${esc(label)}</div>`;
+      })
+      .join("");
+    const laneItems = timelineLaneItems(win.today);
+    const laneCount = Math.max(1, ...laneItems.map((item) => item.lanes), 1);
+    const navBars = laneItems
+      .map((item) => {
+        const from = Math.max(0, dayDiff(full.from, item.span.from));
+        const till = Math.min(full.span - 1, dayDiff(full.from, item.span.till));
+        if (till < from) return "";
+        const len = till - from + 1;
+        const title = `${orderNum(item.order)} ${orderTitle(item.order)}`.trim();
+        const due = orderDeadline(item.order, win.today);
+        return `<div class="tl-nav-bar ${due ? "has-deadline" : ""}" data-cal-id="${esc(item.order.id)}" style="--lane:${item.lane};--from:${from};--len:${len};--span:${full.span};--bar:${esc(calendarBarColor(item.order))}" title="${esc(title)}${due ? ` · до ${calFmtDay(due, true)}` : ""}"></div>`;
+      })
+      .join("");
+    const todayInFull = win.today >= full.from && win.today <= full.to;
+    const todayNav = todayInFull ? `<div class="tl-nav-today" style="left:${((dayDiff(full.from, win.today) + 0.5) / full.span) * 100}%"></div>` : "";
+    const dense = n > 45;
+    const head = win.days
+      .map((day) => {
+        const key = dayKey(day);
+        const hot = (load.map[key] || 0) >= CAL_HOT_LOAD;
+        const monday = (day.getDay() + 6) % 7 === 0;
+        const first = day.getDate() === 1;
+        const showNum = !dense || monday || first;
+        const label = first ? RU_MONTHS_NOM[day.getMonth()].slice(0, 3) : RU_WEEKDAYS[(day.getDay() + 6) % 7];
+        return `<div class="gantt-day ${isWeekend(day) ? "is-weekend" : ""} ${dayKey(day) === dayKey(win.today) ? "is-today" : ""} ${hot ? "is-hot" : ""} ${showNum ? "" : "is-slim"}" data-cal-day="${key}">
+          <span>${showNum ? day.getDate() : ""}</span><small>${showNum ? esc(label) : ""}</small>
+        </div>`;
+      })
+      .join("");
+    const todayInView = win.today >= win.from && win.today <= win.to;
+    const todayLine = todayInView ? `<div class="gantt-today" style="left:calc((${dayDiff(win.from, win.today)} + 0.5) / ${n} * 100%)"></div>` : "";
+    const rows = visible
+      .slice()
+      .sort((a, b) => compareTimelineOrders(a, b, win.today))
+      .map((order) => {
+        const meta = workStatusMeta(order);
+        const { start, end } = workSpan(order);
+        const today = win.today;
+        let from = start || win.from;
+        let till = end || (start && start <= today ? today : start || win.from);
+        if (from < win.from) from = win.from;
+        if (till > win.to) till = win.to;
+        if (from > till) return "";
+        const left = dayDiff(win.from, from);
+        const span = dayDiff(from, till) + 1;
+        const due = orderDeadline(order, win.today);
+        const label = `${orderNum(order)} ${orderTitle(order)}`.trim();
+        const tip = due ? `${label} · дедлайн ${calFmtDay(due, true)}` : label;
+        return `<div class="gantt-row ${calSelectedClass(order.id)} ${due ? "has-deadline" : ""}">
+          <button type="button" class="gantt-label" data-cal-id="${esc(order.id)}">
+            <b>${esc(orderNum(order))} ${esc(orderTitle(order))}</b>
+            <small>${esc(order.customer || "без заказчика")} · ${esc(meta.label)}${workDurationDays(order) ? ` · ${workDurationDays(order)} дн.` : ""}${due ? ` · до ${calFmtDay(due)}` : ""}</small>
+          </button>
+          <div class="gantt-track" data-cal-track="${esc(order.id)}">
+            <div class="gantt-bar tone-${meta.tone} ${meta.id === "now" ? "is-live" : ""} ${due ? "has-deadline" : ""}" data-cal-id="${esc(order.id)}" data-cal-drag="move" style="--from:${left};--span:${span};--bar:${esc(calendarBarColor(order))}" title="${esc(tip)}">
+              <i class="gantt-h start" data-cal-drag="start"></i>
+              <i class="gantt-h end" data-cal-drag="end"></i>
+            </div>
+          </div>
+        </div>`;
+      })
+      .join("");
+    const empty = visible.length
+      ? ""
+      : `<div class="cal-empty">${dated.length ? "В видимой области нет заказов — сдвиньте рамку сверху или прокрутите линейку дней колесом." : list.length ? "Нет отмеченных заказов по фильтру." : "Нет заказов по фильтру. Отметьте начало работ в карточке или справа."}</div>`;
+    return `<div class="tl-nav" id="tl-nav">
+      <div class="tl-nav-meta">
+        <span>весь период · ${esc(calFmtRange(full.from, full.to))} · ${full.span} дн.</span>
+        <span id="tl-nav-meta-view">видно ${n} дн. · ${esc(calFmtRange(win.from, win.to))}</span>
+      </div>
+      <div class="tl-nav-track" id="tl-nav-track" data-tl-nav="track">
+        ${ticks}
+        <div class="tl-nav-bars" style="--lanes:${laneCount}">${navBars}</div>
+        ${todayNav}
+        <div class="tl-nav-shade left" id="tl-nav-shade-l" style="width:${box.left}%"></div>
+        <div class="tl-nav-shade right" id="tl-nav-shade-r" style="left:${box.left + box.width}%;width:${Math.max(0, 100 - box.left - box.width)}%"></div>
+        <div class="tl-nav-view" id="tl-nav-view" data-tl-nav="view" style="left:${box.left}%;width:${box.width}%">
+          <i class="tl-nav-h start" data-tl-nav="start"></i>
+          <i class="tl-nav-h end" data-tl-nav="end"></i>
+        </div>
+      </div>
+    </div>
+    <div class="gantt-scroll" id="gantt-scroll">
+      <div class="gantt" style="--days:${n}">
+        <div class="gantt-day-col" id="gantt-day-col" hidden></div>
+        <div class="gantt-days">${head}${todayLine}<div class="gantt-day-tip" id="gantt-day-tip" hidden></div></div>
+        <div class="gantt-body">${rows || empty}</div>
+      </div>
+    </div>
+    <p class="cal-hint">Сверху весь период: рамка — что видно сейчас, края и колесо меняют масштаб. Колесо на линейке дней листает период. Полосу заказа можно двигать, края меняют даты.</p>`;
+  }
+
+  function renderClassicCalendar(win, list, load) {
+    const cells = [];
+    for (let d = win.gridFrom; d <= win.gridTo; d = addDays(d, 1)) {
+      const key = dayKey(d);
+      const inMonth = d.getMonth() === win.from.getMonth();
+      const items = list.filter((order) => orderCoversDay(order, d));
+      const shown = items.slice(0, 3);
+      const more = items.length - shown.length;
+      const hot = (load.map[key] || 0) >= CAL_HOT_LOAD;
+      cells.push(`<div class="cal-cell ${inMonth ? "" : "is-out"} ${isWeekend(d) ? "is-weekend" : ""} ${key === dayKey(win.today) ? "is-today" : ""} ${calendarState().pick === key ? "is-pick" : ""} ${hot ? "is-hot" : ""}" data-cal-day="${key}">
+        <div class="cal-cell-n">${d.getDate()}${items.length ? `<b>${items.length}</b>` : ""}</div>
+        ${shown.map((order) => calChipHtml(order, d)).join("")}
+        ${more > 0 ? `<div class="cal-more">ещё ${more}</div>` : ""}
+      </div>`);
+    }
+    return `<div class="cal-weekdays">${RU_WEEKDAYS.map((w, i) => `<div class="${i >= 5 ? "is-weekend" : ""}">${w}</div>`).join("")}</div>
+      <div class="cal-month">${cells.join("")}</div>`;
+  }
+
+  function renderExtendedCalendar(win, list, load) {
+    const cols = win.days
+      .map((day) => {
+        const key = dayKey(day);
+        const items = list.filter((order) => orderCoversDay(order, day));
+        const starts = items.filter((order) => dateDay(order.work_start) === key);
+        const ends = items.filter((order) => dateDay(order.work_end) === key);
+        const n = load.map[key] || 0;
+        const pct = Math.min(100, (n / Math.max(CAL_HOT_LOAD, load.peak || 1)) * 100);
+        return `<div class="cal-col ${isWeekend(day) ? "is-weekend" : ""} ${key === dayKey(win.today) ? "is-today" : ""} ${calendarState().pick === key ? "is-pick" : ""} ${n >= CAL_HOT_LOAD ? "is-hot" : ""}" data-cal-day="${key}">
+          <div class="cal-col-head">
+            <strong>${RU_WEEKDAYS[(day.getDay() + 6) % 7]}</strong>
+            <span>${calFmtDay(day)}</span>
+            <em>${n} зак.</em>
+          </div>
+          <div class="cal-load"><i style="width:${pct}%"></i></div>
+          ${starts.length ? `<div class="cal-col-sec">Старт</div>${starts.map((order) => calChipHtml(order, day)).join("")}` : ""}
+          ${items.filter((order) => dateDay(order.work_start) !== key && dateDay(order.work_end) !== key).length ? `<div class="cal-col-sec">В работе</div>${items.filter((order) => dateDay(order.work_start) !== key && dateDay(order.work_end) !== key).map((order) => calChipHtml(order, day)).join("")}` : ""}
+          ${ends.length ? `<div class="cal-col-sec">Финиш</div>${ends.map((order) => calChipHtml(order, day)).join("")}` : ""}
+          ${items.length ? "" : `<div class="cal-col-empty">пусто</div>`}
+        </div>`;
+      })
+      .join("");
+    return `<div class="cal-week">${cols}</div>`;
+  }
+
+  function calSelectedClass(id) {
+    return calendarState().selected === id ? "is-selected" : "";
+  }
+
+  function renderCalendarSide(win, all, list) {
+    const cal = calendarState();
+    const selected = findOrder(cal.selected);
+    const today = win.today;
+    const now = all.filter((order) => workStatus(order) === "now");
+    const overdue = all.filter((order) => workStatus(order) === "overdue");
+    const nodate = all.filter((order) => workStatus(order) === "nodate");
+    const pick = cal.pick ? parseDay(cal.pick) : null;
+    const pickItems = pick ? all.filter((order) => orderCoversDay(order, pick)) : [];
+    const due = selected ? orderDeadline(selected, today) : null;
+    const sel = selected
+      ? `<div class="cal-sel">
+          <div class="cal-sel-head">
+            <b>${esc(orderNum(selected))} ${esc(orderTitle(selected))}</b>
+            <span class="work-pill work-pill-${esc(workStatus(selected))}">${esc(workStatusMeta(selected).label)}</span>
+          </div>
+          <div class="cal-sel-sub">${esc(selected.customer || "без заказчика")}${workDurationDays(selected) ? ` · ${workDurationDays(selected)} дн.` : ""}</div>
+          ${due ? `<div class="cal-due-line">Дедлайн ${esc(calFmtDay(due, true))}</div>` : ""}
+          <div class="cal-dates">
+            <div class="field"><label>Начало</label><input type="date" data-cal-field="work_start" value="${esc(dateDay(selected.work_start))}" /></div>
+            <div class="field"><label>Конец</label><input type="date" data-cal-field="work_end" value="${esc(dateDay(selected.work_end))}" /></div>
+          </div>
+          <div class="cal-actions">
+            <button type="button" class="btn small primary" data-cal-act="start-today">Начать сегодня</button>
+            <button type="button" class="btn small" data-cal-act="end-today">Закончить сегодня</button>
+            <button type="button" class="btn small" data-cal-act="shift-left" title="Сдвинуть на день назад">−1 день</button>
+            <button type="button" class="btn small" data-cal-act="shift-right" title="Сдвинуть на день вперёд">+1 день</button>
+            <button type="button" class="btn small" data-cal-act="fill-lines" title="Взять крайние даты позиций">С дат позиций</button>
+            <button type="button" class="btn small" data-cal-act="clear">Снять даты</button>
+            <button type="button" class="btn small" data-cal-act="open">Открыть заказ</button>
+          </div>
+        </div>`
+      : `<div class="cal-sel idle">Выберите заказ на доске — здесь можно поставить старт и финиш, сдвинуть или открыть карточку.</div>`;
+    const pickBlock = pick
+      ? `<div class="cal-block">
+          <h3>${esc(calFmtDay(pick, true))}${pickItems.length >= CAL_HOT_LOAD ? " · перегруз" : ""}</h3>
+          <div class="cal-actions">
+            <button type="button" class="btn small" data-cal-act="pick-start" ${selected ? "" : "disabled"}>Старт выбранного</button>
+            <button type="button" class="btn small" data-cal-act="pick-end" ${selected ? "" : "disabled"}>Финиш выбранного</button>
+          </div>
+          ${pickItems.length ? pickItems.map((order) => calChipHtml(order, pick)).join("") : `<div class="cal-col-empty">в этот день никто не отмечен</div>`}
+        </div>`
+      : "";
+    const listBlock = (title, items, empty) =>
+      `<div class="cal-block"><h3>${title} <span>${items.length}</span></h3>${
+        items.length ? items.map((order) => calChipHtml(order)).join("") : `<div class="cal-col-empty">${empty}</div>`
+      }</div>`;
+    const fillAll = nodate.some((order) => lineDateRange(order))
+      ? `<button type="button" class="btn small" data-cal-act="fill-all">Подставить даты с позиций всем без дат</button>`
+      : "";
+    return `${sel}${pickBlock}
+      ${listBlock("В работе", now, "Нет заказов в работе — поставьте дату начала.")}
+      ${listBlock("Просрочены", overdue, "Без даты конца заказ не просрочен.")}
+      <div class="cal-block"><h3>Без дат <span>${nodate.length}</span></h3>${fillAll}${
+        nodate.length ? nodate.map((order) => calChipHtml(order)).join("") : `<div class="cal-col-empty">Все заказы размечены.</div>`
+      }</div>`;
+  }
+
+  function calendarPlanText() {
+    const win = calendarWindow();
+    const all = calendarOrdersAll();
+    const now = all.filter((order) => workStatus(order) === "now");
+    const lines = [`План работ ${win.title}`, ""];
+    lines.push(`Сейчас в работе (${now.length}):`);
+    if (now.length) now.forEach((order) => lines.push(`• ${orderNum(order)} ${orderTitle(order)} — ${order.customer || "без заказчика"}`));
+    else lines.push("• нет");
+    lines.push("");
+    win.days.forEach((day) => {
+      const key = dayKey(day);
+      const starts = all.filter((order) => dateDay(order.work_start) === key);
+      const ends = all.filter((order) => dateDay(order.work_end) === key);
+      const load = all.filter((order) => orderCoversDay(order, day) && workStatus(order) !== "cancelled").length;
+      if (!starts.length && !ends.length) return;
+      lines.push(`${calFmtDay(day, true)} · ${load} в работе`);
+      starts.forEach((order) => lines.push(`  старт  ${orderNum(order)} ${orderTitle(order)}`));
+      ends.forEach((order) => lines.push(`  финиш ${orderNum(order)} ${orderTitle(order)}`));
+    });
+    const overdue = all.filter((order) => workStatus(order) === "overdue");
+    if (overdue.length) {
+      lines.push("");
+      lines.push(`Просрочены (${overdue.length}):`);
+      overdue.forEach((order) => lines.push(`• ${orderNum(order)} ${orderTitle(order)} с ${dateDay(order.work_start)}`));
+    }
+    return lines.join("\n");
+  }
+
+  function calendarSelect(id) {
+    calendarState().selected = id;
+    const order = findOrder(id);
+    if (order) revealOrderOnCalendar(order);
+    else renderCalendar();
+  }
+
+  function revealOrderOnCalendar(order) {
+    const cal = calendarState();
+    const start = parseDay(order.work_start) || parseDay(order.work_end);
+    if (start) {
+      if (cal.mode === "timeline") {
+        clampTimelineView();
+        const to = addDays(cal.viewFrom, cal.viewDays - 1);
+        if (start < cal.viewFrom || start > to) {
+          cal.viewFrom = addDays(start, -Math.floor((cal.viewDays - 1) * 0.2));
+          clampTimelineView();
+        }
+        cal.anchor = start;
+      } else {
+        const win = calendarWindow();
+        if (start < win.from || start > win.to) {
+          if (cal.mode === "classic") cal.anchor = new Date(start.getFullYear(), start.getMonth(), 1);
+          else cal.anchor = mondayOf(start);
+        }
+      }
+      cal.pick = dayKey(start);
+      cal.revealDay = dayKey(start);
+    }
+    renderCalendar();
+  }
+
+  function applyCalendarOrder(mutator, { toastText } = {}) {
+    const order = findOrder(calendarState().selected);
+    if (!order) {
+      toast("Сначала выберите заказ");
+      return;
+    }
+    historyCommit();
+    mutator(order);
+    historyCommit();
+    markDirty();
+    revealOrderOnCalendar(order);
+    if (toastText) toast(toastText);
+  }
+
+  function onCalClick(e) {
+    if (calSkipClick) {
+      calSkipClick = false;
+      return;
+    }
+    const mode = e.target.closest("[data-cal-mode]");
+    if (mode) {
+      const cal = calendarState();
+      cal.mode = mode.dataset.calMode;
+      persistCalendar();
+      markDirty();
+      historyCommit();
+      renderCalendar();
+      return;
+    }
+    if (e.target.closest("#btn-cal-filter")) {
+      const menu = $("cal-filter-menu");
+      const btn = $("btn-cal-filter");
+      if (!menu) return;
+      const open = menu.hidden;
+      menu.hidden = !open;
+      btn?.setAttribute("aria-expanded", String(open));
+      return;
+    }
+    const filter = e.target.closest("[data-cal-filter]");
+    if (filter) {
+      calendarState().filter = filter.dataset.calFilter;
+      persistCalendar();
+      markDirty();
+      historyCommit();
+      renderCalendar();
+      return;
+    }
+    if (e.target.closest("#cal-prev")) {
+      calendarShift(-1);
+      return;
+    }
+    if (e.target.closest("#cal-next")) {
+      calendarShift(1);
+      return;
+    }
+    if (e.target.closest("#cal-today")) {
+      goTimelineToday();
+      renderCalendar();
+      return;
+    }
+    if (e.target.closest("#cal-copy")) {
+      cashCopy(calendarPlanText(), "План работ скопирован");
+      return;
+    }
+    const act = e.target.closest("[data-cal-act]")?.dataset.calAct;
+    if (act) {
+      onCalendarAct(act);
+      return;
+    }
+    const chip = e.target.closest("[data-cal-id]");
+    if (chip) {
+      if (e.detail === 2) {
+        gotoOrder(chip.dataset.calId);
+        return;
+      }
+      calendarSelect(chip.dataset.calId);
+      return;
+    }
+    const day = e.target.closest("[data-cal-day]");
+    if (day) {
+      const cal = calendarState();
+      cal.pick = cal.pick === day.dataset.calDay ? "" : day.dataset.calDay;
+      renderCalendar();
+    }
+  }
+
+  function onCalendarAct(act) {
+    const cal = calendarState();
+    if (act === "fill-all") {
+      historyCommit();
+      let n = 0;
+      calendarOrdersAll().forEach((order) => {
+        if (workStatus(order) !== "nodate") return;
+        if (fillWorkFromLines(order)) n += 1;
+      });
+      if (n) {
+        historyCommit();
+        markDirty();
+      }
+      renderCalendar();
+      toast(n ? `Даты подставлены у ${n} зак.` : "У заказов без дат нет дат позиций");
+      return;
+    }
+    if (act === "open") {
+      if (cal.selected) gotoOrder(cal.selected);
+      return;
+    }
+    if (act === "pick-start" || act === "pick-end") {
+      if (!cal.pick) return;
+      applyCalendarOrder((order) => {
+        if (act === "pick-start") order.work_start = cal.pick;
+        else order.work_end = cal.pick;
+        normalizeWorkDates(order);
+      });
+      return;
+    }
+    if (act === "fill-lines") {
+      applyCalendarOrder((order) => {
+        if (!fillWorkFromLines(order)) toast("У позиций нет дат заказа");
+      });
+      return;
+    }
+    applyCalendarOrder((order) => {
+      if (act === "start-today") setWorkToday(order, "start");
+      else if (act === "end-today") setWorkToday(order, "end");
+      else if (act === "shift-left") shiftWorkDates(order, -1);
+      else if (act === "shift-right") shiftWorkDates(order, 1);
+      else if (act === "clear") {
+        order.work_start = "";
+        order.work_end = "";
+      }
+    });
+  }
+
+  function onCalChange(e) {
+    const field = e.target.dataset.calField;
+    if (!field) return;
+    applyCalendarOrder((order) => {
+      order[field] = e.target.value;
+      normalizeWorkDates(order);
+    });
+  }
+
+  function calDayFromPoint(track, clientX, days) {
+    const rect = track.getBoundingClientRect();
+    if (!rect.width) return days[0];
+    const t = Math.max(0, Math.min(0.999, (clientX - rect.left) / rect.width));
+    return days[Math.floor(t * days.length)];
+  }
+
+  function onCalPointerDown(e) {
+    if (e.button !== 0) return;
+    const navHit = e.target.closest("[data-tl-nav]");
+    if (navHit) {
+      e.preventDefault();
+      const full = clampTimelineView();
+      const cal = calendarState();
+      const track = $("tl-nav-track");
+      const originDay = timelineDayFromX(track, e.clientX, full);
+      calNav = {
+        mode: navHit.dataset.tlNav,
+        full,
+        originX: e.clientX,
+        originFrom: cal.viewFrom,
+        originDays: cal.viewDays,
+        originEnd: addDays(cal.viewFrom, cal.viewDays - 1),
+        originDay,
+        moved: false,
+      };
+      $("tl-nav-view")?.classList.add("is-drag");
+      try {
+        navHit.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    const handle = e.target.closest("[data-cal-drag]");
+    if (!handle) return;
+    const bar = handle.closest(".gantt-bar[data-cal-id]");
+    const order = findOrder(bar?.dataset.calId);
+    if (!order) return;
+    const track = handle.closest(".gantt-track");
+    if (!track) return;
+    e.preventDefault();
+    historyCommit();
+    const win = calendarWindow();
+    calDrag = {
+      order,
+      bar,
+      mode: handle.dataset.calDrag,
+      days: win.days,
+      full: win.full,
+      track,
+      start0: parseDay(order.work_start),
+      end0: parseDay(order.work_end),
+      originDay: calDayFromPoint(track, e.clientX, win.days),
+      moved: false,
+    };
+    bar.classList.add("is-drag");
+    paintCalDragBar();
+    showGanttDayTip(calDrag.originDay, e);
+    try {
+      bar.setPointerCapture(e.pointerId);
+    } catch {
+      try {
+        handle.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  function paintCalDragBar() {
+    if (!calDrag) return;
+    const { bar, order, days } = calDrag;
+    if (!bar || !days.length) return;
+    const winFrom = days[0];
+    const winTo = days[days.length - 1];
+    const span = orderDrawSpan(order, dayStart(new Date()));
+    if (!span) return;
+    const from = span.from < winFrom ? winFrom : span.from;
+    const till = span.till > winTo ? winTo : span.till;
+    if (from > till) return;
+    const fromIdx = dayDiff(winFrom, from);
+    const len = dayDiff(from, till) + 1;
+    const n = days.length;
+    bar.style.setProperty("--from", String(fromIdx));
+    bar.style.setProperty("--span", String(len));
+    bar.style.setProperty("--days", String(n));
+    bar.style.left = `${(fromIdx / n) * 100}%`;
+    bar.style.width = `${(len / n) * 100}%`;
+    bar.classList.toggle("has-deadline", !!orderDeadline(order));
+    bar.classList.toggle("is-live", workStatus(order) === "now");
+    const full = calDrag.full;
+    const navBar = document.querySelector(`.tl-nav-bar[data-cal-id="${cssEscape(order.id)}"]`);
+    if (navBar && full) {
+      const navFrom = Math.max(0, dayDiff(full.from, span.from));
+      const navTill = Math.min(full.span - 1, dayDiff(full.from, span.till));
+      if (navTill >= navFrom) {
+        navBar.style.setProperty("--from", String(navFrom));
+        navBar.style.setProperty("--len", String(navTill - navFrom + 1));
+      }
+    }
+  }
+
+  function onCalPointerMove(e) {
+    if (calNav) {
+      const track = $("tl-nav-track");
+      if (!track) return;
+      const day = timelineDayFromX(track, e.clientX, calNav.full);
+      if (!day) return;
+      if (!calNav.moved && Math.abs(e.clientX - calNav.originX) < 3) return;
+      calNav.moved = true;
+      const cal = calendarState();
+      if (calNav.mode === "view") {
+        cal.viewFrom = addDays(calNav.originFrom, dayDiff(calNav.originDay, day));
+        cal.viewDays = calNav.originDays;
+      } else if (calNav.mode === "start") {
+        let from = day;
+        if (from > calNav.originEnd) from = calNav.originEnd;
+        cal.viewFrom = from;
+        cal.viewDays = Math.max(TL_MIN_DAYS, dayDiff(from, calNav.originEnd) + 1);
+      } else if (calNav.mode === "end") {
+        let end = day;
+        if (end < calNav.originFrom) end = calNav.originFrom;
+        cal.viewFrom = calNav.originFrom;
+        cal.viewDays = Math.max(TL_MIN_DAYS, dayDiff(calNav.originFrom, end) + 1);
+      } else {
+        const from = day < calNav.originDay ? day : calNav.originDay;
+        const to = day < calNav.originDay ? calNav.originDay : day;
+        cal.viewFrom = from;
+        cal.viewDays = Math.max(TL_MIN_DAYS, dayDiff(from, to) + 1);
+      }
+      clampTimelineView();
+      paintNavView();
+      return;
+    }
+    if (!calDrag) return;
+    const day = calDayFromPoint(calDrag.track, e.clientX, calDrag.days);
+    if (!day) return;
+    const delta = dayDiff(calDrag.originDay, day);
+    if (delta || calDrag.moved) calDrag.moved = true;
+    const order = calDrag.order;
+    if (calDrag.mode === "start") {
+      order.work_start = dayKey(day);
+      if (!order.work_end && calDrag.end0) order.work_end = dayKey(calDrag.end0);
+    } else if (calDrag.mode === "end") {
+      if (!order.work_start) order.work_start = calDrag.start0 ? dayKey(calDrag.start0) : dayKey(day);
+      order.work_end = dayKey(day);
+    } else {
+      if (calDrag.start0) order.work_start = dayKey(addDays(calDrag.start0, delta));
+      else order.work_start = dayKey(day);
+      if (calDrag.end0) order.work_end = dayKey(addDays(calDrag.end0, delta));
+    }
+    normalizeWorkDates(order);
+    paintCalDragBar();
+    const highlight =
+      calDrag.mode === "start" ? parseDay(order.work_start) : calDrag.mode === "end" ? parseDay(order.work_end) : day;
+    showGanttDayTip(highlight || day, e);
+  }
+
+  function onCalPointerUp() {
+    if (calNav) {
+      $("tl-nav-view")?.classList.remove("is-drag");
+      const jumped = !calNav.moved && calNav.mode === "track";
+      if (jumped) {
+        const cal = calendarState();
+        cal.viewFrom = addDays(calNav.originDay, -Math.floor((cal.viewDays - 1) / 2));
+        clampTimelineView();
+      }
+      if (calNav.moved || jumped) {
+        calSkipClick = true;
+        calendarState().anchor = calendarState().viewFrom;
+        calNav = null;
+        renderCalendar();
+        return;
+      }
+      calNav = null;
+      return;
+    }
+    if (!calDrag) return;
+    const bar = calDrag.bar;
+    if (calDrag.moved) {
+      calSkipClick = true;
+      calendarState().selected = calDrag.order.id;
+      historyCommit();
+      markDirty();
+      calDrag = null;
+      renderCalendar();
+      return;
+    }
+    bar?.classList.remove("is-drag");
+    if (bar) {
+      bar.style.removeProperty("left");
+      bar.style.removeProperty("width");
+    }
+    calDrag = null;
+    showGanttDayTip(null);
+  }
+
+  function onCalWheel(e) {
+    if (calendarState().mode !== "timeline") return;
+    const nav = e.target.closest("#tl-nav");
+    const days = e.target.closest(".gantt-days");
+    if (!nav && !days) return;
+    e.preventDefault();
+    if (nav) {
+      const track = $("tl-nav-track");
+      if (!track) return;
+      const rect = track.getBoundingClientRect();
+      const ratio = rect.width ? Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) : 0.5;
+      timelineZoomAt(ratio, e.deltaY > 0 ? 1.14 : 0.88);
+      calendarState().anchor = calendarState().viewFrom;
+      renderCalendar();
+      return;
+    }
+    const delta = e.deltaX || e.deltaY;
+    if (!delta) return;
+    const step = Math.max(1, Math.round(Math.abs(delta) / 70));
+    const cal = calendarState();
+    cal.viewFrom = addDays(cal.viewFrom, (delta > 0 ? 1 : -1) * step);
+    clampTimelineView();
+    cal.anchor = cal.viewFrom;
+    renderCalendar();
+  }
+
+  function showGanttDayTip(day, pointer) {
+    const tip = $("gantt-day-tip");
+    const col = $("gantt-day-col");
+    const strip = document.querySelector("#gantt-scroll .gantt-days");
+    document.querySelectorAll(".gantt-day.is-hover").forEach((el) => el.classList.remove("is-hover"));
+    if (!day) {
+      if (tip) {
+        tip.hidden = true;
+        tip.classList.remove("is-follow");
+        tip.style.removeProperty("top");
+      }
+      if (col) col.hidden = true;
+      return;
+    }
+    const days = calDrag?.days || calendarWindow().days;
+    const idx = days.length ? dayDiff(days[0], day) : -1;
+    if (col) {
+      if (idx >= 0 && idx < days.length) {
+        col.hidden = false;
+        col.style.setProperty("--col", String(idx));
+      } else col.hidden = true;
+    }
+    const cell = strip?.querySelector(`.gantt-day[data-cal-day="${cssEscape(dayKey(day))}"]`);
+    if (cell) cell.classList.add("is-hover");
+    if (!tip) return;
+    tip.hidden = false;
+    tip.textContent = `${RU_WEEKDAYS_FULL[(day.getDay() + 6) % 7]}, ${calFmtDay(day, true)}`;
+    const follow = !!(calDrag && pointer && Number.isFinite(pointer.clientX));
+    if (follow) {
+      tip.classList.add("is-follow");
+      const tipW = tip.offsetWidth || 160;
+      const tipH = tip.offsetHeight || 28;
+      let x = pointer.clientX + 14;
+      let y = pointer.clientY - tipH - 10;
+      if (y < 8) y = pointer.clientY + 18;
+      if (x + tipW > window.innerWidth - 8) x = pointer.clientX - tipW - 14;
+      if (x < 8) x = 8;
+      tip.style.left = `${x}px`;
+      tip.style.top = `${y}px`;
+      return;
+    }
+    tip.classList.remove("is-follow");
+    tip.style.removeProperty("top");
+    if (!strip || !cell) {
+      tip.hidden = true;
+      return;
+    }
+    const stripRect = strip.getBoundingClientRect();
+    const dayRect = cell.getBoundingClientRect();
+    const tipW = tip.offsetWidth || 140;
+    let left = dayRect.left - stripRect.left + dayRect.width / 2;
+    const pad = tipW / 2 + 6;
+    left = Math.max(pad, Math.min(stripRect.width - pad, left));
+    tip.style.left = `${left}px`;
+  }
+
+  function onGanttDayHover(e) {
+    if (calendarState().mode !== "timeline") return;
+    if (calNav || calDrag) return;
+    const dayEl = e.type === "pointerleave" ? null : e.target.closest(".gantt-days .gantt-day");
+    const parsed = dayEl ? parseDay(dayEl.dataset.calDay) : null;
+    showGanttDayTip(parsed);
+  }
+
+  function closeCalFilter() {
+    const menu = $("cal-filter-menu");
+    if (menu) menu.hidden = true;
+    $("btn-cal-filter")?.setAttribute("aria-expanded", "false");
+  }
+
+  function bindCalendar() {
+    $("view-calendar")?.addEventListener("click", onCalClick);
+    $("view-calendar")?.addEventListener("change", onCalChange);
+    $("cal-board")?.addEventListener("pointerdown", onCalPointerDown);
+    $("cal-board")?.addEventListener("pointermove", onGanttDayHover);
+    $("cal-board")?.addEventListener("pointerleave", onGanttDayHover);
+    $("cal-board")?.addEventListener("wheel", onCalWheel, { passive: false });
+    window.addEventListener("pointermove", onCalPointerMove);
+    window.addEventListener("pointerup", onCalPointerUp);
+    window.addEventListener("pointercancel", onCalPointerUp);
+    document.addEventListener("click", (e) => {
+      if (e.target.closest("#cal-filter")) return;
+      closeCalFilter();
+    });
+  }
+
   /* ==== Облако заказов: интерактивный граф ==== */
   const CLOUD_COLORS = ["#0f766e", "#2563eb", "#7c3aed", "#d97706", "#db2777", "#0891b2", "#059669", "#e11d48", "#4f46e5", "#ca8a04"];
   const GALAXY_TYPES = [
@@ -3573,6 +4862,7 @@
     if (state.view === "orders") renderOrders();
     if (state.view === "analytics") renderAnalytics();
     if (state.view === "cashflow") renderCashflow();
+    if (state.view === "calendar") renderCalendar();
     if (state.view === "cloud") renderCloud();
     if (state.view === "catalogs") renderCatalogs();
     if (state.view === "customers") renderCustomers();
@@ -3841,13 +5131,15 @@
 
   async function exportCsv() {
     const rows = allRows();
-    const head = ["Номер", "Заказчик", "Название", "Тип", "Вид", "Продукт", "Количество", "Ед", "Цена", "Скидка%", "Итог", "Расход", "Оплачено", "Не оплачено", "Дата заказа", "Дата оплаты", "Статус"];
+    const head = ["Номер", "Заказчик", "Название", "Начало работ", "Конец работ", "Тип", "Вид", "Продукт", "Количество", "Ед", "Цена", "Скидка%", "Итог", "Расход", "Оплачено", "Не оплачено", "Дата заказа", "Дата оплаты", "Статус"];
     const lines = [head.join(";")];
     rows.forEach(({ order, line, totals }) => {
       const vals = [
         order.number,
         order.customer,
         order.name,
+        dateDay(order.work_start),
+        dateDay(order.work_end),
         line.order_type,
         kindLabel(totals.kind) || "доход",
         line.product,
@@ -4085,6 +5377,33 @@
       .filter((x) => x !== undefined);
   }
 
+  function closeFileMenu() {
+    const menu = $("file-menu");
+    const btn = $("btn-file-menu");
+    if (menu) menu.hidden = true;
+    btn?.setAttribute("aria-expanded", "false");
+  }
+
+  function bindFileMenu() {
+    const btn = $("btn-file-menu");
+    const menu = $("file-menu");
+    if (!btn || !menu) return;
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = menu.hidden;
+      menu.hidden = !open;
+      btn.setAttribute("aria-expanded", String(open));
+    });
+    menu.addEventListener("click", (e) => {
+      if (e.target.closest("button")) closeFileMenu();
+    });
+    document.addEventListener("click", (e) => {
+      if (menu.hidden) return;
+      if (e.target.closest("#file-menu") || e.target.closest("#btn-file-menu")) return;
+      closeFileMenu();
+    });
+  }
+
   function bind() {
     applyTheme(localStorage.getItem(LS_THEME) || currentTheme(), false);
     $("nav").addEventListener("click", (e) => {
@@ -4092,6 +5411,8 @@
       if (btn) setView(btn.dataset.view);
     });
     bindCashflow();
+    bindCalendar();
+    bindFileMenu();
     bindCloud();
     $("global-search").addEventListener("input", (e) => {
       state.search = e.target.value;
@@ -4940,11 +6261,52 @@
           return;
         }
         if ($("remote-modal").classList.contains("open")) $("remote-modal").classList.remove("open");
+        if (!$("file-menu")?.hidden) {
+          e.preventDefault();
+          closeFileMenu();
+          return;
+        }
+        if ($("cal-filter-menu") && !$("cal-filter-menu").hidden) {
+          e.preventDefault();
+          closeCalFilter();
+          return;
+        }
       }
       if (state.view === "cloud" && e.key === "/" && !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) {
         e.preventDefault();
         $("cloud-search")?.focus();
         return;
+      }
+      if (state.view === "calendar" && !ctrl && !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) {
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          calendarShift(-1);
+          return;
+        }
+        if (e.key === "ArrowRight") {
+          e.preventDefault();
+          calendarShift(1);
+          return;
+        }
+        if (e.key === "t" || e.key === "T") {
+          e.preventDefault();
+          goTimelineToday();
+          renderCalendar();
+          return;
+        }
+        if (e.key === "Enter" && calendarState().selected) {
+          e.preventDefault();
+          gotoOrder(calendarState().selected);
+          return;
+        }
+        if (e.key === "1" || e.key === "2" || e.key === "3") {
+          e.preventDefault();
+          calendarState().mode = CALENDAR_MODES[Number(e.key) - 1];
+          persistCalendar();
+          markDirty();
+          renderCalendar();
+          return;
+        }
       }
       if (!ctrl) return;
       if (code === "KeyK" || (e.shiftKey && code === "KeyP")) {
@@ -5071,6 +6433,21 @@
         syncCustomersFromOrders();
         const list = state.doc.customers || [];
         $("customer-list").innerHTML = unique(list.map((c) => c.name)).map((c) => `<option value="${esc(c)}">`).join("");
+      }
+      if (e.target.dataset.k === "work_start" || e.target.dataset.k === "work_end") {
+        normalizeWorkDates(order);
+        if (e.type === "change") {
+          e.target.value = order[e.target.dataset.k] || "";
+          const other = e.target.dataset.k === "work_start" ? "work_end" : "work_start";
+          const otherEl = card.querySelector(`[data-k="${other}"]`);
+          if (otherEl) otherEl.value = order[other] || "";
+          const pill = card.querySelector(".work-pill");
+          if (pill) {
+            const meta = workStatusMeta(order);
+            pill.className = `work-pill work-pill-${meta.id}`;
+            pill.textContent = meta.label;
+          }
+        }
       }
       markDirty();
       return;
@@ -6262,6 +7639,7 @@
       { group: "Разделы", ico: "☰", title: "Заказы", sub: "таблицы заказов и позиций", run: () => setView("orders") },
       { group: "Разделы", ico: "▦", title: "Аналитика", sub: "фильтры, сравнение периодов", run: () => setView("analytics") },
       { group: "Разделы", ico: "₽", title: "Касса", sub: "платёжный календарь и дебиторка", run: () => setView("cashflow") },
+      { group: "Разделы", ico: "◷", title: "Календарь", sub: "старт, финиш и что идёт сейчас", run: () => setView("calendar") },
       { group: "Разделы", ico: "✣", title: "Облако заказов", sub: "живая карта заказов и позиций", run: () => setView("cloud") },
       { group: "Разделы", ico: "◉", title: "Заказчики", sub: "контакты и рейтинг", run: () => setView("customers") },
       { group: "Разделы", ico: "⚙", title: "Справочники", sub: "статусы, единицы, продукты", run: () => setView("catalogs") },
@@ -6348,6 +7726,28 @@
         run: () => {
           state.orderFilter = "month";
           setView("orders");
+        },
+      },
+      {
+        group: "Фильтры",
+        ico: "◷",
+        title: "Календарь: идёт сейчас",
+        sub: "заказы в работе сегодня",
+        run: () => {
+          calendarState().filter = "now";
+          persistCalendar();
+          setView("calendar");
+        },
+      },
+      {
+        group: "Фильтры",
+        ico: "!",
+        title: "Календарь: просрочены",
+        sub: "без даты конца дедлайна нет",
+        run: () => {
+          calendarState().filter = "overdue";
+          persistCalendar();
+          setView("calendar");
         },
       },
       {
@@ -6619,6 +8019,12 @@
       panel.classList.toggle("open", open);
       btn.classList.toggle("open", open);
       if (open) requestAnimationFrame(() => panel.querySelector("textarea")?.focus());
+      return;
+    }
+    if (act === "work-start-today" || act === "work-end-today") {
+      setWorkToday(order, act === "work-start-today" ? "start" : "end");
+      markDirty();
+      renderOrders();
       return;
     }
     if (act === "share") {
@@ -7319,6 +8725,11 @@
       return;
     }
     const hadFocus = !!state.focusOrderId;
+    if (nav.view === "calendar") {
+      state.remoteStats = null;
+      setView("calendar");
+      return;
+    }
     if (state.view === "cloud") {
       if (cloudState().catalog) {
         cloudState().catalog = false;
@@ -7356,7 +8767,8 @@
       return;
     }
     state.remoteStats = null;
-    if (nav.view === "orders") setView("orders");
+    if (nav.view === "calendar") setView("calendar");
+    else if (nav.view === "orders") setView("orders");
     else if (nav.view === "snapshot") setView("dashboard");
     else if (hadFocus && state.view === "dashboard") renderDashboard();
     else if (state.view === "dashboard") renderDashboard();

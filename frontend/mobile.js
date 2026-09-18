@@ -24,9 +24,10 @@
     view: "orders",
     orderId: null,
     ordersResume: null,
-    scroll: { orders: 0, stats: 0, snapshot: 0, files: 0, order: {} },
+    scroll: { orders: 0, stats: 0, snapshot: 0, files: 0, calendar: 0, order: {} },
     editLineId: null,
     headOpen: false,
+    cal: { mode: "extended", filter: "all", anchor: null },
     query: "",
     filter: "all",
     stats: { period: "all", filter: "all", status: "" },
@@ -319,6 +320,120 @@
 
   function dateValue(v) {
     return String(v || "").slice(0, 10);
+  }
+
+  const DAY_MS = 86400000;
+  const RU_MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+  const RU_MONTHS_NOM = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+  const RU_WEEKDAYS = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
+  const WORK_STATUS = {
+    nodate: { label: "без дат" },
+    planned: { label: "запланирован" },
+    now: { label: "идёт сейчас" },
+    done: { label: "завершён" },
+    overdue: { label: "просрочен" },
+    cancelled: { label: "снят" },
+  };
+
+  function dayStart(d) {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
+  function parseDay(iso) {
+    const s = dateValue(iso);
+    if (s.length < 10) return null;
+    const y = Number(s.slice(0, 4));
+    const m = Number(s.slice(5, 7));
+    const d = Number(s.slice(8, 10));
+    if (!y || !m || !d) return null;
+    return new Date(y, m - 1, d);
+  }
+
+  function addDays(d, n) {
+    const x = new Date(d);
+    x.setDate(x.getDate() + n);
+    return x;
+  }
+
+  function dayKey(d) {
+    return localStamp(d);
+  }
+
+  function dayDiff(from, to) {
+    return Math.round((to.getTime() - from.getTime()) / DAY_MS);
+  }
+
+  function mondayOf(d) {
+    const x = dayStart(d);
+    return addDays(x, -((x.getDay() + 6) % 7));
+  }
+
+  function calFmtDay(d) {
+    return `${d.getDate()} ${RU_MONTHS_GEN[d.getMonth()]}`;
+  }
+
+  function orderIsOff(order) {
+    const income = (order.lines || []).filter((line) => !isExpenseLine(line));
+    if (!income.length) return false;
+    return income.every((line) => /отмен|аннул|черн/i.test(line.status || ""));
+  }
+
+  function normalizeWorkDates(order) {
+    const start = dateValue(order.work_start);
+    const end = dateValue(order.work_end);
+    order.work_start = start;
+    order.work_end = end;
+    if (start && end && end < start) {
+      order.work_start = end;
+      order.work_end = start;
+    }
+    return order;
+  }
+
+  function workStatus(order, today = dayStart(new Date())) {
+    if (orderIsOff(order)) return "cancelled";
+    const start = parseDay(order.work_start);
+    const end = parseDay(order.work_end);
+    if (!start && !end) return "nodate";
+    if (start && !end) {
+      if (start > today) return "planned";
+      return "now";
+    }
+    if (!start && end) return end < today ? "done" : "now";
+    if (today < start) return "planned";
+    if (today > end) return "done";
+    return "now";
+  }
+
+  function workStatusMeta(order) {
+    const id = workStatus(order);
+    return { id, ...(WORK_STATUS[id] || WORK_STATUS.nodate) };
+  }
+
+  function orderCoversDay(order, day) {
+    const start = parseDay(order.work_start);
+    const end = parseDay(order.work_end);
+    if (!start && !end) return false;
+    const d = dayStart(day);
+    const today = dayStart(new Date());
+    if (start && !end) {
+      if (start > today) return dayKey(d) === dayKey(start);
+      return d >= start && d <= today;
+    }
+    if (!start && end) return d <= end;
+    return d >= start && d <= end;
+  }
+
+  function setWorkToday(order, which) {
+    const today = dayKey(dayStart(new Date()));
+    if (which === "start") {
+      order.work_start = today;
+      if (order.work_end && order.work_end < today) order.work_end = "";
+    } else {
+      if (!order.work_start) order.work_start = today;
+      order.work_end = today;
+    }
+    normalizeWorkDates(order);
   }
 
   function fmtDate(v) {
@@ -913,6 +1028,8 @@
       name: "",
       notes: "",
       created_at: localStamp(new Date()),
+      work_start: "",
+      work_end: "",
       lines: [emptyLine()],
     };
   }
@@ -1063,7 +1180,7 @@
     if (redo) redo.disabled = !state.history.redo;
   }
 
-  const SCREENS = ["orders", "order", "stats", "snapshot", "files"];
+  const SCREENS = ["orders", "order", "stats", "snapshot", "files", "calendar"];
 
   function rememberSnapReturn() {
     if (state.view === "snapshot") return;
@@ -1150,6 +1267,7 @@
     if (state.view === "orders") renderOrders();
     else if (state.view === "order") renderOrder();
     else if (state.view === "stats") renderStats();
+    else if (state.view === "calendar") renderCalendar();
     else if (state.view === "snapshot") renderSnapshot();
     else renderFiles();
     if (state.editLineId && !$("editor").hidden) renderEditor();
@@ -1331,6 +1449,15 @@
         </div>
         <div class="field"><label>Заказчик</label><input type="text" list="customers-list" value="${esc(order.customer || "")}" ${a("customer")} /></div>
         <div class="field"><label>Название</label><input type="text" value="${esc(order.name || "")}" ${a("name")} /></div>
+        <div class="grid-2">
+          <div class="field"><label>Начало работ</label><input type="date" value="${esc(dateValue(order.work_start))}" ${a("work_start")} /></div>
+          <div class="field"><label>Конец работ</label><input type="date" value="${esc(dateValue(order.work_end))}" ${a("work_end")} /></div>
+        </div>
+        <div class="work-row">
+          <span class="work-pill work-pill-${esc(workStatus(order))}">${esc(workStatusMeta(order).label)}</span>
+          <button type="button" class="btn small" data-work-act="start">Начать сегодня</button>
+          <button type="button" class="btn small" data-work-act="end">Закончить сегодня</button>
+        </div>
         <div class="field last"><label>Заметки</label><textarea rows="3" ${a("notes")}>${esc(order.notes || "")}</textarea></div>
       </div>
     </article>
@@ -2010,6 +2137,126 @@
         if (state.stats.status && line.status !== state.stats.status) return false;
         return matchesStatsPeriod(line.order_date, state.stats.period);
       });
+  }
+
+  function renderCalendar() {
+    if (!requireDocument()) return;
+    const cal = state.cal;
+    if (!cal.anchor) cal.anchor = dayStart(new Date());
+    const today = dayStart(new Date());
+    const all = orders();
+    const list = cal.filter === "all" ? all : all.filter((order) => workStatus(order) === cal.filter);
+    const now = all.filter((order) => workStatus(order) === "now");
+    const overdue = all.filter((order) => workStatus(order) === "overdue");
+    const nodate = all.filter((order) => workStatus(order) === "nodate");
+    const modes = [
+      ["timeline", "Таймлайн"],
+      ["classic", "Классический"],
+      ["extended", "Расширенный"],
+    ];
+    const filters = [
+      ["all", "Все"],
+      ["now", "Сейчас"],
+      ["planned", "План"],
+      ["done", "Готово"],
+      ["overdue", "Просрочены"],
+      ["nodate", "Без дат"],
+    ];
+    let title = "";
+    let board = "";
+    if (cal.mode === "classic") {
+      const from = new Date(cal.anchor.getFullYear(), cal.anchor.getMonth(), 1);
+      const to = new Date(cal.anchor.getFullYear(), cal.anchor.getMonth() + 1, 0);
+      title = `${RU_MONTHS_NOM[from.getMonth()]} ${from.getFullYear()}`;
+      const gridFrom = mondayOf(from);
+      let gridTo = addDays(gridFrom, 41);
+      while (gridTo < to) gridTo = addDays(gridTo, 7);
+      const cells = [];
+      for (let d = gridFrom; d <= gridTo; d = addDays(d, 1)) {
+        const key = dayKey(d);
+        const n = list.filter((order) => orderCoversDay(order, d)).length;
+        const inMonth = d.getMonth() === from.getMonth();
+        cells.push(`<button type="button" class="mcal-cell ${inMonth ? "" : "is-out"} ${key === dayKey(today) ? "is-today" : ""} ${n ? "has" : ""}" data-cal-day="${key}">
+          <b>${d.getDate()}</b>${n ? `<i>${n}</i>` : ""}
+        </button>`);
+      }
+      board = `<div class="mcal-weekdays">${RU_WEEKDAYS.map((w) => `<span>${w}</span>`).join("")}</div>
+        <div class="mcal-month">${cells.join("")}</div>`;
+      if (cal.pick) {
+        const pick = parseDay(cal.pick);
+        const items = list.filter((order) => orderCoversDay(order, pick));
+        board += `<div class="mcal-daylist"><h3>${esc(calFmtDay(pick))}</h3>${
+          items.length ? items.map(mcalOrderCard).join("") : `<div class="empty">В этот день никто не отмечен.</div>`
+        }</div>`;
+      }
+    } else if (cal.mode === "extended") {
+      const from = mondayOf(cal.anchor);
+      const to = addDays(from, 6);
+      title = `${from.getDate()}–${calFmtDay(to)}`;
+      board = `<div class="mcal-week">${rangeDays(from, to)
+        .map((day) => {
+          const key = dayKey(day);
+          const items = list.filter((order) => orderCoversDay(order, day));
+          return `<div class="mcal-col ${key === dayKey(today) ? "is-today" : ""}">
+            <div class="mcal-col-h"><b>${RU_WEEKDAYS[(day.getDay() + 6) % 7]}</b><span>${day.getDate()}</span><i>${items.length}</i></div>
+            ${items.length ? items.map(mcalOrderCard).join("") : `<div class="empty">пусто</div>`}
+          </div>`;
+        })
+        .join("")}</div>`;
+    } else {
+      const from = mondayOf(cal.anchor);
+      const to = addDays(from, 13);
+      title = `${from.getDate()}–${calFmtDay(to)}`;
+      const dated = list
+        .filter((order) => workStatus(order) !== "nodate")
+        .filter((order) => rangeDays(from, to).some((day) => orderCoversDay(order, day)))
+        .sort((a, b) => String(a.work_start || "").localeCompare(String(b.work_start || "")));
+      board = dated.length ? dated.map(mcalOrderCard).join("") : `<div class="empty">В эти две недели нет отмеченных заказов.</div>`;
+    }
+    $("calendar-body").innerHTML = `
+      <div class="mcal-modes">${modes
+        .map(([id, label]) => `<button type="button" class="chip ${cal.mode === id ? "active" : ""}" data-cal-mode="${id}">${label}</button>`)
+        .join("")}</div>
+      <div class="mcal-nav">
+        <button type="button" class="btn" data-cal-nav="-1">‹</button>
+        <button type="button" class="btn" data-cal-nav="0">Сегодня</button>
+        <strong>${esc(title)}</strong>
+        <button type="button" class="btn" data-cal-nav="1">›</button>
+      </div>
+      <div class="mcal-kpis">
+        <div><span>Идёт</span><b>${now.length}</b></div>
+        <div class="${overdue.length ? "warn" : ""}"><span>Просрочены</span><b>${overdue.length}</b></div>
+        <div><span>Без дат</span><b>${nodate.length}</b></div>
+      </div>
+      <div class="chips">${filters
+        .map(([id, label]) => `<button type="button" class="chip ${cal.filter === id ? "active" : ""}" data-cal-filter="${id}">${label}</button>`)
+        .join("")}</div>
+      ${board}
+      ${now.length && cal.mode !== "extended" ? `<h3 class="section">В работе</h3>${now.map(mcalOrderCard).join("")}` : ""}
+    `;
+  }
+
+  function rangeDays(from, to) {
+    const days = [];
+    for (let d = dayStart(from); d <= to; d = addDays(d, 1)) days.push(d);
+    return days;
+  }
+
+  function mcalOrderCard(order) {
+    const meta = workStatusMeta(order);
+    const t = orderTotals(order);
+    return `<article class="card order-item mcal-order" data-open="${esc(order.id)}">
+      <div class="oi-top"><span class="oi-num">${esc(order.number || "—")}</span><span class="oi-sep">—</span><span class="oi-customer">${esc(order.name || "без названия")}</span></div>
+      <div class="oi-name">${esc(order.customer || "Без заказчика")} · ${esc(dateValue(order.work_start) || "нет старта")} → ${esc(dateValue(order.work_end) || "идёт")}</div>
+      <div class="oi-foot">
+        <span class="work-pill work-pill-${esc(meta.id)}">${esc(meta.label)}</span>
+        <span class="sum">${esc(money(t.after))}</span>
+      </div>
+      <div class="mcal-acts">
+        <button type="button" class="btn small" data-cal-work="${esc(order.id)}" data-work-act="start">Начать сегодня</button>
+        <button type="button" class="btn small" data-cal-work="${esc(order.id)}" data-work-act="end">Закончить сегодня</button>
+      </div>
+    </article>`;
   }
 
   function renderStats() {
@@ -3365,6 +3612,10 @@
       refreshOrderRow(line.id);
     } else {
       order[field] = el.value;
+      if (field === "work_start" || field === "work_end") {
+        normalizeWorkDates(order);
+        if (el.type === "date") el.value = order[field] || "";
+      }
       if (field === "number" || field === "name") renderOrderTopOnly(order);
     }
     touchDoc();
@@ -3624,6 +3875,47 @@
     });
 
     $("main").addEventListener("click", async (e) => {
+      const workBtn = e.target.closest("[data-work-act]");
+      if (workBtn) {
+        const id = workBtn.dataset.calWork || state.orderId;
+        const order = orders().find((o) => o.id === id) || currentOrder();
+        if (!order) return;
+        setWorkToday(order, workBtn.dataset.workAct);
+        touchDoc();
+        pushSoon();
+        if (state.view === "calendar") renderCalendar();
+        else renderOrder();
+        toast(workBtn.dataset.workAct === "start" ? "Старт — сегодня" : "Финиш — сегодня");
+        return;
+      }
+      const calMode = e.target.closest("[data-cal-mode]");
+      if (calMode) {
+        state.cal.mode = calMode.dataset.calMode;
+        renderCalendar();
+        return;
+      }
+      const calFilter = e.target.closest("[data-cal-filter]");
+      if (calFilter) {
+        state.cal.filter = calFilter.dataset.calFilter;
+        renderCalendar();
+        return;
+      }
+      const calNav = e.target.closest("[data-cal-nav]");
+      if (calNav) {
+        const dir = Number(calNav.dataset.calNav);
+        if (!state.cal.anchor) state.cal.anchor = dayStart(new Date());
+        if (dir === 0) state.cal.anchor = dayStart(new Date());
+        else if (state.cal.mode === "classic") state.cal.anchor = new Date(state.cal.anchor.getFullYear(), state.cal.anchor.getMonth() + dir, 1);
+        else state.cal.anchor = addDays(mondayOf(state.cal.anchor), dir * 7);
+        renderCalendar();
+        return;
+      }
+      const calDay = e.target.closest("[data-cal-day]");
+      if (calDay) {
+        state.cal.pick = state.cal.pick === calDay.dataset.calDay ? "" : calDay.dataset.calDay;
+        renderCalendar();
+        return;
+      }
       const open = e.target.closest("[data-open]");
       if (open) {
         setView("order", open.dataset.open);

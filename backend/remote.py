@@ -217,6 +217,7 @@ class RemoteSession:
                 "stats": "Сводка",
                 "files": "Отчёты",
                 "snapshot": "Снимок",
+                "calendar": "Календарь",
             }.get(str(view or ""), str(view or "экран"))
             netlog.add("nav", f"Телефон открыл: {label}", source=str(cid or ""), key=f"nav-{view}")
             return self.version

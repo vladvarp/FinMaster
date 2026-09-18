@@ -32,6 +32,28 @@ CASH_HORIZONS = (14, 30, 60, 90)
 CLOUD_LAYOUTS = ("galaxy", "orbit", "timeline", "constellation")
 CLOUD_COLOR_MODES = ("status", "customer", "debt", "type")
 CLOUD_SIZE_MODES = ("amount", "debt", "quantity", "equal")
+CALENDAR_MODES = ("timeline", "classic", "extended")
+CALENDAR_FILTERS = ("all", "now", "planned", "done", "overdue", "nodate")
+
+
+def _day_iso(value: Any) -> str:
+    text = str(value or "").strip()
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        year, month, day = text[0:4], text[5:7], text[8:10]
+        if year.isdigit() and month.isdigit() and day.isdigit():
+            return f"{year}-{month}-{day}"
+    return ""
+
+
+def _calendar_ui(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, Any] = {}
+    if raw.get("mode") in CALENDAR_MODES:
+        out["mode"] = raw["mode"]
+    if raw.get("filter") in CALENDAR_FILTERS:
+        out["filter"] = raw["filter"]
+    return out
 
 
 def _cloud_ui(raw: Any) -> dict[str, Any]:
@@ -246,7 +268,18 @@ def normalize_document(raw: Any) -> dict[str, Any]:
 
     orders = raw.get("orders")
     if isinstance(orders, list):
-        base["orders"] = [o for o in orders if isinstance(o, dict)]
+        cleaned_orders = []
+        for order in orders:
+            if not isinstance(order, dict):
+                continue
+            start = _day_iso(order.get("work_start"))
+            end = _day_iso(order.get("work_end"))
+            if start and end and end < start:
+                start, end = end, start
+            order["work_start"] = start
+            order["work_end"] = end
+            cleaned_orders.append(order)
+        base["orders"] = cleaned_orders
 
     if not isinstance(products, list):
         seen = set()
@@ -276,6 +309,7 @@ def normalize_document(raw: Any) -> dict[str, Any]:
             "payment_terms": _int_in_range(ui.get("payment_terms"), DEFAULT_PAYMENT_TERMS, 0, 365),
             "cash_horizon": _int_in_range(ui.get("cash_horizon"), DEFAULT_CASH_HORIZON, 14, 90),
             "cloud": _cloud_ui(ui.get("cloud")),
+            "calendar": _calendar_ui(ui.get("calendar")),
             "line_series": _line_series_ui(ui.get("line_series")),
         }
         if base["ui"]["cash_horizon"] not in CASH_HORIZONS:

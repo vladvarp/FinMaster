@@ -82,23 +82,32 @@
             <path d="M9.5 4.5v15" stroke="currentColor" stroke-width="1.8"/>
           </svg>
         </button>
-        <div class="brand">
-          <svg width="38" height="38" viewBox="0 0 42 42" fill="none">
-            <rect width="42" height="42" rx="12" fill="#0f766e"/>
-            <path d="M12 28V14h7.5a4.5 4.5 0 010 9H12" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/>
-            <path d="M12 23h18M22 23v7" stroke="#99f6e4" stroke-width="2.4" stroke-linecap="round"/>
-          </svg>
-          <div class="brand-text">
-            <h1>FinMaster</h1>
-            <span>Учёт заказов</span>
+        <div class="brand-wrap">
+          <button type="button" class="brand" id="btn-file-menu" title="Файл: новый, открыть, сохранить" aria-haspopup="menu" aria-expanded="false" aria-controls="file-menu">
+            <svg width="38" height="38" viewBox="0 0 42 42" fill="none" aria-hidden="true">
+              <rect width="42" height="42" rx="12" fill="#0f766e"/>
+              <path d="M12 28V14h7.5a4.5 4.5 0 010 9H12" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/>
+              <path d="M12 23h18M22 23v7" stroke="#99f6e4" stroke-width="2.4" stroke-linecap="round"/>
+            </svg>
+            <div class="brand-text">
+              <h1>FinMaster</h1>
+              <span>Учёт заказов</span>
+            </div>
+          </button>
+          <div class="file-menu" id="file-menu" hidden role="menu">
+            <button type="button" class="btn ghost" id="btn-new" role="menuitem">Новый</button>
+            <button type="button" class="btn ghost" id="btn-open" role="menuitem">Открыть</button>
+            <button type="button" class="btn ghost" id="btn-save" role="menuitem">Сохранить</button>
+            <button type="button" class="btn ghost" id="btn-save-as" role="menuitem">Сохранить как</button>
           </div>
         </div>
       </div>
       <div class="sidebar-core">
         <div class="file-box">
           <div class="file-title">Текущий отчёт</div>
-          <div class="file-name"><span class="dirty-dot hidden" id="dirty-dot"></span><input id="report-title" value="Новый отчёт" /></div>
+          <div class="file-name"><input id="report-title" value="Новый отчёт" /></div>
           <div class="file-path" id="file-path">Файл ещё не сохранён</div>
+          <label class="side-check"><input type="checkbox" id="autosave" /> <span>Автосохранение</span><span class="dirty-dot hidden" id="dirty-dot" title="Есть несохранённые изменения"></span></label>
         </div>
         <nav class="nav" id="nav">
           <button data-view="orders" title="Заказы"><span class="nav-ico">☰</span><span class="nav-label">Заказы</span></button>
@@ -106,26 +115,12 @@
 
           <button data-view="analytics" title="Аналитика"><span class="nav-ico">▦</span><span class="nav-label">Аналитика</span></button>
           <button data-view="cashflow" title="Касса: платёжный календарь и дебиторка"><span class="nav-ico">₽</span><span class="nav-label">Касса</span></button>
+          <button data-view="calendar" title="Календарь работ: когда заказы начаты, идут и закончены"><span class="nav-ico">◷</span><span class="nav-label">Календарь</span></button>
           <button data-view="cloud" title="Облако заказов: интерактивная карта связей"><span class="nav-ico">✣</span><span class="nav-label">Облако</span></button>
           <button data-view="customers" title="Заказчики"><span class="nav-ico">◉</span><span class="nav-label">Заказчики</span></button>
           <button data-view="catalogs" title="Справочники"><span class="nav-ico">⚙</span><span class="nav-label">Справочники</span></button>
         
         </nav>
-      </div>
-      <div class="side-actions">
-        <button class="btn ghost" id="btn-new">Новый</button>
-        <button class="btn ghost" id="btn-open">Открыть</button>
-        <button class="btn primary save-btn" id="btn-save" title="Сохранить">
-          <svg class="save-ico" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M5 3h11l5 5v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8"/>
-            <path d="M8 3v7h8V3" stroke="currentColor" stroke-width="1.8"/>
-            <path d="M8 21v-7h8v7" stroke="currentColor" stroke-width="1.8"/>
-          </svg>
-          <span class="save-label">Сохранить</span>
-        </button>
-        <button class="btn ghost" id="btn-save-as">Сохранить как</button>
-        <label class="side-check"><input type="checkbox" id="autosave" /> <span>Автосохранение</span></label>
-        <div class="hint">Без галочки отчёт пишется только по кнопке «Сохранить». При закрытии с несохранёнными изменениями программа спросит подтверждение.</div>
       </div>
     </aside>
 
@@ -335,6 +330,39 @@
           <div class="card" style="margin-top:12px">
             <h3>Кто должен <span class="insights-sub">дисциплина — средняя задержка оплаты относительно срока</span></h3>
             <div class="table-wrap" id="cash-debtors"></div>
+          </div>
+        </div>
+
+        <div class="view cal-view" id="view-calendar">
+          <div class="toolbar">
+            <div class="left cal-modes" role="tablist" aria-label="Вид календаря">
+              <button type="button" class="btn" data-cal-mode="timeline" title="Диаграмма Ганта по дням">Таймлайн</button>
+              <button type="button" class="btn" data-cal-mode="classic" title="Месячная сетка">Классический</button>
+              <button type="button" class="btn" data-cal-mode="extended" title="Неделя с загрузкой цеха">Расширенный</button>
+            </div>
+          </div>
+          <div class="kpis cal-kpis" id="cal-kpis"></div>
+          <div class="cal-tools">
+            <div class="cal-filter" id="cal-filter">
+              <button type="button" class="btn" id="btn-cal-filter" title="Фильтр заказов" aria-haspopup="menu" aria-expanded="false" aria-controls="cal-filter-menu">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M4 5h16l-6.2 7.4v5.1L10.2 19v-6.6L4 5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                </svg>
+                <span id="cal-filter-label">Все</span>
+              </button>
+              <div class="cal-filter-menu" id="cal-filter-menu" hidden role="menu"></div>
+            </div>
+            <div class="cal-nav">
+              <button class="btn" type="button" id="cal-prev" title="Предыдущий период (←)">‹</button>
+              <button class="btn" type="button" id="cal-today" title="К сегодняшнему дню (T)">Сегодня</button>
+              <strong id="cal-title"></strong>
+              <button class="btn" type="button" id="cal-next" title="Следующий период (→)">›</button>
+              <button class="btn" type="button" id="cal-copy" title="Скопировать план работ на видимый период">План работ</button>
+            </div>
+          </div>
+          <div class="cal-layout">
+            <div class="card cal-board" id="cal-board"></div>
+            <aside class="card cal-side" id="cal-side"></aside>
           </div>
         </div>
 
@@ -768,6 +796,11 @@
           <h4>Ячейки</h4>
           <div class="help-row"><span>Формулы в кол-ве, цене, скидке</span><span><kbd>2+3*4</kbd></span></div>
           <div class="help-row"><span>Запятая превращается в точку</span><span><kbd>2,5</kbd> → <kbd>2.5</kbd></span></div>
+          <h4>Календарь</h4>
+          <div class="help-row"><span>Предыдущий / следующий период</span><span><kbd>←</kbd><kbd>→</kbd></span></div>
+          <div class="help-row"><span>К сегодняшнему дню</span><span><kbd>T</kbd></span></div>
+          <div class="help-row"><span>Масштаб / прокрутка дней в таймлайне</span><span>колесо на навигаторе / на линейке дней</span></div>
+          <div class="help-row"><span>Таймлайн / классический / расширенный</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span></div>
           <h4>Облако</h4>
           <div class="help-row"><span>Поиск по карте</span><span><kbd>/</kbd></span></div>
           <div class="help-row"><span>Показать всё / автотур</span><span><kbd>F</kbd> / <kbd>T</kbd></span></div>
