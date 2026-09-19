@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import secrets
+import shutil
 import threading
 from datetime import datetime, timezone
 from typing import Any
@@ -13,6 +15,9 @@ APP_NAME = "FinMaster"
 MAX_RECENT = 15
 MAX_DEVICES = 20
 DEFAULT_REMOTE_PORT = 17891
+HISTORY_LIMIT_MIN = 5
+HISTORY_LIMIT_MAX = 200
+HISTORY_LIMIT_DEFAULT = 40
 _TELEGRAM_TOKEN_RE = re.compile(r"^\d{5,}:[A-Za-z0-9_-]{20,}$")
 _LOCK = threading.RLock()
 _CACHE: dict[str, Any] | None = None
@@ -32,7 +37,14 @@ def config_path() -> str:
 
 
 def _blank_config() -> dict[str, Any]:
-    return {"recent": [], "autosave": False, "last_dir": "", "theme": "light", "window_maximized": False}
+    return {
+        "recent": [],
+        "autosave": False,
+        "last_dir": "",
+        "theme": "light",
+        "window_maximized": False,
+        "history_limit": HISTORY_LIMIT_DEFAULT,
+    }
 
 
 def _clone(data: dict[str, Any]) -> dict[str, Any]:
@@ -88,6 +100,7 @@ def load_config() -> dict[str, Any]:
             data.setdefault("last_dir", "")
             data.setdefault("theme", "light")
             data.setdefault("window_maximized", False)
+            data["history_limit"] = clamp_history_limit(data.get("history_limit"))
             if isinstance(data.get("remote"), dict):
                 _fill_secrets(data["remote"])
             _CACHE = _clone(data)
@@ -174,6 +187,304 @@ def set_autosave(enabled: bool) -> None:
     cfg = load_config()
     cfg["autosave"] = bool(enabled)
     save_config(cfg)
+
+
+def clamp_history_limit(value: Any) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = HISTORY_LIMIT_DEFAULT
+    return max(HISTORY_LIMIT_MIN, min(HISTORY_LIMIT_MAX, n))
+
+
+def history_limit() -> int:
+    return clamp_history_limit(load_config().get("history_limit"))
+
+
+def set_history_limit(value: Any) -> int:
+    n = clamp_history_limit(value)
+    cfg = load_config()
+    cfg["history_limit"] = n
+    save_config(cfg)
+    return n
+
+
+HISTORY_META = "meta.json"
+
+
+def history_root() -> str:
+    path = os.path.join(default_reports_dir(), "history")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _norm_report_path(path: str) -> str:
+    return os.path.normcase(os.path.abspath(str(path or "").replace("/", os.sep)))
+
+
+def _folder_bytes(path: str) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                continue
+    return total
+
+
+def _read_history_meta(folder: str) -> dict[str, Any]:
+    path = os.path.join(folder, HISTORY_META)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = json.load(fh)
+        return raw if isinstance(raw, dict) else {}
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return {}
+
+
+def _write_history_meta(folder: str, data: dict[str, Any]) -> None:
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, HISTORY_META)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def _snap_name(item_id: str) -> str:
+    text = re.sub(r"[^A-Za-z0-9_-]+", "", str(item_id or ""))
+    return f"{text or secrets.token_hex(8)}.json"
+
+
+def find_history_folder(report_path: str) -> str:
+    if not report_path:
+        return ""
+    want = _norm_report_path(report_path)
+    root = history_root()
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return ""
+    for name in names:
+        folder = os.path.join(root, name)
+        if not os.path.isdir(folder):
+            continue
+        path = str(_read_history_meta(folder).get("path") or "")
+        if path and _norm_report_path(path) == want:
+            return folder
+    return ""
+
+
+def _alloc_history_folder(report_path: str, title: str) -> str:
+    existing = find_history_folder(report_path)
+    if existing:
+        return existing
+    base = safe_report_title(title or os.path.splitext(os.path.basename(report_path))[0])
+    root = history_root()
+    folder = os.path.join(root, base)
+    if os.path.isdir(folder):
+        meta = _read_history_meta(folder)
+        other = str(meta.get("path") or "")
+        if other and _norm_report_path(other) != _norm_report_path(report_path):
+            suffix = hashlib.sha1(_norm_report_path(report_path).encode("utf-8")).hexdigest()[:8]
+            folder = os.path.join(root, f"{base} — {suffix}")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
+def _in_library(path: str) -> bool:
+    if not path:
+        return False
+    folder = os.path.abspath(default_reports_dir())
+    full = os.path.abspath(path)
+    prefix = folder if folder.endswith(os.sep) else folder + os.sep
+    check = full.lower() if os.name == "nt" else full
+    root = prefix.lower() if os.name == "nt" else prefix
+    return check.startswith(root)
+
+
+def _clean_history_item(item: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    item_id = str(item.get("id") or "").strip()
+    if not item_id:
+        return None
+    return {
+        "id": item_id,
+        "at": str(item.get("at") or ""),
+        "label": str(item.get("label") or "Правка"),
+        "source": "mobile" if item.get("source") == "mobile" else "pc",
+        "device": str(item.get("device") or ("Телефон" if item.get("source") == "mobile" else "ПК")),
+        "file": _snap_name(item.get("file") or item_id),
+    }
+
+
+def load_doc_history(report_path: str) -> dict[str, Any]:
+    folder = find_history_folder(report_path)
+    if not folder:
+        return {"index": -1, "items": []}
+    meta = _read_history_meta(folder)
+    raw_items = meta.get("items") if isinstance(meta.get("items"), list) else []
+    items = []
+    for raw in raw_items:
+        info = _clean_history_item(raw) if isinstance(raw, dict) else None
+        if not info:
+            continue
+        snap = os.path.join(folder, info["file"])
+        try:
+            with open(snap, encoding="utf-8") as fh:
+                doc = json.load(fh)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        items.append({**info, "doc": doc})
+    limit = history_limit()
+    if len(items) > limit:
+        extra = len(items) - limit
+        items = items[extra:]
+        index = max(-1, int(meta.get("index") or -1) - extra)
+    else:
+        index = int(meta.get("index") if meta.get("index") is not None else len(items) - 1)
+    if items and (index < 0 or index >= len(items)):
+        index = len(items) - 1
+    return {"index": index, "items": items, "folder": os.path.basename(folder)}
+
+
+def save_doc_history(report_path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if not report_path:
+        return {"index": -1, "items": []}
+    title = ""
+    if isinstance(payload, dict):
+        title = str(payload.get("title") or "")
+    folder = _alloc_history_folder(report_path, title)
+    raw_items = payload.get("items") if isinstance(payload, dict) else []
+    if not isinstance(raw_items, list):
+        raw_items = []
+    keep = []
+    keep_files = {HISTORY_META}
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        info = _clean_history_item(raw)
+        if not info:
+            continue
+        snap = os.path.join(folder, info["file"])
+        doc = raw.get("doc")
+        if isinstance(doc, dict) and not os.path.isfile(snap):
+            try:
+                with open(snap, "w", encoding="utf-8") as fh:
+                    json.dump(doc, fh, ensure_ascii=False)
+            except OSError:
+                continue
+        if not os.path.isfile(snap):
+            continue
+        keep.append(info)
+        keep_files.add(info["file"])
+    limit = history_limit()
+    if len(keep) > limit:
+        extra = len(keep) - limit
+        for gone in keep[:extra]:
+            keep_files.discard(gone["file"])
+        keep = keep[extra:]
+        index = max(-1, int(payload.get("index") or -1) - extra)
+    else:
+        index = int(payload.get("index") if isinstance(payload, dict) and payload.get("index") is not None else len(keep) - 1)
+    if keep and (index < 0 or index >= len(keep)):
+        index = len(keep) - 1
+    try:
+        for name in os.listdir(folder):
+            if name in keep_files:
+                continue
+            path = os.path.join(folder, name)
+            if os.path.isfile(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    _write_history_meta(
+        folder,
+        {
+            "path": os.path.abspath(report_path),
+            "title": title or os.path.splitext(os.path.basename(report_path))[0],
+            "index": index,
+            "items": keep,
+        },
+    )
+    return load_doc_history(report_path)
+
+
+def delete_doc_history(report_path: str) -> None:
+    folder = find_history_folder(report_path)
+    if folder:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def delete_history_folder(name: str) -> str:
+    root = os.path.abspath(history_root())
+    folder = os.path.abspath(os.path.join(root, os.path.basename(str(name or ""))))
+    prefix = root if root.endswith(os.sep) else root + os.sep
+    check = folder if os.name != "nt" else folder.lower()
+    base = prefix if os.name != "nt" else prefix.lower()
+    if check != (root if os.name != "nt" else root.lower()) and not check.startswith(base):
+        raise ValueError("Нельзя удалить эту папку.")
+    if not os.path.isdir(folder):
+        raise FileNotFoundError("Папка истории не найдена.")
+    shutil.rmtree(folder)
+    return folder
+
+
+def list_histories(current_path: str = "") -> dict[str, Any]:
+    root = history_root()
+    items: list[dict[str, Any]] = []
+    total = 0
+    try:
+        names = os.listdir(root)
+    except OSError:
+        names = []
+    for name in names:
+        folder = os.path.join(root, name)
+        if not os.path.isdir(folder):
+            continue
+        meta = _read_history_meta(folder)
+        path = str(meta.get("path") or "")
+        snaps = meta.get("items") if isinstance(meta.get("items"), list) else []
+        size = _folder_bytes(folder)
+        total += size
+        last = ""
+        for snap in snaps:
+            if isinstance(snap, dict) and str(snap.get("at") or "") > last:
+                last = str(snap.get("at") or "")
+        items.append(
+            {
+                "folder": name,
+                "title": str(meta.get("title") or name),
+                "path": path,
+                "exists": bool(path and os.path.isfile(path)),
+                "in_library": _in_library(path),
+                "current": same_path(path, current_path),
+                "count": len(snaps),
+                "bytes": size,
+                "index": meta.get("index"),
+                "updated": last,
+            }
+        )
+    items.sort(key=lambda row: (not row.get("current"), -(row.get("bytes") or 0), str(row.get("title") or "")))
+    return {"root": root, "bytes": total, "items": items}
 
 
 def now_local_iso() -> str:
@@ -509,6 +820,7 @@ def delete_library_report(path: str) -> str:
     full = library_file_path(path)
     send_to_trash(full)
     remove_recent(full)
+    delete_doc_history(full)
     return full
 
 

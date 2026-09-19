@@ -18,6 +18,38 @@ CLIENT_TTL = 45.0
 POLL_TIMEOUT = 25.0
 
 
+def _history_payload(raw: Any) -> dict[str, Any]:
+    data = raw if isinstance(raw, dict) else {}
+    items = []
+    for item in data.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        items.append(
+            {
+                "id": str(item.get("id") or ""),
+                "at": str(item.get("at") or ""),
+                "label": str(item.get("label") or "Правка"),
+                "source": "mobile" if item.get("source") == "mobile" else "pc",
+                "device": str(item.get("device") or ("Телефон" if item.get("source") == "mobile" else "ПК")),
+            }
+        )
+    try:
+        index = int(data.get("index"))
+    except (TypeError, ValueError):
+        index = -1
+    try:
+        limit = int(data.get("limit"))
+    except (TypeError, ValueError):
+        limit = 40
+    return {
+        "undo": bool(data.get("undo")),
+        "redo": bool(data.get("redo")),
+        "index": index,
+        "limit": max(5, min(200, limit)),
+        "items": items,
+    }
+
+
 def _ip_rank(ip: str) -> int:
     """Чем меньше, тем вероятнее это домашний Wi-Fi, а не VPN или туннель."""
     if ip.startswith("192.168."):
@@ -81,7 +113,7 @@ class RemoteSession:
         self.origin = ""
         self.command: dict[str, Any] | None = None
         self.nav: dict[str, Any] = {"seq": 0, "view": "", "order_id": "", "line_id": "", "cid": "", "period": "", "filter": "", "status": ""}
-        self.history: dict[str, bool] = {"undo": False, "redo": False}
+        self.history: dict[str, Any] = {"undo": False, "redo": False, "index": -1, "limit": 40, "items": []}
         self.doc_version = 0
         self._command_id = 0
         self._nav_seq = 0
@@ -135,7 +167,7 @@ class RemoteSession:
             if isinstance(doc, dict):
                 self.doc = doc
             if isinstance(history, dict):
-                self.history = {"undo": bool(history.get("undo")), "redo": bool(history.get("redo"))}
+                self.history = _history_payload(history)
             self.path = str(path or "")
             self.dirty = bool(dirty)
             self.origin = str(origin or "")
@@ -161,7 +193,7 @@ class RemoteSession:
         """Компьютер сообщает, есть ли что отменять — телефон гасит свои кнопки."""
         with self._cond:
             if isinstance(history, dict):
-                flags = {"undo": bool(history.get("undo")), "redo": bool(history.get("redo"))}
+                flags = _history_payload(history)
                 if flags != self.history:
                     self.history = flags
                     self.version += 1

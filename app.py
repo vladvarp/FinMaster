@@ -21,6 +21,7 @@ from backend.telegram import send_link as telegram_send_link
 from backend.telegram import set_menu_button as telegram_set_menu
 from backend.telegram import push_open_controls as telegram_push_open
 from backend.tunnel import TUNNEL
+from backend.watch import WATCHER
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 FRONTEND = os.path.join(ROOT, "frontend")
@@ -325,6 +326,7 @@ def api_bootstrap():
             "recent": _recent_payload(),
             "library": storage.list_library_reports(),
             "autosave": bool(cfg.get("autosave")),
+            "history_limit": storage.history_limit(),
             "last_dir": cfg.get("last_dir") or "",
             "theme": "dark" if cfg.get("theme") == "dark" else "light",
             "desktop": True,
@@ -350,6 +352,41 @@ def api_autosave():
     return jsonify({"ok": True, "autosave": enabled, "version": version})
 
 
+@app.post("/api/history")
+def api_history():
+    data = request.get_json(silent=True) or {}
+    path = str(data.get("path") or "")
+    if not path:
+        return jsonify({"error": "Нет пути файла."}), 400
+    saved = storage.save_doc_history(path, data)
+    return jsonify({"ok": True, "history": saved, "history_limit": storage.history_limit()})
+
+
+@app.get("/api/history/library")
+def api_history_library():
+    path = str((request.args.get("path") if request.args else "") or "")
+    return jsonify({"ok": True, **storage.list_histories(path)})
+
+
+@app.post("/api/history/delete")
+def api_history_delete():
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("folder") or "")
+    try:
+        storage.delete_history_folder(name)
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, **storage.list_histories(str(data.get("path") or ""))})
+
+
+@app.post("/api/history/limit")
+def api_history_limit():
+    n = storage.set_history_limit((request.get_json(silent=True) or {}).get("limit"))
+    return jsonify({"ok": True, "history_limit": n})
+
+
 @app.post("/api/theme")
 def api_theme():
     data = request.get_json(silent=True) or {}
@@ -368,6 +405,33 @@ def api_recent_remove():
 @app.get("/api/library")
 def api_library():
     return jsonify(storage.list_library_reports())
+
+
+def _on_library_change() -> None:
+    if REMOTE.enabled:
+        REMOTE.notify()
+
+
+def _ensure_library_watch() -> None:
+    WATCHER.set_hook(_on_library_change)
+    WATCHER.start()
+
+
+@app.get("/api/library/watch")
+def api_library_watch():
+    if not _is_local():
+        return jsonify({"error": "Список папки можно слушать только на компьютере."}), 403
+    _ensure_library_watch()
+    since = request.args.get("since", type=int) or 0
+    version = WATCHER.wait(since)
+    return jsonify(
+        {
+            "ok": True,
+            "version": version,
+            "library": storage.list_library_reports(),
+            "recent": _recent_payload(),
+        }
+    )
 
 
 def _delete_library_file(path: str) -> dict[str, Any]:
@@ -444,7 +508,15 @@ def _open_path(path: str) -> dict[str, Any]:
     raw = json.loads(storage.read_text(path))
     doc = normalize_document(raw)
     recent = storage.add_recent(path, doc.get("title") or "")
-    return {"path": os.path.abspath(path), "document": doc, "recent": recent, "cancelled": False}
+    abs_path = os.path.abspath(path)
+    return {
+        "path": abs_path,
+        "document": doc,
+        "recent": recent,
+        "cancelled": False,
+        "history": storage.load_doc_history(abs_path),
+        "history_limit": storage.history_limit(),
+    }
 
 
 @app.post("/api/dialog/save")
@@ -478,7 +550,20 @@ def api_write():
     doc["modified_at"] = now_iso()
     storage.atomic_write(path, json.dumps(doc, ensure_ascii=False, indent=2))
     recent = storage.add_recent(path, doc.get("title") or "")
-    return jsonify({"path": os.path.abspath(path), "document": doc, "recent": recent})
+    abs_path = os.path.abspath(path)
+    history = data.get("history")
+    if isinstance(history, dict):
+        history = {**history, "title": doc.get("title") or history.get("title") or ""}
+        storage.save_doc_history(abs_path, history)
+    return jsonify(
+        {
+            "path": abs_path,
+            "document": doc,
+            "recent": recent,
+            "history": storage.load_doc_history(abs_path),
+            "history_limit": storage.history_limit(),
+        }
+    )
 
 
 @app.post("/api/write-text")
@@ -829,7 +914,7 @@ def api_remote_command():
         return jsonify({"error": "Сессия закрыта."}), 409
     data = request.get_json(silent=True) or {}
     kind = str(data.get("type") or "")
-    if kind not in {"save", "open", "new", "undo", "redo", "delete"}:
+    if kind not in {"save", "open", "new", "undo", "redo", "delete", "history_jump", "history_limit"}:
         return jsonify({"error": "Неизвестная команда."}), 400
     payload: dict[str, Any] = {}
     if kind == "open":
@@ -837,6 +922,10 @@ def api_remote_command():
         if not path or not os.path.exists(path):
             return jsonify({"error": "Файл не найден."}), 404
         payload["path"] = os.path.abspath(path)
+    if kind == "history_jump":
+        payload["id"] = str(data.get("id") or "")
+    if kind == "history_limit":
+        payload["limit"] = storage.set_history_limit(data.get("limit"))
     if kind == "delete":
         try:
             result = _delete_library_file(str(data.get("path") or ""))
@@ -1049,6 +1138,7 @@ def main(splash=None) -> None:
     cfg = storage.load_config()
     recent = cfg.get("recent") or []
     report(f"Недавних отчётов: {len(recent)}", 42)
+    _ensure_library_watch()
 
     port = pick_port()
     SERVER_PORT = port

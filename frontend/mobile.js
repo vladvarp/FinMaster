@@ -19,8 +19,9 @@
     dirty: false,
     recent: [],
     library: { path: "", items: [] },
+    listsSig: "",
     clients: [],
-    history: { undo: false, redo: false },
+    history: { undo: false, redo: false, index: -1, limit: 40, items: [] },
     view: "orders",
     orderId: null,
     ordersResume: null,
@@ -1024,7 +1025,10 @@
         if (typeof data.version === "number") state.version = Math.max(state.version, data.version);
         if (typeof data.autosave === "boolean") applyAutosave(data.autosave);
         if (data.changed) applySnapshot(data);
-        else noteOnline();
+        else {
+          noteOnline();
+          if (applyFileLists(data) && state.view === "files") renderFiles();
+        }
         if (state.version <= before) await sleep(400);
       } catch (err) {
         if (state.stopped) return;
@@ -1038,6 +1042,44 @@
     return !!(state.doc && typeof state.doc === "object");
   }
 
+  function normalizeHistory(raw) {
+    const items = Array.isArray(raw?.items) ? raw.items : [];
+    return {
+      undo: !!raw?.undo,
+      redo: !!raw?.redo,
+      index: Number.isInteger(raw?.index) ? raw.index : -1,
+      limit: Math.max(5, Math.min(200, Number(raw?.limit) || 40)),
+      items,
+    };
+  }
+
+  function historyTime(iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function fileListsSig(library, recent) {
+    const lib = (library?.items || []).map((item) => `${item.path}|${item.modified_at}|${item.bytes}`).join("\n");
+    const rec = (recent || []).map((item) => `${item.path}|${item.exists}`).join("\n");
+    return `${lib}#${rec}`;
+  }
+
+  function applyFileLists(data) {
+    if (!data) return false;
+    const hasLib = data.library && typeof data.library === "object";
+    const hasRec = Array.isArray(data.recent);
+    if (!hasLib && !hasRec) return false;
+    const library = hasLib ? data.library : state.library;
+    const recent = hasRec ? data.recent : state.recent;
+    const sig = fileListsSig(library, recent);
+    if (sig === state.listsSig) return false;
+    state.listsSig = sig;
+    if (hasLib) state.library = library;
+    if (hasRec) state.recent = recent;
+    return true;
+  }
+
   function applySnapshot(data, initial = false) {
     if (typeof data.version === "number") state.version = Math.max(state.version, data.version);
     if (typeof data.autosave === "boolean") applyAutosave(data.autosave);
@@ -1048,9 +1090,11 @@
     if (typeof data.path === "string") state.path = data.path;
     if (typeof data.dirty === "boolean") state.dirty = data.dirty;
     if (Array.isArray(data.clients)) state.clients = data.clients;
-    if (Array.isArray(data.recent)) state.recent = data.recent;
-    if (data.library && typeof data.library === "object") state.library = data.library;
-    if (data.history && typeof data.history === "object") state.history = data.history;
+    const listsChanged = applyFileLists(data);
+    if (data.history && typeof data.history === "object") {
+      state.history = normalizeHistory(data.history);
+      if ($("sheet-title")?.textContent === "История" && !$("sheet").hidden) renderHistorySheet();
+    }
     updateHead();
     if (!data.document) {
       if (state.doc) state.doc = null;
@@ -1061,13 +1105,18 @@
     }
     const incomingVer = typeof data.doc_version === "number" ? data.doc_version : null;
     const fresh = incomingVer == null ? true : incomingVer > state.docVersion;
-    if (!initial && !fresh && !pathChanged && !expectHit) return;
+    if (!initial && !fresh && !pathChanged && !expectHit) {
+      if (listsChanged && state.view === "files") renderFiles();
+      return;
+    }
     if (!initial && data.origin === state.cid && !pathChanged && !expectHit) {
       if (incomingVer != null) state.docVersion = Math.max(state.docVersion, incomingVer);
+      if (listsChanged && state.view === "files") renderFiles();
       return;
     }
     if (!initial && (state.pushTimer || state.pushing || isTyping()) && !pathChanged && !expectHit) {
       if (data.document) state.pending = data.document;
+      if (listsChanged && state.view === "files") renderFiles();
       return;
     }
     if (incomingVer != null) state.docVersion = Math.max(state.docVersion, incomingVer);
@@ -3632,6 +3681,38 @@
     };
   }
 
+  function renderHistorySheet() {
+    const items = state.history.items || [];
+    const index = state.history.index;
+    $("sheet-list").innerHTML = `
+      <div class="empty" style="margin-bottom:8px">Только просмотр: отмена и повтор — стрелками сверху.</div>
+      ${
+        items.length
+          ? items
+              .slice()
+              .reverse()
+              .map((item) => {
+                const i = items.indexOf(item);
+                return `<div class="hist-info ${i === index ? "active" : ""}">
+                  <span>${esc(item.label || "Правка")}</span>
+                  <small>${esc([historyTime(item.at), item.device || (item.source === "mobile" ? "Телефон" : "ПК")].filter(Boolean).join(" · "))}</small>
+                </div>`;
+              })
+              .join("")
+          : `<div class="empty">Пока нет снимков</div>`
+      }`;
+  }
+
+  function openHistorySheet() {
+    $("sheet").classList.remove("is-menu");
+    $("sheet-title").hidden = false;
+    $("sheet-title").textContent = "История";
+    $("sheet").hidden = false;
+    $("sheet").classList.add("is-on");
+    $("sheet")._menu = null;
+    renderHistorySheet();
+  }
+
   function closeSheet() {
     $("sheet").hidden = true;
     $("sheet").classList.remove("is-on", "is-menu");
@@ -3681,6 +3762,16 @@
             <small>синхронно с компьютером</small>
           </span>
         </label>
+        <button type="button" class="menu-history" data-menu="history">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M12 8v4.2L15 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>
+            <strong>История</strong>
+            <small>${(state.history.items || []).length ? `${state.history.items.length} снимков` : "только просмотр"}</small>
+          </span>
+        </button>
         <div class="menu-grid">
           ${tiles
             .map(
@@ -3745,6 +3836,10 @@
       addToHomeScreen();
       if (state.homeScreen === "added") renderMenu();
       else closeSheet();
+      return;
+    }
+    if (value === "history") {
+      openHistorySheet();
       return;
     }
     closeSheet();
@@ -4690,6 +4785,11 @@
     $("sheet").addEventListener("click", (e) => {
       if (e.target.closest("[data-close-sheet]")) {
         closeSheet();
+        return;
+      }
+      const hist = e.target.closest("[data-history-id]");
+      if (hist) {
+        command("history_jump", { id: hist.dataset.historyId });
         return;
       }
       const menu = e.target.closest("[data-menu]");

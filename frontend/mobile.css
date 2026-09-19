@@ -1299,6 +1299,43 @@ h3.section {
   color: var(--muted);
   font-weight: 500;
 }
+.menu-history {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 54px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--field);
+  color: var(--ink);
+  text-align: left;
+}
+.menu-history svg { flex: 0 0 auto; }
+.menu-history span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.menu-history strong { font-size: 15px; font-weight: 700; }
+.menu-history small { font-size: 12px; color: var(--muted); font-weight: 500; }
+.hist-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--field);
+}
+.hist-info.active {
+  border-color: var(--accent-2);
+  background: color-mix(in srgb, var(--accent) 12%, var(--field));
+}
+.hist-info span { font-size: 15px; font-weight: 700; }
+.hist-info small { font-size: 12px; color: var(--muted); }
 .menu-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

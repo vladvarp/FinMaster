@@ -83,8 +83,36 @@
 
   const $ = (id) => document.getElementById(id);
 
-  const HISTORY_LIMIT = 80;
-  const history = { stack: [], index: -1, timer: null, busy: false };
+  const HISTORY_LIMIT_MIN = 5;
+  const HISTORY_LIMIT_MAX = 200;
+  const HISTORY_LIMIT_DEFAULT = 40;
+  const history = {
+    stack: [],
+    index: -1,
+    timer: null,
+    persistTimer: null,
+    flagsTimer: null,
+    busy: false,
+    pending: false,
+    pendingLabel: "",
+    limit: HISTORY_LIMIT_DEFAULT,
+  };
+
+  function clampHistoryLimit(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return HISTORY_LIMIT_DEFAULT;
+    return Math.max(HISTORY_LIMIT_MIN, Math.min(HISTORY_LIMIT_MAX, Math.round(n)));
+  }
+
+  function historyKey(value) {
+    try {
+      const obj = typeof value === "string" ? JSON.parse(value) : JSON.parse(JSON.stringify(value || {}));
+      delete obj.modified_at;
+      return JSON.stringify(obj);
+    } catch {
+      return "";
+    }
+  }
 
   function historySnapshot() {
     try {
@@ -94,30 +122,179 @@
     }
   }
 
-  function historyReset() {
+  function historyGuessLabel(prevJson, nextJson) {
+    try {
+      const a = JSON.parse(prevJson);
+      const b = JSON.parse(nextJson);
+      const ao = a.orders || [];
+      const bo = b.orders || [];
+      if (ao.length < bo.length) return "Новый заказ";
+      if (ao.length > bo.length) return "Удаление заказа";
+      const byId = (list) => Object.fromEntries((list || []).map((o) => [o.id, o]));
+      const A = byId(ao);
+      const B = byId(bo);
+      for (const id of Object.keys(B)) {
+        if (JSON.stringify(A[id] || null) === JSON.stringify(B[id] || null)) continue;
+        const n = String(B[id].number || B[id].name || "").trim();
+        return n ? `Заказ ${n}` : "Правка заказа";
+      }
+      if (JSON.stringify(a.customers || []) !== JSON.stringify(b.customers || [])) return "Справочник заказчиков";
+      if (JSON.stringify(a.statuses || []) !== JSON.stringify(b.statuses || [])) return "Справочник статусов";
+      if (JSON.stringify(a.products || []) !== JSON.stringify(b.products || [])) return "Справочник продуктов";
+      if (JSON.stringify(a.units || []) !== JSON.stringify(b.units || [])) return "Единицы измерения";
+      if (JSON.stringify(a.order_types || []) !== JSON.stringify(b.order_types || [])) return "Типы заказов";
+      if (JSON.stringify(a.ui?.calendar || {}) !== JSON.stringify(b.ui?.calendar || {})) return "Календарь";
+      if (a.title !== b.title) return "Название отчёта";
+    } catch {
+      /* ignore */
+    }
+    return "Правка";
+  }
+
+  function remoteDeviceName(origin) {
+    const cid = String(origin || "");
+    const client = (remote.clients || []).find((c) => c.id === cid);
+    return String(client?.name || "").trim() || "Телефон";
+  }
+
+  function historyItem(json, label, meta) {
+    return {
+      id: uid(),
+      at: new Date().toISOString(),
+      label: label || "Правка",
+      source: meta?.source || "pc",
+      device: meta?.device || "ПК",
+      json,
+    };
+  }
+
+  function historyReset(label = "Открыт отчёт") {
     clearTimeout(history.timer);
+    history.pending = false;
+    history.pendingLabel = "";
     const snap = state.doc ? historySnapshot() : null;
-    history.stack = snap ? [snap] : [];
+    history.stack = snap ? [historyItem(snap, label, { source: "pc", device: "ПК" })] : [];
     history.index = history.stack.length - 1;
     updateHistoryButtons();
+    persistHistorySoon();
   }
 
-  function historyCommit() {
+  function historyTrim() {
+    while (history.stack.length > history.limit) {
+      history.stack.shift();
+      history.index = Math.max(0, history.index - 1);
+    }
+  }
+
+  function historyCommit(label, meta) {
     clearTimeout(history.timer);
-    if (!state.doc || history.busy) return;
+    if (!state.doc || history.busy) return null;
     const snap = historySnapshot();
-    if (snap == null || snap === history.stack[history.index]) return;
+    if (snap == null) return null;
+    const cur = history.stack[history.index];
+    if (cur && historyKey(cur.json) === historyKey(snap)) {
+      history.pending = false;
+      history.pendingLabel = "";
+      return null;
+    }
+    const text = label || history.pendingLabel || (cur ? historyGuessLabel(cur.json, snap) : "Правка");
+    const src = meta || (remote.applying ? { source: "mobile", device: remoteDeviceName(remote.origin) } : { source: "pc", device: "ПК" });
     history.stack = history.stack.slice(0, history.index + 1);
-    history.stack.push(snap);
-    if (history.stack.length > HISTORY_LIMIT) history.stack.shift();
+    history.stack.push(historyItem(snap, text, src));
+    historyTrim();
     history.index = history.stack.length - 1;
+    history.pending = false;
+    history.pendingLabel = "";
     updateHistoryButtons();
+    persistHistorySoon();
+    return history.stack[history.index];
   }
 
-  function historySchedule() {
+  function historySchedule(label) {
     if (history.busy) return;
+    if (label) history.pendingLabel = label;
+    history.pending = true;
     clearTimeout(history.timer);
-    history.timer = setTimeout(historyCommit, 500);
+    history.timer = setTimeout(() => historyCommit(history.pendingLabel), 500);
+  }
+
+  function historyMeta() {
+    return {
+      undo: history.index > 0,
+      redo: history.index < history.stack.length - 1,
+      index: history.index,
+      limit: history.limit,
+      items: history.stack.map((item) => ({
+        id: item.id,
+        at: item.at,
+        label: item.label,
+        source: item.source,
+        device: item.device,
+      })),
+    };
+  }
+
+  function historyDiskPayload() {
+    return {
+      index: history.index,
+      items: history.stack.map((item) => {
+        let doc = null;
+        try {
+          doc = JSON.parse(item.json);
+        } catch {
+          doc = null;
+        }
+        return { id: item.id, at: item.at, label: item.label, source: item.source, device: item.device, doc };
+      }).filter((item) => item.doc),
+    };
+  }
+
+  function persistHistorySoon() {
+    renderHistoryPanel();
+    if (!state.desktop || !state.path) return;
+    clearTimeout(history.persistTimer);
+    history.persistTimer = setTimeout(() => {
+      apiPost("/api/history", {
+        path: state.path,
+        title: state.doc?.title || "",
+        ...historyDiskPayload(),
+      }).catch(() => {});
+    }, 400);
+  }
+
+  function adoptHistory(payload, limit) {
+    if (limit != null) history.limit = clampHistoryLimit(limit);
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    const restored = [];
+    items.forEach((item) => {
+      if (!item || !item.doc || typeof item.doc !== "object") return;
+      try {
+        restored.push({
+          id: item.id || uid(),
+          at: item.at || new Date().toISOString(),
+          label: item.label || "Правка",
+          source: item.source === "mobile" ? "mobile" : "pc",
+          device: item.device || (item.source === "mobile" ? "Телефон" : "ПК"),
+          json: JSON.stringify(item.doc),
+        });
+      } catch {
+        /* skip broken snapshot */
+      }
+    });
+    if (!restored.length) {
+      historyReset(state.path ? "Открыт отчёт" : "Новый отчёт");
+      return;
+    }
+    history.stack = restored;
+    historyTrim();
+    let index = Number(payload?.index);
+    if (!Number.isInteger(index) || index < 0 || index >= history.stack.length) index = history.stack.length - 1;
+    const key = historyKey(state.doc);
+    const match = history.stack.findIndex((item) => historyKey(item.json) === key);
+    history.index = match >= 0 ? match : index;
+    history.pending = false;
+    history.pendingLabel = "";
+    updateHistoryButtons();
   }
 
   function updateHistoryButtons() {
@@ -125,34 +302,35 @@
     const redoBtn = $("btn-redo");
     if (undoBtn) undoBtn.disabled = history.index <= 0;
     if (redoBtn) redoBtn.disabled = history.index >= history.stack.length - 1;
+    const clock = $("btn-history");
+    if (clock) clock.disabled = !state.doc;
     publishHistoryFlags();
+    renderHistoryPanel();
   }
 
   function publishHistoryFlags() {
     if (!state.desktop) return;
     clearTimeout(history.flagsTimer);
     history.flagsTimer = setTimeout(() => {
-      apiPost("/api/remote/publish", {
-        history: { undo: history.index > 0, redo: history.index < history.stack.length - 1 },
-      }).catch(() => {});
+      apiPost("/api/remote/publish", { history: historyMeta() }).catch(() => {});
     }, 300);
   }
 
-  function historyGo(step) {
-    if (!state.doc) return false;
-    if (step < 0) historyCommit();
-    const next = history.index + step;
-    if (next < 0 || next >= history.stack.length) {
-      toast(step < 0 ? "Отменять больше нечего" : "Повторять нечего");
+  function historyApplyIndex(next, { toastText } = {}) {
+    if (!state.doc || next < 0 || next >= history.stack.length) {
+      toast(next < history.index ? "Отменять больше нечего" : "Повторять нечего");
       return false;
     }
+    if (next === history.index && !history.pending) return false;
     let doc;
     try {
-      doc = JSON.parse(history.stack[next]);
+      doc = JSON.parse(history.stack[next].json);
     } catch {
       return false;
     }
     history.busy = true;
+    history.pending = false;
+    history.pendingLabel = "";
     history.index = next;
     state.doc = doc;
     if (state.calendar) {
@@ -164,9 +342,193 @@
     renderAll();
     syncDirty();
     updateHistoryButtons();
+    persistHistorySoon();
     history.busy = false;
     scheduleAutosave();
+    if (toastText) toast(toastText);
     return true;
+  }
+
+  function historyGo(step) {
+    if (!state.doc) return false;
+    if (step < 0 && history.pending) historyCommit(history.pendingLabel);
+    return historyApplyIndex(history.index + step);
+  }
+
+  function historyJump(id) {
+    const next = history.stack.findIndex((item) => item.id === id);
+    if (next < 0) return false;
+    return historyApplyIndex(next, { toastText: history.stack[next].label || "Снимок восстановлен" });
+  }
+
+  async function setHistoryLimit(value) {
+    const next = clampHistoryLimit(value);
+    history.limit = next;
+    const extra = history.stack.length - history.limit;
+    if (extra > 0) {
+      history.stack = history.stack.slice(extra);
+      history.index = Math.max(0, history.index - extra);
+    }
+    if (state.desktop) {
+      try {
+        const res = await apiPost("/api/history/limit", { limit: next });
+        if (res.history_limit) history.limit = clampHistoryLimit(res.history_limit);
+      } catch {
+        /* keep local */
+      }
+    }
+    updateHistoryButtons();
+    persistHistorySoon();
+  }
+
+  function historyTime(iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function fmtBytes(n) {
+    const x = Number(n) || 0;
+    if (x < 1024) return `${Math.round(x)} Б`;
+    if (x < 1024 * 1024) return `${(x / 1024).toFixed(1)} КБ`;
+    if (x < 1024 * 1024 * 1024) return `${(x / (1024 * 1024)).toFixed(1)} МБ`;
+    return `${(x / (1024 * 1024 * 1024)).toFixed(2)} ГБ`;
+  }
+
+  function historyPlaceLabel(row) {
+    if (row.current) return "открыт сейчас";
+    if (!row.exists) return row.in_library ? "удалён из FinMaster" : "файла нет на диске";
+    if (row.in_library) return "в папке FinMaster";
+    return "другой путь";
+  }
+
+  function renderHistoryLibrary(data) {
+    const box = $("history-modal-list");
+    const sum = $("history-modal-sum");
+    if (sum) {
+      const n = (data.items || []).length;
+      sum.textContent = `${data.root || "Документы\\FinMaster\\history"} · ${n} ${n === 1 ? "история" : "историй"} · ${fmtBytes(data.bytes)}`;
+    }
+    if (!box) return;
+    const rows = data.items || [];
+    if (!rows.length) {
+      box.innerHTML = `<div class="empty">Папок истории ещё нет.</div>`;
+      return;
+    }
+    box.innerHTML = `<table class="data hist-lib-table"><thead><tr>
+      <th>Отчёт</th><th>Путь</th><th>Где</th><th>Снимки</th><th>Размер</th><th></th>
+    </tr></thead><tbody>${rows
+      .map(
+        (row) => `<tr class="${row.current ? "is-current" : ""} ${row.exists ? "" : "is-missing"}">
+          <td><b>${esc(row.title || row.folder)}</b><div class="meta">${esc(row.folder)}</div></td>
+          <td class="hist-lib-path">${esc(row.path || "—")}</td>
+          <td>${esc(historyPlaceLabel(row))}</td>
+          <td>${row.count || 0}</td>
+          <td>${esc(fmtBytes(row.bytes))}</td>
+          <td><button class="btn small danger" type="button" data-hist-del="${esc(row.folder)}">Удалить</button></td>
+        </tr>`
+      )
+      .join("")}</tbody></table>`;
+  }
+
+  async function refreshHistoryLibrary() {
+    if (!$("history-modal")?.classList.contains("open") || !state.desktop) return;
+    try {
+      const q = state.path ? `?path=${encodeURIComponent(state.path)}` : "";
+      renderHistoryLibrary(await apiGet(`/api/history/library${q}`));
+    } catch {
+      /* список подтянется при следующем открытии */
+    }
+  }
+
+  async function openHistoryLibrary() {
+    toggleHistoryPanel(false);
+    if (!state.desktop) {
+      toast("Управление историями доступно в программе на компьютере");
+      return;
+    }
+    $("history-modal")?.classList.add("open");
+    try {
+      const q = state.path ? `?path=${encodeURIComponent(state.path)}` : "";
+      renderHistoryLibrary(await apiGet(`/api/history/library${q}`));
+    } catch (err) {
+      toast(`Не удалось открыть истории: ${err.message || err}`);
+    }
+  }
+
+  async function deleteHistoryFolder(name) {
+    const ok = await askConfirm({
+      title: "Удалить историю?",
+      text: `Папка «${name}» и все снимки этого отчёта будут удалены. Сам файл отчёта останется.`,
+      ok: "Удалить",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const data = await apiPost("/api/history/delete", { folder: name, path: state.path || "" });
+      renderHistoryLibrary(data);
+      const current = (data.items || []).some((row) => row.current);
+      if (!current && state.doc) historyReset(state.path ? "Открыт отчёт" : "Новый отчёт");
+      toast("История удалена");
+    } catch (err) {
+      toast(`Не удалось удалить: ${err.message || err}`);
+    }
+  }
+
+  function renderHistoryPanel() {
+    const list = $("history-list");
+    const input = $("history-limit");
+    if (input && document.activeElement !== input) input.value = String(history.limit);
+    if (!list) return;
+    if (!history.stack.length) {
+      list.innerHTML = `<div class="history-empty">Пока нет снимков</div>`;
+      return;
+    }
+    const rows = [...history.stack].reverse();
+    list.innerHTML = rows
+      .map((item) => {
+        const i = history.stack.indexOf(item);
+        return `<button type="button" class="history-item ${i === history.index ? "active" : ""}" data-history-id="${esc(item.id)}">
+          <span class="history-item-top"><b>${esc(item.label || "Правка")}</b><time>${esc(historyTime(item.at))}</time></span>
+          <small>${esc(item.device || (item.source === "mobile" ? "Телефон" : "ПК"))}</small>
+        </button>`;
+      })
+      .join("");
+  }
+
+  function placeHistoryPanel() {
+    const panel = $("history-panel");
+    const btn = $("btn-history");
+    if (!panel || panel.hidden || !btn) return;
+    const r = btn.getBoundingClientRect();
+    const width = Math.min(360, window.innerWidth - 16);
+    let left = r.right - width;
+    if (left < 8) left = 8;
+    if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 8 - width);
+    let top = r.bottom + 8;
+    const spaceBelow = window.innerHeight - top - 8;
+    const spaceAbove = r.top - 8;
+    const need = Math.min(420, window.innerHeight * 0.7);
+    if (spaceBelow < 180 && spaceAbove > spaceBelow) {
+      top = Math.max(8, r.top - 8 - Math.min(need, panel.offsetHeight || need));
+    }
+    panel.style.top = `${Math.round(top)}px`;
+    panel.style.left = `${Math.round(left)}px`;
+    panel.style.right = "auto";
+    panel.style.width = `${Math.round(width)}px`;
+  }
+
+  function toggleHistoryPanel(force) {
+    const panel = $("history-panel");
+    const btn = $("btn-history");
+    if (!panel) return;
+    const open = force == null ? panel.hidden : !!force;
+    panel.hidden = !open;
+    btn?.setAttribute("aria-expanded", String(open));
+    if (open) {
+      renderHistoryPanel();
+      requestAnimationFrame(placeHistoryPanel);
+    }
   }
 
   function undo() {
@@ -559,11 +921,11 @@
     }, 800);
   }
 
-  function markDirty() {
-    if (!state.doc) return;
+  function markDirty(label) {
+    if (!state.doc || history.busy) return;
     state.dirty = true;
     state.doc.modified_at = new Date().toISOString();
-    historySchedule();
+    historySchedule(label);
     updateChrome();
     syncDirty();
     remotePublish();
@@ -606,7 +968,7 @@
   function discardOpenReport() {
     state.doc = emptyDoc();
     state.path = "";
-    historyReset();
+    historyReset("Отчёт закрыт");
     setClean();
     showStart();
   }
@@ -5701,7 +6063,7 @@
     persistCloudPrefs();
     persistChartPrefs();
     state.path = null;
-    historyReset();
+    historyReset("Новый отчёт");
     setClean();
     showApp();
     setView("orders");
@@ -5733,7 +6095,11 @@
     cloudState().catalog = false;
     adoptCloudFromDocument();
     adoptChartsFromDocument();
-    historyReset();
+    if (res.history && Array.isArray(res.history.items) && res.history.items.length) {
+      adoptHistory(res.history, res.history_limit);
+    } else {
+      historyReset("Открыт отчёт");
+    }
     if (res.recent) renderRecent(res.recent);
     else if (res.path) pushLocalRecent(res.path, res.document.title);
     setClean();
@@ -5890,7 +6256,7 @@
           if (picked.cancelled || !picked.path) return false;
           path = picked.path;
         }
-        const res = await apiPost("/api/write", { path, document: state.doc });
+        const res = await apiPost("/api/write", { path, document: state.doc, history: historyDiskPayload() });
         state.doc = res.document;
         state.path = res.path;
         if (res.recent) renderRecent(res.recent);
@@ -6035,6 +6401,7 @@
         try {
           payload = await apiGet("/api/bootstrap");
           state.autosave = !!payload.autosave;
+          if (payload.history_limit) history.limit = clampHistoryLimit(payload.history_limit);
         } catch {
           payload = {};
         }
@@ -6049,6 +6416,7 @@
     }
     state.recentItems = payload.recent || [];
     state.library = payload.library || null;
+    state.listsSig = fileListsSig(state.library, state.recentItems);
     renderRecentItems(state.recentItems);
     renderLibrary(state.library);
     applyStartView(startViewMode());
@@ -6303,6 +6671,37 @@
     });
     $("btn-undo").addEventListener("click", undo);
     $("btn-redo").addEventListener("click", redo);
+    $("btn-history")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const panel = $("history-panel");
+      toggleHistoryPanel(panel?.hidden);
+    });
+    $("history-panel")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (e.target.closest("#btn-history-manage")) {
+        openHistoryLibrary();
+        return;
+      }
+      const item = e.target.closest("[data-history-id]");
+      if (item) historyJump(item.dataset.historyId);
+    });
+    $("history-limit")?.addEventListener("change", (e) => {
+      setHistoryLimit(e.target.value);
+    });
+    $("history-modal-close")?.addEventListener("click", () => $("history-modal")?.classList.remove("open"));
+    $("history-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("history-modal")) $("history-modal")?.classList.remove("open");
+    });
+    $("history-modal-list")?.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-hist-del]");
+      if (btn) deleteHistoryFolder(btn.dataset.histDel);
+    });
+    document.addEventListener("click", (e) => {
+      if (e.target.closest("#history-pop") || e.target.closest("#history-panel") || e.target.closest("#history-modal")) return;
+      toggleHistoryPanel(false);
+    });
+    window.addEventListener("resize", placeHistoryPanel);
+    window.addEventListener("scroll", placeHistoryPanel, true);
     $("btn-command").addEventListener("click", openPalette);
     $("btn-fullscreen")?.addEventListener("click", () => toggleAppFullscreen());
     document.addEventListener("fullscreenchange", () => {
@@ -6926,7 +7325,7 @@
         state.path = file.name;
         adoptCloudFromDocument();
         adoptChartsFromDocument();
-        historyReset();
+        historyReset("Открыт отчёт");
         pushLocalRecent(file.name, state.doc.title);
         setClean();
         showApp();
@@ -8921,6 +9320,10 @@
     publishTimer: null,
     polling: false,
     applying: false,
+    origin: "",
+    deferred: null,
+    deferredOrigin: "",
+    clients: [],
   };
 
   const NET_KIND = {
@@ -9433,7 +9836,7 @@
           document: state.doc,
           path: state.path,
           dirty: state.dirty,
-          history: { undo: history.index > 0, redo: history.index < history.stack.length - 1 },
+          history: historyMeta(),
         });
         if (res.version) remote.version = res.version;
       } catch {
@@ -9465,7 +9868,7 @@
           (data.doc_version || 0) > remote.docVersion
         ) {
           remote.docVersion = data.doc_version || 0;
-          applyRemoteDoc(data.document);
+          applyRemoteDoc(data.document, data.origin);
         }
         if (typeof data.autosave === "boolean") applyRemoteAutosave(data.autosave);
         if (data.nav && data.nav.seq > remote.lastNav) {
@@ -9496,21 +9899,23 @@
     return true;
   }
 
-  function applyRemoteDoc(doc) {
+  function applyRemoteDoc(doc, origin) {
     const active = document.activeElement;
     const typing = active && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName);
     if (typing) {
       remote.deferred = doc;
+      remote.deferredOrigin = origin;
       return;
     }
-    remote.applying = true;
     historyCommit();
+    remote.applying = true;
+    remote.origin = origin || "";
     state.doc = doc;
     state.dirty = true;
+    historyCommit("Правка", { source: "mobile", device: remoteDeviceName(origin) });
     showApp();
     renderAll();
     syncDirty();
-    historySchedule();
     remote.applying = false;
     scheduleAutosave();
     toast("Изменения с телефона применены");
@@ -9595,7 +10000,9 @@
     if (!remote.deferred) return;
     const doc = remote.deferred;
     remote.deferred = null;
-    applyRemoteDoc(doc);
+    const origin = remote.deferredOrigin;
+    remote.deferredOrigin = "";
+    applyRemoteDoc(doc, origin);
   }
 
   async function runRemoteCommand(cmd) {
@@ -9610,6 +10017,19 @@
       const back = cmd.type === "undo";
       const ok = historyGo(back ? -1 : 1);
       if (ok) toast(back ? "Действие отменено с телефона" : "Действие возвращено с телефона");
+    } else if (cmd.type === "history_jump") {
+      const ok = historyJump(String(cmd.id || ""));
+      if (ok) toast("Снимок восстановлен с телефона");
+    } else if (cmd.type === "history_limit") {
+      history.limit = clampHistoryLimit(cmd.limit);
+      const extra = history.stack.length - history.limit;
+      if (extra > 0) {
+        history.stack = history.stack.slice(extra);
+        history.index = Math.max(0, history.index - extra);
+      }
+      updateHistoryButtons();
+      persistHistorySoon();
+      toast(`Хранить снимков: ${history.limit}`);
     } else if (cmd.type === "new") {
       const stay = !!state.view && $("app-shell") && !$("app-shell").hidden;
       const view = stay ? state.view : "dashboard";
@@ -9619,7 +10039,7 @@
       persistCloudPrefs();
       persistChartPrefs();
       state.path = "";
-      historyReset();
+      historyReset("Новый отчёт");
       setClean();
       showApp();
       setView(view);
@@ -9641,19 +10061,72 @@
     remotePublish();
   }
 
+  function fileListsSig(library, recent) {
+    const lib = (library?.items || []).map((item) => `${item.path}|${item.modified_at}|${item.bytes}|${item.orders}`).join("\n");
+    const rec = (recent || []).map((item) => `${item.path}|${item.exists}|${item.opened_at}`).join("\n");
+    return `${lib}#${rec}`;
+  }
+
+  function pathInLibraryFolder(path, folder) {
+    if (!path || !folder) return false;
+    const file = String(path).replace(/\//g, "\\").toLowerCase();
+    const root = String(folder).replace(/\//g, "\\").toLowerCase().replace(/\\+$/, "");
+    return file.startsWith(`${root}\\`) && file.endsWith(".fmaster");
+  }
+
+  function noteMissingOpenFile(library) {
+    if (!state.path || !state.doc) return;
+    const folder = library?.path || "";
+    if (!pathInLibraryFolder(state.path, folder)) return;
+    const there = (library?.items || []).some((item) => samePath(item.path, state.path));
+    if (there) {
+      state.missingFileNoted = false;
+      return;
+    }
+    if (state.missingFileNoted) return;
+    state.missingFileNoted = true;
+    toast("Файл отчёта удалён или перемещён — при необходимости сохраните копию");
+  }
+
   function applyRemoteLists(data) {
-    if (!data) return;
-    if (data.library) {
-      state.library = data.library;
-      renderLibrary(data.library);
+    if (!data) return false;
+    const hasLib = !!data.library;
+    const hasRecent = Array.isArray(data.recent);
+    if (!hasLib && !hasRecent) return false;
+    const library = hasLib ? data.library : state.library;
+    const recent = hasRecent ? data.recent : state.recentItems || [];
+    const sig = fileListsSig(library, recent);
+    if (sig === state.listsSig) return false;
+    state.listsSig = sig;
+    if (hasLib) {
+      state.library = library;
+      renderLibrary(library);
     }
-    if (Array.isArray(data.recent)) {
-      state.recentItems = data.recent;
-      renderRecentItems(data.recent);
+    if (hasRecent) {
+      state.recentItems = recent;
+      renderRecentItems(recent);
     }
+    noteMissingOpenFile(state.library);
+    refreshHistoryLibrary();
     if (cloudState().catalog && state.view === "cloud") renderGalaxyCloud();
     if ($("start-screen") && !$("start-screen").classList.contains("hidden") && startViewMode() === "galaxies") {
       renderStartGalaxies();
+    }
+    return true;
+  }
+
+  async function libraryWatchLoop() {
+    if (!state.desktop || state.libraryWatching) return;
+    state.libraryWatching = true;
+    let version = 0;
+    while (state.desktop) {
+      try {
+        const data = await apiGet(`/api/library/watch?since=${version}`);
+        if (typeof data.version === "number") version = data.version;
+        applyRemoteLists(data);
+      } catch {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
     }
   }
 
@@ -9834,6 +10307,7 @@
       state.autosave = !!bootData.autosave;
       applyTheme(bootData.theme || "light", false);
       await renderStartLists(bootData);
+      libraryWatchLoop();
       await apiPost("/api/dirty", { dirty: false });
       if (bootData.remote) {
         applyRemotePayload(bootData.remote);

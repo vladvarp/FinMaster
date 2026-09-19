@@ -138,6 +138,14 @@
         <div class="top-right">
           <div class="history-group">
             <button class="btn icon" type="button" id="btn-undo" title="Отменить (Ctrl+Z)" disabled>↶</button>
+            <div class="history-pop" id="history-pop">
+              <button class="btn icon" type="button" id="btn-history" title="История изменений" aria-label="История изменений" aria-haspopup="dialog" aria-expanded="false" aria-controls="history-panel" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.8"/>
+                  <path d="M12 8v4.2L15 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
             <button class="btn icon" type="button" id="btn-redo" title="Повторить (Ctrl+Y)" disabled>↷</button>
           </div>
           <button class="btn phone-btn js-open-remote" type="button" id="btn-remote" title="Управление с телефона">
@@ -813,7 +821,7 @@
           <div class="help-row"><span>Новый отчёт</span><span><kbd>Ctrl</kbd><kbd>N</kbd></span></div>
           <h4>Общее</h4>
           <div class="help-row"><span>Командная палитра</span><span><kbd>Ctrl</kbd><kbd>K</kbd></span></div>
-          <div class="help-row"><span>Отменить действие</span><span><kbd>Ctrl</kbd><kbd>Z</kbd></span></div>
+          <div class="help-row"><span>Отменить / история снимков</span><span><kbd>Ctrl</kbd><kbd>Z</kbd></span></div>
           <div class="help-row"><span>Повторить действие</span><span><kbd>Ctrl</kbd><kbd>Y</kbd></span></div>
           <div class="help-row"><span>Поиск по отчёту</span><span><kbd>Ctrl</kbd><kbd>F</kbd></span></div>
           <div class="help-row"><span>Эта подсказка</span><span><kbd>F1</kbd></span></div>
@@ -849,6 +857,24 @@
     </div>
   </div>
 
+  <div class="history-panel" id="history-panel" hidden>
+    <div class="history-panel-h">
+      <strong>История</strong>
+      <label>Хранить <input type="number" id="history-limit" min="5" max="200" step="1" /></label>
+    </div>
+    <button class="btn small history-manage" type="button" id="btn-history-manage">Все истории отчётов</button>
+    <div class="history-list" id="history-list"></div>
+  </div>
+  <div class="modal" id="history-modal">
+    <div class="modal-card history-modal">
+      <div class="modal-title-row">
+        <h3>Истории отчётов</h3>
+        <button class="btn" type="button" id="history-modal-close">Закрыть</button>
+      </div>
+      <p id="history-modal-sum">Снимки лежат в Документы\FinMaster\history — по папке на отчёт.</p>
+      <div class="table-wrap" id="history-modal-list"></div>
+    </div>
+  </div>
   <div class="toast" id="toast"></div>
   <input type="file" id="file-input" accept=".fmaster,.json" hidden />
 
