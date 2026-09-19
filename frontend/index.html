@@ -195,15 +195,17 @@
                 <option value="customer">По заказчику</option>
                 <option value="amount-desc">По сумме ↓</option>
               </select>
+              <div class="cal-filter" id="order-filter">
+                <button type="button" class="btn" id="btn-order-filter" title="Фильтр заказов" aria-haspopup="menu" aria-expanded="false" aria-controls="order-filter-menu">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M4 5h16l-6.2 7.4v5.1L10.2 19v-6.6L4 5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                  </svg>
+                  <span id="order-filter-label">Все</span>
+                </button>
+                <div class="cal-filter-menu" id="order-filter-menu" hidden role="menu"></div>
+              </div>
             </div>
             <div class="right" id="orders-summary"></div>
-          </div>
-          <div class="chips" id="order-chips">
-            <button class="chip active" type="button" data-filter="all">Все<span class="chip-count"></span></button>
-            <button class="chip" type="button" data-filter="debt">С долгом<span class="chip-count"></span></button>
-            <button class="chip" type="button" data-filter="paid">Оплаченные<span class="chip-count"></span></button>
-            <button class="chip" type="button" data-filter="month">Этот месяц<span class="chip-count"></span></button>
-            <button class="chip" type="button" data-filter="empty">Без цены<span class="chip-count"></span></button>
           </div>
           <div id="orders-list"></div>
         </div>
@@ -347,23 +349,50 @@
                 <div class="cal-filter-menu" id="cal-filter-menu" hidden role="menu"></div>
               </div>
               <div class="cal-modes" role="tablist" aria-label="Вид календаря">
-                <button type="button" class="btn" data-cal-mode="timeline" title="Диаграмма Ганта по дням">Таймлайн</button>
-                <button type="button" class="btn" data-cal-mode="classic" title="Месячная сетка">Классический</button>
-                <button type="button" class="btn" data-cal-mode="extended" title="Неделя: старты, в работе и финиши">Неделя</button>
-              </div>
-              <div class="cal-filter" id="cal-weekends">
-                <button type="button" class="btn" id="btn-cal-weekends" title="Выходные: дни недели и отдельные даты" aria-haspopup="menu" aria-expanded="false" aria-controls="cal-weekend-menu">
-                  Выходные
+                <button type="button" class="btn cal-ico" data-cal-mode="timeline" title="Таймлайн — диаграмма Ганта" aria-label="Таймлайн">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M4 7h11M4 12h16M4 17h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
                 </button>
-                <div class="cal-filter-menu cal-weekend-menu" id="cal-weekend-menu" hidden role="menu"></div>
+                <button type="button" class="btn cal-ico" data-cal-mode="classic" title="Классический — сетка месяца" aria-label="Классический">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/>
+                    <path d="M4 9.5h16M8 5v3M16 5v3M8 13h.01M12 13h.01M16 13h.01M8 16.5h.01M12 16.5h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  </svg>
+                </button>
+                <button type="button" class="btn cal-ico" data-cal-mode="extended" title="Неделя — старты, в работе и финиши" aria-label="Неделя">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M5 9v8M8.5 6v11M12 8v9M15.5 7v10M19 10v7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  </svg>
+                </button>
               </div>
             </div>
             <div class="cal-nav">
               <button class="btn" type="button" id="cal-prev" title="Предыдущий период (←)">‹</button>
-              <button class="btn" type="button" id="cal-today" title="К сегодняшнему дню (T)">Сегодня</button>
               <div class="cal-title" id="cal-title"></div>
               <button class="btn" type="button" id="cal-next" title="Следующий период (→)">›</button>
-              <button class="btn" type="button" id="cal-copy" title="Скопировать план работ на видимый период">План работ</button>
+              <button class="btn cal-ico" type="button" id="cal-today" title="К сегодняшнему дню (T)" aria-label="Сегодня">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/>
+                  <path d="M4 9.5h16M8 5v3M16 5v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  <circle cx="12" cy="15" r="2.3" fill="currentColor"/>
+                </svg>
+              </button>
+              <div class="cal-filter" id="cal-weekends">
+                <button type="button" class="btn cal-ico" id="btn-cal-weekends" title="Выходные: дни недели и отдельные даты" aria-label="Выходные" aria-haspopup="menu" aria-expanded="false" aria-controls="cal-weekend-menu">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="3.6" stroke="currentColor" stroke-width="1.8"/>
+                    <path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6.2 6.2l1.6 1.6M16.2 16.2l1.6 1.6M6.2 17.8l1.6-1.6M16.2 7.8l1.6-1.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  </svg>
+                </button>
+                <div class="cal-filter-menu cal-weekend-menu" id="cal-weekend-menu" hidden role="menu"></div>
+              </div>
+              <button class="btn cal-ico" type="button" id="cal-copy" title="Скопировать план работ на видимый период" aria-label="План работ">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <rect x="6" y="4" width="12" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/>
+                  <path d="M9 3.8h6v2.8H9zM9 11h6M9 14.2h6M9 17.4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
             </div>
           </div>
           <div class="cal-layout">

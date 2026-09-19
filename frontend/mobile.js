@@ -334,6 +334,7 @@
     done: { label: "завершён", tone: "ok", color: "#059669" },
     overdue: { label: "просрочен", tone: "warn", color: "#dc2626" },
     cancelled: { label: "снят", tone: "mute", color: "#64748b" },
+    paused: { label: "На паузе", tone: "pause", color: "#7c3aed" },
   };
 
   function dayStart(d) {
@@ -446,6 +447,88 @@
       order.work_start = end;
       order.work_end = start;
     }
+    if (!order.work_start && !order.work_end) order.work_pauses = [];
+    else normalizeWorkPauses(order);
+    return order;
+  }
+
+  function workPauses(order) {
+    return Array.isArray(order?.work_pauses) ? order.work_pauses : [];
+  }
+
+  function pauseIsOpen(order, pause) {
+    if (!pause || dateValue(order.work_end)) return false;
+    if (pause.open) return true;
+    const till = dateValue(pause.end);
+    if (!till) return !!dateValue(pause.start);
+    return till >= dayKey(dayStart(new Date()));
+  }
+
+  function pauseEndKey(order, pause, today = dayStart(new Date())) {
+    if (pauseIsOpen(order, pause)) return dayKey(today);
+    return dateValue(pause?.end);
+  }
+
+  function isPaused(order, day) {
+    const key = typeof day === "string" ? String(day).slice(0, 10) : dayKey(dayStart(day));
+    const today = dayStart(new Date());
+    return workPauses(order).some((pause) => {
+      const from = dateValue(pause.start);
+      const till = pauseEndKey(order, pause, today);
+      return from && till && key >= from && key <= till;
+    });
+  }
+
+  function normalizeWorkPauses(order) {
+    const start = dateValue(order.work_start);
+    const end = dateValue(order.work_end);
+    if (!start && !end) {
+      order.work_pauses = [];
+      return order;
+    }
+    const envStart = start;
+    const envEnd = end || (start ? dayKey(dayStart(new Date())) : "");
+    const items = [];
+    workPauses(order).forEach((pause) => {
+      if (!pause || typeof pause !== "object") return;
+      let from = dateValue(pause.start);
+      let till = dateValue(pause.end);
+      const todayKey = envEnd && !end ? envEnd : dayKey(dayStart(new Date()));
+      const wasOpen = !!(pause.open || !till);
+      let open = !end && (wasOpen || (till && envEnd && till >= envEnd));
+      if (from && till && till < from) [from, till] = [till, from];
+      if (!from && !till && !wasOpen) return;
+      from = from || till || envStart;
+      if (envStart && from < envStart) from = envStart;
+      if (open) till = envEnd;
+      else {
+        if (wasOpen) till = todayKey;
+        till = till || from;
+        if (envEnd && till > envEnd) till = envEnd;
+      }
+      if (envStart && till < envStart) return;
+      if (envEnd && from > envEnd) return;
+      if (from && till && from <= till) {
+        items.push(open ? { start: from, end: "", open: true } : { start: from, end: till });
+      }
+    });
+    items.sort((a, b) => a.start.localeCompare(b.start) || String(a.end || envEnd).localeCompare(String(b.end || envEnd)));
+    const merged = [];
+    items.forEach((pause) => {
+      const last = merged[merged.length - 1];
+      const lastEndKey = last ? (last.open ? envEnd : last.end) : "";
+      const lastEnd = lastEndKey ? parseDay(lastEndKey) : null;
+      const nextStart = parseDay(pause.start);
+      if (last && lastEnd && nextStart && nextStart <= addDays(lastEnd, 1)) {
+        if (pause.open || last.open) {
+          last.end = "";
+          last.open = true;
+        } else if (pause.end > last.end) last.end = pause.end;
+        return;
+      }
+      merged.push(pause.open ? { start: pause.start, end: "", open: true } : { start: pause.start, end: pause.end });
+    });
+    order.work_pauses = merged;
     return order;
   }
 
@@ -464,12 +547,21 @@
     return "now";
   }
 
-  function workStatusMeta(order) {
+  function orderIsPausedNow(order, today = dayStart(new Date())) {
+    const st = workStatus(order, today);
+    if (st === "cancelled" || st === "nodate") return false;
+    return isPaused(order, today);
+  }
+
+  function workStatusMeta(order, day) {
     const id = workStatus(order);
+    const paused = day ? isPaused(order, day) : orderIsPausedNow(order);
+    if (paused && id !== "cancelled" && id !== "nodate") return { id: "paused", ...WORK_STATUS.paused };
     return { id, ...(WORK_STATUS[id] || WORK_STATUS.nodate) };
   }
 
   function calendarRole(order, day) {
+    if (isPaused(order, day)) return "На паузе";
     const key = dayKey(day);
     const start = dateValue(order.work_start);
     const end = dateValue(order.work_end);
@@ -506,7 +598,7 @@
   }
 
   function orderCoversDay(order, day) {
-    if (isWeekend(day)) return false;
+    if (isWeekend(day) || isPaused(order, day)) return false;
     const start = parseDay(order.work_start);
     const end = parseDay(order.work_end);
     if (!start && !end) return false;
@@ -521,6 +613,11 @@
     }
     if (!start && end) return d <= end;
     return d >= start && d <= end;
+  }
+
+  function orderMarksDay(order, day) {
+    if (isWeekend(day)) return false;
+    return isPaused(order, day) || orderCoversDay(order, day);
   }
 
   function setWorkToday(order, which) {
@@ -1157,6 +1254,7 @@
       created_at: localStamp(new Date()),
       work_start: "",
       work_end: "",
+      work_pauses: [],
       lines: [emptyLine()],
     };
   }
@@ -1402,26 +1500,30 @@
 
   /* ================= список заказов ================= */
 
+  const ORDER_FILTERS = [
+    ["all", "Все"],
+    ["debt", "С долгом"],
+    ["paid", "Оплачены"],
+    ["month", "Этот месяц"],
+  ];
+
   function renderChips() {
+    const btn = $("btn-m-order-filter");
+    const menu = $("m-order-filter-menu");
+    const label = $("m-order-filter-label");
+    if (!btn || !menu) return;
     const list = orders();
-    const counts = {
-      all: list.length,
-      debt: list.filter((o) => matchesFilter(o, "debt")).length,
-      paid: list.filter((o) => matchesFilter(o, "paid")).length,
-      month: list.filter((o) => matchesFilter(o, "month")).length,
-    };
-    const defs = [
-      ["all", "Все"],
-      ["debt", "С долгом"],
-      ["paid", "Оплачены"],
-      ["month", "Этот месяц"],
-    ];
-    $("chips").innerHTML = defs
-      .map(
-        ([id, label]) =>
-          `<button type="button" class="chip ${state.filter === id ? "active" : ""}" data-chip="${id}">${label}<b>${counts[id]}</b></button>`
-      )
-      .join("");
+    const meta = ORDER_FILTERS.find(([id]) => id === state.filter) || ORDER_FILTERS[0];
+    const n = meta[0] === "all" ? list.length : list.filter((o) => matchesFilter(o, meta[0])).length;
+    if (label) label.textContent = meta[1];
+    btn.title = `Фильтр заказов: ${meta[1]} · ${n}`;
+    btn.classList.toggle("active", state.filter !== "all");
+    btn.setAttribute("aria-expanded", "false");
+    menu.hidden = true;
+    menu.innerHTML = ORDER_FILTERS.map(([id, name]) => {
+      const count = id === "all" ? list.length : list.filter((o) => matchesFilter(o, id)).length;
+      return `<button type="button" class="btn ${state.filter === id ? "active" : ""}" data-chip="${id}" role="menuitem">${esc(name)}<span>${count}</span></button>`;
+    }).join("");
   }
 
   function statusDotsHtml(lines) {
@@ -1581,7 +1683,7 @@
           <div class="field"><label>Конец работ</label><input type="date" value="${esc(dateValue(order.work_end))}" ${a("work_end")} /></div>
         </div>
         <div class="work-row">
-          <span class="work-pill work-pill-${esc(workStatus(order))}">${esc(workStatusMeta(order).label)}</span>
+          <span class="work-pill work-pill-${esc(workStatusMeta(order).id)}">${esc(workStatusMeta(order).label)}</span>
           ${workActButtons(order, false)}
         </div>
         <div class="field last"><label>Заметки</label><textarea rows="3" ${a("notes")}>${esc(order.notes || "")}</textarea></div>
@@ -2277,8 +2379,8 @@
     const overdue = all.filter((order) => workStatus(order) === "overdue");
     const nodate = all.filter((order) => workStatus(order) === "nodate");
     const modes = [
-      ["classic", "Классический"],
-      ["extended", "Неделя"],
+      ["classic", "Классический — сетка месяца"],
+      ["extended", "Неделя — старты, в работе и финиши"],
     ];
     const filters = [
       ["all", "Все"],
@@ -2288,6 +2390,11 @@
       ["overdue", "Просрочены"],
       ["nodate", "Без дат"],
     ];
+    const modeIcon = (id) =>
+      id === "classic"
+        ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 9.5h16M8 5v3M16 5v3M8 13h.01M12 13h.01M16 13h.01M8 16.5h.01M12 16.5h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`
+        : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 9v8M8.5 6v11M12 8v9M15.5 7v10M19 10v7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+    const filterMeta = filters.find(([id]) => id === cal.filter) || filters[0];
     let title = "";
     let board = "";
     if (cal.filter === "nodate") {
@@ -2305,11 +2412,11 @@
       const cells = [];
       for (let d = gridFrom; d <= gridTo; d = addDays(d, 1)) {
         const key = dayKey(d);
-        const covering = list.filter((order) => orderCoversDay(order, d));
+        const covering = list.filter((order) => orderMarksDay(order, d));
         const n = covering.length;
         const inMonth = d.getMonth() === from.getMonth();
         const note = dayNote(key);
-        cells.push(`<button type="button" class="mcal-cell ${inMonth ? "" : "is-out"} ${dayToneClass(d)} ${note ? "has-note" : ""} ${key === dayKey(today) ? "is-today" : ""} ${mcalDayTone(covering)}" data-cal-day="${key}">
+        cells.push(`<button type="button" class="mcal-cell ${inMonth ? "" : "is-out"} ${dayToneClass(d)} ${note ? "has-note" : ""} ${key === dayKey(today) ? "is-today" : ""} ${cal.pick === key ? "is-pick" : ""} ${mcalDayTone(covering)}" data-cal-day="${key}">
           <b>${d.getDate()}</b>${n ? `<i>${n}</i>` : ""}${note ? `<em class="mcal-memo">${esc(note)}</em>` : ""}
         </button>`);
       }
@@ -2317,7 +2424,7 @@
         <div class="mcal-month">${cells.join("")}</div>`;
       if (cal.pick) {
         const pick = parseDay(cal.pick);
-        const items = list.filter((order) => orderCoversDay(order, pick));
+        const items = list.filter((order) => orderMarksDay(order, pick));
         const pickKey = dayKey(pick);
         board += `<div class="mcal-daylist"><h3>${esc(calFmtDay(pick))}</h3>
           <label class="mcal-note">Заметка<textarea rows="2" data-cal-note="${esc(pickKey)}" placeholder="Что в этот день">${esc(dayNote(pickKey))}</textarea></label>
@@ -2333,18 +2440,19 @@
         ? `<div class="mcal-week">${weekDays
         .map((day) => {
           const key = dayKey(day);
-          const items = list.filter((order) => orderCoversDay(order, day));
-          const starts = items.filter((order) => dateValue(order.work_start) === key);
-          const ends = items.filter((order) => dateValue(order.work_end) === key);
-          const running = items.filter((order) => dateValue(order.work_start) !== key && dateValue(order.work_end) !== key);
+          const items = list.filter((order) => orderMarksDay(order, day));
+          const starts = items.filter((order) => dateValue(order.work_start) === key && !isPaused(order, day));
+          const ends = items.filter((order) => dateValue(order.work_end) === key && !isPaused(order, day));
+          const paused = items.filter((order) => isPaused(order, day));
+          const running = items.filter((order) => !isPaused(order, day) && dateValue(order.work_start) !== key && dateValue(order.work_end) !== key);
           const note = dayNote(key);
           const block = (title, rows) =>
             rows.length ? `<div class="mcal-sec">${esc(title)}</div>${rows.map((order) => mcalOrderCard(order, day)).join("")}` : "";
-          return `<div class="mcal-col ${dayToneClass(day)} ${key === dayKey(today) ? "is-today" : ""} ${mcalDayTone(items)}" data-cal-day="${key}">
+          return `<div class="mcal-col ${dayToneClass(day)} ${key === dayKey(today) ? "is-today" : ""} ${cal.pick === key ? "is-pick" : ""} ${mcalDayTone(items)}" data-cal-day="${key}">
             <div class="mcal-col-h"><b>${RU_WEEKDAYS[(day.getDay() + 6) % 7]}</b><span>${day.getDate()}</span><i>${items.length}</i></div>
             ${note && cal.pick !== key ? `<div class="mcal-memo">${esc(note)}</div>` : ""}
             ${cal.pick === key ? `<label class="mcal-note">Заметка<textarea rows="2" data-cal-note="${esc(key)}" placeholder="Что в этот день">${esc(note)}</textarea></label>` : ""}
-            ${block("Старт", starts)}${block("В работе", running)}${block("Финиш", ends)}
+            ${block("Старт", starts)}${block("В работе", running)}${block("На паузе", paused)}${block("Финиш", ends)}
             ${items.length ? "" : `<div class="empty">пусто</div>`}
           </div>`;
         })
@@ -2362,28 +2470,47 @@
         ? `<select class="mcal-pick" data-cal-month aria-label="Месяц">${RU_MONTHS_NOM.map((name, i) => `<option value="${i}" ${i === month ? "selected" : ""}>${esc(name)}</option>`).join("")}</select>
            <select class="mcal-pick" data-cal-year aria-label="Год">${yearOpts}</select>`
         : `<strong>${esc(title)}</strong>`;
+    const todayIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 9.5h16M8 5v3M16 5v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="15" r="2.3" fill="currentColor"/></svg>`;
     $("calendar-body").innerHTML = `
-      <div class="mcal-modes">${modes
-        .map(([id, label]) => `<button type="button" class="chip ${cal.mode === id ? "active" : ""}" data-cal-mode="${id}">${label}</button>`)
-        .join("")}</div>
-      ${
-        cal.filter === "nodate"
-          ? ""
-          : `<div class="mcal-nav">
-        <button type="button" class="btn" data-cal-nav="-1">‹</button>
-        <button type="button" class="btn" data-cal-nav="0">Сегодня</button>
-        ${titleHtml}
-        <button type="button" class="btn" data-cal-nav="1">›</button>
-      </div>`
-      }
       <div class="mcal-kpis">
         <div><span>Идёт</span><b>${now.length}</b></div>
         <div class="${overdue.length ? "warn" : ""}"><span>Просрочены</span><b>${overdue.length}</b></div>
         <div><span>Без дат</span><b>${nodate.length}</b></div>
       </div>
-      <div class="chips">${filters
-        .map(([id, label]) => `<button type="button" class="chip ${cal.filter === id ? "active" : ""}" data-cal-filter="${id}">${label}</button>`)
-        .join("")}</div>
+      <div class="mcal-top">
+        <div class="mcal-modes">${modes
+          .map(
+            ([id, label]) =>
+              `<button type="button" class="chip ${cal.mode === id ? "active" : ""}" data-cal-mode="${id}" title="${esc(label)}" aria-label="${esc(label)}">${modeIcon(id)}</button>`
+          )
+          .join("")}</div>
+        <div class="mcal-filter">
+          <button type="button" class="btn ${cal.filter !== "all" ? "active" : ""}" id="btn-mcal-filter" title="Фильтр заказов: ${esc(filterMeta[1])}" aria-haspopup="menu" aria-expanded="false" aria-controls="mcal-filter-menu">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 5h16l-6.2 7.4v5.1L10.2 19v-6.6L4 5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            </svg>
+            <span>${esc(filterMeta[1])}</span>
+          </button>
+          <div class="mcal-filter-menu" id="mcal-filter-menu" hidden role="menu">${filters
+            .map(
+              ([id, label]) =>
+                `<button type="button" class="btn ${cal.filter === id ? "active" : ""}" data-cal-filter="${id}" role="menuitem">${esc(label)}<span>${id === "all" ? all.length : all.filter((order) => workStatus(order) === id).length}</span></button>`
+            )
+            .join("")}</div>
+        </div>
+      </div>
+      <div class="mcal-nav">
+        <button type="button" class="btn mcal-ico" data-cal-nav="0" title="Сегодня" aria-label="Сегодня">${todayIcon}</button>
+        ${
+          cal.filter === "nodate"
+            ? ""
+            : `<div class="mcal-nav-dates">
+          <button type="button" class="btn" data-cal-nav="-1">‹</button>
+          ${titleHtml}
+          <button type="button" class="btn" data-cal-nav="1">›</button>
+        </div>`
+        }
+      </div>
       ${board}
     `;
   }
@@ -2395,7 +2522,7 @@
   }
 
   function mcalOrderCard(order, day) {
-    const meta = workStatusMeta(order);
+    const meta = workStatusMeta(order, day);
     const t = orderTotals(order);
     const role = day ? calendarRole(order, day) : "";
     return `<article class="card order-item mcal-order tone-${esc(meta.tone)}" data-open="${esc(order.id)}" style="--tint:${esc(meta.color)}">
@@ -4084,11 +4211,25 @@
         renderCalendar();
         return;
       }
+      if (e.target.closest("#btn-mcal-filter")) {
+        const menu = $("mcal-filter-menu");
+        const btn = $("btn-mcal-filter");
+        if (!menu) return;
+        const open = menu.hidden;
+        menu.hidden = !open;
+        btn?.setAttribute("aria-expanded", String(open));
+        return;
+      }
       const calFilter = e.target.closest("[data-cal-filter]");
       if (calFilter) {
         state.cal.filter = calFilter.dataset.calFilter;
         renderCalendar();
         return;
+      }
+      const filterMenu = $("mcal-filter-menu");
+      if (filterMenu && !filterMenu.hidden && !e.target.closest(".mcal-filter")) {
+        filterMenu.hidden = true;
+        $("btn-mcal-filter")?.setAttribute("aria-expanded", "false");
       }
       const calNav = e.target.closest("[data-cal-nav]");
       if (calNav) {
@@ -4122,11 +4263,25 @@
         openEditor(editRow.dataset.edit);
         return;
       }
+      if (e.target.closest("#btn-m-order-filter")) {
+        const menu = $("m-order-filter-menu");
+        const btn = $("btn-m-order-filter");
+        if (!menu) return;
+        const open = menu.hidden;
+        menu.hidden = !open;
+        btn?.setAttribute("aria-expanded", String(open));
+        return;
+      }
       const chip = e.target.closest("[data-chip]");
       if (chip) {
         state.filter = chip.dataset.chip;
         renderOrders();
         return;
+      }
+      const orderFilterMenu = $("m-order-filter-menu");
+      if (orderFilterMenu && !orderFilterMenu.hidden && !e.target.closest("#m-order-filter")) {
+        orderFilterMenu.hidden = true;
+        $("btn-m-order-filter")?.setAttribute("aria-expanded", "false");
       }
       const statsPeriod = e.target.closest("#stats-period");
       if (statsPeriod) {

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 
@@ -44,6 +44,77 @@ def _day_iso(value: Any) -> str:
         if year.isdigit() and month.isdigit() and day.isdigit():
             return f"{year}-{month}-{day}"
     return ""
+
+
+def _iso_add(value: str, days: int) -> str:
+    try:
+        year, month, day = (int(part) for part in value.split("-"))
+        return (date(year, month, day) + timedelta(days=days)).isoformat()
+    except ValueError:
+        return value
+
+
+def _work_pauses(raw: Any, start: str, end: str) -> list[dict[str, Any]]:
+    if not start and not end:
+        return []
+    if not isinstance(raw, list):
+        return []
+    today = date.today().isoformat()
+    items: list[tuple[str, str, bool]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        a = _day_iso(item.get("start"))
+        b = _day_iso(item.get("end"))
+        stored_end = b
+        if a and b and b < a:
+            a, b = b, a
+        if not a and not b:
+            continue
+        a = a or b
+        b = b or a
+        was_open = bool(item.get("open")) or not stored_end
+        open_pause = False
+        if not end:
+            if was_open or (b and b >= today):
+                open_pause = bool(a)
+                b = today
+        elif was_open or not stored_end:
+            b = today
+        if start and a and a < start:
+            a = start
+        if open_pause:
+            b = today
+        elif end and b > end:
+            b = end
+        if start and b < start:
+            continue
+        if end and a > end:
+            continue
+        if not end and open_pause and a > today:
+            continue
+        if a and (open_pause or (b and a <= b)):
+            items.append((a, "" if open_pause else b, open_pause))
+    items.sort(key=lambda row: (row[0], row[1] or today))
+    merged: list[dict[str, Any]] = []
+    for a, b, open_pause in items:
+        if merged:
+            last = merged[-1]
+            last_end = str(last.get("end") or today)
+            nxt = _iso_add(last_end, 1)
+            if nxt and a <= nxt:
+                if open_pause or last.get("open"):
+                    last["end"] = ""
+                    last["open"] = True
+                elif b and b > last_end:
+                    last["end"] = b
+                continue
+        entry: dict[str, Any] = {"start": a, "end": b}
+        if open_pause:
+            entry["open"] = True
+            entry["end"] = ""
+        merged.append(entry)
+    return merged
 
 
 def _weekday_list(raw: Any) -> list[int]:
@@ -333,6 +404,7 @@ def normalize_document(raw: Any) -> dict[str, Any]:
                 start, end = end, start
             order["work_start"] = start
             order["work_end"] = end
+            order["work_pauses"] = _work_pauses(order.get("work_pauses"), start, end)
             cleaned_orders.append(order)
         base["orders"] = cleaned_orders
 

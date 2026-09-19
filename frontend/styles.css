@@ -530,6 +530,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .work-pill-done { background: rgba(5, 150, 105, 0.14); color: var(--ok); }
 .work-pill-overdue { background: rgba(220, 38, 38, 0.14); color: var(--danger); }
 .work-pill-cancelled, .work-pill-nodate { background: var(--bg-2); color: var(--muted); }
+.work-pill-paused { background: rgba(124, 58, 237, 0.14); color: #7c3aed; }
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .field label { font-size: 11px; color: var(--muted); font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
 .field input, .field select, .field textarea {
@@ -3299,7 +3300,22 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
   border-color: transparent;
   color: #fff;
 }
+.cal-ico {
+  width: 38px;
+  min-width: 38px;
+  padding: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.cal-ico svg,
+.cal-filter > .btn svg {
+  display: block;
+  pointer-events: none;
+  -webkit-user-drag: none;
+}
 .cal-nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cal-nav .cal-filter-menu { left: auto; right: 0; }
 .cal-title {
   display: inline-flex;
   align-items: center;
@@ -3338,7 +3354,7 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
   flex-wrap: wrap;
 }
 .cal-filter { position: relative; }
-.cal-filter > .btn { gap: 8px; }
+.cal-filter > .btn { display: inline-flex; align-items: center; gap: 8px; }
 .cal-filter > .btn.active {
   background: var(--accent);
   border-color: transparent;
@@ -3542,6 +3558,8 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
 .cal-chip.tone-now { background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
 .cal-chip.tone-warn { background: color-mix(in srgb, var(--danger) 10%, var(--card)); }
 .cal-chip.tone-ok { background: color-mix(in srgb, var(--ok) 10%, var(--card)); }
+.cal-chip.tone-pause { background: color-mix(in srgb, #7c3aed 14%, var(--card)); }
+.cal-chip.tone-pause i { color: #7c3aed; font-weight: 700; }
 .cal-chip.has-deadline i { color: #d97706; font-weight: 700; }
 .cal-due-line {
   margin: 2px 0 8px;
@@ -3602,8 +3620,13 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
   border-radius: 2px;
   background: color-mix(in srgb, var(--bar, var(--accent)) 78%, #0f172a);
 }
-.tl-nav-bar.has-deadline {
-  box-shadow: inset -3px 0 0 #eab308;
+.tl-nav-bar.is-pause {
+  background: repeating-linear-gradient(
+    -52deg,
+    color-mix(in srgb, var(--bar, var(--accent)) 28%, transparent) 0 3px,
+    color-mix(in srgb, #94a3b8 50%, transparent) 3px 6px
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bar, var(--accent)) 40%, transparent);
 }
 .tl-nav-today {
   position: absolute;
@@ -3660,13 +3683,31 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
   width: calc(100% / var(--days));
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   pointer-events: none;
+  z-index: 4;
+}
+.gantt-grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--days), minmax(0, 1fr));
+  pointer-events: none;
   z-index: 0;
+}
+.gantt-grid-col.is-weekend { background: color-mix(in srgb, var(--danger) 6%, transparent); }
+.gantt-grid-col.is-off-day { background: color-mix(in srgb, #7c3aed 16%, transparent); }
+.gantt-grid-col.is-hot { background: color-mix(in srgb, #d97706 12%, transparent); }
+.gantt-grid-col.is-pick {
+  background: color-mix(in srgb, var(--accent-2) 18%, transparent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-2) 50%, transparent);
 }
 .gantt-row {
   position: relative;
+  z-index: 1;
   border-bottom: 1px solid var(--line);
+  cursor: pointer;
 }
 .gantt-row.is-selected { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.gantt-row.is-paused .gantt-label small { color: #7c3aed; }
 .gantt-label {
   display: flex;
   flex-direction: column;
@@ -3703,7 +3744,7 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
 }
 .gantt-days { min-height: 32px; border-bottom: 1px solid var(--line); z-index: 1; }
 .gantt-body { position: relative; z-index: 1; }
-.gantt-track { min-height: 56px; }
+.gantt-track { min-height: 56px; cursor: pointer; }
 .gantt-day {
   display: flex;
   flex-direction: column;
@@ -3729,6 +3770,9 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
 }
 .gantt-day.is-today { color: var(--accent); font-weight: 800; }
 .gantt-day.is-hot { background: color-mix(in srgb, #d97706 14%, transparent); }
+.gantt-day.is-pick {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-2) 70%, transparent);
+}
 .gantt-day.is-hover {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
   color: var(--ink);
@@ -3767,7 +3811,7 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
   background: var(--danger);
   transform: translateX(-1px);
   pointer-events: none;
-  z-index: 2;
+  z-index: 5;
 }
 .gantt-bar {
   position: absolute;
@@ -3813,6 +3857,16 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
   pointer-events: none;
 }
 .gantt-bar.has-deadline .gantt-h.end { background: #f5d76e; }
+.gantt-bar.is-pause {
+  background: repeating-linear-gradient(
+    -52deg,
+    color-mix(in srgb, var(--bar, var(--accent)) 22%, transparent) 0 5px,
+    color-mix(in srgb, #94a3b8 38%, transparent) 5px 10px
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bar, var(--accent)) 45%, transparent);
+  z-index: 2;
+}
+.gantt-bar.is-pause .gantt-h { background: color-mix(in srgb, var(--bar, var(--accent)) 55%, #fff); }
 .gantt-label small { color: var(--muted); }
 .gantt-row.has-deadline .gantt-label small { color: color-mix(in srgb, #d97706 55%, var(--muted)); }
 .gantt-bar.is-drag { cursor: grabbing; opacity: 0.9; }
@@ -3861,6 +3915,16 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
 .cal-sel-name { font-weight: 700; margin-top: 4px; }
 .cal-sel-sub { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
 .cal-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.cal-pauses { display: flex; flex-direction: column; gap: 4px; margin: 0 0 8px; }
+.cal-pause-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.cal-pause-note { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
 .cal-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .cal-block { margin-top: 14px; }
 .cal-block h3 {
@@ -3876,6 +3940,13 @@ html[data-theme="dark"] .cal-cell,
 html[data-theme="dark"] .cal-col { background: #151d2e; }
 html[data-theme="dark"] .cal-chip { background: #1b2538; }
 html[data-theme="dark"] .gantt-bar { box-shadow: 0 8px 18px rgba(0,0,0,0.35); }
+html[data-theme="dark"] .gantt-bar.is-pause {
+  background: repeating-linear-gradient(
+    -52deg,
+    color-mix(in srgb, var(--bar, var(--accent)) 18%, transparent) 0 5px,
+    color-mix(in srgb, #64748b 42%, transparent) 5px 10px
+  );
+}
 html[data-theme="dark"] .gantt-bar.has-deadline {
   box-shadow:
     inset -14px 0 14px -6px color-mix(in srgb, #eab308 50%, transparent),

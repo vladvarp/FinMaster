@@ -34,9 +34,17 @@
       <section class="screen" id="screen-orders">
         <div class="search-wrap">
           <input type="search" id="search" placeholder="Поиск: заказ, клиент, позиция" autocomplete="off" />
+          <div class="mcal-filter" id="m-order-filter">
+            <button type="button" class="btn" id="btn-m-order-filter" title="Фильтр заказов" aria-haspopup="menu" aria-expanded="false" aria-controls="m-order-filter-menu">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M4 5h16l-6.2 7.4v5.1L10.2 19v-6.6L4 5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+              </svg>
+              <span id="m-order-filter-label">Все</span>
+            </button>
+            <div class="mcal-filter-menu" id="m-order-filter-menu" hidden role="menu"></div>
+          </div>
           <button type="button" class="sort-btn" id="btn-sort" aria-label="Сортировка">↓ новые</button>
         </div>
-        <div class="chips" id="chips"></div>
         <div class="list" id="orders-list"></div>
         <button type="button" class="fab" id="btn-add-order" aria-label="Новый заказ">+</button>
       </section>
