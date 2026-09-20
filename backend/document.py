@@ -233,7 +233,7 @@ def _line_series_ui(raw: Any) -> dict[str, Any]:
 
 
 CALC_OPS = ("+", "-", "*", "/")
-CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme")
+CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group")
 CALC_MAX_BLUEPRINTS = 24
 CALC_MAX_NODES = 120
 CALC_MAX_LINKS = 400
@@ -332,6 +332,14 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         node["value"] = value
     elif kind == "scheme":
         node["blueprintId"] = _clip_text(raw.get("blueprintId"), 80)
+    elif kind == "group":
+        node["name"] = _clip_text(raw.get("name"), 48, "Группа")
+        color = str(raw.get("color") or "").strip().lower()
+        if not (len(color) == 7 and color.startswith("#") and all(ch in "0123456789abcdef" for ch in color[1:])):
+            color = "#14b8a6"
+        node["color"] = color
+        node["w"] = _int_in_range(raw.get("w"), 320, 160, 4000)
+        node["h"] = _int_in_range(raw.get("h"), 220, 120, 4000)
     elif kind == "formula":
         letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         inputs = _calc_ports(

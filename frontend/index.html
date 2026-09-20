@@ -43,10 +43,11 @@
         <div class="start-actions">
           <button class="btn primary" type="button" id="btn-start-new" onclick="window.finmasterNew && window.finmasterNew()">Новый отчёт</button>
           <button class="btn" type="button" id="btn-start-open" onclick="window.finmasterOpen && window.finmasterOpen()">Открыть файл</button>
-          <button class="btn phone-btn js-open-remote" type="button" id="btn-start-remote" title="Управление с телефона">
-            <span class="phone-ico">▯</span><span>Телефон</span><span class="phone-live" hidden></span>
+          <button class="btn icon phone-btn js-open-remote" type="button" id="btn-start-remote" title="Управление с телефона" aria-label="Управление с телефона">
+            <span class="phone-ico" aria-hidden="true"></span>
+            <span class="phone-live" hidden></span>
           </button>
-          <button class="btn js-theme-toggle" type="button" title="Тема">Тема</button>
+          <button class="btn icon js-theme-toggle" type="button" title="Тема" aria-label="Тема"></button>
         </div>
       </div>
       <div class="start-galaxy" id="start-galaxy" hidden>
@@ -149,12 +150,23 @@
             </div>
             <button class="btn icon" type="button" id="btn-redo" title="Повторить (Ctrl+Y)" disabled>↷</button>
           </div>
-          <button class="btn phone-btn js-open-remote" type="button" id="btn-remote" title="Управление с телефона">
-            <span class="phone-ico">▯</span><span>Телефон</span><span class="phone-live" id="phone-live" hidden></span>
+          <button class="btn icon" type="button" id="btn-home" title="К списку отчётов" aria-label="К списку отчётов">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 11.5L12 4l8 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M6.5 10.5V20h11V10.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
           </button>
-          <button class="btn js-theme-toggle" type="button" title="Тема">Тема</button>
-          <button class="btn" id="btn-home">К списку отчётов</button>
-          <button class="btn" id="btn-export">Экспорт CSV</button>
+          <button class="btn icon" type="button" id="btn-export" title="Экспорт CSV" aria-label="Экспорт CSV">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 4v10.5M8.5 11.5 12 15l3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M5 19h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <button class="btn icon phone-btn js-open-remote" type="button" id="btn-remote" title="Управление с телефона" aria-label="Управление с телефона">
+            <span class="phone-ico" aria-hidden="true"></span>
+            <span class="phone-live" id="phone-live" hidden></span>
+          </button>
+          <button class="btn icon js-theme-toggle" type="button" title="Тема" aria-label="Тема"></button>
           <button class="btn icon" type="button" id="btn-fullscreen" title="Полный экран (F11)" aria-label="Полный экран">⛶</button>
           <button class="btn icon" type="button" id="btn-help" title="Горячие клавиши (F1)">?</button>
         </div>
@@ -424,11 +436,27 @@
               <div class="calc-board-tools">
                 <button type="button" class="calc-refresh" id="calc-refresh" title="Пересчитать схему">↻</button>
                 <button type="button" class="calc-chain-move" id="calc-chain-move" title="Тянуть цепочку входов" aria-pressed="false">⛓</button>
+                <button type="button" class="calc-prune" id="calc-prune" title="Убрать ноды без связей">∅</button>
               </div>
               <input id="calc-bp-name" class="calc-bp-name" maxlength="48" spellcheck="false" title="Название схемы" />
               <div class="calc-world" id="calc-world">
+                <div class="calc-groups" id="calc-groups"></div>
                 <svg class="calc-wires" id="calc-wires" viewBox="-20000 -20000 40000 40000" aria-hidden="true"></svg>
+                <div class="calc-wire-ui" id="calc-wire-ui"></div>
+                <div class="calc-group-ui" id="calc-group-ui"></div>
                 <div class="calc-nodes" id="calc-nodes"></div>
+              </div>
+              <div class="calc-mini-wrap" id="calc-mini-wrap">
+                <canvas class="calc-minimap" id="calc-minimap" width="200" height="128" title="Навигатор схемы" aria-label="Навигатор схемы"></canvas>
+                <button type="button" class="calc-mini-toggle" id="calc-mini-toggle" title="Скрыть навигатор" aria-pressed="true" aria-label="Показать или скрыть навигатор">
+                  <svg class="calc-mini-eye-on" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/>
+                  </svg>
+                  <svg class="calc-mini-eye-off" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M3 3l18 18M10.6 10.7a2.8 2.8 0 0 0 3.7 3.7M9.5 5.3A10.7 10.7 0 0 1 12 5c6 0 9.5 7 9.5 7a16.6 16.6 0 0 1-3.2 3.8M6.2 6.3C4.1 7.8 2.5 12 2.5 12s3.5 7 9.5 7c1.2 0 2.3-.2 3.3-.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
               </div>
               <div class="calc-hint">Связь: с выхода на вход или со входа на выход. Крестик на линии снимает связь. Нода схемы отдаёт результаты выбранного блюпринта.</div>
             </div>

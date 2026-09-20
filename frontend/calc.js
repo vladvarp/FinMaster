@@ -10,6 +10,8 @@
     { id: "/", label: "÷" },
   ];
 
+  const GROUP_COLORS = ["#14b8a6", "#0ea5e9", "#8b5cf6", "#f59e0b", "#f43f5e", "#22c55e", "#06b6d4", "#eab308", "#a855f7", "#fb7185", "#64748b", "#d946ef"];
+
   let api = null;
   const session = {
     bound: false,
@@ -22,6 +24,10 @@
     tabDrag: "",
     tabMoved: false,
     moveChain: false,
+    mini: null,
+    miniDrag: null,
+    miniHidden: false,
+    resize: null,
   };
 
   function $(id) {
@@ -86,6 +92,51 @@
   function fmtShort(value) {
     if (value == null || !Number.isFinite(value)) return "—";
     return Number(value).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+  }
+
+  function fmtCopy(value) {
+    if (value == null || !Number.isFinite(value)) return "";
+    const n = Number(value);
+    if (Number.isInteger(n)) return String(n);
+    return String(Math.round(n * 100) / 100);
+  }
+
+  async function copyScreenText(text) {
+    const raw = String(text || "").trim();
+    if (!raw || raw === "—") return false;
+    try {
+      if (api?.copyText) await api.copyText(raw);
+      else if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(raw);
+      else {
+        await fetch("/api/clipboard-text", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: raw }),
+        });
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function screenHtml(value, tip) {
+    const shown = fmtShort(value);
+    const copy = fmtCopy(value);
+    const canCopy = !!copy;
+    return `<div class="calc-screen" title="${esc(tip || "Результат")}">
+      <span class="calc-screen-val">${esc(shown)}</span>
+      <button type="button" class="calc-screen-copy${canCopy ? "" : " is-off"}" data-copy="${esc(copy)}" title="Копировать" aria-label="Копировать"${canCopy ? "" : " disabled"}>
+        <svg class="calc-screen-ico calc-screen-ico-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="8" y="8" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M6 16V6a2 2 0 0 1 2-2h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <svg class="calc-screen-ico calc-screen-ico-ok" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M5 12.5 10 17.5 19 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="calc-screen-copied">Скопировано</span>
+      </button>
+    </div>`;
   }
 
   function tokenize(src) {
@@ -534,6 +585,345 @@
     world.style.transform = `translate(${bp.x || 0}px, ${bp.y || 0}px) scale(${bp.zoom || 1})`;
   }
 
+  function nodeFootprint(node) {
+    const el = findNodeEl(node.id);
+    if (el) return { w: Math.max(40, el.offsetWidth), h: Math.max(28, el.offsetHeight) };
+    if (node.type === "formula") return { w: 360, h: 160 };
+    if (node.type === "order") return { w: 230, h: 140 };
+    if (node.type === "scheme") return { w: 220, h: 100 };
+    if (node.type === "group") return { w: Math.max(160, node.w || 320), h: Math.max(120, node.h || 220) };
+    return { w: 188, h: 120 };
+  }
+
+  function groupRect(node) {
+    return {
+      x: node.x || 0,
+      y: node.y || 0,
+      w: Math.max(160, Number(node.w) || 320),
+      h: Math.max(120, Number(node.h) || 220),
+    };
+  }
+
+  function nodeRect(node) {
+    const size = nodeFootprint(node);
+    return { x: node.x || 0, y: node.y || 0, w: size.w, h: size.h };
+  }
+
+  function overlapArea(a, b) {
+    const x1 = Math.max(a.x, b.x);
+    const y1 = Math.max(a.y, b.y);
+    const x2 = Math.min(a.x + a.w, b.x + b.w);
+    const y2 = Math.min(a.y + a.h, b.y + b.h);
+    if (x2 <= x1 || y2 <= y1) return 0;
+    return (x2 - x1) * (y2 - y1);
+  }
+
+  function nodesInsideGroup(bp, group, seen) {
+    const visited = seen || new Set();
+    if (!group || visited.has(group.id)) return [];
+    visited.add(group.id);
+    const gr = groupRect(group);
+    const selfArea = gr.w * gr.h;
+    const direct = (bp.nodes || []).filter((node) => {
+      if (visited.has(node.id)) return false;
+      // Не тянуть родительские/более крупные группы (их центр часто попадает внутрь вложенной)
+      if (node.type === "group" && groupArea(node) >= selfArea) return false;
+      const nr = nodeRect(node);
+      const cx = nr.x + nr.w / 2;
+      const cy = nr.y + nr.h / 2;
+      return cx >= gr.x && cx <= gr.x + gr.w && cy >= gr.y && cy <= gr.y + gr.h;
+    });
+    const all = new Map();
+    direct.forEach((node) => {
+      all.set(node.id, node);
+      if (node.type === "group") {
+        nodesInsideGroup(bp, node, visited).forEach((child) => all.set(child.id, child));
+      }
+    });
+    return [...all.values()];
+  }
+
+  function groupArea(node) {
+    const gr = groupRect(node);
+    return gr.w * gr.h;
+  }
+
+  function sortGroupsByArea(groups) {
+    return [...groups].sort((a, b) => groupArea(b) - groupArea(a));
+  }
+
+  function containNodeInGroup(node, group) {
+    const gr = groupRect(group);
+    const size = nodeFootprint(node);
+    const maxX = gr.x + Math.max(0, gr.w - size.w);
+    const maxY = gr.y + Math.max(0, gr.h - size.h);
+    node.x = Math.min(Math.max(node.x || 0, gr.x), maxX);
+    node.y = Math.min(Math.max(node.y || 0, gr.y), maxY);
+  }
+
+  function pushNodeOutOfGroup(node, group) {
+    const gr = groupRect(group);
+    const nr = nodeRect(node);
+    const overlap = overlapArea(nr, gr);
+    if (overlap <= 0) return;
+    const left = nr.x + nr.w - gr.x;
+    const right = gr.x + gr.w - nr.x;
+    const top = nr.y + nr.h - gr.y;
+    const bottom = gr.y + gr.h - nr.y;
+    const options = [
+      { axis: "x", delta: -left },
+      { axis: "x", delta: right },
+      { axis: "y", delta: -top },
+      { axis: "y", delta: bottom },
+    ];
+    options.sort((a, b) => Math.abs(a.delta) - Math.abs(b.delta));
+    const best = options[0];
+    if (best.axis === "x") node.x = (node.x || 0) + best.delta;
+    else node.y = (node.y || 0) + best.delta;
+  }
+
+  function snapNodeToGroups(bp, node) {
+    if (!bp || !node || node.type === "group") return false;
+    const nr = nodeRect(node);
+    const area = Math.max(1, nr.w * nr.h);
+    let best = null;
+    (bp.nodes || []).forEach((group) => {
+      if (group.type !== "group") return;
+      const gr = groupRect(group);
+      const overlap = overlapArea(nr, gr);
+      if (overlap <= 0) return;
+      if (!best || overlap > best.overlap) best = { group, overlap, ratio: overlap / area };
+    });
+    if (!best) return false;
+    if (best.ratio >= 0.5) containNodeInGroup(node, best.group);
+    else pushNodeOutOfGroup(node, best.group);
+    return true;
+  }
+
+  function nodesRoot() {
+    return $("calc-nodes") || $("calc-world");
+  }
+
+  function groupsRoot() {
+    return $("calc-groups");
+  }
+
+  function groupUiRoot() {
+    return $("calc-group-ui");
+  }
+
+  function wireUiRoot() {
+    return $("calc-wire-ui");
+  }
+
+  function findNodeEl(id) {
+    const key = cssEsc(id);
+    return (
+      nodesRoot()?.querySelector(`[data-node="${key}"]`) ||
+      groupsRoot()?.querySelector(`[data-node="${key}"]`) ||
+      groupUiRoot()?.querySelector(`[data-node="${key}"]`) ||
+      null
+    );
+  }
+
+  function findGroupChrome(id) {
+    return groupUiRoot()?.querySelector(`.calc-group-chrome[data-node="${cssEsc(id)}"]`) || null;
+  }
+
+  function applyNodeEl(node) {
+    const el = groupsRoot()?.querySelector(`[data-node="${cssEsc(node.id)}"]`) || nodesRoot()?.querySelector(`[data-node="${cssEsc(node.id)}"]`);
+    const chrome = node.type === "group" ? findGroupChrome(node.id) : null;
+    if (el) {
+      el.style.left = `${node.x || 0}px`;
+      el.style.top = `${node.y || 0}px`;
+      if (node.type === "group") {
+        el.style.width = `${Math.max(160, node.w || 320)}px`;
+        el.style.height = `${Math.max(120, node.h || 220)}px`;
+      }
+    }
+    if (chrome) {
+      chrome.style.left = `${node.x || 0}px`;
+      chrome.style.top = `${node.y || 0}px`;
+      chrome.style.width = `${Math.max(160, node.w || 320)}px`;
+      chrome.style.height = `${Math.max(120, node.h || 220)}px`;
+    }
+  }
+
+  function miniNodeColor(node) {
+    if (node?.type === "group") return String(node.color || "#14b8a6");
+    const kind = wireKind(node);
+    const map = {
+      order: "#0d9488",
+      math: "#f97316",
+      formula: "#a855f7",
+      percent: "#f43f5e",
+      const: "#64748b",
+      result: "#06b6d4",
+      scheme: "#eab308",
+      group: "#94a3b8",
+    };
+    return map[kind] || "#0d9488";
+  }
+
+  function blueprintBounds(bp) {
+    const nodes = bp?.nodes || [];
+    if (!nodes.length) return { minX: -80, minY: -60, maxX: 320, maxY: 220, width: 400, height: 280 };
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    nodes.forEach((node) => {
+      const size = nodeFootprint(node);
+      minX = Math.min(minX, node.x || 0);
+      minY = Math.min(minY, node.y || 0);
+      maxX = Math.max(maxX, (node.x || 0) + size.w);
+      maxY = Math.max(maxY, (node.y || 0) + size.h);
+    });
+    const pad = 80;
+    minX -= pad;
+    minY -= pad;
+    maxX += pad;
+    maxY += pad;
+    return { minX, minY, maxX, maxY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
+  }
+
+  function drawMinimap(bp) {
+    const canvas = $("calc-minimap");
+    const board = $("calc-board");
+    const wrap = $("calc-mini-wrap");
+    if (!canvas || !board || !bp) return;
+    if (session.miniHidden) {
+      wrap?.classList.add("is-hidden");
+      board.classList.add("is-mini-hidden");
+      return;
+    }
+    wrap?.classList.remove("is-hidden");
+    board.classList.remove("is-mini-hidden");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cssW = 200;
+    const cssH = 128;
+    if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(cssH * dpr)) {
+      canvas.width = Math.round(cssW * dpr);
+      canvas.height = Math.round(cssH * dpr);
+      canvas.style.width = `${cssW}px`;
+      canvas.style.height = `${cssH}px`;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const w = cssW;
+    const h = cssH;
+    const box = blueprintBounds(bp);
+    const boardRect = board.getBoundingClientRect();
+    const zoom = bp.zoom || 1;
+    const view = {
+      x: -(bp.x || 0) / zoom,
+      y: -(bp.y || 0) / zoom,
+      w: boardRect.width / zoom,
+      h: boardRect.height / zoom,
+    };
+    const inset = 10;
+    const scale = Math.min((w - inset * 2) / box.width, (h - inset * 2) / box.height);
+    const ox = (w - box.width * scale) / 2 - box.minX * scale;
+    const oy = (h - box.height * scale) / 2 - box.minY * scale;
+    session.mini = { scale, ox, oy, w, h };
+
+    const dark = document.documentElement.getAttribute("data-theme") === "dark";
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = dark ? "#0b1220" : "#eef3f8";
+    ctx.fillRect(0, 0, w, h);
+
+    const byId = Object.fromEntries((bp.nodes || []).map((node) => [node.id, node]));
+    (bp.links || []).forEach((link) => {
+      const a = byId[link.from];
+      const b = byId[link.to];
+      if (!a || !b) return;
+      const as = nodeFootprint(a);
+      const bs = nodeFootprint(b);
+      ctx.strokeStyle = dark ? "rgba(148,163,184,0.35)" : "rgba(100,116,139,0.35)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo((a.x || 0) * scale + ox + (as.w * scale) / 2, (a.y || 0) * scale + oy + (as.h * scale) / 2);
+      ctx.lineTo((b.x || 0) * scale + ox + (bs.w * scale) / 2, (b.y || 0) * scale + oy + (bs.h * scale) / 2);
+      ctx.stroke();
+    });
+
+    (bp.nodes || [])
+      .filter((node) => node.type === "group")
+      .forEach((node) => {
+        const gr = groupRect(node);
+        const x = gr.x * scale + ox;
+        const y = gr.y * scale + oy;
+        const rw = Math.max(6, gr.w * scale);
+        const rh = Math.max(5, gr.h * scale);
+        ctx.fillStyle = miniNodeColor(node);
+        ctx.globalAlpha = 0.22;
+        ctx.fillRect(x, y, rw, rh);
+        ctx.globalAlpha = 0.7;
+        ctx.strokeStyle = miniNodeColor(node);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, y, rw, rh);
+        ctx.globalAlpha = 1;
+      });
+
+    (bp.nodes || [])
+      .filter((node) => node.type !== "group")
+      .forEach((node) => {
+      const size = nodeFootprint(node);
+      const x = (node.x || 0) * scale + ox;
+      const y = (node.y || 0) * scale + oy;
+      const rw = Math.max(4, size.w * scale);
+      const rh = Math.max(3, size.h * scale);
+      ctx.fillStyle = miniNodeColor(node);
+      ctx.globalAlpha = session.selected === node.id ? 1 : 0.85;
+      ctx.beginPath();
+      const r = 2;
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + rw, y, x + rw, y + rh, r);
+      ctx.arcTo(x + rw, y + rh, x, y + rh, r);
+      ctx.arcTo(x, y + rh, x, y, r);
+      ctx.arcTo(x, y, x + rw, y, r);
+      ctx.closePath();
+      ctx.fill();
+      if (session.selected === node.id) {
+        ctx.strokeStyle = dark ? "#f8fafc" : "#0f172a";
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    });
+
+    ctx.strokeStyle = "#14b8a6";
+    ctx.lineWidth = 1.4;
+    ctx.strokeRect(view.x * scale + ox, view.y * scale + oy, Math.max(8, view.w * scale), Math.max(8, view.h * scale));
+    ctx.fillStyle = "rgba(20, 184, 166, 0.12)";
+    ctx.fillRect(view.x * scale + ox, view.y * scale + oy, Math.max(8, view.w * scale), Math.max(8, view.h * scale));
+  }
+
+  function miniWorldPoint(clientX, clientY) {
+    const canvas = $("calc-minimap");
+    const map = session.mini;
+    if (!canvas || !map) return null;
+    const rect = canvas.getBoundingClientRect();
+    const sx = ((clientX - rect.left) / rect.width) * map.w;
+    const sy = ((clientY - rect.top) / rect.height) * map.h;
+    return {
+      x: (sx - map.ox) / map.scale,
+      y: (sy - map.oy) / map.scale,
+    };
+  }
+
+  function centerViewOn(bp, worldX, worldY) {
+    const board = $("calc-board");
+    if (!board || !bp) return;
+    const rect = board.getBoundingClientRect();
+    const zoom = bp.zoom || 1;
+    bp.x = rect.width / 2 - worldX * zoom;
+    bp.y = rect.height / 2 - worldY * zoom;
+    applyWorld(bp);
+    drawMinimap(bp);
+  }
+
   function nextLetter(used) {
     for (const letter of LETTERS) {
       if (!used.has(letter)) return letter;
@@ -592,6 +982,12 @@
       ];
     }
     if (type === "order") node.orderId = extra?.orderId || "";
+    if (type === "group") {
+      node.name = "Группа";
+      node.color = GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
+      node.w = 320;
+      node.h = 220;
+    }
     bp.nodes.push(node);
     session.selected = node.id;
     dirty();
@@ -606,6 +1002,26 @@
     if (session.selected === id) session.selected = "";
     dirty();
     render();
+  }
+
+  function pruneOrphanNodes() {
+    const bp = activeBlueprint();
+    if (!bp) return 0;
+    const linked = new Set();
+    (bp.links || []).forEach((link) => {
+      if (link.from) linked.add(link.from);
+      if (link.to) linked.add(link.to);
+    });
+    const before = (bp.nodes || []).length;
+    bp.nodes = (bp.nodes || []).filter((node) => node.type === "scheme" || node.type === "group" || linked.has(node.id));
+    const removed = before - bp.nodes.length;
+    if (!removed) return 0;
+    const keep = new Set(bp.nodes.map((node) => node.id));
+    bp.links = (bp.links || []).filter((link) => keep.has(link.from) && keep.has(link.to));
+    if (session.selected && !keep.has(session.selected)) session.selected = "";
+    dirty();
+    render();
+    return removed;
   }
 
   function usedInputPorts(nodeId, links) {
@@ -798,9 +1214,10 @@
         <div class="calc-tools-label">Ноды</div>
         <button type="button" class="btn calc-tool" data-add-node="math" draggable="true">Оператор</button>
         <button type="button" class="btn calc-tool" data-add-node="formula" draggable="true">Формула</button>
-        <button type="button" class="btn calc-tool" data-add-node="percent" draggable="true">Процент %</button>
+        <button type="button" class="btn calc-tool" data-add-node="percent" draggable="true">Процент</button>
         <button type="button" class="btn calc-tool" data-add-node="const" draggable="true">Константа</button>
         <button type="button" class="btn calc-tool" data-add-node="result" draggable="true">Результат</button>
+        <button type="button" class="btn calc-tool" data-add-node="group" draggable="true">Группа</button>
       </div>
       <div class="calc-orders calc-schemes">
         <div class="calc-tools-label">Схемы</div>
@@ -830,7 +1247,9 @@
                   .map((order) => {
                     const n = orderLines(order).length;
                     const used = usedOrders.has(order.id);
-                    return `<button type="button" class="calc-order${used ? " is-used" : ""}" draggable="true" data-order="${esc(order.id)}"${used ? ' title="На схеме"' : ""}>
+                    const label = `${order.number || "—"} — ${order.name || order.customer || "Без названия"}`;
+                    const tip = used ? `${label} · на схеме` : label;
+                    return `<button type="button" class="calc-order${used ? " is-used" : ""}" draggable="true" data-order="${esc(order.id)}" title="${esc(tip)}">
                       <b>${esc(order.number || "—")}</b>
                       <span>${esc(order.name || order.customer || "Без названия")}</span>
                       <small>${used ? "на схеме" : `${n} поз.`}</small>
@@ -907,7 +1326,7 @@
     return `<article class="calc-node is-order ${missing ? "is-error" : ""} ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
-        <span>${missing ? "Заказ удалён" : `№ ${esc(order.number || "—")}`}</span>
+        <span>${missing ? "Заказ удалён" : esc(order.number || "—")}</span>
         <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
       </header>
       <div class="calc-node-sub">${missing ? "" : esc(order.name || order.customer || "")}</div>
@@ -943,7 +1362,7 @@
       <div class="calc-ops">
         ${OPS.map((op) => `<button type="button" class="calc-op ${node.op === op.id ? "on" : ""}" data-op="${op.id}">${op.label}</button>`).join("")}
       </div>
-      <div class="calc-screen" title="Выход">${esc(fmtShort(value))}</div>
+      ${screenHtml(value, "Выход")}
       <div class="calc-ports">
         ${ports
           .map(
@@ -1032,7 +1451,7 @@
         <input class="calc-pname calc-result-name" data-result-name="${esc(node.id)}" value="${esc(resultName(node))}" maxlength="48" spellcheck="false" title="Имя результата" />
         <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
       </header>
-      <div class="calc-screen" title="Значение связи">${esc(fmtShort(value))}</div>
+      ${screenHtml(value, "Значение связи")}
       <div class="calc-ports">
         <div class="calc-row in">
           <i class="calc-port in" data-port="in" data-io="in"></i>
@@ -1056,7 +1475,7 @@
         <span>Процент</span>
         <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
       </header>
-      <div class="calc-screen" title="Число × % / 100">${esc(fmtShort(value))}</div>
+      ${screenHtml(value, "Число × % / 100")}
       <div class="calc-ports">
         ${nodeInputs(node)
           .map(
@@ -1104,16 +1523,69 @@
     </article>`;
   }
 
-  function nodesRoot() {
-    return $("calc-nodes") || $("calc-world");
+  function groupNodeHtml(node, zIndex) {
+    const w = Math.max(160, node.w || 320);
+    const h = Math.max(120, node.h || 220);
+    const color = String(node.color || "#14b8a6");
+    const z = Number.isFinite(zIndex) ? zIndex : 0;
+    return `<article class="calc-node is-group ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;width:${w}px;height:${h}px;z-index:${z};--group-color:${esc(color)}"></article>`;
+  }
+
+  function groupChromeHtml(node, zIndex) {
+    const w = Math.max(160, node.w || 320);
+    const h = Math.max(120, node.h || 220);
+    const color = String(node.color || "#14b8a6");
+    const name = String(node.name || "").trim() || "Группа";
+    const z = Number.isFinite(zIndex) ? zIndex : 0;
+    return `<div class="calc-group-chrome ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;width:${w}px;height:${h}px;z-index:${z};--group-color:${esc(color)}">
+      <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить группу · Shift — только рамка"></i>
+      <header class="calc-node-h calc-group-h">
+        <input class="calc-pname calc-group-name" data-group-name="${esc(node.id)}" value="${esc(name)}" maxlength="48" spellcheck="false" title="Имя группы" />
+        <input class="calc-group-color" data-group-color="${esc(node.id)}" type="color" value="${esc(color)}" title="Цвет группы" />
+        <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
+      </header>
+      <i class="calc-resize" data-resize-group="${esc(node.id)}" title="Изменить размер"></i>
+    </div>`;
+  }
+
+  function fitScreenNodes() {
+    const host = nodesRoot();
+    if (!host) return;
+    host.querySelectorAll(".calc-node.is-math, .calc-node.is-result, .calc-node.is-percent, .calc-node.is-const").forEach((el) => {
+      el.style.width = "";
+      const screen = el.querySelector(".calc-screen-val, .calc-const-val");
+      if (!screen) return;
+      const btn = el.querySelector(".calc-screen-copy");
+      const pad = 16 + (btn ? btn.offsetWidth + 8 : 0);
+      const need = Math.ceil(Math.max(screen.scrollWidth, screen.offsetWidth) + pad);
+      const width = Math.min(520, Math.max(188, need));
+      el.style.width = `${width}px`;
+    });
   }
 
   function renderNodes(bp, graph) {
     const host = nodesRoot();
+    const groups = groupsRoot();
+    const groupUi = groupUiRoot();
     if (!host) return;
     const focus = document.activeElement;
-    const keep = focus && host.contains(focus) ? { name: focus.dataset.inName || focus.dataset.outName || focus.dataset.outExpr || focus.dataset.resultName || focus.dataset.constValue, start: focus.selectionStart, end: focus.selectionEnd } : null;
-    host.innerHTML = (bp.nodes || [])
+    const focusHost = host.contains(focus) || groups?.contains(focus) || groupUi?.contains(focus) ? focus : null;
+    const keep = focusHost
+      ? {
+          name: focus.dataset.inName || focus.dataset.outName || focus.dataset.outExpr || focus.dataset.resultName || focus.dataset.constValue || focus.dataset.groupName,
+          start: focus.selectionStart,
+          end: focus.selectionEnd,
+        }
+      : null;
+    const groupNodes = sortGroupsByArea((bp.nodes || []).filter((node) => node.type === "group"));
+    const plainNodes = (bp.nodes || []).filter((node) => node.type !== "group");
+    if (groups) {
+      groups.innerHTML = groupNodes.map((node, i) => groupNodeHtml(node, i)).join("");
+    }
+    if (groupUi) {
+      groupUi.innerHTML = groupNodes.map((node, i) => groupChromeHtml(node, i)).join("");
+    }
+    host.innerHTML = plainNodes
       .map((node) => {
         if (node.type === "math") return mathNodeHtml(node, bp, graph);
         if (node.type === "percent") return percentNodeHtml(node, bp, graph);
@@ -1124,9 +1596,12 @@
         return orderNodeHtml(node, api.findOrder(node.orderId), graph, bp);
       })
       .join("");
+    fitScreenNodes();
     applyWorld(bp);
     if (keep?.name) {
-      const again = host.querySelector(`[data-in-name="${cssEsc(keep.name)}"], [data-out-name="${cssEsc(keep.name)}"], [data-out-expr="${cssEsc(keep.name)}"], [data-result-name="${cssEsc(keep.name)}"], [data-const-value="${cssEsc(keep.name)}"]`);
+      const again =
+        host.querySelector(`[data-in-name="${cssEsc(keep.name)}"], [data-out-name="${cssEsc(keep.name)}"], [data-out-expr="${cssEsc(keep.name)}"], [data-result-name="${cssEsc(keep.name)}"], [data-const-value="${cssEsc(keep.name)}"]`) ||
+        groupUi?.querySelector(`[data-group-name="${cssEsc(keep.name)}"]`);
       if (again) {
         again.focus({ preventScroll: true });
         try {
@@ -1197,7 +1672,7 @@
       }
       return "order";
     }
-    if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme") return type;
+    if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme" || type === "group") return type;
     return "order";
   }
 
@@ -1249,6 +1724,18 @@
     btn.title = session.moveChain ? "Цепочка входов: вкл" : "Тянуть цепочку входов";
   }
 
+  function syncMiniToggle() {
+    const btn = $("calc-mini-toggle");
+    const wrap = $("calc-mini-wrap");
+    const board = $("calc-board");
+    if (!btn) return;
+    const on = !session.miniHidden;
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.title = on ? "Скрыть навигатор" : "Показать навигатор";
+    wrap?.classList.toggle("is-hidden", !on);
+    board?.classList.toggle("is-mini-hidden", !on);
+  }
+
   function setLinkingClass() {
     const board = $("calc-board");
     if (!board) return;
@@ -1260,40 +1747,44 @@
   function drawWires(bp, graph) {
     const svg = $("calc-wires");
     const host = nodesRoot();
+    const ui = wireUiRoot() || host;
     if (!svg || !host || !bp) return;
     const ns = "http://www.w3.org/2000/svg";
     while (svg.firstChild) svg.removeChild(svg.firstChild);
-    const addPath = (d, cls) => {
+    const addPath = (d, cls, attrs) => {
       const el = document.createElementNS(ns, "path");
       el.setAttribute("d", d);
       el.setAttribute("class", cls);
-      el.setAttribute("pointer-events", "none");
+      if (attrs) Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, value));
       svg.appendChild(el);
+      return el;
     };
     const hostButtons = [];
     const byId = Object.fromEntries((bp.nodes || []).map((node) => [node.id, node]));
     const flowIds = upstreamFlow(bp, session.selected);
     (bp.links || []).forEach((link) => {
-      const fromEl = host.querySelector(`[data-node="${cssEsc(link.from)}"]`);
-      const toEl = host.querySelector(`[data-node="${cssEsc(link.to)}"]`);
+      const fromEl = findNodeEl(link.from);
+      const toEl = findNodeEl(link.to);
       if (!fromEl || !toEl) return;
       const a = portWorld(fromEl, link.fromPort, "out", bp);
       const b = portWorld(toEl, link.toPort, "in", bp);
       if (!a || !b) return;
       const dx = Math.max(40, Math.abs(b.x - a.x) * 0.45);
+      const d = `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`;
       const src = byId[link.from];
       const flow = flowIds.has(link.id);
       const err = graph.errors.has(link.from) || graph.errors.has(link.to);
-      addPath(
-        `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`,
-        `calc-wire is-${wireKind(src, link.fromPort)}${flow ? " is-flow" : ""}${err ? " is-error" : ""}`
-      );
+      const wire = addPath(d, `calc-wire is-${wireKind(src, link.fromPort)}${flow ? " is-flow" : ""}${err ? " is-error" : ""}`, {
+        "pointer-events": "none",
+        "data-link": link.id,
+      });
       if (!session.linking && !session.drag && !session.pan) {
+        const hit = addPath(d, "calc-wire-hit", { "data-link": link.id });
         const mid = bezierMid(a, b);
-        hostButtons.push({ id: link.id, x: mid.x, y: mid.y });
+        hostButtons.push({ id: link.id, x: mid.x, y: mid.y, wire, hit });
       }
     });
-    host.querySelectorAll(".calc-unlink-wire").forEach((el) => el.remove());
+    ui.querySelectorAll(".calc-unlink-wire").forEach((el) => el.remove());
     hostButtons.forEach((item) => {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -1303,7 +1794,25 @@
       btn.textContent = "×";
       btn.style.left = `${item.x}px`;
       btn.style.top = `${item.y}px`;
-      host.appendChild(btn);
+      const show = () => {
+        item.wire.classList.add("is-hot");
+        btn.classList.add("is-show");
+      };
+      const hide = () => {
+        item.wire.classList.remove("is-hot");
+        btn.classList.remove("is-show");
+      };
+      item.hit.addEventListener("pointerenter", show);
+      item.hit.addEventListener("pointerleave", (e) => {
+        if (e.relatedTarget === btn || btn.contains(e.relatedTarget)) return;
+        hide();
+      });
+      btn.addEventListener("pointerenter", show);
+      btn.addEventListener("pointerleave", (e) => {
+        if (e.relatedTarget === item.hit) return;
+        hide();
+      });
+      ui.appendChild(btn);
     });
     if (session.linking?.x != null) {
       const L = session.linking;
@@ -1311,22 +1820,23 @@
       let b = null;
       let kind = "order";
       if (L.reverse) {
-        const toEl = host.querySelector(`[data-node="${cssEsc(L.to)}"]`);
+        const toEl = findNodeEl(L.to);
         a = { x: L.x, y: L.y };
         b = toEl ? portWorld(toEl, L.toPort, "in", bp) : null;
         kind = wireKind(byId[L.to]);
       } else {
-        const fromEl = host.querySelector(`[data-node="${cssEsc(L.from)}"]`);
+        const fromEl = findNodeEl(L.from);
         a = fromEl ? portWorld(fromEl, L.fromPort, "out", bp) : null;
         b = { x: L.x, y: L.y };
         kind = wireKind(byId[L.from], L.fromPort);
       }
       if (a && b) {
         const dx = Math.max(40, Math.abs(b.x - a.x) * 0.45);
-        addPath(`M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`, `calc-wire is-temp is-${kind}`);
+        addPath(`M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`, `calc-wire is-temp is-${kind}`, { "pointer-events": "none" });
       }
     }
     setLinkingClass();
+    drawMinimap(bp);
   }
 
   function render() {
@@ -1338,6 +1848,7 @@
     if (session.busy) {
       applyWorld(bp);
       drawWires(bp, computeGraph(bp));
+      drawMinimap(bp);
       return;
     }
     const graph = computeGraph(bp);
@@ -1345,13 +1856,17 @@
     renderTitle(bp);
     renderSide(bp);
     renderNodes(bp, graph);
-    requestAnimationFrame(() => drawWires(bp, graph));
+    requestAnimationFrame(() => {
+      drawWires(bp, graph);
+      drawMinimap(bp);
+    });
   }
 
   function recalculate() {
     session.linking = null;
     session.drag = null;
     session.pan = null;
+    session.resize = null;
     session.busy = false;
     setLinkingClass();
     const calc = ensureState();
@@ -1364,6 +1879,15 @@
   function onBoardPointerDown(e) {
     const bp = activeBlueprint();
     if (!bp) return;
+    if (e.button === 1) {
+      e.preventDefault();
+      session.selected = "";
+      document.querySelectorAll(".calc-node.is-on, .calc-group-chrome.is-on").forEach((el) => el.classList.remove("is-on"));
+      session.busy = true;
+      session.pan = { x: e.clientX, y: e.clientY, ox: bp.x || 0, oy: bp.y || 0 };
+      $("calc-board").setPointerCapture(e.pointerId);
+      return;
+    }
     const del = e.target.closest("[data-del-node]");
     if (del) {
       e.preventDefault();
@@ -1379,9 +1903,28 @@
       else disconnectInput(unlink.closest(".calc-node")?.dataset.node, unlink.dataset.delInLink);
       return;
     }
-    if (e.target.closest(".calc-refresh, .calc-chain-move, .calc-board-tools, .calc-bp-name, input, textarea, select")) return;
+    if (e.target.closest(".calc-refresh, .calc-chain-move, .calc-board-tools, .calc-bp-name, .calc-screen-copy, .calc-minimap, .calc-mini-toggle, .calc-mini-wrap, input, textarea, select")) return;
+    const resize = e.target.closest("[data-resize-group]");
+    if (resize) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = resize.dataset.resizeGroup;
+      const item = bp.nodes.find((n) => n.id === id && n.type === "group");
+      if (!item) return;
+      session.selected = id;
+      session.busy = true;
+      session.resize = {
+        id,
+        dx: e.clientX,
+        dy: e.clientY,
+        w: Math.max(160, item.w || 320),
+        h: Math.max(120, item.h || 220),
+      };
+      $("calc-board").setPointerCapture(e.pointerId);
+      return;
+    }
     const port = e.target.closest(".calc-port");
-    const node = e.target.closest(".calc-node");
+    const node = e.target.closest(".calc-node, .calc-group-chrome");
     const drag = e.target.closest("[data-drag-node]");
     if (port) {
       e.preventDefault();
@@ -1451,7 +1994,13 @@
       const origins = [];
       const byId = Object.fromEntries((bp.nodes || []).map((item) => [item.id, item]));
       const moveIds = new Set([id]);
-      if (session.moveChain) upstreamNodeIds(bp, id).forEach((uid) => moveIds.add(uid));
+      const dragged = byId[id];
+      if (dragged?.type === "group") {
+        if (!e.shiftKey) nodesInsideGroup(bp, dragged).forEach((item) => moveIds.add(item.id));
+        if (session.moveChain) upstreamNodeIds(bp, id).forEach((nid) => moveIds.add(nid));
+      } else if (session.moveChain) {
+        upstreamNodeIds(bp, id).forEach((nid) => moveIds.add(nid));
+      }
       moveIds.forEach((nid) => {
         const item = byId[nid];
         if (item) origins.push({ id: nid, x: item.x || 0, y: item.y || 0 });
@@ -1461,21 +2010,24 @@
         dx: e.clientX,
         dy: e.clientY,
         origins,
+        isGroup: dragged?.type === "group",
       };
       $("calc-board").setPointerCapture(e.pointerId);
-      node.classList.add("is-on");
+      document.querySelectorAll("#calc-nodes .calc-node, #calc-groups .calc-node, #calc-group-ui .calc-group-chrome").forEach((el) => {
+        el.classList.toggle("is-on", el.dataset.node === id);
+      });
       return;
     }
     if (node) {
       session.selected = node.dataset.node;
-      nodesRoot()?.querySelectorAll(".calc-node").forEach((el) => {
+      document.querySelectorAll("#calc-nodes .calc-node, #calc-groups .calc-node, #calc-group-ui .calc-group-chrome").forEach((el) => {
         el.classList.toggle("is-on", el.dataset.node === node.dataset.node);
       });
       drawWires(bp, computeGraph(bp));
       return;
     }
     session.selected = "";
-    nodesRoot()?.querySelectorAll(".calc-node").forEach((el) => el.classList.remove("is-on"));
+    document.querySelectorAll("#calc-nodes .calc-node, #calc-groups .calc-node, #calc-group-ui .calc-group-chrome").forEach((el) => el.classList.remove("is-on"));
     drawWires(bp, computeGraph(bp));
     session.busy = true;
     session.pan = { x: e.clientX, y: e.clientY, ox: bp.x || 0, oy: bp.y || 0 };
@@ -1492,30 +2044,37 @@
       drawWires(bp, computeGraph(bp));
       return;
     }
+    if (session.resize) {
+      const zoom = bp.zoom || 1;
+      const item = bp.nodes.find((n) => n.id === session.resize.id && n.type === "group");
+      if (!item) return;
+      item.w = Math.max(160, Math.round(session.resize.w + (e.clientX - session.resize.dx) / zoom));
+      item.h = Math.max(120, Math.round(session.resize.h + (e.clientY - session.resize.dy) / zoom));
+      applyNodeEl(item);
+      drawMinimap(bp);
+      return;
+    }
     if (session.drag) {
       const zoom = bp.zoom || 1;
       const dx = (e.clientX - session.drag.dx) / zoom;
       const dy = (e.clientY - session.drag.dy) / zoom;
-      const host = nodesRoot();
       const byId = Object.fromEntries((bp.nodes || []).map((item) => [item.id, item]));
       (session.drag.origins || []).forEach((origin) => {
         const item = byId[origin.id];
         if (!item) return;
         item.x = origin.x + dx;
         item.y = origin.y + dy;
-        const el = host?.querySelector(`[data-node="${cssEsc(item.id)}"]`);
-        if (el) {
-          el.style.left = `${item.x}px`;
-          el.style.top = `${item.y}px`;
-        }
+        applyNodeEl(item);
       });
       drawWires(bp, computeGraph(bp));
+      drawMinimap(bp);
       return;
     }
     if (session.pan) {
       bp.x = session.pan.ox + (e.clientX - session.pan.x);
       bp.y = session.pan.oy + (e.clientY - session.pan.y);
       applyWorld(bp);
+      drawMinimap(bp);
     }
   }
 
@@ -1523,11 +2082,18 @@
     const bp = activeBlueprint();
     const movedNode = session.drag;
     const movedPan = session.pan;
+    const resized = session.resize;
     const linking = session.linking;
     session.drag = null;
     session.pan = null;
+    session.resize = null;
     session.busy = false;
     if (e.target.closest?.("input, textarea, select, .calc-bp-name, .calc-refresh, .calc-chain-move, .calc-board-tools")) return;
+    if (resized) {
+      dirty();
+      if (bp) drawMinimap(bp);
+      return;
+    }
     if (linking) {
       const over = document.elementFromPoint(e.clientX, e.clientY)?.closest?.(".calc-port");
       const nodeId = over?.closest?.(".calc-node")?.dataset.node;
@@ -1564,8 +2130,19 @@
       return;
     }
     if (movedNode) {
+      if (bp && !movedNode.isGroup) {
+        const byId = Object.fromEntries((bp.nodes || []).map((item) => [item.id, item]));
+        (movedNode.origins || []).forEach((origin) => {
+          const item = byId[origin.id];
+          if (!item || item.type === "group") return;
+          if (snapNodeToGroups(bp, item)) applyNodeEl(item);
+        });
+      }
       dirty();
-      if (bp) drawWires(bp, computeGraph(bp));
+      if (bp) {
+        drawWires(bp, computeGraph(bp));
+        drawMinimap(bp);
+      }
       return;
     }
     if (movedPan) {
@@ -1589,6 +2166,7 @@
     bp.y = cy - (cy - (bp.y || 0)) * k;
     bp.zoom = next;
     applyWorld(bp);
+    drawMinimap(bp);
     clearTimeout(onBoardWheel.t);
     onBoardWheel.t = setTimeout(() => dirty(), 280);
   }
@@ -1601,7 +2179,7 @@
     const blueprintId = e.dataTransfer?.getData("text/finmaster-blueprint");
     e.preventDefault();
     const at = worldPoint(bp, e.clientX, e.clientY);
-    if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result") addNode(kind, at);
+    if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group") addNode(kind, at);
     else if (blueprintId && blueprintId !== bp.id) addNode("scheme", at, { blueprintId });
     else if (orderId && api.findOrder(orderId)) addNode("order", at, { orderId });
   }
@@ -1723,7 +2301,29 @@
       session.moveChain = !session.moveChain;
       syncChainMoveBtn();
     });
+    $("calc-prune")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const n = pruneOrphanNodes();
+      const btn = $("calc-prune");
+      if (btn) {
+        btn.title = n ? `Убрано: ${n}` : "Нет нод без связей";
+        clearTimeout(btn._pruneT);
+        btn._pruneT = setTimeout(() => {
+          btn.title = "Убрать ноды без связей";
+        }, 1600);
+      }
+    });
     syncChainMoveBtn();
+    syncMiniToggle();
+    $("calc-mini-toggle")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      session.miniHidden = !session.miniHidden;
+      syncMiniToggle();
+      const bp = activeBlueprint();
+      if (bp && !session.miniHidden) drawMinimap(bp);
+    });
     $("calc-bp-name")?.addEventListener("input", (e) => {
       const bp = activeBlueprint();
       if (!bp) return;
@@ -1793,10 +2393,61 @@
     board.addEventListener("pointermove", onBoardPointerMove);
     board.addEventListener("pointerup", onBoardPointerUp);
     board.addEventListener("pointercancel", onBoardPointerUp);
+    board.addEventListener("auxclick", (e) => {
+      if (e.button === 1) e.preventDefault();
+    });
     board.addEventListener("contextmenu", (e) => {
       if (e.target.closest(".calc-port, .calc-port-menu")) e.preventDefault();
     });
     board.addEventListener("wheel", onBoardWheel, { passive: false });
+    const mini = $("calc-minimap");
+    mini?.addEventListener("pointerdown", (e) => {
+      if (session.miniHidden) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const bp = activeBlueprint();
+      const at = miniWorldPoint(e.clientX, e.clientY);
+      if (!bp || !at) return;
+      session.miniDrag = true;
+      session.busy = true;
+      centerViewOn(bp, at.x, at.y);
+      mini.setPointerCapture(e.pointerId);
+    });
+    mini?.addEventListener("pointermove", (e) => {
+      if (!session.miniDrag || session.miniHidden) return;
+      const bp = activeBlueprint();
+      const at = miniWorldPoint(e.clientX, e.clientY);
+      if (!bp || !at) return;
+      centerViewOn(bp, at.x, at.y);
+    });
+    mini?.addEventListener("pointerup", () => {
+      if (!session.miniDrag) return;
+      session.miniDrag = null;
+      session.busy = false;
+      dirty();
+    });
+    mini?.addEventListener("pointercancel", () => {
+      session.miniDrag = null;
+      session.busy = false;
+    });
+    board.addEventListener("click", async (e) => {
+      const btn = e.target.closest(".calc-screen-copy");
+      if (!btn || !board.contains(btn) || btn.disabled) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const text = btn.dataset.copy || "";
+      if (!(await copyScreenText(text))) return;
+      const screen = btn.closest(".calc-screen");
+      btn.classList.add("is-copied");
+      screen?.classList.add("is-copied");
+      btn.title = "Скопировано";
+      clearTimeout(btn._copyT);
+      btn._copyT = setTimeout(() => {
+        btn.classList.remove("is-copied");
+        screen?.classList.remove("is-copied");
+        btn.title = "Копировать";
+      }, 1400);
+    });
     root.addEventListener("click", (e) => {
       const nodeEl = e.target.closest(".calc-node");
       const bp = activeBlueprint();
@@ -1862,8 +2513,28 @@
         render();
       }
     });
+    root.addEventListener("input", (e) => {
+      if (e.target.dataset?.groupColor) {
+        const nodeEl = e.target.closest("[data-node]");
+        const bp = activeBlueprint();
+        const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node) : null;
+        if (node?.type === "group") {
+          node.color = String(e.target.value || "#14b8a6");
+          const vis = groupsRoot()?.querySelector(`[data-node="${cssEsc(node.id)}"]`);
+          const chrome = findGroupChrome(node.id);
+          vis?.style.setProperty("--group-color", node.color);
+          chrome?.style.setProperty("--group-color", node.color);
+          drawMinimap(bp);
+        }
+        return;
+      }
+      if (!e.target.dataset?.constValue) return;
+      const bp = activeBlueprint();
+      fitScreenNodes();
+      if (bp) requestAnimationFrame(() => drawWires(bp, computeGraph(bp)));
+    });
     root.addEventListener("change", (e) => {
-      const nodeEl = e.target.closest(".calc-node");
+      const nodeEl = e.target.closest(".calc-node, .calc-group-chrome");
       const bp = activeBlueprint();
       const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node) : null;
       if (!node) return;
@@ -1872,6 +2543,22 @@
         e.target.value = node.name;
         dirty();
         render();
+        return;
+      }
+      if (e.target.dataset.groupName && node.type === "group") {
+        node.name = String(e.target.value || "").trim().slice(0, 48) || "Группа";
+        e.target.value = node.name;
+        dirty();
+        return;
+      }
+      if (e.target.dataset.groupColor && node.type === "group") {
+        node.color = String(e.target.value || "#14b8a6");
+        const vis = groupsRoot()?.querySelector(`[data-node="${cssEsc(node.id)}"]`);
+        const chrome = findGroupChrome(node.id);
+        vis?.style.setProperty("--group-color", node.color);
+        chrome?.style.setProperty("--group-color", node.color);
+        dirty();
+        drawMinimap(bp);
         return;
       }
       if (e.target.dataset.constValue && node.type === "const") {
@@ -1925,6 +2612,7 @@
       if (api?.view?.() !== "calculator") return;
       if (e.key === "Escape") {
         hidePortMenu();
+        session.resize = null;
         if (session.linking) {
           session.linking = null;
           setLinkingClass();
@@ -1941,7 +2629,10 @@
     window.addEventListener("resize", () => {
       if (api?.view?.() === "calculator") {
         const bp = activeBlueprint();
-        if (bp) drawWires(bp, computeGraph(bp));
+        if (bp) {
+          drawWires(bp, computeGraph(bp));
+          drawMinimap(bp);
+        }
       }
     });
   }

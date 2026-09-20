@@ -910,6 +910,18 @@
     return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
   }
 
+  function themeIcon(theme) {
+    if (theme === "dark") {
+      return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M21 14.5A8.5 8.5 0 0 1 9.5 3 7 7 0 1 0 21 14.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+      </svg>`;
+    }
+    return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.8"/>
+      <path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.05 5.05l1.56 1.56M17.39 17.39l1.56 1.56M18.95 5.05l-1.56 1.56M6.61 17.39l-1.56 1.56" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </svg>`;
+  }
+
   function applyTheme(theme, persist) {
     const t = theme === "dark" ? "dark" : "light";
     document.documentElement.setAttribute("data-theme", t);
@@ -920,8 +932,9 @@
     }
     document.querySelectorAll(".js-theme-toggle").forEach((btn) => {
       btn.setAttribute("aria-pressed", t === "dark" ? "true" : "false");
-      btn.textContent = t === "dark" ? "Светлая" : "Тёмная";
+      btn.innerHTML = themeIcon(t);
       btn.title = t === "dark" ? "Включить светлую тему" : "Включить тёмную тему";
+      btn.setAttribute("aria-label", btn.title);
     });
     if (persist && state.desktop) {
       apiPost("/api/theme", { theme: t }).catch(() => {});
@@ -6249,6 +6262,11 @@
       taxMode,
       qtyValue,
       lineUnitPrice: (line) => Math.max(0, numExpr(line, "price_expr", "price")),
+      copyText: async (text) => {
+        if (state.desktop) await apiPost("/api/clipboard-text", { text });
+        else if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+        else throw new Error("clipboard");
+      },
     };
   }
 
