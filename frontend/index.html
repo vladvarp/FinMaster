@@ -116,6 +116,7 @@
           <button data-view="analytics" title="Аналитика"><span class="nav-ico">◷</span><span class="nav-label">Аналитика</span></button>
           <button data-view="cashflow" title="Касса: платёжный календарь и дебиторка"><span class="nav-ico">₽</span><span class="nav-label">Касса</span></button>
           <button data-view="calendar" title="Календарь работ: когда заказы начаты, идут и закончены"><span class="nav-ico">▦</span><span class="nav-label">Календарь</span></button>
+          <button data-view="calculator" title="Калькулятор: схемы из заказов, операторов и формул"><span class="nav-ico">∑</span><span class="nav-label">Калькулятор</span></button>
           <button data-view="cloud" title="Облако заказов: интерактивная карта связей"><span class="nav-ico">✣</span><span class="nav-label">Облако</span></button>
           <button data-view="customers" title="Заказчики"><span class="nav-ico">◉</span><span class="nav-label">Заказчики</span></button>
           <button data-view="catalogs" title="Справочники"><span class="nav-ico">⚙</span><span class="nav-label">Справочники</span></button>
@@ -409,6 +410,25 @@
           <div class="cal-layout">
             <div class="card cal-board" id="cal-board"></div>
             <aside class="card cal-side" id="cal-side"></aside>
+          </div>
+        </div>
+
+        <div class="view calc-view" id="view-calculator">
+          <div class="calc-tabbar">
+            <div class="calc-tabs" id="calc-tabs" role="tablist" aria-label="Схемы калькулятора"></div>
+            <button type="button" class="calc-tab add" data-add-bp="1" title="Новая схема">+</button>
+          </div>
+          <div class="calc-layout">
+            <aside class="card calc-side" id="calc-side"></aside>
+            <div class="card calc-board" id="calc-board">
+              <button type="button" class="calc-refresh" id="calc-refresh" title="Пересчитать схему">↻</button>
+              <input id="calc-bp-name" class="calc-bp-name" maxlength="48" spellcheck="false" title="Название схемы" />
+              <div class="calc-world" id="calc-world">
+                <svg class="calc-wires" id="calc-wires" viewBox="-20000 -20000 40000 40000" aria-hidden="true"></svg>
+                <div class="calc-nodes" id="calc-nodes"></div>
+              </div>
+              <div class="calc-hint">Связь: с выхода на вход или со входа на выход. Крестик на линии снимает связь. Нода схемы отдаёт результаты выбранного блюпринта.</div>
+            </div>
           </div>
         </div>
 
@@ -849,6 +869,14 @@
           <div class="help-row"><span>К сегодняшнему дню</span><span><kbd>T</kbd></span></div>
           <div class="help-row"><span>Масштаб / прокрутка дней в таймлайне</span><span>колесо на навигаторе / на линейке дней</span></div>
           <div class="help-row"><span>Таймлайн / классический / неделя</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span></div>
+          <h4>Калькулятор</h4>
+          <div class="help-row"><span>Пересчитать схему</span><span>кнопка ↻ слева вверху</span></div>
+          <div class="help-row"><span>Протянуть связь</span><span>выход→вход или вход→выход</span></div>
+          <div class="help-row"><span>Удалить связь</span><span>крестик на линии / на входе</span></div>
+          <div class="help-row"><span>Удалить выбранную ноду</span><span><kbd>Delete</kbd> / крестик</span></div>
+          <div class="help-row"><span>Отменить тянущуюся связь</span><span><kbd>Esc</kbd></span></div>
+          <div class="help-row"><span>Снять связь со входа</span><span><kbd>Alt</kbd>+клик по входу</span></div>
+          <div class="help-row"><span>Масштаб / сдвиг схемы</span><span>колесо / перетаскивание поля</span></div>
           <h4>Облако</h4>
           <div class="help-row"><span>Поиск по карте</span><span><kbd>/</kbd></span></div>
           <div class="help-row"><span>Показать всё / автотур</span><span><kbd>F</kbd> / <kbd>T</kbd></span></div>
@@ -887,6 +915,7 @@
 
   <script src="/charts.js"></script>
   <script src="/cloud.js"></script>
+  <script src="/calc.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -144,6 +144,7 @@
       if (JSON.stringify(a.units || []) !== JSON.stringify(b.units || [])) return "Единицы измерения";
       if (JSON.stringify(a.order_types || []) !== JSON.stringify(b.order_types || [])) return "Типы заказов";
       if (JSON.stringify(a.ui?.calendar || {}) !== JSON.stringify(b.ui?.calendar || {})) return "Календарь";
+      if (JSON.stringify(a.ui?.calculator || {}) !== JSON.stringify(b.ui?.calculator || {})) return "Калькулятор";
       if (a.title !== b.title) return "Название отчёта";
     } catch {
       /* ignore */
@@ -774,7 +775,7 @@
       products: [],
       customers: [],
       orders: [],
-      ui: { sidebar_collapsed: false, column_widths: {}, share_fields: [], share_theme: "teal", cloud: {}, line_series: {} },
+      ui: { sidebar_collapsed: false, column_widths: {}, share_fields: [], share_theme: "teal", cloud: {}, line_series: {}, calculator: { active: "", blueprints: [] } },
     };
   }
 
@@ -6232,6 +6233,29 @@
     document.addEventListener("webkitfullscreenchange", syncCloudFullscreen);
   }
 
+  function calculatorApi() {
+    return {
+      doc: () => state.doc,
+      view: () => state.view,
+      uid,
+      money,
+      markDirty,
+      orders: () => state.doc?.orders || [],
+      findOrder,
+      lineTotals,
+      orderTotals,
+      isFrozen: isFrozenLine,
+    };
+  }
+
+  function renderCalculator() {
+    window.FinCalc?.render(calculatorApi());
+  }
+
+  function bindCalculator() {
+    window.FinCalc?.bind(calculatorApi());
+  }
+
   function cloudFullscreenElement() {
     return document.fullscreenElement || document.webkitFullscreenElement || null;
   }
@@ -6371,6 +6395,7 @@
     if (state.view === "analytics") renderAnalytics();
     if (state.view === "cashflow") renderCashflow();
     if (state.view === "calendar") renderCalendar();
+    if (state.view === "calculator") renderCalculator();
     if (state.view === "cloud") renderCloud();
     if (state.view === "catalogs") renderCatalogs();
     if (state.view === "customers") renderCustomers();
@@ -6404,6 +6429,7 @@
     }
     renderAll();
     if (name === "cloud") applyCloudFocus({ fly: true });
+    if (name === "calculator") requestAnimationFrame(() => renderCalculator());
   }
 
   function createNew() {
@@ -6928,6 +6954,7 @@
     bindCalendar();
     bindFileMenu();
     bindCloud();
+    bindCalculator();
     $("global-search").addEventListener("input", (e) => {
       state.search = e.target.value;
       renderAll();
@@ -9216,6 +9243,7 @@
       { group: "Разделы", ico: "◷", title: "Аналитика", sub: "фильтры, сравнение периодов", run: () => setView("analytics") },
       { group: "Разделы", ico: "₽", title: "Касса", sub: "платёжный календарь и дебиторка", run: () => setView("cashflow") },
       { group: "Разделы", ico: "▦", title: "Календарь", sub: "старт, финиш и что идёт сейчас", run: () => setView("calendar") },
+      { group: "Разделы", ico: "∑", title: "Калькулятор", sub: "схемы из заказов, операторов и формул", run: () => setView("calculator") },
       { group: "Разделы", ico: "✣", title: "Облако заказов", sub: "живая карта заказов и позиций", run: () => setView("cloud") },
       { group: "Разделы", ico: "◉", title: "Заказчики", sub: "контакты и рейтинг", run: () => setView("customers") },
       { group: "Разделы", ico: "⚙", title: "Справочники", sub: "статусы, единицы, продукты", run: () => setView("catalogs") },

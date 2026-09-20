@@ -232,6 +232,199 @@ def _line_series_ui(raw: Any) -> dict[str, Any]:
     return out
 
 
+CALC_OPS = ("+", "-", "*", "/")
+CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme")
+CALC_MAX_BLUEPRINTS = 24
+CALC_MAX_NODES = 120
+CALC_MAX_LINKS = 400
+CALC_MAX_PORTS = 20
+
+
+def _clip_text(value: Any, limit: int, fallback: str = "") -> str:
+    text = str(value or "").strip()
+    return (text[:limit] if text else fallback)
+
+
+def _calc_port(raw: Any, fallback: str, with_expr: bool) -> dict[str, Any] | None:
+    if isinstance(raw, dict):
+        port_id = _clip_text(raw.get("id"), 80)
+        name = _clip_text(raw.get("name"), 24, fallback)
+        expr = _clip_text(raw.get("expr"), 200) if with_expr else ""
+    else:
+        port_id = ""
+        name = _clip_text(raw, 24, fallback)
+        expr = ""
+    if not name:
+        return None
+    port: dict[str, Any] = {"id": port_id or name, "name": name}
+    if with_expr:
+        port["expr"] = expr
+    return port
+
+
+def _calc_ports(raw: Any, kind: str, defaults: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    with_expr = kind == "out"
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    src = raw if isinstance(raw, list) else defaults
+    for i, item in enumerate(src[:CALC_MAX_PORTS]):
+        fallback = defaults[i]["name"] if i < len(defaults) else ("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[i] if i < 26 else f"P{i + 1}")
+        port = _calc_port(item, fallback, with_expr)
+        if not port:
+            continue
+        key = port["id"]
+        if key in seen:
+            continue
+        seen.add(key)
+        if with_expr and not str(port.get("expr") or "").strip():
+            port["expr"] = defaults[i]["expr"] if i < len(defaults) and defaults[i].get("expr") else port["name"]
+        items.append(port)
+    return items or [dict(item) for item in defaults]
+
+
+def _calc_node(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    node_id = _clip_text(raw.get("id"), 80)
+    kind = str(raw.get("type") or "")
+    if not node_id or kind not in CALC_NODE_TYPES:
+        return None
+    node: dict[str, Any] = {
+        "id": node_id,
+        "type": kind,
+        "x": _int_in_range(raw.get("x"), 80, -8000, 8000),
+        "y": _int_in_range(raw.get("y"), 80, -8000, 8000),
+    }
+    if kind == "order":
+        node["orderId"] = _clip_text(raw.get("orderId"), 80)
+    elif kind == "math":
+        op = str(raw.get("op") or "+")
+        node["op"] = op if op in CALC_OPS else "+"
+    elif kind == "result":
+        node["name"] = _clip_text(raw.get("name"), 48, "Результат")
+    elif kind == "const":
+        try:
+            value = float(raw.get("value"))
+        except (TypeError, ValueError):
+            value = 0.0
+        if value != value:
+            value = 0.0
+        node["value"] = value
+    elif kind == "scheme":
+        node["blueprintId"] = _clip_text(raw.get("blueprintId"), 80)
+    elif kind == "formula":
+        letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        inputs = _calc_ports(
+            raw.get("inputs"),
+            "in",
+            [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}],
+        )
+        used: set[str] = set()
+        fixed: list[dict[str, Any]] = []
+        for i, port in enumerate(inputs[:26]):
+            name = str(port.get("name") or "").strip().upper()
+            if len(name) != 1 or name not in letters or name in used:
+                name = next((ch for ch in letters if ch not in used), letters[i % 26])
+            used.add(name)
+            fixed.append({"id": port.get("id") or name.lower(), "name": name})
+        node["inputs"] = fixed or [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}]
+        node["outputs"] = _calc_ports(
+            raw.get("outputs"),
+            "out",
+            [
+                {"id": "c", "name": "C", "expr": "A+B"},
+                {"id": "d", "name": "D", "expr": "(-40+A)*B"},
+            ],
+        )
+    return node
+
+
+def _calc_link(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    link_id = _clip_text(raw.get("id"), 80)
+    src = _clip_text(raw.get("from"), 80)
+    dst = _clip_text(raw.get("to"), 80)
+    if not link_id or not src or not dst or src == dst:
+        return None
+    return {
+        "id": link_id,
+        "from": src,
+        "fromPort": _clip_text(raw.get("fromPort"), 80, "out"),
+        "to": dst,
+        "toPort": _clip_text(raw.get("toPort"), 80, "in1"),
+    }
+
+
+def _calc_blueprint(raw: Any, index: int) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    bp_id = _clip_text(raw.get("id"), 80)
+    if not bp_id:
+        return None
+    nodes: list[dict[str, Any]] = []
+    seen_nodes: set[str] = set()
+    for item in raw.get("nodes") if isinstance(raw.get("nodes"), list) else []:
+        node = _calc_node(item)
+        if not node or node["id"] in seen_nodes:
+            continue
+        seen_nodes.add(node["id"])
+        nodes.append(node)
+        if len(nodes) >= CALC_MAX_NODES:
+            break
+    node_ids = {node["id"] for node in nodes}
+    links: list[dict[str, Any]] = []
+    seen_links: set[str] = set()
+    for item in raw.get("links") if isinstance(raw.get("links"), list) else []:
+        link = _calc_link(item)
+        if not link or link["id"] in seen_links:
+            continue
+        if link["from"] not in node_ids or link["to"] not in node_ids:
+            continue
+        seen_links.add(link["id"])
+        links.append(link)
+        if len(links) >= CALC_MAX_LINKS:
+            break
+    zoom = 1.0
+    try:
+        zoom = float(raw.get("zoom") or 1)
+    except (TypeError, ValueError):
+        zoom = 1.0
+    if zoom != zoom:
+        zoom = 1.0
+    zoom = max(0.35, min(2.5, zoom))
+    return {
+        "id": bp_id,
+        "name": _clip_text(raw.get("name"), 48, f"Схема {index + 1}"),
+        "x": _int_in_range(raw.get("x"), 0, -20000, 20000),
+        "y": _int_in_range(raw.get("y"), 0, -20000, 20000),
+        "zoom": zoom,
+        "nodes": nodes,
+        "links": links,
+    }
+
+
+def _calculator_ui(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {"active": "", "blueprints": []}
+    blueprints: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, item in enumerate(raw.get("blueprints") if isinstance(raw.get("blueprints"), list) else []):
+        bp = _calc_blueprint(item, i)
+        if not bp or bp["id"] in seen:
+            continue
+        seen.add(bp["id"])
+        blueprints.append(bp)
+        if len(blueprints) >= CALC_MAX_BLUEPRINTS:
+            break
+    active = _clip_text(raw.get("active"), 80)
+    if active and active not in seen:
+        active = blueprints[0]["id"] if blueprints else ""
+    elif not active and blueprints:
+        active = blueprints[0]["id"]
+    return {"active": active, "blueprints": blueprints}
+
+
 def _int_in_range(value: Any, default: int, low: int, high: int) -> int:
     try:
         number = int(round(float(value)))
@@ -310,6 +503,7 @@ def empty_document(title: str = "Новый отчёт") -> dict[str, Any]:
             "cash_horizon": DEFAULT_CASH_HORIZON,
             "cloud": {},
             "line_series": {},
+            "calculator": {"active": "", "blueprints": []},
         },
     }
 
@@ -460,6 +654,7 @@ def normalize_document(raw: Any) -> dict[str, Any]:
             "cloud": _cloud_ui(ui.get("cloud")),
             "calendar": _calendar_ui(ui.get("calendar")),
             "line_series": _line_series_ui(ui.get("line_series")),
+            "calculator": _calculator_ui(ui.get("calculator")),
         }
         if base["ui"]["cash_horizon"] not in CASH_HORIZONS:
             base["ui"]["cash_horizon"] = DEFAULT_CASH_HORIZON

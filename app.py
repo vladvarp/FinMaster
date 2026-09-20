@@ -171,7 +171,7 @@ def favicon_svg():
 @app.get("/<path:filename>")
 def static_files(filename: str):
     response = send_from_directory(FRONTEND, filename)
-    if filename in {"mobile.js", "mobile.css", "mobile.html", "app.js", "cloud.js", "styles.css", "charts.js"}:
+    if filename in {"mobile.js", "mobile.css", "mobile.html", "app.js", "cloud.js", "calc.js", "styles.css", "charts.js"}:
         return _no_cache(response)
     return response
 
