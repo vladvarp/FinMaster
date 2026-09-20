@@ -322,6 +322,8 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         node["op"] = op if op in CALC_OPS else "+"
     elif kind == "result":
         node["name"] = _clip_text(raw.get("name"), 48, "Результат")
+        node["priority"] = _int_in_range(raw.get("priority"), 1, 0, 9999)
+        node["visible"] = False if raw.get("visible") is False else True
     elif kind == "const":
         try:
             value = float(raw.get("value"))

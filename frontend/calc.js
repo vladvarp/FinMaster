@@ -335,14 +335,53 @@
     return String(node?.name || "").trim() || "Результат";
   }
 
+  function resultPriority(node) {
+    const n = Number(node?.priority);
+    return Number.isFinite(n) ? n : 9999;
+  }
+
+  function resultVisible(node) {
+    return node?.visible !== false;
+  }
+
+  function nextResultPriority(bp) {
+    let max = 0;
+    (bp?.nodes || []).forEach((node) => {
+      if (node.type !== "result") return;
+      const n = Number(node.priority);
+      if (Number.isFinite(n) && n > max) max = n;
+    });
+    return max + 1;
+  }
+
   function schemeOutputs(bp) {
     return (bp?.nodes || [])
-      .filter((node) => node.type === "result")
+      .filter((node) => node.type === "result" && resultVisible(node))
+      .sort((a, b) => resultPriority(a) - resultPriority(b) || resultName(a).localeCompare(resultName(b), "ru"))
       .map((node) => ({
         id: `result:${node.id}`,
         name: resultName(node),
         resultId: node.id,
       }));
+  }
+
+  function pruneHiddenResultLinks(resultId) {
+    const portId = `result:${resultId}`;
+    (ensureState()?.blueprints || []).forEach((bp) => {
+      bp.links = (bp.links || []).filter((link) => link.fromPort !== portId);
+    });
+  }
+
+  function resultEyeIcon(on) {
+    if (on) {
+      return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+        <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/>
+      </svg>`;
+    }
+    return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M3 3l18 18M10.6 10.7a2.8 2.8 0 0 0 3.7 3.7M9.5 5.3A10.7 10.7 0 0 1 12 5c6 0 9.5 7 9.5 7a16.6 16.6 0 0 1-3.2 3.8M6.2 6.3C4.1 7.8 2.5 12 2.5 12s3.5 7 9.5 7c1.2 0 2.3-.2 3.3-.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>`;
   }
 
   function nodeInputs(node, links) {
@@ -591,6 +630,7 @@
     if (node.type === "formula") return { w: 360, h: 160 };
     if (node.type === "order") return { w: 230, h: 140 };
     if (node.type === "scheme") return { w: 220, h: 100 };
+    if (node.type === "result") return { w: 376, h: 120 };
     if (node.type === "group") return { w: Math.max(160, node.w || 320), h: Math.max(120, node.h || 220) };
     return { w: 188, h: 120 };
   }
@@ -967,6 +1007,8 @@
     if (type === "result") {
       node.op = "result";
       node.name = "Результат";
+      node.priority = nextResultPriority(bp);
+      node.visible = true;
     }
     if (type === "percent") node.op = "percent";
     if (type === "const") node.value = 0;
@@ -1226,7 +1268,7 @@
             schemes.length
               ? schemes
                   .map((item) => {
-                    const n = (item.nodes || []).filter((node) => node.type === "result").length;
+                    const n = (item.nodes || []).filter((node) => node.type === "result" && resultVisible(node)).length;
                     return `<button type="button" class="calc-order" draggable="true" data-blueprint="${esc(item.id)}">
                       <b>${esc(item.name || "Схема")}</b>
                       <span>${n ? `${n} рез.` : "нет результатов"}</span>
@@ -1445,10 +1487,14 @@
   function resultNodeHtml(node, bp, graph) {
     const value = graph.values[`${node.id}:out`];
     const linked = usedInputPorts(node.id, bp.links);
-    return `<article class="calc-node is-result ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+    const prio = Number.isFinite(Number(node.priority)) ? Number(node.priority) : nextResultPriority(bp);
+    const shown = resultVisible(node);
+    return `<article class="calc-node is-result ${shown ? "" : "is-scheme-off"} ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
+        <input class="calc-result-prio" data-result-prio="${esc(node.id)}" type="number" min="0" max="9999" step="1" value="${prio}" title="Приоритет на схеме (меньше — выше)" aria-label="Приоритет" />
         <input class="calc-pname calc-result-name" data-result-name="${esc(node.id)}" value="${esc(resultName(node))}" maxlength="48" spellcheck="false" title="Имя результата" />
+        <button type="button" class="calc-eye ${shown ? "" : "is-off"}" data-result-eye="${esc(node.id)}" title="${shown ? "Скрыть из ноды схемы" : "Показать в ноде схемы"}" aria-label="${shown ? "Скрыть из ноды схемы" : "Показать в ноде схемы"}" aria-pressed="${shown ? "true" : "false"}">${resultEyeIcon(shown)}</button>
         <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
       </header>
       ${screenHtml(value, "Значение связи")}
@@ -1558,7 +1604,10 @@
       const btn = el.querySelector(".calc-screen-copy");
       const pad = 16 + (btn ? btn.offsetWidth + 8 : 0);
       const need = Math.ceil(Math.max(screen.scrollWidth, screen.offsetWidth) + pad);
-      const width = Math.min(520, Math.max(188, need));
+      const isResult = el.classList.contains("is-result");
+      const minW = isResult ? 376 : 188;
+      const maxW = isResult ? 1040 : 520;
+      const width = Math.min(maxW, Math.max(minW, need));
       el.style.width = `${width}px`;
     });
   }
@@ -1572,7 +1621,7 @@
     const focusHost = host.contains(focus) || groups?.contains(focus) || groupUi?.contains(focus) ? focus : null;
     const keep = focusHost
       ? {
-          name: focus.dataset.inName || focus.dataset.outName || focus.dataset.outExpr || focus.dataset.resultName || focus.dataset.constValue || focus.dataset.groupName,
+          name: focus.dataset.inName || focus.dataset.outName || focus.dataset.outExpr || focus.dataset.resultName || focus.dataset.resultPrio || focus.dataset.constValue || focus.dataset.groupName,
           start: focus.selectionStart,
           end: focus.selectionEnd,
         }
@@ -1600,7 +1649,7 @@
     applyWorld(bp);
     if (keep?.name) {
       const again =
-        host.querySelector(`[data-in-name="${cssEsc(keep.name)}"], [data-out-name="${cssEsc(keep.name)}"], [data-out-expr="${cssEsc(keep.name)}"], [data-result-name="${cssEsc(keep.name)}"], [data-const-value="${cssEsc(keep.name)}"]`) ||
+        host.querySelector(`[data-in-name="${cssEsc(keep.name)}"], [data-out-name="${cssEsc(keep.name)}"], [data-out-expr="${cssEsc(keep.name)}"], [data-result-name="${cssEsc(keep.name)}"], [data-result-prio="${cssEsc(keep.name)}"], [data-const-value="${cssEsc(keep.name)}"]`) ||
         groupUi?.querySelector(`[data-group-name="${cssEsc(keep.name)}"]`);
       if (again) {
         again.focus({ preventScroll: true });
@@ -2281,6 +2330,19 @@
       { passive: false }
     );
     root.addEventListener("click", (e) => {
+      const eye = e.target.closest("[data-result-eye]");
+      if (eye) {
+        e.preventDefault();
+        e.stopPropagation();
+        const bp = activeBlueprint();
+        const node = bp?.nodes.find((item) => item.id === eye.dataset.resultEye && item.type === "result");
+        if (!node) return;
+        node.visible = !resultVisible(node);
+        if (!resultVisible(node)) pruneHiddenResultLinks(node.id);
+        dirty();
+        render();
+        return;
+      }
       if (!e.target.closest("[data-add-bp]")) return;
       const calc = ensureState();
       if (!calc) return;
@@ -2541,6 +2603,14 @@
       if (e.target.dataset.resultName && node.type === "result") {
         node.name = String(e.target.value || "").trim().slice(0, 48) || "Результат";
         e.target.value = node.name;
+        dirty();
+        render();
+        return;
+      }
+      if (e.target.dataset.resultPrio && node.type === "result") {
+        const n = Math.round(Number(e.target.value));
+        node.priority = Number.isFinite(n) ? Math.max(0, Math.min(9999, n)) : nextResultPriority(bp);
+        e.target.value = String(node.priority);
         dirty();
         render();
         return;

@@ -1563,6 +1563,7 @@ h3.section {
 .mcal-cell.is-out { opacity: 0.35; }
 .mcal-cell.is-weekend { background: color-mix(in srgb, var(--danger) 8%, var(--card)); }
 .mcal-cell.is-off-day { background: color-mix(in srgb, #7c3aed 14%, var(--card)); }
+.mcal-cell.is-work-day { background: color-mix(in srgb, #0d9488 14%, var(--card)); }
 .mcal-cell.has-note { position: relative; }
 .mcal-cell .mcal-memo {
   display: block;
@@ -1598,6 +1599,7 @@ h3.section {
 .mcal-col { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 10px; }
 .mcal-col.is-weekend { background: color-mix(in srgb, var(--danger) 6%, var(--card)); }
 .mcal-col.is-off-day { background: color-mix(in srgb, #7c3aed 10%, var(--card)); }
+.mcal-col.is-work-day { background: color-mix(in srgb, #0d9488 10%, var(--card)); }
 .mcal-memo {
   font-size: 12px;
   color: #6d28d9;

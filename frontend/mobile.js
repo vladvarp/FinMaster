@@ -395,7 +395,8 @@
   }
 
   function isWeekend(d) {
-    return !!dayToneClass(d);
+    const tone = dayToneClass(d);
+    return tone === "is-weekend" || tone === "is-off-day";
   }
 
   function isGlobalWeekend(d) {
@@ -407,7 +408,7 @@
   function dayToneClass(d) {
     const key = dayKey(d);
     const off = calendarOffSettings();
-    if (off.workDays.includes(key)) return "";
+    if (off.workDays.includes(key)) return "is-work-day";
     if (off.offDays.includes(key)) return "is-off-day";
     if (off.weekends.includes(weekdayIndex(d))) return "is-weekend";
     return "";
@@ -2468,7 +2469,6 @@
       ["now", "Сейчас"],
       ["planned", "План"],
       ["done", "Готово"],
-      ["overdue", "Просрочены"],
       ["nodate", "Без дат"],
     ];
     const modeIcon = (id) =>

@@ -3241,7 +3241,6 @@
     ["now", "Идёт сейчас"],
     ["planned", "Запланированы"],
     ["done", "Завершены"],
-    ["overdue", "Просрочены"],
     ["nodate", "Без дат"],
   ];
   const RU_MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
@@ -3338,7 +3337,8 @@
   }
 
   function isWeekend(d) {
-    return !!dayToneClass(d);
+    const tone = dayToneClass(d);
+    return tone === "is-weekend" || tone === "is-off-day";
   }
 
   function isGlobalWeekend(d) {
@@ -3350,7 +3350,7 @@
   function dayToneClass(d) {
     const key = dayKey(d);
     const off = calendarOffSettings();
-    if (off.workDays.includes(key)) return "";
+    if (off.workDays.includes(key)) return "is-work-day";
     if (off.offDays.includes(key)) return "is-off-day";
     if (off.weekends.includes(weekdayIndex(d))) return "is-weekend";
     return "";
@@ -4541,7 +4541,12 @@
         </div>
       </div>
     </div>
-    <p class="cal-hint">Колесо на навигаторе — масштаб, на датах — период. Полосу двигают, края меняют даты. Стрелка — позиции. Shift+клик — пауза, Shift+двойной клик снимает.</p>`;
+    <div class="cal-hint hint-i">
+      <button type="button" class="info-btn" title="Подсказка по таймлайну" aria-label="Подсказка по таймлайну">i</button>
+      <div class="hint-i-pop" role="tooltip">
+        Колесо на навигаторе — масштаб, на датах — период. Полосу двигают, края меняют даты. Стрелка — позиции. Shift+клик — пауза, Shift+двойной клик снимает.
+      </div>
+    </div>`;
   }
 
   function renderClassicCalendar(win, list, load) {
@@ -4608,7 +4613,6 @@
     const today = win.today;
     const pausedNow = all.filter((order) => orderIsPausedNow(order, today));
     const now = all.filter((order) => workStatus(order) === "now" && !orderIsPausedNow(order, today));
-    const overdue = all.filter((order) => workStatus(order) === "overdue");
     const nodate = all.filter((order) => workStatus(order) === "nodate");
     const pick = cal.pick ? parseDay(cal.pick) : null;
     const pickItems = pick ? all.filter((order) => orderMarksDay(order, pick)) : [];
@@ -4708,7 +4712,6 @@
     return `${sel}${pickBlock}
       ${listBlock("На паузе", pausedNow, "Нет заказов на паузе.")}
       ${listBlock("В работе", now, "Нет заказов в работе — поставьте дату начала.")}
-      ${listBlock("Просрочены", overdue, "Без даты конца заказ не просрочен.")}
       <div class="cal-block"><h3>Без дат <span>${nodate.length}</span></h3>${fillAll}${
         nodate.length ? nodate.map((order) => calChipHtml(order)).join("") : `<div class="cal-col-empty">Все заказы размечены.</div>`
       }</div>`;
@@ -4795,12 +4798,6 @@
       starts.forEach((order) => lines.push(`  старт  ${orderNum(order)} ${orderTitle(order)}`));
       ends.forEach((order) => lines.push(`  финиш ${orderNum(order)} ${orderTitle(order)}`));
     });
-    const overdue = all.filter((order) => workStatus(order) === "overdue");
-    if (overdue.length) {
-      lines.push("");
-      lines.push(`Просрочены (${overdue.length}):`);
-      overdue.forEach((order) => lines.push(`• ${orderNum(order)} ${orderTitle(order)} с ${dateDay(order.work_start)}`));
-    }
     return lines.join("\n");
   }
 
@@ -5504,7 +5501,14 @@
     tip.hidden = false;
     const tone = dayToneClass(day);
     const note = dayNote(day);
-    const mark = tone === "is-off-day" ? " · выходной точечно" : tone === "is-weekend" ? " · выходной" : "";
+    const mark =
+      tone === "is-off-day"
+        ? " · выходной точечно"
+        : tone === "is-work-day"
+          ? " · рабочий точечно"
+          : tone === "is-weekend"
+            ? " · выходной"
+            : "";
     const extra = note ? ` · ${note.length > 80 ? `${note.slice(0, 80)}…` : note}` : "";
     tip.textContent = `${RU_WEEKDAYS_FULL[weekdayIndex(day)]}, ${calFmtDay(day, true)}${mark}${extra}`;
     const follow = !!(calDrag && pointer && Number.isFinite(pointer.clientX));
@@ -6450,7 +6454,10 @@
       setDT("c-a-to", now);
     }
     renderAll();
-    if (name === "cloud") applyCloudFocus({ fly: true });
+    if (name === "cloud") {
+      applyCloudFocus({ fly: true });
+      requestAnimationFrame(() => orderCloud?.resize?.());
+    }
     if (name === "calculator") requestAnimationFrame(() => renderCalculator());
   }
 
@@ -9361,17 +9368,6 @@
         sub: "заказы в работе сегодня",
         run: () => {
           calendarState().filter = "now";
-          persistCalendar();
-          setView("calendar");
-        },
-      },
-      {
-        group: "Фильтры",
-        ico: "!",
-        title: "Календарь: просрочены",
-        sub: "без даты конца дедлайна нет",
-        run: () => {
-          calendarState().filter = "overdue";
           persistCalendar();
           setView("calendar");
         },
