@@ -131,7 +131,8 @@
         <div class="top-left">
           <div class="search">
             <span class="ico">⌕</span>
-            <input id="global-search" placeholder="Поиск по номеру, заказчику, названию, продукту…" />
+            <input id="global-search" type="search" placeholder="Поиск по номеру, заказчику, названию, продукту…" autocomplete="off" />
+            <button type="button" class="search-clear" data-search-clear="global-search" title="Очистить" aria-label="Очистить поиск">×</button>
           </div>
           <button class="btn cmd-btn" type="button" id="btn-command" title="Командная палитра">
             <span class="cmd-star">✦</span><span class="cmd-text">Команды</span><kbd>Ctrl</kbd><kbd>K</kbd>
@@ -481,6 +482,7 @@
             <label class="cloud-search">
               <span>⌕</span>
               <input type="search" id="cloud-search" placeholder="Номер, заказчик, работа, продукт…" autocomplete="off" />
+              <button type="button" class="search-clear" data-search-clear="cloud-search" title="Очистить" aria-label="Очистить поиск">×</button>
               <kbd>/</kbd>
             </label>
             <label class="cloud-control">

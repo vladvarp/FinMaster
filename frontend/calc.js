@@ -1219,12 +1219,13 @@
   }
 
   function orderStamp(order) {
-    let best = String(order?.created_at || "");
-    for (const line of order.lines || []) {
-      const day = String(line.order_date || "");
-      if (day > best) best = day;
+    let best = "";
+    for (const line of order?.lines || []) {
+      const day = String(line.order_date || "").slice(0, 10);
+      if (day.length >= 10 && day > best) best = day;
     }
-    return best;
+    if (best) return best;
+    return String(order?.created_at || "").slice(0, 10);
   }
 
   function renderSide(bp) {
@@ -1281,7 +1282,10 @@
       </div>
       <div class="calc-orders">
         <div class="calc-tools-label">Заказы</div>
-        <input type="search" id="calc-order-search" placeholder="Номер, название…" value="${esc(session.search)}" />
+        <div class="calc-search${session.search ? " has-value" : ""}">
+          <input type="search" id="calc-order-search" placeholder="Номер, название…" value="${esc(session.search)}" autocomplete="off" />
+          <button type="button" class="search-clear" data-search-clear="calc-order-search" title="Очистить" aria-label="Очистить поиск">×</button>
+        </div>
         <div class="calc-order-list">
           ${
             orders.length
@@ -2410,9 +2414,19 @@
     $("calc-side")?.addEventListener("input", (e) => {
       if (e.target.id !== "calc-order-search") return;
       session.search = e.target.value;
+      e.target.closest(".calc-search")?.classList.toggle("has-value", !!String(e.target.value || "").length);
       renderSide(activeBlueprint());
     });
     $("calc-side")?.addEventListener("click", (e) => {
+      const clear = e.target.closest("[data-search-clear]");
+      if (clear) {
+        e.preventDefault();
+        e.stopPropagation();
+        session.search = "";
+        renderSide(activeBlueprint());
+        $("calc-order-search")?.focus();
+        return;
+      }
       const add = e.target.closest("[data-add-node]");
       if (add) {
         addNode(add.dataset.addNode);

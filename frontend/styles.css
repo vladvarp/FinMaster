@@ -236,6 +236,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   padding: 10px 14px 10px 36px;
   outline: none;
 }
+.search.has-value input { padding-right: 36px; }
 .search input:focus { border-color: var(--accent-2); box-shadow: 0 0 0 3px rgba(20,184,166,0.15); }
 .search .ico {
   position: absolute;
@@ -243,6 +244,38 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   top: 50%;
   transform: translateY(-50%);
   color: var(--muted);
+}
+.search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 24px;
+  height: 24px;
+  display: none;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: 700 16px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+.search.has-value > .search-clear,
+.cloud-search.has-value > .search-clear,
+.calc-search.has-value > .search-clear {
+  display: grid;
+}
+.search-clear:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--line) 55%, transparent);
+}
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .content {
@@ -2902,7 +2935,10 @@ html[data-theme="dark"] .kpi:hover { box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
   color: var(--ink);
   font-size: 12px;
 }
+.cloud-search.has-value input { padding-right: 34px; }
 .cloud-search input:focus { border-color: var(--accent-2); box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.13); }
+.cloud-search .search-clear { right: 8px; }
+.cloud-search.has-value kbd { display: none; }
 .cloud-search kbd {
   position: absolute;
   right: 10px;
@@ -4670,14 +4706,31 @@ html[data-theme="dark"] .calc-mini-toggle {
 .calc-orders { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .calc-schemes { flex: 0 0 auto; }
 .calc-schemes .calc-order-list { max-height: 160px; }
+.calc-search {
+  position: relative;
+  margin-bottom: 8px;
+}
+.calc-search input,
 .calc-orders input {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 8px 10px;
-  margin-bottom: 8px;
+  margin-bottom: 0;
   background: var(--bg-2);
   color: var(--ink);
+}
+.calc-search input {
+  padding-right: 10px;
+}
+.calc-search.has-value input {
+  padding-right: 32px;
+}
+.calc-search .search-clear {
+  right: 6px;
+}
+.calc-orders .calc-search + .calc-order-list {
+  margin-top: 0;
 }
 .calc-order-list { display: flex; flex-direction: column; gap: 6px; overflow: auto; min-height: 0; }
 .calc-order {

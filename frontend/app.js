@@ -2457,12 +2457,13 @@
   }
 
   function orderNewestStamp(order) {
-    let best = order.created_at || "";
+    let best = "";
     for (const line of order.lines || []) {
-      const d = line.order_date || "";
-      if (d > best) best = d;
+      const d = dateDay(line.order_date);
+      if (d && d > best) best = d;
     }
-    return best;
+    if (best) return best;
+    return dateDay(order.created_at) || "";
   }
 
   function compareOrders(a, b, sort) {
@@ -6155,6 +6156,7 @@
     let searchTimer = 0;
     $("cloud-search")?.addEventListener("input", (e) => {
       cloudState().query = e.target.value;
+      syncSearchClear(e.target);
       renderCloud();
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => orderCloud?.fit(), 180);
@@ -6984,8 +6986,10 @@
     bindFileMenu();
     bindCloud();
     bindCalculator();
+    bindSearchClears();
     $("global-search").addEventListener("input", (e) => {
       state.search = e.target.value;
+      syncSearchClear(e.target);
       renderAll();
     });
     $("report-title").addEventListener("input", (e) => {
@@ -9242,10 +9246,46 @@
     setTimeout(() => card.classList.remove("flash"), 1700);
   }
 
+  function syncSearchClear(input) {
+    if (!input) return;
+    const wrap = input.closest(".search, .cloud-search, .calc-search");
+    wrap?.classList.toggle("has-value", !!String(input.value || "").length);
+  }
+
+  function clearSearchInput(input) {
+    if (!input) return;
+    input.value = "";
+    syncSearchClear(input);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.focus();
+  }
+
+  function bindSearchClears() {
+    document.querySelectorAll("[data-search-clear]").forEach((btn) => {
+      if (btn.dataset.boundClear) return;
+      btn.dataset.boundClear = "1";
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const input = $(btn.dataset.searchClear) || btn.parentElement?.querySelector("input");
+        clearSearchInput(input);
+      });
+    });
+    ["global-search", "cloud-search"].forEach((id) => {
+      const input = $(id);
+      if (!input || input.dataset.boundClearSync) return;
+      input.dataset.boundClearSync = "1";
+      input.addEventListener("input", () => syncSearchClear(input));
+      syncSearchClear(input);
+    });
+  }
+
   function gotoOrder(id) {
     state.orderFilter = "all";
     state.search = "";
-    $("global-search").value = "";
+    const search = $("global-search");
+    if (search) search.value = "";
+    syncSearchClear(search);
     setView("orders");
     requestAnimationFrame(() => flashOrder(id));
   }
