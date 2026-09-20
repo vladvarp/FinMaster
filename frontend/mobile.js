@@ -1346,12 +1346,13 @@
   }
 
   function orderNewestStamp(order) {
-    let best = order.created_at || "";
+    let best = "";
     for (const line of order.lines || []) {
-      const d = line.order_date || "";
-      if (d > best) best = d;
+      const d = String(line.order_date || "").slice(0, 10);
+      if (d.length >= 10 && d > best) best = d;
     }
-    return best;
+    if (best) return best;
+    return String(order.created_at || "").slice(0, 10);
   }
 
   const SORT_OPTIONS = [
