@@ -3567,38 +3567,59 @@
     return name || `Позиция ${index + 1}`;
   }
 
+  function lineDateFloor(line) {
+    return dateDay(line?.order_date) || "";
+  }
+
+  function dayKeyMax(...keys) {
+    return keys.filter(Boolean).sort().at(-1) || "";
+  }
+
   function lineWorkProxy(order, line) {
+    const floor = lineDateFloor(line);
+    let start = dateDay(line?.work_start) || dateDay(order?.work_start);
+    let end = dateDay(line?.work_end) || dateDay(order?.work_end);
+    if (floor) {
+      if (start && start < floor) start = floor;
+      if (end && end < floor) end = floor;
+    }
     return {
-      work_start: dateDay(line?.work_start) || dateDay(order?.work_start),
-      work_end: dateDay(line?.work_end) || dateDay(order?.work_end),
+      work_start: start || "",
+      work_end: end || "",
       work_pauses: Array.isArray(line?.work_pauses) ? line.work_pauses.map((pause) => ({ ...pause })) : [],
     };
   }
 
-  function clampLineToOrder(order, start, end) {
+  function clampLineToOrder(order, start, end, line) {
     const oStart = dateDay(order?.work_start);
     const oEnd = dateDay(order?.work_end);
+    const floor = lineDateFloor(line);
     let a = dateDay(start);
     let b = dateDay(end);
     if (oStart && a && a < oStart) a = oStart;
     if (oEnd && a && a > oEnd) a = oEnd;
     if (oStart && b && b < oStart) b = oStart;
     if (oEnd && b && b > oEnd) b = oEnd;
+    if (floor && a && a < floor) a = floor;
+    if (floor && b && b < floor) b = floor;
     if (a && b && b < a) [a, b] = [b, a];
+    if (floor && a && a < floor) a = floor;
+    if (a && b && b < a) b = a;
     return { start: a, end: b };
   }
 
   function writeLineWork(order, line, proxy) {
     if (!line) return;
     normalizeWorkDates(proxy, { mergePauses: true, lines: false });
-    const clamped = clampLineToOrder(order, proxy.work_start, proxy.work_end);
+    const clamped = clampLineToOrder(order, proxy.work_start, proxy.work_end, line);
     proxy.work_start = clamped.start;
     proxy.work_end = clamped.end;
     normalizeWorkDates(proxy, { mergePauses: true, lines: false });
     const pauses = workPauses(proxy);
     const oStart = dateDay(order.work_start);
     const oEnd = dateDay(order.work_end);
-    const sameDates = dateDay(proxy.work_start) === oStart && dateDay(proxy.work_end) === oEnd;
+    const defaultStart = dayKeyMax(oStart, lineDateFloor(line));
+    const sameDates = dateDay(proxy.work_start) === defaultStart && dateDay(proxy.work_end) === oEnd;
     if (!dateDay(proxy.work_start) && !dateDay(proxy.work_end)) {
       line.work_start = "";
       line.work_end = "";
@@ -3632,8 +3653,22 @@
     return order;
   }
 
-  function clampLineProxy(order, proxy, drag) {
+  function lineDrawEnvelope(order, line) {
     const env = orderDrawSpan(order);
+    if (!env) return null;
+    const floor = parseDay(lineDateFloor(line));
+    let from = env.from;
+    if (floor) {
+      if (floor > env.till) from = env.till;
+      else if (floor > from) from = floor;
+    }
+    if (from > env.till) return null;
+    return { from, till: env.till };
+  }
+
+  function clampLineProxy(order, proxy, drag) {
+    const line = drag?.line;
+    const env = lineDrawEnvelope(order, line) || orderDrawSpan(order);
     if (!env) return;
     let start = parseDay(proxy.work_start);
     let end = parseDay(proxy.work_end);
@@ -3653,7 +3688,7 @@
       proxy.work_start = dayKey(start);
       return;
     }
-    const c = clampLineToOrder(order, proxy.work_start, proxy.work_end);
+    const c = clampLineToOrder(order, proxy.work_start, proxy.work_end, line);
     proxy.work_start = c.start;
     proxy.work_end = c.end;
   }
@@ -5239,7 +5274,7 @@
     const index = calDrag.pauseIndex;
     const list = workPauses(order);
     if (!list[index] || !calDrag.pause0) return;
-    const env = orderDrawSpan(order);
+    const env = calDrag.line ? lineDrawEnvelope(calDrag.order, calDrag.line) : orderDrawSpan(calDrag.order || order);
     if (!env) return;
     const others = calDrag.pauses0 || list;
     const prev = others[index - 1];
