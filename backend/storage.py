@@ -264,26 +264,73 @@ def _write_history_meta(folder: str, data: dict[str, Any]) -> None:
 
 
 def _snap_name(item_id: str) -> str:
-    text = re.sub(r"[^A-Za-z0-9_-]+", "", str(item_id or ""))
+    text = os.path.basename(str(item_id or "").strip())
+    if text.lower().endswith(".json"):
+        text = text[:-5]
+    text = re.sub(r"[^A-Za-z0-9_-]+", "", text)
     return f"{text or secrets.token_hex(8)}.json"
+
+
+def _history_file_candidates(item: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: Any) -> None:
+        raw = os.path.basename(str(value or "").strip())
+        if not raw:
+            return
+        variants = [raw, _snap_name(raw)]
+        if raw.lower().endswith(".json"):
+            stem = raw[:-5]
+            variants.append(re.sub(r"[^A-Za-z0-9_-]+", "", stem) + "json.json")
+        for name in variants:
+            name = os.path.basename(str(name or "").strip())
+            if not name or name == HISTORY_META or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+
+    add(item.get("file"))
+    add(item.get("id"))
+    return names
+
+
+def _read_history_snap(path: str) -> dict[str, Any] | None:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
 
 
 def find_history_folder(report_path: str) -> str:
     if not report_path:
         return ""
     want = _norm_report_path(report_path)
+    want_name = os.path.basename(want)
     root = history_root()
     try:
         names = os.listdir(root)
     except OSError:
         return ""
+    fallback = ""
+    fallback_hits = 0
     for name in names:
         folder = os.path.join(root, name)
         if not os.path.isdir(folder):
             continue
         path = str(_read_history_meta(folder).get("path") or "")
-        if path and _norm_report_path(path) == want:
+        if not path:
+            continue
+        got = _norm_report_path(path)
+        if got == want:
             return folder
+        if os.path.basename(got) == want_name:
+            fallback = folder
+            fallback_hits += 1
+    if fallback_hits == 1:
+        return fallback
     return ""
 
 
@@ -339,18 +386,23 @@ def load_doc_history(report_path: str) -> dict[str, Any]:
     raw_items = meta.get("items") if isinstance(meta.get("items"), list) else []
     items = []
     for raw in raw_items:
-        info = _clean_history_item(raw) if isinstance(raw, dict) else None
+        if not isinstance(raw, dict):
+            continue
+        info = _clean_history_item(raw)
         if not info:
             continue
-        snap = os.path.join(folder, info["file"])
-        try:
-            with open(snap, encoding="utf-8") as fh:
-                doc = json.load(fh)
-        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        doc = None
+        used = info["file"]
+        for name in _history_file_candidates(raw):
+            found = _read_history_snap(os.path.join(folder, name))
+            if found is None:
+                continue
+            doc = found
+            used = name
+            break
+        if doc is None:
             continue
-        if not isinstance(doc, dict):
-            continue
-        items.append({**info, "doc": doc})
+        items.append({**info, "file": used, "doc": doc})
     limit = history_limit()
     if len(items) > limit:
         extra = len(items) - limit
@@ -370,29 +422,52 @@ def save_doc_history(report_path: str, payload: dict[str, Any]) -> dict[str, Any
     if isinstance(payload, dict):
         title = str(payload.get("title") or "")
     folder = _alloc_history_folder(report_path, title)
+    old_meta = _read_history_meta(folder)
+    old_items = old_meta.get("items") if isinstance(old_meta.get("items"), list) else []
+    old_ids = {str(item.get("id") or "") for item in old_items if isinstance(item, dict) and item.get("id")}
     raw_items = payload.get("items") if isinstance(payload, dict) else []
     if not isinstance(raw_items, list):
         raw_items = []
     keep = []
     keep_files = {HISTORY_META}
+    pending_writes: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for raw in raw_items:
         if not isinstance(raw, dict):
             continue
         info = _clean_history_item(raw)
         if not info:
             continue
-        snap = os.path.join(folder, info["file"])
-        doc = raw.get("doc")
-        if isinstance(doc, dict) and not os.path.isfile(snap):
-            try:
-                with open(snap, "w", encoding="utf-8") as fh:
-                    json.dump(doc, fh, ensure_ascii=False)
-            except OSError:
+        used = ""
+        for name in _history_file_candidates({**raw, "file": info.get("file"), "id": info.get("id")}):
+            if os.path.isfile(os.path.join(folder, name)):
+                used = name
+                break
+        if used:
+            info["file"] = used
+        else:
+            doc = raw.get("doc")
+            if not isinstance(doc, dict):
                 continue
-        if not os.path.isfile(snap):
-            continue
+            pending_writes.append((info, doc))
         keep.append(info)
         keep_files.add(info["file"])
+    new_ids = {item["id"] for item in keep}
+    if old_ids and new_ids.isdisjoint(old_ids) and len(keep) < max(1, len(old_items)):
+        return load_doc_history(report_path)
+    written: list[dict[str, Any]] = []
+    for info, doc in pending_writes:
+        snap = os.path.join(folder, info["file"])
+        try:
+            with open(snap, "w", encoding="utf-8") as fh:
+                json.dump(doc, fh, ensure_ascii=False)
+        except OSError:
+            continue
+        if os.path.isfile(snap):
+            written.append(info)
+    if pending_writes:
+        ok = {id(item) for item in written}
+        keep = [item for item in keep if id(item) in ok or os.path.isfile(os.path.join(folder, item["file"]))]
+        keep_files = {HISTORY_META, *(item["file"] for item in keep)}
     limit = history_limit()
     if len(keep) > limit:
         extra = len(keep) - limit

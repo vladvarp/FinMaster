@@ -168,7 +168,7 @@
     };
   }
 
-  function historyReset(label = "Открыт отчёт") {
+  function historyReset(label = "Открыт отчёт", opts = {}) {
     clearTimeout(history.timer);
     history.pending = false;
     history.pendingLabel = "";
@@ -176,7 +176,7 @@
     history.stack = snap ? [historyItem(snap, label, { source: "pc", device: "ПК" })] : [];
     history.index = history.stack.length - 1;
     updateHistoryButtons();
-    persistHistorySoon();
+    if (opts.persist !== false) persistHistorySoon();
   }
 
   function historyTrim() {
@@ -244,7 +244,7 @@
         } catch {
           doc = null;
         }
-        return { id: item.id, at: item.at, label: item.label, source: item.source, device: item.device, doc };
+        return { id: item.id, file: item.file || undefined, at: item.at, label: item.label, source: item.source, device: item.device, doc };
       }).filter((item) => item.doc),
     };
   }
@@ -271,6 +271,7 @@
       try {
         restored.push({
           id: item.id || uid(),
+          file: item.file ? String(item.file) : undefined,
           at: item.at || new Date().toISOString(),
           label: item.label || "Правка",
           source: item.source === "mobile" ? "mobile" : "pc",
@@ -282,7 +283,7 @@
       }
     });
     if (!restored.length) {
-      historyReset(state.path ? "Открыт отчёт" : "Новый отчёт");
+      historyReset(state.path ? "Открыт отчёт" : "Новый отчёт", { persist: !items.length });
       return;
     }
     history.stack = restored;
@@ -6445,7 +6446,7 @@
     if (res.history && Array.isArray(res.history.items) && res.history.items.length) {
       adoptHistory(res.history, res.history_limit);
     } else {
-      historyReset("Открыт отчёт");
+      historyReset("Открыт отчёт", { persist: !res.history?.folder });
     }
     if (res.recent) renderRecent(res.recent);
     else if (res.path) pushLocalRecent(res.path, res.document.title);
