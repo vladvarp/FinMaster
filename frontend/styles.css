@@ -4393,10 +4393,20 @@ html[data-theme="dark"] .file-menu .btn.ghost:hover {
   cursor: grab;
 }
 .calc-board:active { cursor: grabbing; }
-.calc-refresh {
+.calc-board-tools {
   position: absolute;
   top: 10px;
   left: 12px;
+  z-index: 5;
+  display: flex;
+  gap: 6px;
+  pointer-events: auto;
+}
+.calc-refresh,
+.calc-chain-move {
+  position: relative;
+  top: auto;
+  left: auto;
   z-index: 5;
   width: 34px;
   height: 34px;
@@ -4410,12 +4420,19 @@ html[data-theme="dark"] .file-menu .btn.ghost:hover {
   cursor: pointer;
   box-shadow: var(--shadow);
 }
-.calc-refresh:hover {
+.calc-refresh:hover,
+.calc-chain-move:hover {
   border-color: var(--accent-2);
   color: var(--accent);
   background: var(--card);
 }
 .calc-refresh:active { transform: rotate(-45deg); }
+.calc-chain-move.is-on {
+  border-color: var(--accent-2);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent-2) 18%, var(--card));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 28%, transparent), var(--shadow);
+}
 .calc-bp-name {
   position: absolute;
   top: 10px;
@@ -4469,7 +4486,18 @@ html[data-theme="dark"] .file-menu .btn.ghost:hover {
   pointer-events: none;
 }
 .calc-wire.is-temp { stroke-dasharray: 6 5; opacity: 0.8; }
-.calc-wire.is-order { stroke: #0d9488; }
+.calc-wire.is-order,
+.calc-wire.is-income,
+.calc-wire.is-total { stroke: #0d9488; }
+.calc-wire.is-tax { stroke: #d97706; }
+.calc-wire.is-cost { stroke: #e11d48; }
+.calc-wire.is-frozen { stroke: #64748b; }
+.calc-wire.is-field-qty { stroke: #0ea5e9; }
+.calc-wire.is-field-price { stroke: #8b5cf6; }
+.calc-wire.is-field-discount { stroke: #eab308; }
+.calc-wire.is-field-paid { stroke: #22c55e; }
+.calc-wire.is-field-unpaid { stroke: #f97316; }
+.calc-wire.is-field-percent { stroke: #ec4899; }
 .calc-wire.is-math { stroke: #f97316; }
 .calc-wire.is-formula { stroke: #a855f7; }
 .calc-wire.is-percent { stroke: #f43f5e; }
@@ -4544,6 +4572,7 @@ html[data-theme="dark"] .file-menu .btn.ghost:hover {
 .calc-node {
   position: absolute;
   width: 230px;
+  z-index: 2;
   pointer-events: auto;
   background: var(--card);
   border: 1px solid var(--line);
@@ -4683,6 +4712,73 @@ html[data-theme="dark"] .file-menu .btn.ghost:hover {
 .calc-port.in:hover,
 .calc-port.in.is-hot { box-shadow: 0 0 0 4px color-mix(in srgb, #38bdf8 50%, transparent); background: #7dd3fc; }
 .calc-node.is-order .calc-port.out { background: #14b8a6; box-shadow: 0 0 0 1px #0f766e; }
+.calc-node.is-order .calc-row.is-income .calc-port.out { background: #14b8a6; box-shadow: 0 0 0 1px #0f766e; }
+.calc-node.is-order .calc-row.is-tax .calc-port.out { background: #f59e0b; box-shadow: 0 0 0 1px #b45309; }
+.calc-node.is-order .calc-row.is-cost .calc-port.out { background: #f43f5e; box-shadow: 0 0 0 1px #be123c; }
+.calc-node.is-order .calc-row.is-frozen .calc-port.out { background: #94a3b8; box-shadow: 0 0 0 1px #64748b; }
+.calc-node.is-order .calc-row.is-total .calc-port.out { background: #0d9488; box-shadow: 0 0 0 1px #0f766e; }
+.calc-node.is-order .calc-row.is-tax .calc-row-name { color: #b45309; }
+.calc-node.is-order .calc-row.is-cost .calc-row-name { color: #be123c; }
+.calc-node.is-order .calc-row.is-frozen .calc-row-name { color: #64748b; }
+.calc-node.is-order .calc-row.is-child {
+  padding-left: 18px;
+  min-height: 22px;
+}
+.calc-node.is-order .calc-row.is-child .calc-row-name {
+  font-size: 11px;
+  font-weight: 500;
+}
+.calc-node.is-order .calc-row.is-child .calc-port.out {
+  width: 11px;
+  height: 11px;
+}
+.calc-node.is-order .calc-row.is-child.is-field-qty .calc-port.out { background: #0ea5e9; box-shadow: 0 0 0 1px #0284c7; }
+.calc-node.is-order .calc-row.is-child.is-field-price .calc-port.out { background: #8b5cf6; box-shadow: 0 0 0 1px #6d28d9; }
+.calc-node.is-order .calc-row.is-child.is-field-discount .calc-port.out { background: #eab308; box-shadow: 0 0 0 1px #a16207; }
+.calc-node.is-order .calc-row.is-child.is-field-paid .calc-port.out { background: #22c55e; box-shadow: 0 0 0 1px #15803d; }
+.calc-node.is-order .calc-row.is-child.is-field-unpaid .calc-port.out { background: #f97316; box-shadow: 0 0 0 1px #c2410c; }
+.calc-node.is-order .calc-row.is-child.is-field-percent .calc-port.out { background: #ec4899; box-shadow: 0 0 0 1px #be185d; }
+.calc-node.is-order .calc-row.is-child.is-field-qty .calc-row-name { color: #0284c7; }
+.calc-node.is-order .calc-row.is-child.is-field-price .calc-row-name { color: #6d28d9; }
+.calc-node.is-order .calc-row.is-child.is-field-discount .calc-row-name { color: #a16207; }
+.calc-node.is-order .calc-row.is-child.is-field-paid .calc-row-name { color: #15803d; }
+.calc-node.is-order .calc-row.is-child.is-field-unpaid .calc-row-name { color: #c2410c; }
+.calc-node.is-order .calc-row.is-child.is-field-percent .calc-row-name { color: #be185d; }
+.calc-port-menu {
+  position: fixed;
+  z-index: 80;
+  min-width: 168px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.calc-port-menu button {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.calc-port-menu button:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.calc-port-menu button.is-shown {
+  color: var(--muted);
+  opacity: 0.55;
+}
+.calc-port-menu button.is-shown:hover {
+  opacity: 0.85;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
 .calc-node.is-math .calc-port.out { background: #f97316; box-shadow: 0 0 0 1px #c2410c; }
 .calc-node.is-formula .calc-port.out { background: #a855f7; box-shadow: 0 0 0 1px #7e22ce; }
 .calc-node.is-percent .calc-port.out { background: #f43f5e; box-shadow: 0 0 0 1px #be123c; }
@@ -4737,7 +4833,7 @@ html[data-theme="dark"] .calc-const-val { background: #020617; color: #5eead4; }
 .calc-add { width: 100%; margin-top: 2px; }
 .calc-unlink-wire {
   position: absolute;
-  z-index: 6;
+  z-index: 0;
   width: 18px;
   height: 18px;
   margin: 0;

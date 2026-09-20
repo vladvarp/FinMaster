@@ -421,7 +421,10 @@
           <div class="calc-layout">
             <aside class="card calc-side" id="calc-side"></aside>
             <div class="card calc-board" id="calc-board">
-              <button type="button" class="calc-refresh" id="calc-refresh" title="Пересчитать схему">↻</button>
+              <div class="calc-board-tools">
+                <button type="button" class="calc-refresh" id="calc-refresh" title="Пересчитать схему">↻</button>
+                <button type="button" class="calc-chain-move" id="calc-chain-move" title="Тянуть цепочку входов" aria-pressed="false">⛓</button>
+              </div>
               <input id="calc-bp-name" class="calc-bp-name" maxlength="48" spellcheck="false" title="Название схемы" />
               <div class="calc-world" id="calc-world">
                 <svg class="calc-wires" id="calc-wires" viewBox="-20000 -20000 40000 40000" aria-hidden="true"></svg>

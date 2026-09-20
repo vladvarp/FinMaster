@@ -297,6 +297,26 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
     }
     if kind == "order":
         node["orderId"] = _clip_text(raw.get("orderId"), 80)
+        open_fields: dict[str, list[str]] = {}
+        raw_open = raw.get("openFields")
+        if isinstance(raw_open, dict):
+            allowed = {"qty", "price", "discount", "paid", "unpaid", "percent"}
+            for key, fields in raw_open.items():
+                line_id = _clip_text(key, 80)
+                if not line_id or not isinstance(fields, list):
+                    continue
+                cleaned: list[str] = []
+                seen_f: set[str] = set()
+                for item in fields[:8]:
+                    name = _clip_text(item, 16)
+                    if name not in allowed or name in seen_f:
+                        continue
+                    seen_f.add(name)
+                    cleaned.append(name)
+                if cleaned:
+                    open_fields[line_id] = cleaned
+        if open_fields:
+            node["openFields"] = open_fields
     elif kind == "math":
         op = str(raw.get("op") or "+")
         node["op"] = op if op in CALC_OPS else "+"

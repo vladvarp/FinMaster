@@ -21,6 +21,7 @@
     connectAt: 0,
     tabDrag: "",
     tabMoved: false,
+    moveChain: false,
   };
 
   function $(id) {
@@ -194,14 +195,85 @@
   }
 
   function orderLines(order) {
-    if (!order) return [];
-    return (order.lines || []).filter((line) => !api.isFrozen(line));
+    return order?.lines || [];
   }
 
   function lineAmount(line, order) {
     const totals = api.lineTotals(line, order);
     if (!totals) return 0;
     return totals.expense ? totals.cost : totals.after;
+  }
+
+  function lineTone(line, order) {
+    if (api.isFrozen?.(line)) return "frozen";
+    const totals = api.lineTotals(line, order);
+    if (totals?.kind === "tax") return "tax";
+    if (totals?.kind === "cost") return "cost";
+    return "income";
+  }
+
+  function lineFieldOptions(line, order) {
+    const totals = api.lineTotals(line, order);
+    if (totals?.expense) {
+      if (totals.kind === "tax" && totals.mode && totals.mode !== "amount") {
+        return [{ id: "percent", name: "процент" }];
+      }
+      return [
+        { id: "qty", name: "количество" },
+        { id: "price", name: "сумма за единицу" },
+      ];
+    }
+    return [
+      { id: "qty", name: "количество" },
+      { id: "price", name: "цена" },
+      { id: "discount", name: "скидка" },
+      { id: "paid", name: "оплачено" },
+      { id: "unpaid", name: "не оплачено" },
+    ];
+  }
+
+  function lineFieldValue(line, order, field) {
+    const totals = api.lineTotals(line, order) || {};
+    if (field === "qty") return Number(api.qtyValue?.(line) ?? line.quantity) || 0;
+    if (field === "price") return Number(api.lineUnitPrice?.(line) ?? line.price) || 0;
+    if (field === "discount") return Number(totals.discount) || 0;
+    if (field === "paid") return Number(totals.paid) || 0;
+    if (field === "unpaid") return Number(totals.unpaid) || 0;
+    if (field === "percent") return Number(totals.percent) || 0;
+    return 0;
+  }
+
+  function parseLinePort(portId) {
+    const text = String(portId || "");
+    const m = text.match(/^line:([^:]+)(?::([a-z]+))?$/);
+    if (!m) return null;
+    return { lineId: m[1], field: m[2] || "" };
+  }
+
+  function openFieldsFor(node, lineId) {
+    const map = node.openFields && typeof node.openFields === "object" ? node.openFields : {};
+    return Array.isArray(map[lineId]) ? map[lineId].slice() : [];
+  }
+
+  function ensureOpenField(node, lineId, field) {
+    if (!node.openFields || typeof node.openFields !== "object") node.openFields = {};
+    const list = Array.isArray(node.openFields[lineId]) ? node.openFields[lineId] : [];
+    if (!list.includes(field)) list.push(field);
+    node.openFields[lineId] = list;
+  }
+
+  function dropOpenField(node, lineId, field) {
+    if (!node?.openFields || !Array.isArray(node.openFields[lineId])) return;
+    node.openFields[lineId] = node.openFields[lineId].filter((item) => item !== field);
+    if (!node.openFields[lineId].length) delete node.openFields[lineId];
+  }
+
+  function linkedFromPorts(nodeId, links) {
+    const set = new Set();
+    (links || []).forEach((link) => {
+      if (link.from === nodeId) set.add(link.fromPort);
+    });
+    return set;
   }
 
   function findBlueprint(id) {
@@ -236,18 +308,39 @@
     return [];
   }
 
-  function nodeOutputs(node, order) {
+  function nodeOutputs(node, order, links) {
     if (node.type === "math" || node.type === "result" || node.type === "percent" || node.type === "const") return [{ id: "out", name: "out" }];
     if (node.type === "formula") return node.outputs || [];
     if (node.type === "scheme") return schemeOutputs(findBlueprint(node.blueprintId));
     if (node.type === "order") {
-      const lines = orderLines(order);
-      const ports = lines.map((line) => ({
-        id: `line:${line.id}`,
-        name: line.product || "Позиция",
-        line,
-      }));
-      ports.push({ id: "total", name: "Итого" });
+      const found = order || api.findOrder(node.orderId);
+      const lines = orderLines(found);
+      const linked = linkedFromPorts(node.id, links);
+      const ports = [];
+      lines.forEach((line) => {
+        const tone = lineTone(line, found);
+        ports.push({
+          id: `line:${line.id}`,
+          name: line.product || "Позиция",
+          line,
+          tone,
+          child: false,
+        });
+        const fields = new Set(openFieldsFor(node, line.id));
+        lineFieldOptions(line, found).forEach((field) => {
+          if (fields.has(field.id) || linked.has(`line:${line.id}:${field.id}`)) {
+            ports.push({
+              id: `line:${line.id}:${field.id}`,
+              name: field.name,
+              line,
+              tone,
+              child: true,
+              field: field.id,
+            });
+          }
+        });
+      });
+      ports.push({ id: "total", name: "Итого", tone: "total", child: false });
       return ports;
     }
     return [];
@@ -324,6 +417,9 @@
             const amount = lineAmount(line, order);
             setVal(nodeId, `line:${line.id}`, amount);
             total += amount;
+            lineFieldOptions(line, order).forEach((field) => {
+              setVal(nodeId, `line:${line.id}:${field.id}`, lineFieldValue(line, order, field.id));
+            });
           });
           const totals = api.orderTotals(order);
           setVal(nodeId, "total", totals?.after ?? total);
@@ -474,10 +570,7 @@
   function addNode(type, point, extra) {
     const bp = activeBlueprint();
     if (!bp) return;
-    const at = point || {
-      x: 120 + (session.place % 6) * 28,
-      y: 80 + (session.place % 6) * 28,
-    };
+    const at = point || viewCenter(bp);
     session.place += 1;
     const node = { id: uid(), type, x: at.x, y: at.y };
     if (type === "math") node.op = "+";
@@ -554,7 +647,7 @@
     (bp.links || []).forEach((link) => {
       const src = (bp.nodes || []).find((node) => node.id === link.from);
       if (!src || src.type !== "order") return;
-      const ids = nodeOutputs(src, api.findOrder(src.orderId)).map((port) => port.id);
+      const ids = nodeOutputs(src, api.findOrder(src.orderId), bp.links).map((port) => port.id);
       const hit = matchPortId(link.fromPort, ids);
       if (hit && hit !== link.fromPort) {
         link.fromPort = hit;
@@ -570,24 +663,37 @@
     const src = bp.nodes.find((node) => node.id === from);
     const dst = bp.nodes.find((node) => node.id === to);
     if (!src || !dst) return false;
-    const srcIds = nodeOutputs(src, api.findOrder(src.orderId)).map((port) => port.id);
+    const srcIds = nodeOutputs(src, api.findOrder(src.orderId), bp.links).map((port) => port.id);
     const fromHit = matchPortId(fromPort, srcIds);
     if (!fromHit) return false;
     const port = resolveToPort(dst, toPort, bp.links);
     if (!port) return false;
+    const replaced = (bp.links || []).filter((link) => link.to === to && link.toPort === port);
     bp.links = bp.links.filter((link) => !(link.to === to && link.toPort === port));
     bp.links.push({ id: uid(), from, fromPort: fromHit, to, toPort: port });
+    replaced.forEach((link) => releaseOrderField(bp, link.from, link.fromPort));
     dirty();
     render();
     return true;
   }
 
+  function releaseOrderField(bp, nodeId, fromPort) {
+    const parsed = parseLinePort(fromPort);
+    if (!parsed?.field) return;
+    const still = (bp.links || []).some((link) => link.from === nodeId && link.fromPort === fromPort);
+    if (still) return;
+    const node = (bp.nodes || []).find((item) => item.id === nodeId && item.type === "order");
+    if (node) dropOpenField(node, parsed.lineId, parsed.field);
+  }
+
   function removeLink(id) {
     const bp = activeBlueprint();
     if (!bp || !id) return;
+    const gone = bp.links.find((link) => link.id === id);
     const before = bp.links.length;
     bp.links = bp.links.filter((link) => link.id !== id);
     if (bp.links.length !== before) {
+      if (gone) releaseOrderField(bp, gone.from, gone.fromPort);
       dirty();
       render();
     }
@@ -602,9 +708,11 @@
   function disconnectInput(nodeId, portId) {
     const bp = activeBlueprint();
     if (!bp) return;
+    const gone = (bp.links || []).filter((link) => link.to === nodeId && link.toPort === portId);
     const before = bp.links.length;
     bp.links = bp.links.filter((link) => !(link.to === nodeId && link.toPort === portId));
     if (bp.links.length !== before) {
+      gone.forEach((link) => releaseOrderField(bp, link.from, link.fromPort));
       dirty();
       render();
     }
@@ -735,9 +843,67 @@
       </div>`;
   }
 
-  function orderNodeHtml(node, order, graph) {
+  function hidePortMenu() {
+    document.querySelectorAll(".calc-port-menu").forEach((el) => el.remove());
+  }
+
+  function showLinePortMenu(clientX, clientY, nodeId, lineId) {
+    hidePortMenu();
+    const bp = activeBlueprint();
+    const node = bp?.nodes.find((item) => item.id === nodeId && item.type === "order");
+    const order = api.findOrder(node?.orderId);
+    const line = (order?.lines || []).find((item) => item.id === lineId);
+    if (!bp || !node || !line) return;
+    const options = lineFieldOptions(line, order);
+    if (!options.length) return;
+    const open = new Set(openFieldsFor(node, lineId));
+    const linked = linkedFromPorts(node.id, bp.links);
+    const menu = document.createElement("div");
+    menu.className = "calc-port-menu";
+    menu.style.left = `${clientX}px`;
+    menu.style.top = `${clientY}px`;
+    options.forEach((field) => {
+      const shown = open.has(field.id) || linked.has(`line:${lineId}:${field.id}`);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = field.name;
+      if (shown) {
+        btn.className = "is-shown";
+        btn.title = "Убрать с ноды";
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          dropOpenField(node, lineId, field.id);
+          const portId = `line:${lineId}:${field.id}`;
+          bp.links = (bp.links || []).filter((link) => !(link.from === nodeId && link.fromPort === portId));
+          hidePortMenu();
+          dirty();
+          render();
+        });
+      } else {
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          ensureOpenField(node, lineId, field.id);
+          hidePortMenu();
+          dirty();
+          render();
+        });
+      }
+      menu.appendChild(btn);
+    });
+    document.body.appendChild(menu);
+    const onDoc = (e) => {
+      if (e.target.closest?.(".calc-port-menu")) return;
+      hidePortMenu();
+      document.removeEventListener("pointerdown", onDoc, true);
+    };
+    setTimeout(() => document.addEventListener("pointerdown", onDoc, true), 0);
+  }
+
+  function orderNodeHtml(node, order, graph, bp) {
     const missing = !order;
-    const ports = nodeOutputs(node, order);
+    const ports = nodeOutputs(node, order, bp?.links);
     return `<article class="calc-node is-order ${missing ? "is-error" : ""} ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
@@ -749,10 +915,14 @@
         ${ports
           .map((port) => {
             const value = graph.values[`${node.id}:${port.id}`];
-            return `<div class="calc-row">
-              <span class="calc-row-name" title="${esc(port.name)}">${esc(port.name)}</span>
+            const tone = port.tone || "income";
+            const child = port.child ? " is-child" : "";
+            const fieldCls = port.child && port.field ? ` is-field-${port.field}` : "";
+            const tip = port.child ? esc(port.name) : `${esc(port.name)} · ПКМ — поля позиции`;
+            return `<div class="calc-row out is-${tone}${child}${fieldCls}">
+              <span class="calc-row-name" title="${tip}">${esc(port.name)}</span>
               <b>${esc(fmtShort(value))}</b>
-              <i class="calc-port out" data-port="${esc(port.id)}" data-io="out"></i>
+              <i class="calc-port out" data-port="${esc(port.id)}" data-io="out" data-line="${esc(port.line?.id || "")}" data-child="${port.child ? "1" : "0"}" title="${tip}"></i>
             </div>`;
           })
           .join("")}
@@ -951,7 +1121,7 @@
         if (node.type === "result") return resultNodeHtml(node, bp, graph);
         if (node.type === "formula") return formulaNodeHtml(node, bp, graph);
         if (node.type === "scheme") return schemeNodeHtml(node, graph);
-        return orderNodeHtml(node, api.findOrder(node.orderId), graph);
+        return orderNodeHtml(node, api.findOrder(node.orderId), graph, bp);
       })
       .join("");
     applyWorld(bp);
@@ -975,6 +1145,18 @@
     return {
       x: (clientX - rect.left - (bp.x || 0)) / zoom,
       y: (clientY - rect.top - (bp.y || 0)) / zoom,
+    };
+  }
+
+  function viewCenter(bp) {
+    const board = $("calc-board");
+    if (!board || !bp) return { x: 120, y: 80 };
+    const rect = board.getBoundingClientRect();
+    const mid = screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2, bp);
+    const n = session.place % 6;
+    return {
+      x: mid.x - 115 + n * 24,
+      y: mid.y - 50 + n * 24,
     };
   }
 
@@ -1002,9 +1184,20 @@
     };
   }
 
-  function wireKind(node) {
+  function wireKind(node, fromPort) {
     const type = node?.type || "";
-    if (type === "order" || type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme") return type;
+    if (type === "order") {
+      if (fromPort === "total") return "order";
+      const parsed = parseLinePort(fromPort);
+      if (parsed?.field) return `field-${parsed.field}`;
+      if (parsed) {
+        const order = api.findOrder(node.orderId);
+        const line = (order?.lines || []).find((item) => item.id === parsed.lineId);
+        if (line) return lineTone(line, order);
+      }
+      return "order";
+    }
+    if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme") return type;
     return "order";
   }
 
@@ -1027,6 +1220,33 @@
     }
     walk(nodeId);
     return ids;
+  }
+
+  function upstreamNodeIds(bp, nodeId) {
+    const ids = new Set();
+    if (!bp || !nodeId) return ids;
+    const incoming = {};
+    (bp.links || []).forEach((link) => {
+      if (!incoming[link.to]) incoming[link.to] = [];
+      incoming[link.to].push(link.from);
+    });
+    function walk(id) {
+      (incoming[id] || []).forEach((from) => {
+        if (!from || ids.has(from)) return;
+        ids.add(from);
+        walk(from);
+      });
+    }
+    walk(nodeId);
+    return ids;
+  }
+
+  function syncChainMoveBtn() {
+    const btn = $("calc-chain-move");
+    if (!btn) return;
+    btn.classList.toggle("is-on", !!session.moveChain);
+    btn.setAttribute("aria-pressed", session.moveChain ? "true" : "false");
+    btn.title = session.moveChain ? "Цепочка входов: вкл" : "Тянуть цепочку входов";
   }
 
   function setLinkingClass() {
@@ -1066,7 +1286,7 @@
       const err = graph.errors.has(link.from) || graph.errors.has(link.to);
       addPath(
         `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`,
-        `calc-wire is-${wireKind(src)}${flow ? " is-flow" : ""}${err ? " is-error" : ""}`
+        `calc-wire is-${wireKind(src, link.fromPort)}${flow ? " is-flow" : ""}${err ? " is-error" : ""}`
       );
       if (!session.linking && !session.drag && !session.pan) {
         const mid = bezierMid(a, b);
@@ -1099,7 +1319,7 @@
         const fromEl = host.querySelector(`[data-node="${cssEsc(L.from)}"]`);
         a = fromEl ? portWorld(fromEl, L.fromPort, "out", bp) : null;
         b = { x: L.x, y: L.y };
-        kind = wireKind(byId[L.from]);
+        kind = wireKind(byId[L.from], L.fromPort);
       }
       if (a && b) {
         const dx = Math.max(40, Math.abs(b.x - a.x) * 0.45);
@@ -1159,7 +1379,7 @@
       else disconnectInput(unlink.closest(".calc-node")?.dataset.node, unlink.dataset.delInLink);
       return;
     }
-    if (e.target.closest(".calc-refresh, .calc-bp-name, input, textarea, select")) return;
+    if (e.target.closest(".calc-refresh, .calc-chain-move, .calc-board-tools, .calc-bp-name, input, textarea, select")) return;
     const port = e.target.closest(".calc-port");
     const node = e.target.closest(".calc-node");
     const drag = e.target.closest("[data-drag-node]");
@@ -1170,6 +1390,21 @@
       const io = port.dataset.io;
       const portId = port.dataset.port;
       session.selected = nodeId || "";
+      const lineId = port.dataset.line || "";
+      const parsed = parseLinePort(portId);
+      const isMainLineOut = io === "out" && parsed && !parsed.field;
+
+      if (e.button === 2) {
+        if (session.linking) {
+          session.linking = null;
+          setLinkingClass();
+          if (bp) drawWires(bp, computeGraph(bp));
+        }
+        if (isMainLineOut) showLinePortMenu(e.clientX, e.clientY, nodeId, parsed.lineId);
+        return;
+      }
+      if (e.button !== 0) return;
+
       if (session.linking) {
         const src = session.linking;
         if (src.reverse && io === "out" && nodeId !== src.to) {
@@ -1212,12 +1447,20 @@
       e.preventDefault();
       session.selected = node.dataset.node;
       session.busy = true;
+      const id = node.dataset.node;
+      const origins = [];
+      const byId = Object.fromEntries((bp.nodes || []).map((item) => [item.id, item]));
+      const moveIds = new Set([id]);
+      if (session.moveChain) upstreamNodeIds(bp, id).forEach((uid) => moveIds.add(uid));
+      moveIds.forEach((nid) => {
+        const item = byId[nid];
+        if (item) origins.push({ id: nid, x: item.x || 0, y: item.y || 0 });
+      });
       session.drag = {
-        id: node.dataset.node,
+        id,
         dx: e.clientX,
         dy: e.clientY,
-        x: Number(node.style.left.replace("px", "")) || 0,
-        y: Number(node.style.top.replace("px", "")) || 0,
+        origins,
       };
       $("calc-board").setPointerCapture(e.pointerId);
       node.classList.add("is-on");
@@ -1251,15 +1494,21 @@
     }
     if (session.drag) {
       const zoom = bp.zoom || 1;
-      const node = bp.nodes.find((item) => item.id === session.drag.id);
-      if (!node) return;
-      node.x = session.drag.x + (e.clientX - session.drag.dx) / zoom;
-      node.y = session.drag.y + (e.clientY - session.drag.dy) / zoom;
-      const el = nodesRoot()?.querySelector(`[data-node="${cssEsc(node.id)}"]`);
-      if (el) {
-        el.style.left = `${node.x}px`;
-        el.style.top = `${node.y}px`;
-      }
+      const dx = (e.clientX - session.drag.dx) / zoom;
+      const dy = (e.clientY - session.drag.dy) / zoom;
+      const host = nodesRoot();
+      const byId = Object.fromEntries((bp.nodes || []).map((item) => [item.id, item]));
+      (session.drag.origins || []).forEach((origin) => {
+        const item = byId[origin.id];
+        if (!item) return;
+        item.x = origin.x + dx;
+        item.y = origin.y + dy;
+        const el = host?.querySelector(`[data-node="${cssEsc(item.id)}"]`);
+        if (el) {
+          el.style.left = `${item.x}px`;
+          el.style.top = `${item.y}px`;
+        }
+      });
       drawWires(bp, computeGraph(bp));
       return;
     }
@@ -1278,11 +1527,21 @@
     session.drag = null;
     session.pan = null;
     session.busy = false;
-    if (e.target.closest?.("input, textarea, select, .calc-bp-name, .calc-refresh")) return;
+    if (e.target.closest?.("input, textarea, select, .calc-bp-name, .calc-refresh, .calc-chain-move, .calc-board-tools")) return;
     if (linking) {
       const over = document.elementFromPoint(e.clientX, e.clientY)?.closest?.(".calc-port");
       const nodeId = over?.closest?.(".calc-node")?.dataset.node;
       const io = over?.dataset.io;
+      if (e.button === 2) {
+        session.linking = null;
+        setLinkingClass();
+        if (bp) drawWires(bp, computeGraph(bp));
+        if (linking.reverse && io === "out" && nodeId) {
+          const parsed = parseLinePort(over.dataset.port);
+          if (parsed && !parsed.field) showLinePortMenu(e.clientX, e.clientY, nodeId, parsed.lineId);
+        }
+        return;
+      }
       if (linking.reverse && io === "out" && nodeId && nodeId !== linking.to) {
         session.linking = null;
         finishLink(nodeId, over.dataset.port, linking.to, linking.toPort);
@@ -1458,6 +1717,13 @@
       e.stopPropagation();
       recalculate();
     });
+    $("calc-chain-move")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      session.moveChain = !session.moveChain;
+      syncChainMoveBtn();
+    });
+    syncChainMoveBtn();
     $("calc-bp-name")?.addEventListener("input", (e) => {
       const bp = activeBlueprint();
       if (!bp) return;
@@ -1527,6 +1793,9 @@
     board.addEventListener("pointermove", onBoardPointerMove);
     board.addEventListener("pointerup", onBoardPointerUp);
     board.addEventListener("pointercancel", onBoardPointerUp);
+    board.addEventListener("contextmenu", (e) => {
+      if (e.target.closest(".calc-port, .calc-port-menu")) e.preventDefault();
+    });
     board.addEventListener("wheel", onBoardWheel, { passive: false });
     root.addEventListener("click", (e) => {
       const nodeEl = e.target.closest(".calc-node");
@@ -1654,11 +1923,14 @@
     });
     document.addEventListener("keydown", (e) => {
       if (api?.view?.() !== "calculator") return;
-      if (e.key === "Escape" && session.linking) {
-        session.linking = null;
-        setLinkingClass();
-        const bp = activeBlueprint();
-        if (bp) drawWires(bp, computeGraph(bp));
+      if (e.key === "Escape") {
+        hidePortMenu();
+        if (session.linking) {
+          session.linking = null;
+          setLinkingClass();
+          const bp = activeBlueprint();
+          if (bp) drawWires(bp, computeGraph(bp));
+        }
         return;
       }
       if (!/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && (e.key === "Delete" || e.key === "Backspace") && session.selected) {

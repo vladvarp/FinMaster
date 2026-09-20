@@ -6245,6 +6245,10 @@
       lineTotals,
       orderTotals,
       isFrozen: isFrozenLine,
+      isExpense: isExpenseLine,
+      taxMode,
+      qtyValue,
+      lineUnitPrice: (line) => Math.max(0, numExpr(line, "price_expr", "price")),
     };
   }
 
