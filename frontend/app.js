@@ -631,6 +631,10 @@
     return !!typeKind(line?.order_type);
   }
 
+  function isFrozenLine(line) {
+    return !!line?.frozen;
+  }
+
   function typeNames(kind) {
     const list = orderTypes();
     if (kind === "expense") return list.filter((t) => t.is_tax || t.is_cost).map((t) => t.name);
@@ -641,8 +645,13 @@
   function splitLines(lines) {
     const income = [];
     const expense = [];
-    (lines || []).forEach((line) => (isExpenseLine(line) ? expense : income).push(line));
-    return { income, expense };
+    const frozen = [];
+    (lines || []).forEach((line) => {
+      if (isFrozenLine(line)) frozen.push(line);
+      else if (isExpenseLine(line)) expense.push(line);
+      else income.push(line);
+    });
+    return { income, expense, frozen };
   }
 
   /** Режим строки налога: «amount» — своя сумма, «gross» — % от выручки, «net» — % от выручки без затрат. */
@@ -663,6 +672,7 @@
     let gross = 0;
     let costs = 0;
     for (const item of order?.lines || []) {
+      if (isFrozenLine(item)) continue;
       const kind = typeKind(item.order_type);
       if (!kind) gross += lineTotals(item).after;
       else if (kind === "cost") costs += lineTotals(item).cost;
@@ -704,7 +714,7 @@
 
   function applyPaidIfCovered(line) {
     const ps = paidStatus();
-    if (!ps || statusLocked(line.status) || isExpenseLine(line)) return false;
+    if (!ps || statusLocked(line.status) || isExpenseLine(line) || isFrozenLine(line)) return false;
     const t = lineTotals(line);
     if (t.after > 0 && t.paid + 0.005 >= t.after) {
       if (line.status !== ps.name) {
@@ -718,6 +728,7 @@
   function orderTotals(order) {
     const acc = (order.lines || []).reduce(
       (sum, line) => {
+        if (isFrozenLine(line)) return sum;
         const t = lineTotals(line, order);
         if (t.expense) {
           sum.cost += t.cost;
@@ -786,6 +797,10 @@
       tax_mode: "gross",
       tax_percent: 0,
       tax_percent_expr: "0",
+      work_start: "",
+      work_end: "",
+      work_pauses: [],
+      frozen: false,
     };
   }
 
@@ -996,6 +1011,7 @@
     const rows = [];
     for (const order of state.doc.orders || []) {
       for (const line of order.lines || []) {
+        if (isFrozenLine(line)) continue;
         rows.push({ order, line, totals: lineTotals(line, order) });
       }
     }
@@ -1048,7 +1064,7 @@
   function dashRows() {
     const order = focusedOrder();
     let rows = order
-      ? (order.lines || []).map((line) => ({ order, line, totals: lineTotals(line, order) }))
+      ? (order.lines || []).filter((line) => !isFrozenLine(line)).map((line) => ({ order, line, totals: lineTotals(line, order) }))
       : allRows();
     const f = state.remoteStats;
     if (!f || focusedOrder()) return rows;
@@ -1071,12 +1087,12 @@
     const t = orderTotals(order);
     if (filter === "debt") return t.unpaid > 0.005;
     if (filter === "paid") return t.after > 0.005 && t.unpaid <= 0.005;
-    if (filter === "empty") return (order.lines || []).some((line) => !isExpenseLine(line) && lineTotals(line).after <= 0.005);
+    if (filter === "empty") return (order.lines || []).some((line) => !isFrozenLine(line) && !isExpenseLine(line) && lineTotals(line).after <= 0.005);
     if (filter === "month") {
       const now = new Date();
       const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
       return (
-        (order.lines || []).some((line) => String(line.order_date || "").slice(0, 7) === key) ||
+        (order.lines || []).some((line) => !isFrozenLine(line) && String(line.order_date || "").slice(0, 7) === key) ||
         String(order.created_at || "").slice(0, 7) === key
       );
     }
@@ -1945,7 +1961,7 @@
     $("orders-list").innerHTML = orders
       .map((order) => {
         const tot = orderTotals(order);
-        const { income, expense } = splitLines(order.lines);
+        const { income, expense, frozen } = splitLines(order.lines);
         return `<article class="order-card" data-order="${order.id}">
           <div class="order-head">
             <div class="field"><label>Номер заказа</label><input data-k="number" value="${esc(order.number)}" /></div>
@@ -1991,12 +2007,13 @@
                 ${
                   income.length
                     ? income.map((line) => orderLineRow(line, ctx)).join("")
-                    : `<tr><td colspan="${ORDER_COLS.length}" class="empty-cell">Доходных позиций нет — только расходы. Нажмите «+ Тип заказа».</td></tr>`
+                    : `<tr><td colspan="${ORDER_COLS.length}" class="empty-cell">${frozen.length ? "Все позиции заморожены — они ниже, в отдельном блоке." : expense.length ? "Доходных позиций нет — только расходы. Нажмите «+ Тип заказа»." : "Нет позиций. Нажмите «+ Тип заказа»."}</td></tr>`
                 }
               </tbody>
             </table>
           </div>
           ${orderExpensesHtml(expense, tot, { ...ctx, order })}
+          ${orderFrozenHtml(frozen, { ...ctx, order })}
           <div class="order-foot">
             <button class="btn small" data-act="addline">+ Тип заказа</button>
             ${canExpense ? `<button class="btn small" data-act="addcost" title="Строка налога или затраты — вычитается из заказа">+ Расход</button>` : ""}
@@ -2015,8 +2032,8 @@
 
   function orderLineRow(line, { statusNames, units, types }) {
     const t = lineTotals(line);
-    return `<tr data-line="${line.id}" class="line-row" style="--status-color:${esc(statusColor(line.status))}">
-      <td class="line-drag" title="Перетащить строку"><span></span></td>
+    return `<tr data-line="${line.id}" class="line-row${isFrozenLine(line) ? " is-frozen" : ""}" style="--status-color:${esc(statusColor(line.status))}">
+      <td class="line-drag" title="Перетащить строку. Правый клик — заморозить"><span></span></td>
       <td><select data-lk="order_type">${optionList(unique([line.order_type, ...types]), line.order_type)}</select></td>
       <td><input data-lk="product" autocomplete="off" spellcheck="false" value="${esc(line.product)}" /></td>
       <td class="num">${exprInput(line, "qty_expr")}</td>
@@ -2058,8 +2075,8 @@
         : `<td class="num" colspan="3">
         <div class="tax-percent">${exprInput(line, "tax_percent_expr")}<span class="tax-of">% от ${esc(money(t.base))}</span></div>
       </td>`;
-    return `<tr data-line="${line.id}" class="line-row cost-row">
-      <td class="line-drag" title="Перетащить строку"><span></span></td>
+    return `<tr data-line="${line.id}" class="line-row cost-row${isFrozenLine(line) ? " is-frozen" : ""}">
+      <td class="line-drag" title="Перетащить строку. Правый клик — заморозить"><span></span></td>
       <td><select data-lk="order_type">${optionList(unique([line.order_type, ...types]), line.order_type)}</select></td>
       <td><span class="cost-kind ${esc(t.kind)}">${esc(kindLabel(t.kind))}</span></td>
       <td><input data-lk="product" autocomplete="off" spellcheck="false" value="${esc(line.product)}" placeholder="за что" /></td>
@@ -2089,6 +2106,41 @@
           <tbody>${expense.map((line) => orderCostRow(line, ctx)).join("")}</tbody>
         </table>
       </div>
+    </div>`;
+  }
+
+  function orderFrozenHtml(frozen, ctx) {
+    if (!frozen.length) return "";
+    const income = frozen.filter((line) => !isExpenseLine(line));
+    const expense = frozen.filter((line) => isExpenseLine(line));
+    return `<div class="order-frozen">
+      <div class="oe-head"><span class="oe-title">Замороженные позиции</span>
+        <span class="oe-sum">${frozen.length} · не учитываются нигде</span>
+      </div>
+      ${
+        income.length
+          ? `<div class="table-wrap">
+        <table class="data">
+          ${colgroupHtml()}
+          <thead><tr>${orderHeadHtml()}</tr></thead>
+          <tbody>${income.map((line) => orderLineRow(line, ctx)).join("")}</tbody>
+        </table>
+      </div>`
+          : ""
+      }
+      ${
+        expense.length
+          ? `<div class="table-wrap">
+        <table class="data cost-table">
+          <thead><tr>
+            <th></th><th>Тип</th><th>Вид</th><th>За что</th><th>Расчёт</th><th class="num">Кол-во</th><th>Ед.</th>
+            <th class="num">Сумма за ед.</th><th>Дата</th><th class="num">Итог</th><th></th>
+          </tr></thead>
+          <tbody>${expense.map((line) => orderCostRow(line, ctx)).join("")}</tbody>
+        </table>
+      </div>`
+          : ""
+      }
     </div>`;
   }
 
@@ -3193,7 +3245,9 @@
   const CAL_HOT_LOAD = 4;
   const TL_MIN_DAYS = 3;
   const TL_DEFAULT_DAYS = 21;
-  const TL_NAV_LANES = 12;
+  const CAL_BAR_PAID = "#059669";
+  const CAL_BAR_DEBT = "#d97706";
+  const CAL_BAR_DUE = "#dc2626";
   const DEFAULT_WEEKENDS = [5, 6];
   let calDrag = null;
   let calNav = null;
@@ -3331,7 +3385,7 @@
   }
 
   function orderIsOff(order) {
-    const income = (order.lines || []).filter((line) => !isExpenseLine(line));
+    const income = (order.lines || []).filter((line) => !isFrozenLine(line) && !isExpenseLine(line));
     if (!income.length) return false;
     return income.every((line) => /отмен|аннул|черн/i.test(line.status || ""));
   }
@@ -3468,7 +3522,7 @@
     return key >= dayKey(span.from) && key <= dayKey(span.till);
   }
 
-  function normalizeWorkDates(order, { mergePauses = true } = {}) {
+  function normalizeWorkDates(order, { mergePauses = true, lines = true } = {}) {
     const start = dateDay(order.work_start);
     const end = dateDay(order.work_end);
     order.work_start = start;
@@ -3479,7 +3533,132 @@
     }
     if (!order.work_start && !order.work_end) order.work_pauses = [];
     else normalizeWorkPauses(order, mergePauses);
+    if (lines) normalizeOrderLinesWork(order);
     return order;
+  }
+
+  function calendarWorkLines(order) {
+    return (order?.lines || []).filter((line) => !isFrozenLine(line) && !isExpenseLine(line));
+  }
+
+  function findCalendarLine(order, lineId) {
+    if (!order || !lineId) return null;
+    return (order.lines || []).find((line) => line.id === lineId) || null;
+  }
+
+  function lineWorkName(line, index = 0) {
+    const name = String(line?.product || "").trim() || String(line?.order_type || "").trim();
+    return name || `Позиция ${index + 1}`;
+  }
+
+  function lineWorkProxy(order, line) {
+    return {
+      work_start: dateDay(line?.work_start) || dateDay(order?.work_start),
+      work_end: dateDay(line?.work_end) || dateDay(order?.work_end),
+      work_pauses: Array.isArray(line?.work_pauses) ? line.work_pauses.map((pause) => ({ ...pause })) : [],
+    };
+  }
+
+  function clampLineToOrder(order, start, end) {
+    const oStart = dateDay(order?.work_start);
+    const oEnd = dateDay(order?.work_end);
+    let a = dateDay(start);
+    let b = dateDay(end);
+    if (oStart && a && a < oStart) a = oStart;
+    if (oEnd && a && a > oEnd) a = oEnd;
+    if (oStart && b && b < oStart) b = oStart;
+    if (oEnd && b && b > oEnd) b = oEnd;
+    if (a && b && b < a) [a, b] = [b, a];
+    return { start: a, end: b };
+  }
+
+  function writeLineWork(order, line, proxy) {
+    if (!line) return;
+    normalizeWorkDates(proxy, { mergePauses: true, lines: false });
+    const clamped = clampLineToOrder(order, proxy.work_start, proxy.work_end);
+    proxy.work_start = clamped.start;
+    proxy.work_end = clamped.end;
+    normalizeWorkDates(proxy, { mergePauses: true, lines: false });
+    const pauses = workPauses(proxy);
+    const oStart = dateDay(order.work_start);
+    const oEnd = dateDay(order.work_end);
+    const sameDates = dateDay(proxy.work_start) === oStart && dateDay(proxy.work_end) === oEnd;
+    if (!dateDay(proxy.work_start) && !dateDay(proxy.work_end)) {
+      line.work_start = "";
+      line.work_end = "";
+      line.work_pauses = [];
+      return;
+    }
+    if (sameDates) {
+      line.work_start = "";
+      line.work_end = "";
+      line.work_pauses = pauses;
+      return;
+    }
+    line.work_start = dateDay(proxy.work_start);
+    line.work_end = dateDay(proxy.work_end);
+    line.work_pauses = pauses;
+  }
+
+  function normalizeOrderLinesWork(order) {
+    if (!dateDay(order.work_start) && !dateDay(order.work_end)) {
+      calendarWorkLines(order).forEach((line) => {
+        line.work_start = "";
+        line.work_end = "";
+        line.work_pauses = [];
+      });
+      return order;
+    }
+    calendarWorkLines(order).forEach((line) => {
+      const proxy = lineWorkProxy(order, line);
+      writeLineWork(order, line, proxy);
+    });
+    return order;
+  }
+
+  function clampLineProxy(order, proxy, drag) {
+    const env = orderDrawSpan(order);
+    if (!env) return;
+    let start = parseDay(proxy.work_start);
+    let end = parseDay(proxy.work_end);
+    if (drag?.mode === "move" && start) {
+      const len = end ? dayDiff(start, end) : 0;
+      if (start < env.from) start = env.from;
+      if (end) {
+        end = addDays(start, len);
+        if (end > env.till) {
+          end = env.till;
+          start = addDays(end, -len);
+        }
+        if (start < env.from) start = env.from;
+        proxy.work_end = dayKey(end);
+      } else if (start > env.till) start = env.till;
+      if (start < env.from) start = env.from;
+      proxy.work_start = dayKey(start);
+      return;
+    }
+    const c = clampLineToOrder(order, proxy.work_start, proxy.work_end);
+    proxy.work_start = c.start;
+    proxy.work_end = c.end;
+  }
+
+  function lineWorkMeta(order, line, day) {
+    if (/отмен|аннул|черн/i.test(line?.status || "")) return { id: "cancelled", ...WORK_STATUS.cancelled };
+    return workStatusMeta(lineWorkProxy(order, line), day);
+  }
+
+  function calendarLinesOpen(orderId) {
+    return !!calendarState().openLines?.[orderId];
+  }
+
+  function toggleCalendarLines(orderId) {
+    const cal = calendarState();
+    if (!cal.openLines) cal.openLines = {};
+    if (cal.openLines[orderId]) delete cal.openLines[orderId];
+    else cal.openLines[orderId] = true;
+    cal.selected = orderId;
+    cal.selectedLine = "";
+    renderCalendar();
   }
 
   function workSpan(order) {
@@ -3646,7 +3825,7 @@
 
   function lineDateRange(order) {
     const keys = (order.lines || [])
-      .filter((line) => !isExpenseLine(line))
+      .filter((line) => !isFrozenLine(line) && !isExpenseLine(line))
       .map((line) => dateDay(line.order_date))
       .filter(Boolean)
       .sort();
@@ -3661,12 +3840,16 @@
         mode: CALENDAR_MODES.includes(saved.mode) ? saved.mode : "timeline",
         filter: CALENDAR_FILTERS.some(([id]) => id === saved.filter) ? saved.filter : "all",
         selected: "",
+        selectedLine: "",
+        openLines: {},
         pick: "",
         anchor: dayStart(new Date()),
         viewFrom: null,
         viewDays: TL_DEFAULT_DAYS,
       };
     }
+    if (!state.calendar.openLines || typeof state.calendar.openLines !== "object") state.calendar.openLines = {};
+    if (typeof state.calendar.selectedLine !== "string") state.calendar.selectedLine = "";
     if (!(state.calendar.anchor instanceof Date) || Number.isNaN(state.calendar.anchor.getTime())) {
       state.calendar.anchor = dayStart(new Date());
     }
@@ -3847,8 +4030,21 @@
   }
 
   function calendarBarColor(order) {
-    const first = (order.lines || []).find((line) => !isExpenseLine(line));
+    const tot = orderTotals(order);
+    if (tot.unpaid > 0.005) return workStatus(order) === "done" ? CAL_BAR_DUE : CAL_BAR_DEBT;
+    if (tot.after > 0.005) return CAL_BAR_PAID;
+    const first = (order.lines || []).find((line) => !isFrozenLine(line) && !isExpenseLine(line));
     return statusColor(first?.status) || "#0f766e";
+  }
+
+  function calendarLineBarColor(order, line) {
+    if (!line || isFrozenLine(line) || isExpenseLine(line)) return calendarBarColor(order);
+    const t = lineTotals(line, order);
+    if (t.unpaid > 0.005) return workStatus(order) === "done" ? CAL_BAR_DUE : CAL_BAR_DEBT;
+    if (t.after > 0.005) return CAL_BAR_PAID;
+    const paid = paidStatus();
+    if (paid && line.status === paid.name) return CAL_BAR_PAID;
+    return statusColor(line.status) || calendarBarColor(order);
   }
 
   function setWorkToday(order, which) {
@@ -3936,7 +4132,6 @@
       const key = dateDay(order.work_end);
       return key && key >= dayKey(weekFrom) && key <= dayKey(weekTo);
     }).length;
-    const overdue = all.filter((order) => workStatus(order) === "overdue").length;
     const nodate = all.filter((order) => workStatus(order) === "nodate").length;
     const load = calendarLoadMap(all.filter((order) => workStatus(order) !== "cancelled"), win.days);
     const peakLabel = load.peakKey ? calFmtDay(parseDay(load.peakKey)) : "—";
@@ -3971,20 +4166,26 @@
       weekendMenu.innerHTML = weekendMenuHtml();
       weekendMenu.hidden = !weekendOpen;
     }
-    $("cal-kpis").innerHTML = `
-      <div class="kpi ${nowCount ? "ok" : ""}"><div class="label">Идёт сейчас</div><div class="value">${nowCount}</div><div class="sub">в работе, в том числе без дедлайна</div></div>
-      <div class="kpi"><div class="label">Старт на неделе</div><div class="value">${startWeek}</div><div class="sub">с ${calFmtDay(weekFrom)}</div></div>
-      <div class="kpi"><div class="label">Финиш на неделе</div><div class="value">${endWeek}</div><div class="sub">до ${calFmtDay(weekTo)}</div></div>
-      <div class="kpi ${overdue ? "warn" : ""}"><div class="label">Просрочены</div><div class="value">${overdue}</div><div class="sub">без даты конца дедлайна нет</div></div>
-      <div class="kpi"><div class="label">Без дат</div><div class="value">${nodate}</div><div class="sub">ещё не отмечены на календаре</div></div>
-      <div class="kpi ${load.peak >= CAL_HOT_LOAD ? "warn" : ""}"><div class="label">Пик загрузки</div><div class="value">${load.peak}</div><div class="sub">${load.peak ? `${peakLabel} · одновременно` : "нет пересечений"}</div></div>`;
+    const stats = $("cal-stats-pop");
+    if (stats) {
+      stats.innerHTML = `<div class="cal-stats-list">
+        <div class="cal-stat ${nowCount ? "ok" : ""}"><span>Идёт сейчас</span><b>${nowCount}</b><small>в работе, в том числе без дедлайна</small></div>
+        <div class="cal-stat"><span>Старт на неделе</span><b>${startWeek}</b><small>с ${calFmtDay(weekFrom)}</small></div>
+        <div class="cal-stat"><span>Финиш на неделе</span><b>${endWeek}</b><small>до ${calFmtDay(weekTo)}</small></div>
+        <div class="cal-stat"><span>Без дат</span><b>${nodate}</b><small>ещё не отмечены на календаре</small></div>
+        <div class="cal-stat ${load.peak >= CAL_HOT_LOAD ? "warn" : ""}"><span>Пик загрузки</span><b>${load.peak}</b><small>${load.peak ? `${peakLabel} · одновременно` : "нет пересечений"}</small></div>
+      </div>`;
+    }
 
     const board = $("cal-board");
     const keepY = board.scrollTop;
+    const keepGanttY = document.querySelector("#gantt-scroll .gantt")?.scrollTop || 0;
     if (cal.mode === "classic") board.innerHTML = renderClassicCalendar(win, list, load);
     else if (cal.mode === "extended") board.innerHTML = renderExtendedCalendar(win, list, load);
     else board.innerHTML = renderTimelineCalendar(win, list, load);
     board.scrollTop = keepY;
+    const ganttEl = document.querySelector("#gantt-scroll .gantt");
+    if (ganttEl) ganttEl.scrollTop = keepGanttY;
     $("cal-side").innerHTML = renderCalendarSide(win, all, list);
     const reveal = cal.revealDay ? parseDay(cal.revealDay) : null;
     cal.revealDay = "";
@@ -4036,6 +4237,7 @@
   function refreshTimelineGantt() {
     const host = $("gantt-scroll");
     if (!host) return;
+    const keepY = host.querySelector(".gantt")?.scrollTop || 0;
     const win = calendarWindow();
     const list = calendarOrders();
     const load = calendarLoadMap(
@@ -4046,6 +4248,8 @@
     tmp.innerHTML = renderTimelineCalendar(win, list, load);
     const next = tmp.querySelector("#gantt-scroll");
     if (next) host.replaceWith(next);
+    const gantt = $("gantt-scroll")?.querySelector(".gantt");
+    if (gantt) gantt.scrollTop = keepY;
   }
 
   function timelineZoomAt(ratio, factor) {
@@ -4070,28 +4274,98 @@
   }
 
   function timelineLaneItems(today) {
-    const items = calendarOrders()
+    const blocks = calendarOrders()
       .map((order) => {
         const span = orderDrawSpan(order, today);
         if (!span) return null;
         const segs = splitWorkSegments(span.from, span.till, order);
         const pauses = orderPauseSegments(order, span.from, span.till, today);
-        return segs.length || pauses.length ? { order, span, segs, pauses } : null;
+        return segs.length || pauses.length ? { order, span, segs, pauses, kind: "order" } : null;
       })
       .filter(Boolean)
       .sort((a, b) => compareTimelineOrders(a.order, b.order, today) || a.span.from - b.span.from || a.span.till - b.span.till);
+    const items = [];
+    blocks.forEach((block) => {
+      items.push(block);
+      if (!calendarLinesOpen(block.order.id)) return;
+      calendarWorkLines(block.order).forEach((line) => {
+        const proxy = lineWorkProxy(block.order, line);
+        const span = orderDrawSpan(proxy, today);
+        if (!span) return;
+        const segs = splitWorkSegments(span.from, span.till, proxy);
+        const pauses = orderPauseSegments(proxy, span.from, span.till, today);
+        if (!segs.length && !pauses.length) return;
+        items.push({
+          order: block.order,
+          line,
+          span,
+          segs,
+          pauses,
+          kind: "line",
+          color: calendarLineBarColor(block.order, line),
+        });
+      });
+    });
+    const byStart = items.slice().sort((a, b) => {
+      const from = a.span.from - b.span.from;
+      if (from) return from;
+      const dur = (b.span.till - b.span.from) - (a.span.till - a.span.from);
+      if (dur) return dur;
+      return String(a.order.number || "").localeCompare(String(b.order.number || ""), "ru", { numeric: true });
+    });
     const ends = [];
-    return items.map((item) => {
+    const laneOf = new Map();
+    byStart.forEach((item) => {
       let lane = ends.findIndex((till) => item.span.from > till);
       if (lane < 0) {
-        if (ends.length >= TL_NAV_LANES) lane = items.indexOf(item) % TL_NAV_LANES;
-        else {
-          lane = ends.length;
-          ends.push(item.span.till);
-        }
+        lane = ends.length;
+        ends.push(item.span.till);
       } else ends[lane] = item.span.till;
-      return { ...item, lane, lanes: Math.max(ends.length, 1) };
+      laneOf.set(item, lane);
     });
+    const lanes = Math.max(1, ends.length);
+    return items.map((item) => ({ ...item, lane: laneOf.get(item) || 0, lanes }));
+  }
+
+  function ganttBarsHtml(target, win, { order, lineId = "", label = "", color = "", meta } = {}) {
+    const status = meta || workStatusMeta(target);
+    const segs = orderWorkSegments(target, win.from, win.to, win.today);
+    const pauses = orderPauseSegments(target, win.from, win.to, win.today);
+    if (!segs.length && !pauses.length) return "";
+    const due = orderDeadline(target, win.today);
+    const tip = due ? `${label} · дедлайн ${calFmtDay(due, true)}` : label;
+    const lineAttr = lineId ? ` data-cal-line="${esc(lineId)}"` : "";
+    const id = esc(order.id);
+    return segs
+      .map((seg, i) => {
+        const left = dayDiff(win.from, seg.from);
+        const span = dayDiff(seg.from, seg.till) + 1;
+        const first = i === 0;
+        const last = i === segs.length - 1;
+        const cut = `${first ? "" : " is-cut-start"}${last ? "" : " is-cut-end"}`;
+        return `<div class="gantt-bar tone-${status.tone} ${status.id === "now" ? "is-live" : ""} ${due && last ? "has-deadline" : ""}${cut}" data-cal-id="${id}"${lineAttr} data-cal-drag="move" style="--from:${left};--span:${span};--bar:${esc(color)}" title="${esc(tip)}">
+          ${first ? `<i class="gantt-h start" data-cal-drag="start"></i>` : ""}
+          ${last ? `<i class="gantt-h end" data-cal-drag="end"></i>` : ""}
+        </div>`;
+      })
+      .concat(
+        pauses.map((seg) => {
+          const left = dayDiff(win.from, seg.from);
+          const span = dayDiff(seg.from, seg.till) + 1;
+          const pauseTip = pauseIsOpen(target, workPauses(target)[seg.index])
+            ? `${label} · пауза с ${calFmtDay(seg.from)} · идёт, пока не снимете`
+            : `${label} · пауза ${calFmtDay(seg.from)}${span > 1 ? ` — ${calFmtDay(seg.till)}` : ""}`;
+          return `<div class="gantt-bar is-pause" data-cal-id="${id}"${lineAttr} data-pause-i="${seg.index}" data-cal-drag="pause-move" style="--from:${left};--span:${span};--bar:${esc(color)}" title="${esc(pauseTip)}">
+            ${seg.showStart ? `<i class="gantt-h start" data-cal-drag="pause-start"></i>` : "<i></i>"}
+            ${seg.showEnd ? `<i class="gantt-h end" data-cal-drag="pause-end"></i>` : "<i></i>"}
+          </div>`;
+        })
+      )
+      .join("");
+  }
+
+  function ganttExpandIcon() {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   }
 
   function renderTimelineCalendar(win, list, load) {
@@ -4115,21 +4389,27 @@
     const laneCount = Math.max(1, ...laneItems.map((item) => item.lanes), 1);
     const navBars = laneItems
       .flatMap((item) => {
-        const title = `${orderNum(item.order)} ${orderTitle(item.order)}`.trim();
-        const due = orderDeadline(item.order, win.today);
-        return item.segs.map((seg) => {
+        const title = item.line
+          ? `${orderNum(item.order)} ${lineWorkName(item.line)}`.trim()
+          : `${orderNum(item.order)} ${orderTitle(item.order)}`.trim();
+        const due = orderDeadline(item.line ? lineWorkProxy(item.order, item.line) : item.order, win.today);
+        const color = item.color || calendarBarColor(item.order);
+        const lineAttr = item.line ? ` data-cal-line="${esc(item.line.id)}"` : "";
+        const lineClass = item.kind === "line" ? " is-line" : "";
+        return item.segs.map((seg, i) => {
           const from = Math.max(0, dayDiff(full.from, seg.from));
           const till = Math.min(full.span - 1, dayDiff(full.from, seg.till));
           if (till < from) return "";
           const len = till - from + 1;
-          return `<div class="tl-nav-bar ${due ? "has-deadline" : ""}" data-cal-id="${esc(item.order.id)}" style="--lane:${item.lane};--from:${from};--len:${len};--span:${full.span};--bar:${esc(calendarBarColor(item.order))}" title="${esc(title)}${due ? ` · до ${calFmtDay(due, true)}` : ""}"></div>`;
+          const cut = `${i ? " is-cut-start" : ""}${i < item.segs.length - 1 ? " is-cut-end" : ""}`;
+          return `<div class="tl-nav-bar ${due ? "has-deadline" : ""}${lineClass}${cut}" data-cal-id="${esc(item.order.id)}"${lineAttr} style="--lane:${item.lane};--from:${from};--len:${len};--span:${full.span};--bar:${esc(color)}" title="${esc(title)}${due ? ` · до ${calFmtDay(due, true)}` : ""}"></div>`;
         }).concat(
           (item.pauses || []).map((seg) => {
             const from = Math.max(0, dayDiff(full.from, seg.from));
             const till = Math.min(full.span - 1, dayDiff(full.from, seg.till));
             if (till < from) return "";
             const len = till - from + 1;
-            return `<div class="tl-nav-bar is-pause" data-cal-id="${esc(item.order.id)}" style="--lane:${item.lane};--from:${from};--len:${len};--span:${full.span};--bar:${esc(calendarBarColor(item.order))}" title="${esc(title)} · пауза"></div>`;
+            return `<div class="tl-nav-bar is-pause${lineClass}" data-cal-id="${esc(item.order.id)}"${lineAttr} style="--lane:${item.lane};--from:${from};--len:${len};--span:${full.span};--bar:${esc(color)}" title="${esc(title)} · пауза"></div>`;
           })
         );
       })
@@ -4166,44 +4446,53 @@
       .map((order) => {
         const meta = workStatusMeta(order);
         const pausedNow = orderIsPausedNow(order, win.today);
-        const segs = orderWorkSegments(order, win.from, win.to, win.today);
-        const pauses = orderPauseSegments(order, win.from, win.to, win.today);
-        if (!segs.length && !pauses.length) return "";
         const due = orderDeadline(order, win.today);
         const label = `${orderNum(order)} ${orderTitle(order)}`.trim();
-        const tip = due ? `${label} · дедлайн ${calFmtDay(due, true)}` : label;
-        const bars = segs
-          .map((seg, i) => {
-            const left = dayDiff(win.from, seg.from);
-            const span = dayDiff(seg.from, seg.till) + 1;
-            const first = i === 0;
-            const last = i === segs.length - 1;
-            return `<div class="gantt-bar tone-${meta.tone} ${meta.id === "now" ? "is-live" : ""} ${due && last ? "has-deadline" : ""}" data-cal-id="${esc(order.id)}" data-cal-drag="move" style="--from:${left};--span:${span};--bar:${esc(calendarBarColor(order))}" title="${esc(tip)}">
-              ${first ? `<i class="gantt-h start" data-cal-drag="start"></i>` : "<i></i>"}
-              ${last ? `<i class="gantt-h end" data-cal-drag="end"></i>` : "<i></i>"}
-            </div>`;
-          })
-          .concat(
-            pauses.map((seg) => {
-              const left = dayDiff(win.from, seg.from);
-              const span = dayDiff(seg.from, seg.till) + 1;
-              const pauseTip = pauseIsOpen(order, workPauses(order)[seg.index])
-                ? `${label} · пауза с ${calFmtDay(seg.from)} · идёт, пока не снимете`
-                : `${label} · пауза ${calFmtDay(seg.from)}${span > 1 ? ` — ${calFmtDay(seg.till)}` : ""}`;
-              return `<div class="gantt-bar is-pause" data-cal-id="${esc(order.id)}" data-pause-i="${seg.index}" data-cal-drag="pause-move" style="--from:${left};--span:${span};--bar:${esc(calendarBarColor(order))}" title="${esc(pauseTip)}">
-                ${seg.showStart ? `<i class="gantt-h start" data-cal-drag="pause-start"></i>` : "<i></i>"}
-                ${seg.showEnd ? `<i class="gantt-h end" data-cal-drag="pause-end"></i>` : "<i></i>"}
-              </div>`;
-            })
-          )
-          .join("");
-        return `<div class="gantt-row ${calSelectedClass(order.id)} ${due ? "has-deadline" : ""} ${pausedNow ? "is-paused" : ""}" data-cal-id="${esc(order.id)}">
-          <button type="button" class="gantt-label" data-cal-id="${esc(order.id)}">
-            <b>${esc(orderNum(order))} ${esc(orderTitle(order))}</b>
-            <small>${esc(order.customer || "без заказчика")} · ${esc(meta.label)}${workDurationDays(order) ? ` · ${workDurationDays(order)} дн.` : ""}${due ? ` · до ${calFmtDay(due)}` : ""}</small>
-          </button>
-          <div class="gantt-track" data-cal-track="${esc(order.id)}">${bars}</div>
+        const color = calendarBarColor(order);
+        const bars = ganttBarsHtml(order, win, { order, label, color });
+        if (!bars) return "";
+        const workLines = calendarWorkLines(order);
+        const open = calendarLinesOpen(order.id);
+        const expand = workLines.length
+          ? `<button type="button" class="gantt-expand ${open ? "is-open" : ""}" data-cal-expand="${esc(order.id)}" title="${open ? "Скрыть позиции" : "Показать позиции"}" aria-label="${open ? "Скрыть позиции" : "Показать позиции"}" aria-expanded="${open}">${ganttExpandIcon()}</button>`
+          : `<span class="gantt-expand is-empty" aria-hidden="true"></span>`;
+        const lineRows = open
+          ? workLines
+              .map((line, index) => {
+                const proxy = lineWorkProxy(order, line);
+                const lineMeta = lineWorkMeta(order, line);
+                const linePaused = orderIsPausedNow(proxy, win.today);
+                const lineLabel = lineWorkName(line, index);
+                const lineBars = ganttBarsHtml(proxy, win, {
+                  order,
+                  lineId: line.id,
+                  label: `${label} · ${lineLabel}`,
+                  color: calendarLineBarColor(order, line),
+                  meta: lineMeta,
+                });
+                const days = workDurationDays(proxy);
+                return `<div class="gantt-row is-line ${calSelectedClass(order.id, line.id)} ${linePaused ? "is-paused" : ""}" data-cal-id="${esc(order.id)}" data-cal-line="${esc(line.id)}">
+          <div class="gantt-head">
+            <button type="button" class="gantt-label" data-cal-id="${esc(order.id)}" data-cal-line="${esc(line.id)}">
+              <b>${esc(lineLabel)}</b>
+              <small>${esc(lineMeta.label)}${days ? ` · ${days} дн.` : ""}</small>
+            </button>
+          </div>
+          <div class="gantt-track" data-cal-track="${esc(order.id)}" data-cal-line="${esc(line.id)}">${lineBars}</div>
         </div>`;
+              })
+              .join("")
+          : "";
+        return `<div class="gantt-row ${calSelectedClass(order.id)} ${due ? "has-deadline" : ""} ${pausedNow ? "is-paused" : ""} ${open ? "is-open" : ""}" data-cal-id="${esc(order.id)}">
+          <div class="gantt-head">
+            ${expand}
+            <button type="button" class="gantt-label" data-cal-id="${esc(order.id)}">
+              <b>${esc(orderNum(order))} ${esc(orderTitle(order))}</b>
+              <small>${esc(order.customer || "без заказчика")} · ${esc(meta.label)}${workDurationDays(order) ? ` · ${workDurationDays(order)} дн.` : ""}${due ? ` · до ${calFmtDay(due)}` : ""}${workLines.length ? ` · ${workLines.length} поз.` : ""}</small>
+            </button>
+          </div>
+          <div class="gantt-track" data-cal-track="${esc(order.id)}">${bars}</div>
+        </div>${lineRows}`;
       })
       .join("");
     const empty = visible.length
@@ -4214,9 +4503,9 @@
         <span>весь период · ${esc(calFmtRange(full.from, full.to))} · ${full.span} дн.</span>
         <span id="tl-nav-meta-view">видно ${n} дн. · ${esc(calFmtRange(win.from, win.to))}</span>
       </div>
-      <div class="tl-nav-track" id="tl-nav-track" data-tl-nav="track">
+      <div class="tl-nav-track" id="tl-nav-track" data-tl-nav="track" style="--lanes:${laneCount}">
         ${ticks}
-        <div class="tl-nav-bars" style="--lanes:${laneCount}">${navBars}</div>
+        <div class="tl-nav-bars">${navBars}</div>
         ${todayNav}
         <div class="tl-nav-shade left" id="tl-nav-shade-l" style="width:${box.left}%"></div>
         <div class="tl-nav-shade right" id="tl-nav-shade-r" style="left:${box.left + box.width}%;width:${Math.max(0, 100 - box.left - box.width)}%"></div>
@@ -4226,18 +4515,18 @@
         </div>
       </div>
     </div>
-    <div class="gantt-scroll" id="gantt-scroll">
-      <div class="gantt" style="--days:${n}">
+    <div class="gantt-scroll" id="gantt-scroll" style="--days:${n}">
+      <div class="gantt-days">${head}<div class="gantt-day-tip" id="gantt-day-tip" hidden></div></div>
+      <div class="gantt">
         <div class="gantt-day-col" id="gantt-day-col" hidden></div>
         ${todayLine}
-        <div class="gantt-days">${head}<div class="gantt-day-tip" id="gantt-day-tip" hidden></div></div>
         <div class="gantt-body">
           <div class="gantt-grid" aria-hidden="true">${gridCols}</div>
           ${rows || empty}
         </div>
       </div>
     </div>
-    <p class="cal-hint">Сверху весь период: рамка — что видно сейчас, края и колесо меняют масштаб. Колесо на линейке дней листает период. Полосу заказа можно двигать, края меняют даты. Shift+клик по полосе ставит паузу в этот день (когда работали над другим заказом); паузу двигают теми же ручками, двойной клик снимает.</p>`;
+    <p class="cal-hint">Колесо на навигаторе — масштаб, на датах — период. Полосу двигают, края меняют даты. Стрелка — позиции. Shift+клик — пауза, Shift+двойной клик снимает.</p>`;
   }
 
   function renderClassicCalendar(win, list, load) {
@@ -4292,8 +4581,10 @@
     return `<div class="cal-week">${cols}</div>`;
   }
 
-  function calSelectedClass(id) {
-    return calendarState().selected === id ? "is-selected" : "";
+  function calSelectedClass(id, lineId = "") {
+    const cal = calendarState();
+    if (lineId) return cal.selected === id && cal.selectedLine === lineId ? "is-selected" : "";
+    return cal.selected === id && !cal.selectedLine ? "is-selected" : "";
   }
 
   function renderCalendarSide(win, all, list) {
@@ -4306,19 +4597,22 @@
     const nodate = all.filter((order) => workStatus(order) === "nodate");
     const pick = cal.pick ? parseDay(cal.pick) : null;
     const pickItems = pick ? all.filter((order) => orderMarksDay(order, pick)) : [];
-    const due = selected ? orderDeadline(selected, today) : null;
-    const pauses = selected ? workPauses(selected) : [];
+    const selectedLine = selected && cal.selectedLine ? findCalendarLine(selected, cal.selectedLine) : null;
+    const workTarget = selectedLine ? lineWorkProxy(selected, selectedLine) : selected;
+    const due = workTarget ? orderDeadline(workTarget, today) : null;
+    const pauses = workTarget ? workPauses(workTarget) : [];
+    const inheritLine = !!(selectedLine && !dateDay(selectedLine.work_start) && !dateDay(selectedLine.work_end));
     const pauseList = pauses.length
       ? `<div class="cal-pauses">${pauses
           .map((pause, i) => {
             const from = parseDay(pause.start);
-            const open = pauseIsOpen(selected, pause);
-            const till = parseDay(pauseEndKey(selected, pause, today));
+            const open = pauseIsOpen(workTarget, pause);
+            const till = parseDay(pauseEndKey(workTarget, pause, today));
             const label = !from
               ? ""
               : open
                 ? `${calFmtDay(from)} — идёт`
-                : till && pause.start !== pauseEndKey(selected, pause, today)
+                : till && pause.start !== pauseEndKey(workTarget, pause, today)
                   ? `${calFmtDay(from)} — ${calFmtDay(till)}`
                   : calFmtDay(from);
             return `<div class="cal-pause-row">
@@ -4328,17 +4622,22 @@
           })
           .join("")}</div>`
       : "";
+    const lineIdx = selectedLine ? calendarWorkLines(selected).findIndex((line) => line.id === selectedLine.id) : -1;
     const sel = selected
       ? `<div class="cal-sel">
           <div class="cal-sel-head">
             <b>${esc(orderNum(selected))} ${esc(orderTitle(selected))}</b>
-            <span class="work-pill work-pill-${esc(workStatusMeta(selected).id)}">${esc(workStatusMeta(selected).label)}</span>
+            <span class="work-pill work-pill-${esc(workStatusMeta(workTarget).id)}">${esc(workStatusMeta(workTarget).label)}</span>
           </div>
-          <div class="cal-sel-sub">${esc(selected.customer || "без заказчика")}${workDurationDays(selected) ? ` · ${workDurationDays(selected)} дн.` : ""}</div>
+          <div class="cal-sel-sub">${
+            selectedLine
+              ? `позиция · ${esc(lineWorkName(selectedLine, Math.max(0, lineIdx)))}${inheritLine ? " · как у заказа" : ""}`
+              : `${esc(selected.customer || "без заказчика")}${workDurationDays(selected) ? ` · ${workDurationDays(selected)} дн.` : ""}`
+          }</div>
           ${due ? `<div class="cal-due-line">Дедлайн ${esc(calFmtDay(due, true))}</div>` : ""}
           <div class="cal-dates">
-            <div class="field"><label>Начало</label><input type="date" data-cal-field="work_start" value="${esc(dateDay(selected.work_start))}" /></div>
-            <div class="field"><label>Конец</label><input type="date" data-cal-field="work_end" value="${esc(dateDay(selected.work_end))}" /></div>
+            <div class="field"><label>Начало</label><input type="date" data-cal-field="work_start" value="${esc(dateDay(workTarget.work_start))}" /></div>
+            <div class="field"><label>Конец</label><input type="date" data-cal-field="work_end" value="${esc(dateDay(workTarget.work_end))}" /></div>
           </div>
           ${pauseList}
           <div class="cal-actions">
@@ -4346,12 +4645,16 @@
             <button type="button" class="btn small" data-cal-act="end-today">Закончить сегодня</button>
             <button type="button" class="btn small" data-cal-act="shift-left" title="Сдвинуть на день назад">−1 день</button>
             <button type="button" class="btn small" data-cal-act="shift-right" title="Сдвинуть на день вперёд">+1 день</button>
-            <button type="button" class="btn small" data-cal-act="fill-lines" title="Взять крайние даты позиций">С дат позиций</button>
-            <button type="button" class="btn small" data-cal-act="clear">Снять даты</button>
+            ${
+              selectedLine
+                ? `<button type="button" class="btn small" data-cal-act="reset-line" title="Вернуть срок позиции к сроку заказа">Как у заказа</button>`
+                : `<button type="button" class="btn small" data-cal-act="fill-lines" title="Взять крайние даты позиций">С дат позиций</button>`
+            }
+            <button type="button" class="btn small" data-cal-act="clear">${selectedLine ? "Сбросить позицию" : "Снять даты"}</button>
             <button type="button" class="btn small" data-cal-act="open">Открыть заказ</button>
           </div>
         </div>`
-      : `<div class="cal-sel idle">Выберите заказ на доске — здесь можно поставить старт и финиш, паузы внутри срока, сдвинуть или открыть карточку.</div>`;
+      : `<div class="cal-sel idle">Выберите заказ на доске — здесь можно поставить старт и финиш, паузы внутри срока, сдвинуть или открыть карточку. Стрелка на таймлайне раскрывает позиции.</div>`;
     const pickOff = pick ? isWeekend(pick) : false;
     const pickKey = pick ? dayKey(pick) : "";
     const offSets = calendarOffSettings();
@@ -4364,8 +4667,8 @@
           : pickOff
             ? " · выходной"
             : "";
-    const pickPaused = selected && pick && isPaused(selected, pick);
-    const pickCanPause = selected && pick && pauseInEnvelope(selected, pick);
+    const pickPaused = workTarget && pick && isPaused(workTarget, pick);
+    const pickCanPause = workTarget && pick && pauseInEnvelope(workTarget, pick);
     const pickBlock = pick
       ? `<div class="cal-block">
           <h3>${esc(calFmtDay(pick, true))}${pickMark}${pickItems.length >= CAL_HOT_LOAD ? " · перегруз" : ""}</h3>
@@ -4486,8 +4789,10 @@
     return lines.join("\n");
   }
 
-  function calendarSelect(id) {
-    calendarState().selected = id;
+  function calendarSelect(id, lineId = "") {
+    const cal = calendarState();
+    cal.selected = id;
+    cal.selectedLine = lineId || "";
     const order = findOrder(id);
     if (order) revealOrderOnCalendar(order);
     else renderCalendar();
@@ -4519,13 +4824,22 @@
   }
 
   function applyCalendarOrder(mutator, { toastText, stay = false } = {}) {
-    const order = findOrder(calendarState().selected);
+    const cal = calendarState();
+    const order = findOrder(cal.selected);
     if (!order) {
       toast("Сначала выберите заказ");
       return;
     }
+    const line = cal.selectedLine ? findCalendarLine(order, cal.selectedLine) : null;
     historyCommit();
-    mutator(order);
+    if (line) {
+      const proxy = lineWorkProxy(order, line);
+      mutator(proxy);
+      writeLineWork(order, line, proxy);
+    } else {
+      mutator(order);
+      normalizeWorkDates(order);
+    }
     historyCommit();
     markDirty();
     if (stay) renderCalendar();
@@ -4606,12 +4920,19 @@
       onCalendarAct(actBtn.dataset.calAct, actBtn);
       return;
     }
+    const expand = e.target.closest("[data-cal-expand]");
+    if (expand) {
+      toggleCalendarLines(expand.dataset.calExpand);
+      return;
+    }
     const pauseBar = e.target.closest(".gantt-bar.is-pause");
     if (pauseBar) {
       const order = findOrder(pauseBar.dataset.calId);
+      const lineId = pauseBar.dataset.calLine || "";
       const index = Number(pauseBar.dataset.pauseI);
-      if (e.detail === 2 && order && Number.isInteger(index)) {
+      if (e.detail === 2 && e.shiftKey && order && Number.isInteger(index)) {
         calendarState().selected = order.id;
+        calendarState().selectedLine = lineId;
         applyCalendarOrder(
           (item) => {
             removePauseAt(item, index);
@@ -4620,16 +4941,18 @@
         );
         return;
       }
-      calendarSelect(pauseBar.dataset.calId);
+      calendarSelect(pauseBar.dataset.calId, lineId);
       return;
     }
     const workBar = e.target.closest(".gantt-bar[data-cal-id]");
     if (workBar && e.shiftKey) {
       const order = findOrder(workBar.dataset.calId);
+      const lineId = workBar.dataset.calLine || "";
       const track = workBar.closest(".gantt-track");
       const day = track ? calDayFromPoint(track, e.clientX, calendarWindow().days) : null;
       if (order && day) {
         calendarState().selected = order.id;
+        calendarState().selectedLine = lineId;
         calendarState().pick = dayKey(day);
         let added = false;
         applyCalendarOrder(
@@ -4644,11 +4967,11 @@
     }
     const chip = e.target.closest("[data-cal-id]");
     if (chip) {
-      if (e.detail === 2) {
+      if (e.detail === 2 && !chip.dataset.calLine) {
         gotoOrder(chip.dataset.calId);
         return;
       }
-      calendarSelect(chip.dataset.calId);
+      calendarSelect(chip.dataset.calId, chip.dataset.calLine || "");
       return;
     }
     const day = e.target.closest("[data-cal-day]");
@@ -4727,9 +5050,21 @@
       return;
     }
     if (act === "fill-lines") {
+      calendarState().selectedLine = "";
       applyCalendarOrder((order) => {
         if (!fillWorkFromLines(order)) toast("У позиций нет дат заказа");
       });
+      return;
+    }
+    if (act === "reset-line") {
+      applyCalendarOrder(
+        (item) => {
+          item.work_start = "";
+          item.work_end = "";
+          item.work_pauses = [];
+        },
+        { toastText: "Позиция как у заказа", stay: true }
+      );
       return;
     }
     applyCalendarOrder((order) => {
@@ -4817,28 +5152,33 @@
     e.preventDefault();
     historyCommit();
     const win = calendarWindow();
+    const lineId = bar.dataset.calLine || "";
+    const line = lineId ? findCalendarLine(order, lineId) : null;
+    const target = line ? lineWorkProxy(order, line) : order;
     const pauseIndex = mode.startsWith("pause") ? Number(bar.dataset.pauseI) : -1;
-    const pause = pauseIndex >= 0 ? workPauses(order)[pauseIndex] : null;
+    const pause = pauseIndex >= 0 ? workPauses(target)[pauseIndex] : null;
     calDrag = {
       order,
+      line,
+      target,
       bar,
       mode,
       days: win.days,
       full: win.full,
       track,
-      start0: parseDay(order.work_start),
-      end0: parseDay(order.work_end),
-      pauses0: workPauses(order).map((item) => ({
+      start0: parseDay(target.work_start),
+      end0: parseDay(target.work_end),
+      pauses0: workPauses(target).map((item) => ({
         start: item.start,
-        end: pauseEndKey(order, item),
-        open: pauseIsOpen(order, item),
+        end: pauseEndKey(target, item),
+        open: pauseIsOpen(target, item),
       })),
       pauseIndex,
       pause0: pause
         ? {
             from: parseDay(pause.start),
-            till: parseDay(pauseEndKey(order, pause)),
-            open: pauseIsOpen(order, pause),
+            till: parseDay(pauseEndKey(target, pause)),
+            open: pauseIsOpen(target, pause),
           }
         : null,
       originDay: calDayFromPoint(track, e.clientX, win.days),
@@ -4860,13 +5200,14 @@
 
   function paintCalDragPauseBar() {
     if (!calDrag) return;
-    const { bar, order, days, pauseIndex } = calDrag;
-    const pause = workPauses(order)[pauseIndex];
+    const { bar, days, pauseIndex } = calDrag;
+    const target = calDrag.target || calDrag.order;
+    const pause = workPauses(target)[pauseIndex];
     if (!bar || !pause || !days.length) return;
     const winFrom = days[0];
     const winTo = days[days.length - 1];
     let from = parseDay(pause.start);
-    let till = parseDay(pauseEndKey(order, pause));
+    let till = parseDay(pauseEndKey(target, pause));
     if (!from || !till) return;
     if (from < winFrom) from = winFrom;
     if (till > winTo) till = winTo;
@@ -4935,11 +5276,12 @@
       paintCalDragPauseBar();
       return;
     }
-    const { bar, order, days } = calDrag;
+    const { bar, days } = calDrag;
+    const target = calDrag.target || calDrag.order;
     if (!bar || !days.length) return;
     const winFrom = days[0];
     const winTo = days[days.length - 1];
-    const span = orderDrawSpan(order, dayStart(new Date()));
+    const span = orderDrawSpan(target, dayStart(new Date()));
     if (!span) return;
     const from = span.from < winFrom ? winFrom : span.from;
     const till = span.till > winTo ? winTo : span.till;
@@ -4952,14 +5294,15 @@
     bar.style.setProperty("--days", String(n));
     bar.style.left = `${(fromIdx / n) * 100}%`;
     bar.style.width = `${(len / n) * 100}%`;
-    bar.classList.toggle("has-deadline", !!orderDeadline(order));
-    bar.classList.toggle("is-live", workStatus(order) === "now");
+    bar.classList.toggle("has-deadline", !!orderDeadline(target));
+    bar.classList.toggle("is-live", workStatus(target) === "now");
     const track = bar.closest(".gantt-track");
     track?.querySelectorAll(".gantt-bar").forEach((el) => {
       if (el !== bar) el.hidden = true;
     });
+    if (calDrag.line) return;
     const full = calDrag.full;
-    const navBars = document.querySelectorAll(`.tl-nav-bar[data-cal-id="${cssEscape(order.id)}"]`);
+    const navBars = document.querySelectorAll(`.tl-nav-bar[data-cal-id="${cssEscape(calDrag.order.id)}"]`);
     navBars.forEach((navBar, i) => {
       if (i === 0 && full) {
         const navFrom = Math.max(0, dayDiff(full.from, span.from));
@@ -5010,41 +5353,42 @@
     if (!day) return;
     const delta = dayDiff(calDrag.originDay, day);
     if (delta || calDrag.moved) calDrag.moved = true;
-    const order = calDrag.order;
+    const target = calDrag.target || calDrag.order;
     if (String(calDrag.mode).startsWith("pause")) {
-      applyPauseDrag(order, day, delta);
-      normalizeWorkPauses(order, false);
+      applyPauseDrag(target, day, delta);
+      normalizeWorkPauses(target, false);
       paintCalDragPauseBar();
-      const pause = workPauses(order)[calDrag.pauseIndex];
+      const pause = workPauses(target)[calDrag.pauseIndex];
       const highlight =
         calDrag.mode === "pause-start"
           ? parseDay(pause?.start)
           : calDrag.mode === "pause-end"
-            ? parseDay(pauseEndKey(order, pause))
+            ? parseDay(pauseEndKey(target, pause))
             : day;
       showGanttDayTip(highlight || day, e);
       return;
     }
     if (calDrag.mode === "start") {
-      order.work_start = dayKey(day);
-      if (!order.work_end && calDrag.end0) order.work_end = dayKey(calDrag.end0);
+      target.work_start = dayKey(day);
+      if (!target.work_end && calDrag.end0) target.work_end = dayKey(calDrag.end0);
     } else if (calDrag.mode === "end") {
-      if (!order.work_start) order.work_start = calDrag.start0 ? dayKey(calDrag.start0) : dayKey(day);
-      order.work_end = dayKey(day);
+      if (!target.work_start) target.work_start = calDrag.start0 ? dayKey(calDrag.start0) : dayKey(day);
+      target.work_end = dayKey(day);
     } else {
-      if (calDrag.start0) order.work_start = dayKey(addDays(calDrag.start0, delta));
-      else order.work_start = dayKey(day);
-      if (calDrag.end0) order.work_end = dayKey(addDays(calDrag.end0, delta));
-      order.work_pauses = (calDrag.pauses0 || []).map((pause) => ({
+      if (calDrag.start0) target.work_start = dayKey(addDays(calDrag.start0, delta));
+      else target.work_start = dayKey(day);
+      if (calDrag.end0) target.work_end = dayKey(addDays(calDrag.end0, delta));
+      target.work_pauses = (calDrag.pauses0 || []).map((pause) => ({
         start: pause.start ? dayKey(addDays(parseDay(pause.start), delta)) : "",
         end: pause.open ? "" : pause.end ? dayKey(addDays(parseDay(pause.end), delta)) : "",
         open: !!pause.open,
       }));
     }
-    normalizeWorkDates(order, { mergePauses: false });
+    if (calDrag.line) clampLineProxy(calDrag.order, target, calDrag);
+    normalizeWorkDates(target, { mergePauses: false, lines: false });
     paintCalDragBar();
     const highlight =
-      calDrag.mode === "start" ? parseDay(order.work_start) : calDrag.mode === "end" ? parseDay(order.work_end) : day;
+      calDrag.mode === "start" ? parseDay(target.work_start) : calDrag.mode === "end" ? parseDay(target.work_end) : day;
     showGanttDayTip(highlight || day, e);
   }
 
@@ -5073,7 +5417,9 @@
     if (calDrag.moved) {
       calSkipClick = true;
       calendarState().selected = order.id;
-      normalizeWorkDates(order);
+      calendarState().selectedLine = calDrag.line?.id || "";
+      if (calDrag.line) writeLineWork(order, calDrag.line, calDrag.target);
+      else normalizeWorkDates(order);
       historyCommit();
       markDirty();
       calDrag = null;
@@ -5370,6 +5716,7 @@
     (state.doc.orders || []).forEach((order) => {
       const orderText = [order.number, order.name, order.customer, order.notes].join(" ").toLocaleLowerCase("ru");
       const lines = (order.lines || []).filter((line) => {
+        if (isFrozenLine(line)) return false;
         const t = lineTotals(line);
         if (t.expense) return false;
         if (debtOnly && t.unpaid <= 0.005) return false;
@@ -6625,7 +6972,18 @@
     $("orders-list").addEventListener("input", onOrderInput);
     $("orders-list").addEventListener("change", onOrderInput);
     $("orders-list").addEventListener("click", onOrderClick);
+    $("orders-list").addEventListener("contextmenu", onLineContextMenu);
     $("orders-list").addEventListener("keydown", onOrderKeydown);
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest("#line-menu")) closeLineMenu();
+    });
+    $("line-menu-freeze")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      toggleLineFrozen();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeLineMenu();
+    });
     $("orders-list").addEventListener("focusin", (e) => {
       if (e.target.dataset?.lk === "product") openProductSuggest(e.target);
     });
@@ -7606,7 +7964,7 @@
       if (g === "discount") {
         const v = Math.min(100, Math.max(0, num(e.target.value)));
         (order.lines || []).forEach((line) => {
-          if (isExpenseLine(line)) return;
+          if (isFrozenLine(line) || isExpenseLine(line)) return;
           line.discount = v;
           line.discount_expr = String(v);
           applyPaidIfCovered(line);
@@ -7622,7 +7980,7 @@
       } else if (g === "status" || g === "order_type") {
         if (!e.target.value) return;
         (order.lines || []).forEach((line) => {
-          if (isExpenseLine(line)) return;
+          if (isFrozenLine(line) || isExpenseLine(line)) return;
           if (g === "status" && statusLocked(line.status)) return;
           line[g] = e.target.value;
         });
@@ -7630,6 +7988,7 @@
       } else if (g === "order_date" || g === "payment_date") {
         if (e.type !== "change" || !e.target.value) return;
         (order.lines || []).forEach((line) => {
+          if (isFrozenLine(line)) return;
           if (g === "payment_date" && isExpenseLine(line)) return;
           line[g] = e.target.value;
         });
@@ -7755,7 +8114,7 @@
   /** Налог в процентах зависит от других строк — обновляем его при любой правке заказа. */
   function refreshPercentRows(card, order) {
     for (const item of order.lines || []) {
-      if (!isExpenseLine(item) || taxMode(item) === "amount") continue;
+      if (isFrozenLine(item) || !isExpenseLine(item) || taxMode(item) === "amount") continue;
       const row = card.querySelector(`tr[data-line="${cssEscape(item.id)}"]`);
       if (!row) continue;
       const t = lineTotals(item, order);
@@ -8084,7 +8443,7 @@
         const order = findOrder(block.dataset.order);
         if (!order || !block.querySelector("[data-share-order]")?.checked) return null;
         const ids = new Set([...block.querySelectorAll("[data-share-line]:checked")].map((el) => el.dataset.shareLine));
-        const lines = (order.lines || []).filter((l) => ids.has(l.id) && (withExpenses || !isExpenseLine(l)));
+        const lines = (order.lines || []).filter((l) => ids.has(l.id) && !isFrozenLine(l) && (withExpenses || !isExpenseLine(l)));
         if (!lines.length) return null;
         return { order, lines };
       })
@@ -8185,6 +8544,7 @@
             <label><input type="checkbox" data-share-order ${on ? "checked" : ""} /> ${esc(order.number || "—")} · ${esc(order.name || "без названия")}</label>
           </div>
           <div class="share-lines">${(order.lines || [])
+            .filter((line) => !isFrozenLine(line))
             .map((line) => {
               const kind = typeKind(line.order_type);
               return `<label class="${kind ? "share-cost" : ""}"><input type="checkbox" data-share-line="${esc(line.id)}" ${
@@ -9222,6 +9582,46 @@
     $("help-modal").classList.add("open");
   }
 
+  function closeLineMenu() {
+    const menu = $("line-menu");
+    if (menu) menu.hidden = true;
+  }
+
+  function onLineContextMenu(e) {
+    const grip = e.target.closest(".line-drag");
+    if (!grip) return;
+    const tr = grip.closest("tr[data-line]");
+    const card = tr?.closest("[data-order]");
+    const order = findOrder(card?.dataset.order);
+    const line = order?.lines?.find((item) => item.id === tr.dataset.line);
+    const menu = $("line-menu");
+    const btn = $("line-menu-freeze");
+    if (!line || !menu || !btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    menu.dataset.order = order.id;
+    menu.dataset.line = line.id;
+    btn.textContent = isFrozenLine(line) ? "Вернуть в заказ" : "Заморозить позицию";
+    menu.hidden = false;
+    const x = Math.min(e.clientX, window.innerWidth - 250);
+    const y = Math.min(e.clientY, window.innerHeight - 60);
+    menu.style.left = `${Math.max(8, x)}px`;
+    menu.style.top = `${Math.max(8, y)}px`;
+  }
+
+  function toggleLineFrozen() {
+    const menu = $("line-menu");
+    const order = findOrder(menu?.dataset.order);
+    const line = order?.lines?.find((item) => item.id === menu?.dataset.line);
+    closeLineMenu();
+    if (!line) return;
+    historyCommit();
+    line.frozen = !isFrozenLine(line);
+    markDirty();
+    renderOrders();
+    toast(line.frozen ? "Позиция заморожена" : "Позиция снова в заказе");
+  }
+
   function onOrderClick(e) {
     const act = e.target.dataset.act || e.target.closest("button")?.dataset.act;
     if (!act) return;
@@ -9248,7 +9648,7 @@
     }
     if (act === "payall") {
       (order.lines || []).forEach((line) => {
-        if (isExpenseLine(line)) return;
+        if (isFrozenLine(line) || isExpenseLine(line)) return;
         const after = lineTotals(line).after;
         line.paid = after;
         line.paid_expr = String(after);
@@ -9271,6 +9671,7 @@
       if (idx < 0) return;
       const copy = JSON.parse(JSON.stringify(order.lines[idx]));
       copy.id = uid();
+      copy.frozen = false;
       order.lines.splice(idx + 1, 0, copy);
       markDirty();
       renderOrders();

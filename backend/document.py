@@ -405,6 +405,28 @@ def normalize_document(raw: Any) -> dict[str, Any]:
             order["work_start"] = start
             order["work_end"] = end
             order["work_pauses"] = _work_pauses(order.get("work_pauses"), start, end)
+            lines = order.get("lines")
+            if isinstance(lines, list):
+                for line in lines:
+                    if not isinstance(line, dict):
+                        continue
+                    ls = _day_iso(line.get("work_start"))
+                    le = _day_iso(line.get("work_end"))
+                    if ls and le and le < ls:
+                        ls, le = le, ls
+                    if start and ls and ls < start:
+                        ls = start
+                    if end and ls and ls > end:
+                        ls = end
+                    if start and le and le < start:
+                        le = start
+                    if end and le and le > end:
+                        le = end
+                    line["work_start"] = ls
+                    line["work_end"] = le
+                    line["frozen"] = bool(line.get("frozen"))
+                    env_s, env_e = ls or start, le or end
+                    line["work_pauses"] = _work_pauses(line.get("work_pauses"), env_s, env_e) if (env_s or env_e) else []
             cleaned_orders.append(order)
         base["orders"] = cleaned_orders
 

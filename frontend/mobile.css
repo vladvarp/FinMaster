@@ -1035,7 +1035,16 @@ html[data-theme="dark"] .expr-input.invalid { background: rgba(220, 38, 38, 0.12
 
 /* ===== Расходы: налог и затрата ===== */
 .costs-sum { font-size: 14px; font-weight: 700; color: var(--warn); font-variant-numeric: tabular-nums; }
-.line-row.cost-row { --tint: var(--warn); background: rgba(217, 119, 6, 0.06); }
+.line-row.is-frozen { opacity: 0.72; filter: grayscale(0.25); }
+.frozen-banner {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(100, 116, 139, 0.16);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
 .line-row.cost-row .lr-right b.cost { color: var(--warn); }
 .lr-status.cost-kind { background: #fef3c7; color: #92400e; }
 .lr-status.cost-kind.tax { background: #ede9fe; color: #6d28d9; }
@@ -1517,7 +1526,7 @@ h3.section {
 }
 .mcal-kpis {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
   margin: 0 0 10px;
 }

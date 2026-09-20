@@ -191,6 +191,10 @@
     return !!typeKind(line?.order_type);
   }
 
+  function isFrozenLine(line) {
+    return !!line?.frozen;
+  }
+
   function typeNames(kind) {
     const list = orderTypes();
     if (kind === "expense") return list.filter((t) => t.is_tax || t.is_cost).map((t) => t.name);
@@ -201,8 +205,13 @@
   function splitLines(lines) {
     const income = [];
     const expense = [];
-    (lines || []).forEach((line) => (isExpenseLine(line) ? expense : income).push(line));
-    return { income, expense };
+    const frozen = [];
+    (lines || []).forEach((line) => {
+      if (isFrozenLine(line)) frozen.push(line);
+      else if (isExpenseLine(line)) expense.push(line);
+      else income.push(line);
+    });
+    return { income, expense, frozen };
   }
 
   /** Режим строки налога: «amount» — своя сумма, «gross» — % от выручки, «net» — % от выручки без затрат. */
@@ -220,6 +229,7 @@
     let gross = 0;
     let costs = 0;
     for (const item of order?.lines || []) {
+      if (isFrozenLine(item)) continue;
       const kind = typeKind(item.order_type);
       if (!kind) gross += lineTotals(item).after;
       else if (kind === "cost") costs += lineTotals(item).cost;
@@ -266,6 +276,7 @@
   function sumLines(lines, order) {
     const acc = (lines || []).reduce(
       (sum, line) => {
+        if (isFrozenLine(line)) return sum;
         const t = lineTotals(line, order);
         if (t.expense) {
           sum.cost += t.cost;
@@ -434,7 +445,7 @@
   }
 
   function orderIsOff(order) {
-    const income = (order.lines || []).filter((line) => !isExpenseLine(line));
+    const income = (order.lines || []).filter((line) => !isFrozenLine(line) && !isExpenseLine(line));
     if (!income.length) return false;
     return income.every((line) => /отмен|аннул|черн/i.test(line.status || ""));
   }
@@ -1282,6 +1293,10 @@
       tax_mode: "gross",
       tax_percent: 0,
       tax_percent_expr: "0",
+      work_start: "",
+      work_end: "",
+      work_pauses: [],
+      frozen: false,
     };
   }
 
@@ -1647,7 +1662,7 @@
     const meta = statusMeta(line.status);
     const parts = [line.order_type, `${qtyText(line)} × ${money(t.price)}`];
     if (t.discount > 0) parts.push(`−${Math.round(t.discount)}%`);
-    return `<article class="line-row" data-edit="${esc(line.id)}" style="--tint:${esc(meta.color)}">
+    return `<article class="line-row${isFrozenLine(line) ? " is-frozen" : ""}" data-edit="${esc(line.id)}" style="--tint:${esc(meta.color)}">
       <button type="button" class="lr-drag" aria-label="Перетащить" title="Перетащить"><span></span></button>
       <span class="lr-index">${index + 1}</span>
       <div class="lr-main">
@@ -1669,7 +1684,7 @@
       t.mode === "amount"
         ? `${qtyText(line)} × ${money(t.price)}`
         : `${moneyFmt.format(t.percent).replace(",00", "")} % от ${money(t.base)}${t.mode === "net" ? " (без затрат)" : ""}`;
-    return `<article class="line-row cost-row" data-edit="${esc(line.id)}">
+    return `<article class="line-row cost-row${isFrozenLine(line) ? " is-frozen" : ""}" data-edit="${esc(line.id)}">
       <button type="button" class="lr-drag" aria-label="Перетащить" title="Перетащить"><span></span></button>
       <span class="lr-index">${index + 1}</span>
       <div class="lr-main">
@@ -1693,7 +1708,7 @@
     }
     const t = orderTotals(order);
     const lines = order.lines || [];
-    const { income, expense } = splitLines(lines);
+    const { income, expense, frozen } = splitLines(lines);
     const a = (f) => `data-o="${esc(order.id)}" data-f="${f}"`;
 
     $("order-top").innerHTML = `
@@ -1756,6 +1771,15 @@
       costsList.innerHTML = expense.map((line, i) => costRowHtml(line, i)).join("");
     }
     if (addCost) addCost.hidden = !typeNames("expense").length;
+
+    const frozenRow = $("frozen-row");
+    const frozenList = $("frozen-list");
+    if (frozenRow && frozenList) {
+      frozenRow.hidden = !frozen.length;
+      frozenList.hidden = !frozen.length;
+      $("frozen-title").textContent = `Замороженные · ${frozen.length}`;
+      frozenList.innerHTML = frozen.map((line, i) => (isExpenseLine(line) ? costRowHtml(line, i) : lineRowHtml(line, i))).join("");
+    }
   }
 
   function bindSortable(container, { handle, item, onCommit }) {
@@ -1800,14 +1824,14 @@
     const order = currentOrder();
     if (!order || !listEl) return;
     const ids = [...listEl.querySelectorAll(".line-row[data-edit]")].map((el) => el.dataset.edit);
-    const group = (order.lines || []).filter((line) => (expense ? isExpenseLine(line) : !isExpenseLine(line)));
+    const group = (order.lines || []).filter((line) => !isFrozenLine(line) && (expense ? isExpenseLine(line) : !isExpenseLine(line)));
     if (ids.length !== group.length) return;
     const byId = new Map(group.map((line) => [line.id, line]));
     const nextGroup = ids.map((id) => byId.get(id)).filter(Boolean);
     if (nextGroup.length !== group.length) return;
     let i = 0;
     order.lines = (order.lines || []).map((line) => {
-      if (isExpenseLine(line) !== expense) return line;
+      if (isFrozenLine(line) || isExpenseLine(line) !== expense) return line;
       return nextGroup[i++] || line;
     });
     touchDoc();
@@ -1819,12 +1843,17 @@
     const order = currentOrder();
     if (!order) return;
     const row = document.querySelector(`.line-row[data-edit="${CSS.escape(lineId)}"]`);
-    const { income, expense } = splitLines(order.lines);
+    const { income, expense, frozen } = splitLines(order.lines);
     const wasCost = !!row?.classList.contains("cost-row");
     const index = income.findIndex((l) => l.id === lineId);
     const costIndex = expense.findIndex((l) => l.id === lineId);
-    const line = index >= 0 ? income[index] : expense[costIndex];
+    const frozenIndex = frozen.findIndex((l) => l.id === lineId);
+    const line = index >= 0 ? income[index] : costIndex >= 0 ? expense[costIndex] : frozen[frozenIndex];
     if (!line) return;
+    if (frozenIndex >= 0) {
+      renderOrder();
+      return;
+    }
     // Смена типа переносит строку между списками — проще перерисовать заказ целиком.
     // Налог в процентах зависит от других строк, поэтому его тоже проще пересобрать вместе с заказом.
     const hasPercentTax = expense.some((l) => taxMode(l) !== "amount" && typeKind(l.order_type) === "tax");
@@ -1935,7 +1964,9 @@
     const t = lineTotals(line);
     const a = (f) => `data-l="${esc(line.id)}" data-f="${f}"`;
     const { income } = splitLines(lines);
-    $("ed-title").textContent = t.expense
+    $("ed-title").textContent = line.frozen
+      ? `Заморожена${t.expense ? ` · ${kindLabel(t.kind)}` : ""}`
+      : t.expense
       ? `Расход · ${kindLabel(t.kind)}`
       : `Позиция ${income.findIndex((l) => l.id === line.id) + 1} из ${income.length}`;
     $("ed-prev").disabled = index <= 0;
@@ -2024,12 +2055,14 @@
 
     $("editor-body").innerHTML = `
       ${t.expense ? `<div class="cost-banner ${esc(t.kind)}">Это расход — ${esc(kindLabel(t.kind))}</div>` : ""}
+      ${line.frozen ? `<div class="frozen-banner">Заморожена — не учитывается в итогах, кассе и календаре</div>` : ""}
       ${head}
       ${t.expense ? costOnly : money_}
 
       <div class="ed-sums" id="ed-sums">${editorSumsHtml(t)}</div>
 
       <div class="stack">
+        <button type="button" class="btn wide" id="ed-freeze">${line.frozen ? "Вернуть в заказ" : "Заморозить позицию"}</button>
         <button type="button" class="btn wide" id="ed-dup">Дублировать позицию</button>
         <button type="button" class="btn wide danger-ghost" id="ed-del">Удалить позицию</button>
       </div>`;
@@ -2425,7 +2458,6 @@
     const all = orders();
     const list = cal.filter === "all" ? all : all.filter((order) => workStatus(order) === cal.filter);
     const now = all.filter((order) => workStatus(order) === "now");
-    const overdue = all.filter((order) => workStatus(order) === "overdue");
     const nodate = all.filter((order) => workStatus(order) === "nodate");
     const modes = [
       ["classic", "Классический — сетка месяца"],
@@ -2523,7 +2555,6 @@
     $("calendar-body").innerHTML = `
       <div class="mcal-kpis">
         <div><span>Идёт</span><b>${now.length}</b></div>
-        <div class="${overdue.length ? "warn" : ""}"><span>Просрочены</span><b>${overdue.length}</b></div>
         <div><span>Без дат</span><b>${nodate.length}</b></div>
       </div>
       <div class="mcal-top">
@@ -2895,7 +2926,7 @@
 
   function snapCandidates(order) {
     const withExpenses = snapShowsExpenses();
-    return (order?.lines || []).filter((l) => withExpenses || !isExpenseLine(l));
+    return (order?.lines || []).filter((l) => !isFrozenLine(l) && (withExpenses || !isExpenseLine(l)));
   }
 
   function snapLines(order) {
@@ -4636,8 +4667,16 @@
         editorJump(1);
         return;
       }
+      if (e.target.closest("#ed-freeze")) {
+        line.frozen = !isFrozenLine(line);
+        touchDoc();
+        pushSoon();
+        closeEditor();
+        toast(line.frozen ? "Позиция заморожена" : "Позиция снова в заказе");
+        return;
+      }
       if (e.target.closest("#ed-dup")) {
-        const copy = { ...line, id: uid() };
+        const copy = { ...line, id: uid(), frozen: false };
         const index = order.lines.findIndex((l) => l.id === line.id);
         order.lines.splice(index + 1, 0, copy);
         touchDoc();

@@ -344,7 +344,6 @@
         </div>
 
         <div class="view cal-view" id="view-calendar">
-          <div class="kpis cal-kpis" id="cal-kpis"></div>
           <div class="cal-tools">
             <div class="cal-tools-left">
               <div class="cal-filter" id="cal-filter">
@@ -401,6 +400,10 @@
                   <path d="M9 3.8h6v2.8H9zM9 11h6M9 14.2h6M9 17.4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
               </button>
+              <div class="cal-stats" id="cal-stats">
+                <button type="button" class="info-btn" id="btn-cal-stats" title="Сводка календаря" aria-label="Сводка календаря">i</button>
+                <div class="cal-stats-pop" id="cal-stats-pop" role="tooltip"></div>
+              </div>
             </div>
           </div>
           <div class="cal-layout">
@@ -836,6 +839,7 @@
           <div class="help-row"><span>Передвинуть строку</span><span><kbd>Alt</kbd><kbd>↑</kbd><kbd>↓</kbd></span></div>
           <div class="help-row"><span>Новая строка в заказе</span><span><kbd>Ctrl</kbd><kbd>Enter</kbd></span></div>
           <div class="help-row"><span>Дублировать строку</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>D</kbd></span></div>
+          <div class="help-row"><span>Заморозить позицию</span><span>ПКМ на ручке строки</span></div>
           <h4>Ячейки</h4>
           <div class="help-row"><span>Формулы в кол-ве, цене, скидке</span><span><kbd>2+3*4</kbd></span></div>
           <div class="help-row"><span>Запятая превращается в точку</span><span><kbd>2,5</kbd> → <kbd>2.5</kbd></span></div>
@@ -874,6 +878,9 @@
       <p id="history-modal-sum">Снимки лежат в Документы\FinMaster\history — по папке на отчёт.</p>
       <div class="table-wrap" id="history-modal-list"></div>
     </div>
+  </div>
+  <div class="line-menu" id="line-menu" hidden role="menu">
+    <button type="button" class="btn" id="line-menu-freeze" role="menuitem">Заморозить позицию</button>
   </div>
   <div class="toast" id="toast"></div>
   <input type="file" id="file-input" accept=".fmaster,.json" hidden />

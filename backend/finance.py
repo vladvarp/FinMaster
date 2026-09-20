@@ -106,6 +106,10 @@ def line_kind(line: dict[str, Any] | None, types: dict[str, str] | None = None) 
     return str((types or {}).get(str((line or {}).get("order_type") or "").strip()) or "")
 
 
+def is_frozen(line: dict[str, Any] | None) -> bool:
+    return bool((line or {}).get("frozen"))
+
+
 def is_expense(line: dict[str, Any] | None, types: dict[str, str] | None = None) -> bool:
     return bool(line_kind(line, types))
 
@@ -123,7 +127,7 @@ def order_tax_base(
     gross = 0.0
     costs = 0.0
     for item in (order or {}).get("lines") or []:
-        if not isinstance(item, dict):
+        if not isinstance(item, dict) or is_frozen(item):
             continue
         kind = line_kind(item, types)
         if not kind:
@@ -193,6 +197,8 @@ def lines_totals(
 ) -> dict[str, float]:
     acc = {"total": 0.0, "after": 0.0, "paid": 0.0, "unpaid": 0.0, "cost": 0.0}
     for line in lines or []:
+        if is_frozen(line):
+            continue
         tot = line_totals(line, types, order)
         if tot["kind"]:
             acc["cost"] += float(tot["cost"])
@@ -214,6 +220,8 @@ def split_lines(
     income: list[dict[str, Any]] = []
     expense: list[dict[str, Any]] = []
     for line in lines or []:
+        if is_frozen(line):
+            continue
         (expense if line_kind(line, types) else income).append(line)
     return income, expense
 
