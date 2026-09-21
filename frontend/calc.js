@@ -11,6 +11,42 @@
   ];
 
   const GROUP_COLORS = ["#14b8a6", "#0ea5e9", "#8b5cf6", "#f59e0b", "#f43f5e", "#22c55e", "#06b6d4", "#eab308", "#a855f7", "#fb7185", "#64748b", "#d946ef"];
+  const DASH_PERIODS = [
+    ["all", "Весь период"],
+    ["today", "Сегодня"],
+    ["week", "7 дней"],
+    ["month", "Этот месяц"],
+    ["year", "Этот год"],
+    ["range", "Диапазон"],
+  ];
+  const DASH_PAY_FILTERS = [
+    ["all", "Все"],
+    ["debt", "С долгом"],
+    ["paid", "Оплаченные"],
+    ["month", "Этот месяц"],
+    ["empty", "Без цены"],
+  ];
+  const DASH_PORTS = [
+    { id: "orders", name: "Заказов" },
+    { id: "lines", name: "Позиций" },
+    { id: "after", name: "К оплате" },
+    { id: "afterActive", name: "Без отмен" },
+    { id: "paid", name: "Оплачено" },
+    { id: "unpaid", name: "Долг" },
+    { id: "total", name: "До скидки" },
+    { id: "cost", name: "Расходы" },
+    { id: "costCount", name: "Строк расхода" },
+    { id: "net", name: "Чистыми" },
+    { id: "paidShare", name: "% оплаты" },
+    { id: "avgCheck", name: "Средний чек" },
+    { id: "overdue", name: "Просрочено поз." },
+    { id: "overdueSum", name: "Просроченный долг" },
+    { id: "monthAfter", name: "Выручка месяца" },
+    { id: "monthCost", name: "Расход месяца" },
+    { id: "forecast", name: "Прогноз месяца" },
+  ];
+  const DASH_DEFAULT = ["orders", "after", "paid", "unpaid"];
+  const FILTER_PORTS = ["orders", "lines", "after", "paid", "unpaid", "cost", "net"];
 
   let api = null;
   const session = {
@@ -28,6 +64,7 @@
     miniDrag: null,
     miniHidden: false,
     resize: null,
+    folds: null,
   };
 
   function $(id) {
@@ -57,10 +94,11 @@
     if (!doc) return null;
     if (!doc.ui || typeof doc.ui !== "object") doc.ui = {};
     if (!doc.ui.calculator || typeof doc.ui.calculator !== "object") {
-      doc.ui.calculator = { active: "", blueprints: [] };
+      doc.ui.calculator = { active: "", blueprints: [], folds: { nodes: true, schemes: true, orders: true } };
     }
     const calc = doc.ui.calculator;
     if (!Array.isArray(calc.blueprints)) calc.blueprints = [];
+    if (!calc.folds || typeof calc.folds !== "object") calc.folds = { nodes: true, schemes: true, orders: true };
     if (!calc.blueprints.length) {
       const first = emptyBlueprint("Схема 1");
       calc.blueprints.push(first);
@@ -327,6 +365,188 @@
     return set;
   }
 
+  function dashPortMeta(id) {
+    return DASH_PORTS.find((item) => item.id === id) || { id, name: id };
+  }
+
+  function normalizeDashPorts(list) {
+    const allowed = new Set(DASH_PORTS.map((item) => item.id));
+    const out = [];
+    const seen = new Set();
+    (Array.isArray(list) ? list : DASH_DEFAULT).forEach((id) => {
+      const key = String(id || "");
+      if (!allowed.has(key) || seen.has(key)) return;
+      seen.add(key);
+      out.push(key);
+    });
+    return out.length ? out : DASH_DEFAULT.slice();
+  }
+
+  function openDashPorts(node) {
+    return normalizeDashPorts(node?.openPorts);
+  }
+
+  function ensureDashPort(node, portId) {
+    const list = openDashPorts(node);
+    if (!list.includes(portId)) list.push(portId);
+    node.openPorts = normalizeDashPorts(list);
+  }
+
+  function dropDashPort(node, portId) {
+    node.openPorts = openDashPorts(node).filter((id) => id !== portId);
+    if (!node.openPorts.length) node.openPorts = DASH_DEFAULT.slice();
+  }
+
+  function filterOpts(node) {
+    return {
+      customer: String(node?.customer || "").trim(),
+      orderId: String(node?.orderId || "").trim(),
+      period: node?.period || "all",
+      payFilter: node?.payFilter || "all",
+      status: String(node?.status || "").trim(),
+      dateFrom: node?.dateFrom || "",
+      dateTo: node?.dateTo || "",
+    };
+  }
+
+  function dashStats(node) {
+    return api?.calcStats?.(filterOpts(node)) || {};
+  }
+
+  function loadFolds() {
+    if (session.folds) return session.folds;
+    const merged = {};
+    const calc = ensureState();
+    if (calc?.folds && typeof calc.folds === "object") {
+      ["nodes", "schemes", "orders"].forEach((key) => {
+        if (typeof calc.folds[key] === "boolean") merged[key] = calc.folds[key];
+      });
+    }
+    try {
+      const raw = JSON.parse(localStorage.getItem("finmaster.calc.folds") || "{}") || {};
+      ["nodes", "schemes", "orders"].forEach((key) => {
+        if (typeof raw[key] === "boolean") merged[key] = raw[key];
+      });
+    } catch {
+      /* ignore */
+    }
+    session.folds = merged;
+    return session.folds;
+  }
+
+  function foldOpen(key) {
+    const folds = loadFolds();
+    return folds[key] !== false;
+  }
+
+  function setFold(key, open) {
+    if (!key) return;
+    const folds = loadFolds();
+    folds[key] = !!open;
+    session.folds = folds;
+    try {
+      localStorage.setItem("finmaster.calc.folds", JSON.stringify(folds));
+    } catch {
+      /* ignore */
+    }
+    const calc = ensureState();
+    if (calc) {
+      calc.folds = {
+        nodes: folds.nodes !== false,
+        schemes: folds.schemes !== false,
+        orders: folds.orders !== false,
+      };
+    }
+  }
+
+  function filterFieldsHtml(node) {
+    const statuses = api?.statuses?.() || [];
+    const customer = String(node.customer || "").trim();
+    const customerKey = customer.toLowerCase();
+    const orders = (api?.orders?.() || [])
+      .map((order, index) => ({ order, index }))
+      .filter(({ order }) => {
+        if (!customerKey) return true;
+        return String(order.customer || "")
+          .toLowerCase()
+          .includes(customerKey);
+      })
+      .sort((a, b) => {
+        const da = orderStamp(a.order);
+        const db = orderStamp(b.order);
+        if (db !== da) return db.localeCompare(da);
+        return b.index - a.index;
+      })
+      .map((item) => item.order);
+    const period = node.period || "all";
+    const pay = node.payFilter || "all";
+    const status = String(node.status || "");
+    let orderId = String(node.orderId || "");
+    if (orderId && !orders.some((order) => order.id === orderId)) orderId = "";
+    const range = period === "range";
+    return `<div class="calc-filter-fields">
+      <label class="calc-filter-row">
+        <span>Заказчик</span>
+        <input class="calc-filter-input" data-suggest="customer" data-filter-field="customer" value="${esc(customer)}" placeholder="Все" autocomplete="off" spellcheck="false" />
+      </label>
+      <label class="calc-filter-row">
+        <span>Заказ</span>
+        <select class="calc-filter-input" data-filter-field="orderId" title="Конкретный заказ">
+          <option value="" ${!orderId ? "selected" : ""}>Все</option>
+          ${orders
+            .map((order) => {
+              const label = `${order.number || "—"} — ${order.name || order.customer || "Без названия"}`;
+              return `<option value="${esc(order.id)}" ${orderId === order.id ? "selected" : ""}>${esc(label)}</option>`;
+            })
+            .join("")}
+        </select>
+      </label>
+      <label class="calc-filter-row">
+        <span>Период</span>
+        <select class="calc-filter-input" data-filter-field="period">
+          ${DASH_PERIODS.map(([id, label]) => `<option value="${id}" ${period === id ? "selected" : ""}>${esc(label)}</option>`).join("")}
+        </select>
+      </label>
+      <label class="calc-filter-row${range ? "" : " is-off"}">
+        <span>С</span>
+        <input class="calc-filter-input" type="date" data-filter-field="dateFrom" value="${esc(node.dateFrom || "")}" />
+      </label>
+      <label class="calc-filter-row${range ? "" : " is-off"}">
+        <span>По</span>
+        <input class="calc-filter-input" type="date" data-filter-field="dateTo" value="${esc(node.dateTo || "")}" />
+      </label>
+      <label class="calc-filter-row">
+        <span>Фильтр</span>
+        <select class="calc-filter-input" data-filter-field="payFilter">
+          ${DASH_PAY_FILTERS.map(([id, label]) => `<option value="${id}" ${pay === id ? "selected" : ""}>${esc(label)}</option>`).join("")}
+        </select>
+      </label>
+      <label class="calc-filter-row">
+        <span>Статус</span>
+        <select class="calc-filter-input" data-filter-field="status">
+          <option value="" ${!status ? "selected" : ""}>Все</option>
+          ${statuses.map((name) => `<option value="${esc(name)}" ${status === name ? "selected" : ""}>${esc(name)}</option>`).join("")}
+        </select>
+      </label>
+    </div>`;
+  }
+
+  function statsPortsHtml(node, portIds, graph, tip) {
+    const stats = dashStats(node);
+    return portIds
+      .map((id) => {
+        const meta = dashPortMeta(id);
+        const value = graph.values[`${node.id}:${id}`];
+        const shown = value != null && Number.isFinite(value) ? value : stats[id];
+        return `<div class="calc-row out">
+          <span class="calc-row-name" title="${esc(tip || meta.name)}">${esc(meta.name)}</span>
+          <b>${esc(fmtShort(shown))}</b>
+          <i class="calc-port out" data-port="${esc(id)}" data-io="out" title="${esc(meta.name)}"></i>
+        </div>`;
+      })
+      .join("");
+  }
+
   function findBlueprint(id) {
     return (ensureState()?.blueprints || []).find((bp) => bp.id === id) || null;
   }
@@ -402,6 +622,17 @@
     if (node.type === "math" || node.type === "result" || node.type === "percent" || node.type === "const") return [{ id: "out", name: "out" }];
     if (node.type === "formula") return node.outputs || [];
     if (node.type === "scheme") return schemeOutputs(findBlueprint(node.blueprintId));
+    if (node.type === "filter") {
+      return FILTER_PORTS.map((id) => ({ id, name: dashPortMeta(id).name }));
+    }
+    if (node.type === "dashboard") {
+      const open = new Set(openDashPorts(node));
+      const linked = linkedFromPorts(node.id, links || []);
+      return DASH_PORTS.filter((port) => open.has(port.id) || linked.has(port.id)).map((port) => ({
+        id: port.id,
+        name: port.name,
+      }));
+    }
     if (node.type === "order") {
       const found = order || api.findOrder(node.orderId);
       const lines = orderLines(found);
@@ -599,6 +830,15 @@
             if (inner.errors.has(port.resultId)) errors.add(nodeId);
           });
         }
+      } else if (node.type === "filter" || node.type === "dashboard") {
+        const stats = dashStats(node);
+        const ports = node.type === "filter" ? FILTER_PORTS : openDashPorts(node);
+        const linked = linkedFromPorts(nodeId, links);
+        const ids = new Set(ports.concat([...linked].filter((id) => DASH_PORTS.some((p) => p.id === id))));
+        ids.forEach((id) => {
+          const value = Number(stats[id]);
+          setVal(nodeId, id, Number.isFinite(value) ? value : 0);
+        });
       }
       visiting.delete(nodeId);
       done.add(nodeId);
@@ -631,6 +871,7 @@
     if (node.type === "order") return { w: 230, h: 140 };
     if (node.type === "scheme") return { w: 220, h: 100 };
     if (node.type === "result") return { w: 376, h: 120 };
+    if (node.type === "filter" || node.type === "dashboard") return { w: 384, h: 280 };
     if (node.type === "group") return { w: Math.max(160, node.w || 320), h: Math.max(120, node.h || 220) };
     return { w: 188, h: 120 };
   }
@@ -800,6 +1041,8 @@
       const: "#64748b",
       result: "#06b6d4",
       scheme: "#eab308",
+      filter: "#0ea5e9",
+      dashboard: "#14b8a6",
       group: "#94a3b8",
     };
     return map[kind] || "#0d9488";
@@ -1024,6 +1267,25 @@
       ];
     }
     if (type === "order") node.orderId = extra?.orderId || "";
+    if (type === "filter") {
+      node.customer = "";
+      node.orderId = "";
+      node.period = "all";
+      node.payFilter = "all";
+      node.status = "";
+      node.dateFrom = "";
+      node.dateTo = "";
+    }
+    if (type === "dashboard") {
+      node.customer = "";
+      node.orderId = "";
+      node.period = "all";
+      node.payFilter = "all";
+      node.status = "";
+      node.dateFrom = "";
+      node.dateTo = "";
+      node.openPorts = DASH_DEFAULT.slice();
+    }
     if (type === "group") {
       node.name = "Группа";
       node.color = GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
@@ -1253,63 +1515,125 @@
     );
     const schemes = (calc?.blueprints || []).filter((item) => item.id !== bp?.id);
     host.innerHTML = `
-      <div class="calc-tools">
-        <div class="calc-tools-label">Ноды</div>
-        <button type="button" class="btn calc-tool" data-add-node="math" draggable="true">Оператор</button>
-        <button type="button" class="btn calc-tool" data-add-node="formula" draggable="true">Формула</button>
-        <button type="button" class="btn calc-tool" data-add-node="percent" draggable="true">Процент</button>
-        <button type="button" class="btn calc-tool" data-add-node="const" draggable="true">Константа</button>
-        <button type="button" class="btn calc-tool" data-add-node="result" draggable="true">Результат</button>
-        <button type="button" class="btn calc-tool" data-add-node="group" draggable="true">Группа</button>
-      </div>
-      <div class="calc-orders calc-schemes">
-        <div class="calc-tools-label">Схемы</div>
-        <div class="calc-order-list calc-scheme-list">
-          ${
-            schemes.length
-              ? schemes
-                  .map((item) => {
-                    const n = (item.nodes || []).filter((node) => node.type === "result" && resultVisible(node)).length;
-                    return `<button type="button" class="calc-order" draggable="true" data-blueprint="${esc(item.id)}">
-                      <b>${esc(item.name || "Схема")}</b>
-                      <span>${n ? `${n} рез.` : "нет результатов"}</span>
-                    </button>`;
-                  })
-                  .join("")
-              : `<div class="calc-empty">Другая схема станет нодой: её выходы — ноды «Результат»</div>`
-          }
+      <details class="calc-fold" data-fold="nodes" ${foldOpen("nodes") ? "open" : ""}>
+        <summary class="calc-tools-label">Ноды</summary>
+        <div class="calc-tools">
+          <button type="button" class="btn calc-tool" data-add-node="math" draggable="true">Оператор</button>
+          <button type="button" class="btn calc-tool" data-add-node="formula" draggable="true">Формула</button>
+          <button type="button" class="btn calc-tool" data-add-node="percent" draggable="true">Процент</button>
+          <button type="button" class="btn calc-tool" data-add-node="const" draggable="true">Константа</button>
+          <button type="button" class="btn calc-tool" data-add-node="filter" draggable="true">Фильтр</button>
+          <button type="button" class="btn calc-tool" data-add-node="dashboard" draggable="true">Дашборд</button>
+          <button type="button" class="btn calc-tool" data-add-node="result" draggable="true">Результат</button>
+          <button type="button" class="btn calc-tool" data-add-node="group" draggable="true">Группа</button>
         </div>
-      </div>
-      <div class="calc-orders">
-        <div class="calc-tools-label">Заказы</div>
-        <div class="calc-search${session.search ? " has-value" : ""}">
-          <input type="search" id="calc-order-search" placeholder="Номер, название…" value="${esc(session.search)}" autocomplete="off" />
-          <button type="button" class="search-clear" data-search-clear="calc-order-search" title="Очистить" aria-label="Очистить поиск">×</button>
+      </details>
+      <details class="calc-fold" data-fold="schemes" ${foldOpen("schemes") ? "open" : ""}>
+        <summary class="calc-tools-label">Схемы</summary>
+        <div class="calc-orders calc-schemes">
+          <div class="calc-order-list calc-scheme-list">
+            ${
+              schemes.length
+                ? schemes
+                    .map((item) => {
+                      const n = (item.nodes || []).filter((node) => node.type === "result" && resultVisible(node)).length;
+                      return `<button type="button" class="calc-order" draggable="true" data-blueprint="${esc(item.id)}">
+                        <b>${esc(item.name || "Схема")}</b>
+                        <span>${n ? `${n} рез.` : "нет результатов"}</span>
+                      </button>`;
+                    })
+                    .join("")
+                : `<div class="calc-empty">Другая схема станет нодой: её выходы — ноды «Результат»</div>`
+            }
+          </div>
         </div>
-        <div class="calc-order-list">
-          ${
-            orders.length
-              ? orders
-                  .map((order) => {
-                    const n = orderLines(order).length;
-                    const used = usedOrders.has(order.id);
-                    const label = `${order.number || "—"} — ${order.name || order.customer || "Без названия"}`;
-                    const tip = used ? `${label} · на схеме` : label;
-                    return `<button type="button" class="calc-order${used ? " is-used" : ""}" draggable="true" data-order="${esc(order.id)}" title="${esc(tip)}">
-                      <b>${esc(order.number || "—")}</b>
-                      <span>${esc(order.name || order.customer || "Без названия")}</span>
-                      <small>${used ? "на схеме" : `${n} поз.`}</small>
-                    </button>`;
-                  })
-                  .join("")
-              : `<div class="calc-empty">Нет заказов</div>`
-          }
+      </details>
+      <details class="calc-fold" data-fold="orders" ${foldOpen("orders") ? "open" : ""}>
+        <summary class="calc-tools-label">Заказы</summary>
+        <div class="calc-orders">
+          <div class="calc-search${session.search ? " has-value" : ""}">
+            <input type="search" id="calc-order-search" placeholder="Номер, название…" value="${esc(session.search)}" autocomplete="off" />
+            <button type="button" class="search-clear" data-search-clear="calc-order-search" title="Очистить" aria-label="Очистить поиск">×</button>
+          </div>
+          <div class="calc-order-list">
+            ${
+              orders.length
+                ? orders
+                    .map((order) => {
+                      const n = orderLines(order).length;
+                      const used = usedOrders.has(order.id);
+                      const label = `${order.number || "—"} — ${order.name || order.customer || "Без названия"}`;
+                      const tip = used ? `${label} · на схеме` : label;
+                      return `<button type="button" class="calc-order${used ? " is-used" : ""}" draggable="true" data-order="${esc(order.id)}" title="${esc(tip)}">
+                        <b>${esc(order.number || "—")}</b>
+                        <span>${esc(order.name || order.customer || "Без названия")}</span>
+                        <small>${used ? "на схеме" : `${n} поз.`}</small>
+                      </button>`;
+                    })
+                    .join("")
+                : `<div class="calc-empty">Нет заказов</div>`
+            }
+          </div>
         </div>
-      </div>`;
+      </details>`;
   }
 
   function hidePortMenu() {
     document.querySelectorAll(".calc-port-menu").forEach((el) => el.remove());
+  }
+
+  function showDashPortMenu(clientX, clientY, nodeId) {
+    hidePortMenu();
+    const bp = activeBlueprint();
+    const node = bp?.nodes.find((item) => item.id === nodeId && item.type === "dashboard");
+    if (!bp || !node) return;
+    const open = new Set(openDashPorts(node));
+    const linked = linkedFromPorts(node.id, bp.links);
+    const menu = document.createElement("div");
+    menu.className = "calc-port-menu";
+    menu.style.left = `${clientX}px`;
+    menu.style.top = `${clientY}px`;
+    DASH_PORTS.forEach((port) => {
+      const shown = open.has(port.id) || linked.has(port.id);
+      const locked = linked.has(port.id);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = port.name;
+      if (shown) {
+        btn.className = "is-shown";
+        btn.title = locked ? "Порт занят связью" : "Убрать с ноды";
+      } else {
+        btn.title = "Добавить на ноду";
+      }
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (locked) return;
+        if (shown) dropDashPort(node, port.id);
+        else ensureDashPort(node, port.id);
+        hidePortMenu();
+        dirty();
+        render();
+      });
+      menu.appendChild(btn);
+    });
+    document.body.appendChild(menu);
+    const place = () => {
+      const rect = menu.getBoundingClientRect();
+      let left = clientX;
+      let top = clientY;
+      if (left + rect.width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - rect.width - 8);
+      if (top + rect.height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - rect.height - 8);
+      menu.style.left = `${left}px`;
+      menu.style.top = `${top}px`;
+    };
+    place();
+    const close = (e) => {
+      if (e.target.closest?.(".calc-port-menu")) return;
+      hidePortMenu();
+      document.removeEventListener("pointerdown", close, true);
+    };
+    setTimeout(() => document.addEventListener("pointerdown", close, true), 0);
   }
 
   function showLinePortMenu(clientX, clientY, nodeId, lineId) {
@@ -1598,6 +1922,36 @@
     </div>`;
   }
 
+  function filterNodeHtml(node, graph) {
+    return `<article class="calc-node is-filter ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+      <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
+      <header class="calc-node-h">
+        <span>Фильтр</span>
+        <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
+      </header>
+      ${filterFieldsHtml(node)}
+      <div class="calc-ports">
+        ${statsPortsHtml(node, FILTER_PORTS, graph)}
+      </div>
+    </article>`;
+  }
+
+  function dashboardNodeHtml(node, bp, graph) {
+    const ports = nodeOutputs(node, null, bp.links).map((port) => port.id);
+    return `<article class="calc-node is-dashboard ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+      <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
+      <header class="calc-node-h">
+        <span>Дашборд</span>
+        <button type="button" class="calc-mini calc-dash-ports" data-dash-ports="${esc(node.id)}" title="Порты метрик">+</button>
+        <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
+      </header>
+      ${filterFieldsHtml(node)}
+      <div class="calc-ports">
+        ${statsPortsHtml(node, ports, graph, "ПКМ / + — выбрать порты")}
+      </div>
+    </article>`;
+  }
+
   function fitScreenNodes() {
     const host = nodesRoot();
     if (!host) return;
@@ -1625,9 +1979,11 @@
     const focusHost = host.contains(focus) || groups?.contains(focus) || groupUi?.contains(focus) ? focus : null;
     const keep = focusHost
       ? {
-          name: focus.dataset.inName || focus.dataset.outName || focus.dataset.outExpr || focus.dataset.resultName || focus.dataset.resultPrio || focus.dataset.constValue || focus.dataset.groupName,
+          name: focus.dataset.inName || focus.dataset.outName || focus.dataset.outExpr || focus.dataset.resultName || focus.dataset.resultPrio || focus.dataset.constValue || focus.dataset.groupName || focus.dataset.filterField,
           start: focus.selectionStart,
           end: focus.selectionEnd,
+          filterField: focus.dataset.filterField || "",
+          nodeId: focus.closest?.("[data-node]")?.dataset?.node || "",
         }
       : null;
     const groupNodes = sortGroupsByArea((bp.nodes || []).filter((node) => node.type === "group"));
@@ -1646,15 +2002,18 @@
         if (node.type === "result") return resultNodeHtml(node, bp, graph);
         if (node.type === "formula") return formulaNodeHtml(node, bp, graph);
         if (node.type === "scheme") return schemeNodeHtml(node, graph);
+        if (node.type === "filter") return filterNodeHtml(node, graph);
+        if (node.type === "dashboard") return dashboardNodeHtml(node, bp, graph);
         return orderNodeHtml(node, api.findOrder(node.orderId), graph, bp);
       })
       .join("");
     fitScreenNodes();
     applyWorld(bp);
-    if (keep?.name) {
-      const again =
-        host.querySelector(`[data-in-name="${cssEsc(keep.name)}"], [data-out-name="${cssEsc(keep.name)}"], [data-out-expr="${cssEsc(keep.name)}"], [data-result-name="${cssEsc(keep.name)}"], [data-result-prio="${cssEsc(keep.name)}"], [data-const-value="${cssEsc(keep.name)}"]`) ||
-        groupUi?.querySelector(`[data-group-name="${cssEsc(keep.name)}"]`);
+    if (keep?.name || keep?.filterField) {
+      const again = keep.filterField && keep.nodeId
+        ? host.querySelector(`[data-node="${cssEsc(keep.nodeId)}"] [data-filter-field="${cssEsc(keep.filterField)}"]`)
+        : host.querySelector(`[data-in-name="${cssEsc(keep.name)}"], [data-out-name="${cssEsc(keep.name)}"], [data-out-expr="${cssEsc(keep.name)}"], [data-result-name="${cssEsc(keep.name)}"], [data-result-prio="${cssEsc(keep.name)}"], [data-const-value="${cssEsc(keep.name)}"]`) ||
+          groupUi?.querySelector(`[data-group-name="${cssEsc(keep.name)}"]`);
       if (again) {
         again.focus({ preventScroll: true });
         try {
@@ -1725,7 +2084,7 @@
       }
       return "order";
     }
-    if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme" || type === "group") return type;
+    if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme" || type === "group" || type === "filter" || type === "dashboard") return type;
     return "order";
   }
 
@@ -1921,6 +2280,7 @@
     session.pan = null;
     session.resize = null;
     session.busy = false;
+    session.folds = null;
     setLinkingClass();
     const calc = ensureState();
     if (!calc) return;
@@ -1997,6 +2357,10 @@
           if (bp) drawWires(bp, computeGraph(bp));
         }
         if (isMainLineOut) showLinePortMenu(e.clientX, e.clientY, nodeId, parsed.lineId);
+        else {
+          const owner = bp?.nodes.find((item) => item.id === nodeId);
+          if (owner?.type === "dashboard") showDashPortMenu(e.clientX, e.clientY, nodeId);
+        }
         return;
       }
       if (e.button !== 0) return;
@@ -2232,7 +2596,7 @@
     const blueprintId = e.dataTransfer?.getData("text/finmaster-blueprint");
     e.preventDefault();
     const at = worldPoint(bp, e.clientX, e.clientY);
-    if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group") addNode(kind, at);
+    if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "filter" || kind === "dashboard") addNode(kind, at);
     else if (blueprintId && blueprintId !== bp.id) addNode("scheme", at, { blueprintId });
     else if (orderId && api.findOrder(orderId)) addNode("order", at, { orderId });
   }
@@ -2439,7 +2803,24 @@
       }
       const order = e.target.closest("[data-order]");
       if (order) addNode("order", null, { orderId: order.dataset.order });
+      const summary = e.target.closest("details.calc-fold > summary");
+      if (summary) {
+        const fold = summary.parentElement;
+        if (fold instanceof HTMLDetailsElement && fold.dataset.fold) {
+          requestAnimationFrame(() => setFold(fold.dataset.fold, fold.open));
+        }
+      }
     });
+    $("calc-side")?.addEventListener(
+      "toggle",
+      (e) => {
+        const fold = e.target;
+        if (!(fold instanceof HTMLDetailsElement)) return;
+        if (!fold.matches("details.calc-fold[data-fold]")) return;
+        setFold(fold.dataset.fold, fold.open);
+      },
+      true
+    );
     $("calc-side")?.addEventListener("dragstart", (e) => {
       const order = e.target.closest("[data-order]");
       const tool = e.target.closest("[data-add-node]");
@@ -2587,6 +2968,11 @@
         bp.links = bp.links.filter((link) => !(link.from === node.id && link.fromPort === id));
         dirty();
         render();
+        return;
+      }
+      const dashPorts = e.target.closest("[data-dash-ports]");
+      if (dashPorts && node.type === "dashboard") {
+        showDashPortMenu(e.clientX, e.clientY, node.id);
       }
     });
     root.addEventListener("input", (e) => {
@@ -2652,6 +3038,27 @@
         render();
         return;
       }
+      if (e.target.dataset.filterField && (node.type === "filter" || node.type === "dashboard")) {
+        const field = e.target.dataset.filterField;
+        const raw = String(e.target.value || "").trim();
+        if (field === "customer") {
+          node.customer = raw.slice(0, 80);
+          const key = node.customer.toLowerCase();
+          if (node.orderId && key) {
+            const order = api.findOrder?.(node.orderId);
+            const match = order && String(order.customer || "").toLowerCase().includes(key);
+            if (!match) node.orderId = "";
+          }
+        } else if (field === "orderId") node.orderId = raw.slice(0, 80);
+        else if (field === "period") node.period = DASH_PERIODS.some(([id]) => id === raw) ? raw : "all";
+        else if (field === "payFilter") node.payFilter = DASH_PAY_FILTERS.some(([id]) => id === raw) ? raw : "all";
+        else if (field === "status") node.status = raw.slice(0, 48);
+        else if (field === "dateFrom") node.dateFrom = raw.slice(0, 10);
+        else if (field === "dateTo") node.dateTo = raw.slice(0, 10);
+        dirty();
+        render();
+        return;
+      }
       if (node.type !== "formula") return;
       if (e.target.dataset.inName) {
         const port = node.inputs.find((item) => item.id === e.target.dataset.inName);
@@ -2674,7 +3081,7 @@
     });
     root.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;
-      if (e.target.matches(".calc-expr, .calc-pname, .calc-const-val")) {
+      if (e.target.matches(".calc-expr, .calc-pname, .calc-const-val, .calc-filter-input")) {
         e.preventDefault();
         e.target.blur();
       }

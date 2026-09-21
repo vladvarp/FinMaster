@@ -233,11 +233,65 @@ def _line_series_ui(raw: Any) -> dict[str, Any]:
 
 
 CALC_OPS = ("+", "-", "*", "/")
-CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group")
+CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group", "filter", "dashboard")
 CALC_MAX_BLUEPRINTS = 24
 CALC_MAX_NODES = 120
 CALC_MAX_LINKS = 400
 CALC_MAX_PORTS = 20
+CALC_PERIODS = ("all", "today", "week", "month", "year", "range")
+CALC_PAY_FILTERS = ("all", "debt", "paid", "month", "empty")
+CALC_DASH_PORTS = (
+    "orders",
+    "lines",
+    "after",
+    "afterActive",
+    "paid",
+    "unpaid",
+    "total",
+    "cost",
+    "costCount",
+    "net",
+    "paidShare",
+    "avgCheck",
+    "overdue",
+    "overdueSum",
+    "monthAfter",
+    "monthCost",
+    "forecast",
+)
+CALC_DASH_DEFAULT = ("orders", "after", "paid", "unpaid")
+
+
+def _calc_filter_fields(raw: dict[str, Any]) -> dict[str, Any]:
+    period = str(raw.get("period") or "all")
+    if period not in CALC_PERIODS:
+        period = "all"
+    pay = str(raw.get("payFilter") or "all")
+    if pay not in CALC_PAY_FILTERS:
+        pay = "all"
+    return {
+        "customer": _clip_text(raw.get("customer"), 80),
+        "orderId": _clip_text(raw.get("orderId"), 80),
+        "period": period,
+        "payFilter": pay,
+        "status": _clip_text(raw.get("status"), 48),
+        "dateFrom": _clip_text(raw.get("dateFrom"), 10),
+        "dateTo": _clip_text(raw.get("dateTo"), 10),
+    }
+
+
+def _calc_dash_ports(raw: Any) -> list[str]:
+    allowed = set(CALC_DASH_PORTS)
+    items: list[str] = []
+    seen: set[str] = set()
+    src = raw if isinstance(raw, list) else list(CALC_DASH_DEFAULT)
+    for item in src[:CALC_MAX_PORTS]:
+        name = _clip_text(item, 24)
+        if name not in allowed or name in seen:
+            continue
+        seen.add(name)
+        items.append(name)
+    return items or list(CALC_DASH_DEFAULT)
 
 
 def _clip_text(value: Any, limit: int, fallback: str = "") -> str:
@@ -334,6 +388,11 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         node["value"] = value
     elif kind == "scheme":
         node["blueprintId"] = _clip_text(raw.get("blueprintId"), 80)
+    elif kind == "filter":
+        node.update(_calc_filter_fields(raw))
+    elif kind == "dashboard":
+        node.update(_calc_filter_fields(raw))
+        node["openPorts"] = _calc_dash_ports(raw.get("openPorts"))
     elif kind == "group":
         node["name"] = _clip_text(raw.get("name"), 48, "Группа")
         color = str(raw.get("color") or "").strip().lower()
@@ -436,7 +495,7 @@ def _calc_blueprint(raw: Any, index: int) -> dict[str, Any] | None:
 
 def _calculator_ui(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
-        return {"active": "", "blueprints": []}
+        return {"active": "", "blueprints": [], "folds": {"nodes": True, "schemes": True, "orders": True}}
     blueprints: list[dict[str, Any]] = []
     seen: set[str] = set()
     for i, item in enumerate(raw.get("blueprints") if isinstance(raw.get("blueprints"), list) else []):
@@ -452,7 +511,13 @@ def _calculator_ui(raw: Any) -> dict[str, Any]:
         active = blueprints[0]["id"] if blueprints else ""
     elif not active and blueprints:
         active = blueprints[0]["id"]
-    return {"active": active, "blueprints": blueprints}
+    folds_raw = raw.get("folds") if isinstance(raw.get("folds"), dict) else {}
+    folds = {
+        "nodes": False if folds_raw.get("nodes") is False else True,
+        "schemes": False if folds_raw.get("schemes") is False else True,
+        "orders": False if folds_raw.get("orders") is False else True,
+    }
+    return {"active": active, "blueprints": blueprints, "folds": folds}
 
 
 def _int_in_range(value: Any, default: int, low: int, high: int) -> int:
@@ -533,7 +598,7 @@ def empty_document(title: str = "Новый отчёт") -> dict[str, Any]:
             "cash_horizon": DEFAULT_CASH_HORIZON,
             "cloud": {},
             "line_series": {},
-            "calculator": {"active": "", "blueprints": []},
+            "calculator": {"active": "", "blueprints": [], "folds": {"nodes": True, "schemes": True, "orders": True}},
         },
     }
 

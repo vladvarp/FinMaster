@@ -253,8 +253,8 @@
               </div>
               <div class="field"><label>Статус</label><select id="f-status"><option value="">Все</option></select></div>
               <div class="field"><label>Тип заказа</label><select id="f-type"><option value="">Все</option></select></div>
-              <div class="field"><label>Заказчик</label><input id="f-customer" list="customer-list" /></div>
-              <div class="field"><label>Продукт</label><input id="f-product" /></div>
+              <div class="field"><label>Заказчик</label><input id="f-customer" data-suggest="customer" autocomplete="off" spellcheck="false" /></div>
+              <div class="field"><label>Продукт</label><input id="f-product" data-suggest="product" autocomplete="off" spellcheck="false" /></div>
               <div class="field"><label>Ед. изм.</label><select id="f-unit"><option value="">Все</option></select></div>
               <div class="field"><label>Сумма от</label><input type="number" id="f-min" step="0.01" /></div>
               <div class="field"><label>Сумма до</label><input type="number" id="f-max" step="0.01" /></div>
@@ -615,6 +615,7 @@
   </div>
 
   <datalist id="customer-list"></datalist>
+  <div id="text-suggest" class="suggest" role="listbox" hidden></div>
   <div id="product-suggest" class="suggest" role="listbox" hidden></div>
 
   <div class="modal" id="close-modal">
@@ -709,6 +710,7 @@
       <div class="palette-input">
         <span class="ico">✦</span>
         <input id="palette-input" placeholder="Команда, заказ, заказчик или продукт…" autocomplete="off" spellcheck="false" />
+        <button type="button" class="search-clear" data-search-clear="palette-input" title="Очистить" aria-label="Очистить поиск">×</button>
       </div>
       <div class="palette-list" id="palette-list"></div>
       <div class="palette-foot">
@@ -874,12 +876,14 @@
       <h3>Горячие клавиши</h3>
       <p>Всё управление доступно с клавиатуры — руки не нужно убирать с клавиш.</p>
       <div class="help-grid">
-        <div class="help-col">
+        <section class="help-section">
           <h4>Файл</h4>
           <div class="help-row"><span>Сохранить</span><span><kbd>Ctrl</kbd><kbd>S</kbd></span></div>
           <div class="help-row"><span>Сохранить как</span><span><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>S</kbd></span></div>
           <div class="help-row"><span>Открыть отчёт</span><span><kbd>Ctrl</kbd><kbd>O</kbd></span></div>
           <div class="help-row"><span>Новый отчёт</span><span><kbd>Ctrl</kbd><kbd>N</kbd></span></div>
+        </section>
+        <section class="help-section">
           <h4>Общее</h4>
           <div class="help-row"><span>Командная палитра</span><span><kbd>Ctrl</kbd><kbd>K</kbd></span></div>
           <div class="help-row"><span>Отменить / история снимков</span><span><kbd>Ctrl</kbd><kbd>Z</kbd></span></div>
@@ -888,8 +892,8 @@
           <div class="help-row"><span>Эта подсказка</span><span><kbd>F1</kbd></span></div>
           <div class="help-row"><span>Полный экран</span><span><kbd>F11</kbd></span></div>
           <div class="help-row"><span>Консоль сети</span><span><kbd>Ctrl</kbd><kbd>Ё</kbd></span></div>
-        </div>
-        <div class="help-col">
+        </section>
+        <section class="help-section">
           <h4>Таблица заказа</h4>
           <div class="help-row"><span>Вниз / вверх по столбцу</span><span><kbd>Enter</kbd> / <kbd>Shift</kbd><kbd>Enter</kbd></span></div>
           <div class="help-row"><span>Соседняя ячейка</span><span><kbd>↑</kbd><kbd>↓</kbd></span></div>
@@ -898,15 +902,21 @@
           <div class="help-row"><span>Новая строка в заказе</span><span><kbd>Ctrl</kbd><kbd>Enter</kbd></span></div>
           <div class="help-row"><span>Дублировать строку</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>D</kbd></span></div>
           <div class="help-row"><span>Заморозить позицию</span><span>ПКМ на ручке строки</span></div>
+        </section>
+        <section class="help-section">
           <h4>Ячейки</h4>
           <div class="help-row"><span>Формулы в кол-ве, цене, скидке</span><span><kbd>2+3*4</kbd></span></div>
           <div class="help-row"><span>Запятая превращается в точку</span><span><kbd>2,5</kbd> → <kbd>2.5</kbd></span></div>
+        </section>
+        <section class="help-section">
           <h4>Календарь</h4>
           <div class="help-row"><span>Предыдущий / следующий период</span><span><kbd>←</kbd><kbd>→</kbd></span></div>
           <div class="help-row"><span>В классическом: предыдущий / следующий год</span><span><kbd>Shift</kbd><kbd>←</kbd><kbd>→</kbd></span></div>
           <div class="help-row"><span>К сегодняшнему дню</span><span><kbd>T</kbd></span></div>
           <div class="help-row"><span>Масштаб / прокрутка дней в таймлайне</span><span>колесо на навигаторе / на линейке дней</span></div>
           <div class="help-row"><span>Таймлайн / классический / неделя</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span></div>
+        </section>
+        <section class="help-section">
           <h4>Калькулятор</h4>
           <div class="help-row"><span>Пересчитать схему</span><span>кнопка ↻ слева вверху</span></div>
           <div class="help-row"><span>Протянуть связь</span><span>выход→вход или вход→выход</span></div>
@@ -915,11 +925,13 @@
           <div class="help-row"><span>Отменить тянущуюся связь</span><span><kbd>Esc</kbd></span></div>
           <div class="help-row"><span>Снять связь со входа</span><span><kbd>Alt</kbd>+клик по входу</span></div>
           <div class="help-row"><span>Масштаб / сдвиг схемы</span><span>колесо / перетаскивание поля</span></div>
+        </section>
+        <section class="help-section">
           <h4>Облако</h4>
           <div class="help-row"><span>Поиск по карте</span><span><kbd>/</kbd></span></div>
           <div class="help-row"><span>Показать всё / автотур</span><span><kbd>F</kbd> / <kbd>T</kbd></span></div>
           <div class="help-row"><span>Открыть выбранный узел</span><span><kbd>Enter</kbd></span></div>
-        </div>
+        </section>
       </div>
       <div class="modal-actions">
         <button class="btn primary" type="button" id="help-close">Понятно</button>

@@ -95,6 +95,7 @@
     busy: false,
     pending: false,
     pendingLabel: "",
+    saveChain: Promise.resolve(),
     limit: HISTORY_LIMIT_DEFAULT,
   };
 
@@ -335,6 +336,9 @@
     history.pendingLabel = "";
     history.index = next;
     state.doc = doc;
+    if (state.doc && typeof state.doc === "object") {
+      state.doc.modified_at = new Date().toISOString();
+    }
     if (state.calendar) {
       const saved = ensureUi().calendar || {};
       if (CALENDAR_MODES.includes(saved.mode)) state.calendar.mode = saved.mode;
@@ -346,7 +350,15 @@
     updateHistoryButtons();
     persistHistorySoon();
     history.busy = false;
-    scheduleAutosave();
+    clearTimeout(state.autosaveTimer);
+    if (state.path) {
+      // Сразу пишем файл: иначе при закрытии без автосохранения отмена теряется.
+      history.saveChain = Promise.resolve(history.saveChain)
+        .then(() => save({ silent: true }))
+        .catch(() => false);
+    } else {
+      scheduleAutosave();
+    }
     if (toastText) toast(toastText);
     return true;
   }
@@ -839,10 +851,44 @@
     return data;
   }
 
-  async function syncDirty() {
+  let dirtySyncChain = Promise.resolve();
+
+  function syncDirty() {
     if (!state.desktop) return;
+    const dirty = !!state.dirty;
+    dirtySyncChain = dirtySyncChain
+      .then(() => apiPost("/api/dirty", { dirty }))
+      .catch(() => {});
+  }
+
+  async function flushPendingSaves() {
+    clearTimeout(state.autosaveTimer);
+    clearTimeout(history.persistTimer);
     try {
-      await apiPost("/api/dirty", { dirty: !!state.dirty });
+      await Promise.resolve(history.saveChain);
+    } catch {
+      /* ignore */
+    }
+    if (state.dirty && state.doc && state.path) {
+      try {
+        await save({ silent: true });
+      } catch {
+        /* ignore */
+      }
+    }
+    if (state.desktop && state.path) {
+      try {
+        await apiPost("/api/history", {
+          path: state.path,
+          title: state.doc?.title || "",
+          ...historyDiskPayload(),
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      await dirtySyncChain;
     } catch {
       /* ignore */
     }
@@ -1980,7 +2026,7 @@
         return `<article class="order-card" data-order="${order.id}">
           <div class="order-head">
             <div class="field"><label>Номер заказа</label><input data-k="number" value="${esc(order.number)}" /></div>
-            <div class="field"><label>Заказчик</label><input data-k="customer" list="customer-list" value="${esc(order.customer)}" /></div>
+            <div class="field"><label>Заказчик</label><input data-k="customer" data-suggest="customer" autocomplete="off" spellcheck="false" value="${esc(order.customer)}" /></div>
             <div class="field"><label>Название заказа</label><input data-k="name" value="${esc(order.name)}" /></div>
             <div class="order-head-actions">
               <button type="button" class="note-btn ${order.notes ? "has-note" : ""}" data-act="notes" title="Заметки к заказу" aria-label="Заметки к заказу">i</button>
@@ -2050,7 +2096,7 @@
     return `<tr data-line="${line.id}" class="line-row${isFrozenLine(line) ? " is-frozen" : ""}" style="--status-color:${esc(statusColor(line.status))}">
       <td class="line-drag" title="Перетащить строку. Правый клик — заморозить"><span></span></td>
       <td><select data-lk="order_type">${optionList(unique([line.order_type, ...types]), line.order_type)}</select></td>
-      <td><input data-lk="product" autocomplete="off" spellcheck="false" value="${esc(line.product)}" /></td>
+      <td><input data-lk="product" data-suggest="product" autocomplete="off" spellcheck="false" value="${esc(line.product)}" /></td>
       <td class="num">${exprInput(line, "qty_expr")}</td>
       <td><select data-lk="unit">${optionList(unique([line.unit, ...units]), line.unit)}</select></td>
       <td class="num">${exprInput(line, "price_expr")}</td>
@@ -2094,7 +2140,7 @@
       <td class="line-drag" title="Перетащить строку. Правый клик — заморозить"><span></span></td>
       <td><select data-lk="order_type">${optionList(unique([line.order_type, ...types]), line.order_type)}</select></td>
       <td><span class="cost-kind ${esc(t.kind)}">${esc(kindLabel(t.kind))}</span></td>
-      <td><input data-lk="product" autocomplete="off" spellcheck="false" value="${esc(line.product)}" placeholder="за что" /></td>
+      <td><input data-lk="product" data-suggest="product" autocomplete="off" spellcheck="false" value="${esc(line.product)}" placeholder="за что" /></td>
       <td>${calc}</td>
       ${amount}
       <td><input data-lk="order_date" type="date" value="${esc(dateDay(line.order_date))}" /></td>
@@ -2246,7 +2292,21 @@
     return (state.doc.products || []).map((p) => productEntry(p).name).filter(Boolean);
   }
 
-  const productSuggest = { input: null, items: [], index: -1, picking: false };
+  const textSuggest = { input: null, items: [], index: -1, picking: false, kind: "", mode: "browse", selectEl: null };
+  const productSuggest = textSuggest;
+
+  function customerSuggestNames() {
+    const names = [];
+    (state.doc?.customers || []).forEach((c) => {
+      const name = String(c?.name || "").trim();
+      if (name) names.push(name);
+    });
+    (state.doc?.orders || []).forEach((o) => {
+      const name = String(o?.customer || "").trim();
+      if (name) names.push(name);
+    });
+    return unique(names).sort((a, b) => a.localeCompare(b, "ru", { sensitivity: "base" }));
+  }
 
   function productSuggestNames() {
     const catalog = catalogProductNames();
@@ -2262,40 +2322,79 @@
     return catalog.concat(extra);
   }
 
-  function filterProductSuggest(query) {
-    const all = productSuggestNames();
-    const q = String(query || "").trim().toLocaleLowerCase("ru");
-    if (!q) return all;
-    return all.filter((name) => name.toLocaleLowerCase("ru").includes(q));
+  function suggestNames(kind) {
+    if (kind === "customer") return customerSuggestNames();
+    if (kind === "product") return productSuggestNames();
+    return [];
   }
 
-  function productSuggestOpen() {
-    const box = $("product-suggest");
+  function suggestItemLabel(item) {
+    if (item == null) return "";
+    return typeof item === "string" ? item : String(item.label ?? item.value ?? "");
+  }
+
+  function suggestItemValue(item) {
+    if (item == null) return "";
+    return typeof item === "string" ? item : String(item.value ?? "");
+  }
+
+  function filterSuggestNames(all, query, mode) {
+    const q = String(query || "").trim().toLocaleLowerCase("ru");
+    if (mode !== "filter" || !q) return all.slice();
+    return all.filter((item) => suggestItemLabel(item).toLocaleLowerCase("ru").includes(q));
+  }
+
+  function filterProductSuggest(query) {
+    return filterSuggestNames(productSuggestNames(), query, "filter");
+  }
+
+  function suggestBoxEl() {
+    return $("text-suggest") || $("product-suggest");
+  }
+
+  function textSuggestOpen() {
+    const box = suggestBoxEl();
     return !!(box && !box.hidden);
   }
 
-  function closeProductSuggest() {
-    const box = $("product-suggest");
+  function productSuggestOpen() {
+    return textSuggestOpen();
+  }
+
+  function closeTextSuggest() {
+    const box = suggestBoxEl();
     if (box) {
       box.hidden = true;
       box.innerHTML = "";
     }
-    productSuggest.input = null;
-    productSuggest.items = [];
-    productSuggest.index = -1;
+    textSuggest.selectEl?.classList.remove("is-suggest-open");
+    textSuggest.input = null;
+    textSuggest.selectEl = null;
+    textSuggest.items = [];
+    textSuggest.index = -1;
+    textSuggest.kind = "";
+    textSuggest.mode = "browse";
   }
 
-  function positionProductSuggest() {
-    const box = $("product-suggest");
-    const input = productSuggest.input;
+  function closeProductSuggest() {
+    closeTextSuggest();
+  }
+
+  function positionTextSuggest() {
+    const box = suggestBoxEl();
+    const input = textSuggest.input || textSuggest.selectEl;
     if (!box || !input || box.hidden) return;
     const r = input.getBoundingClientRect();
     const spaceBelow = window.innerHeight - r.bottom - 8;
     const spaceAbove = r.top - 8;
     const openUp = spaceBelow < 140 && spaceAbove > spaceBelow;
     const maxH = Math.min(280, Math.max(120, openUp ? spaceAbove : spaceBelow));
-    box.style.left = `${Math.round(r.left)}px`;
-    box.style.minWidth = `${Math.round(Math.max(r.width, 180))}px`;
+    const width = Math.max(r.width, 180);
+    let left = Math.round(r.left);
+    if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
+    box.style.left = `${left}px`;
+    box.style.minWidth = `${Math.round(width)}px`;
+    box.style.width = `${Math.round(width)}px`;
     box.style.maxHeight = `${Math.round(maxH)}px`;
     if (openUp) {
       box.style.top = "auto";
@@ -2306,64 +2405,192 @@
     }
   }
 
-  function renderProductSuggestBox() {
-    const box = $("product-suggest");
-    const input = productSuggest.input;
+  function positionProductSuggest() {
+    positionTextSuggest();
+  }
+
+  function renderTextSuggestBox() {
+    const box = suggestBoxEl();
+    const input = textSuggest.input || textSuggest.selectEl;
     if (!box || !input) return;
-    const { items, index } = productSuggest;
+    const { items, index } = textSuggest;
     if (!items.length) {
       box.hidden = true;
       box.innerHTML = "";
       return;
     }
     box.innerHTML = items
-      .map(
-        (name, i) =>
-          `<button type="button" role="option" data-i="${i}" class="suggest-item${i === index ? " active" : ""}">${esc(name)}</button>`
-      )
+      .map((item, i) => {
+        const label = suggestItemLabel(item);
+        return `<button type="button" role="option" data-i="${i}" class="suggest-item${i === index ? " active" : ""}">${esc(label)}</button>`;
+      })
       .join("");
     box.hidden = false;
-    positionProductSuggest();
+    positionTextSuggest();
     box.querySelector(".active")?.scrollIntoView({ block: "nearest" });
   }
 
-  function openProductSuggest(input) {
-    if (!input) return;
-    const items = filterProductSuggest(input.value);
+  function renderProductSuggestBox() {
+    renderTextSuggestBox();
+  }
+
+  function openTextSuggest(input, kind, mode) {
+    if (!input || (kind !== "customer" && kind !== "product")) return;
+    textSuggest.selectEl?.classList.remove("is-suggest-open");
+    textSuggest.selectEl = null;
+    const openMode = mode === "filter" ? "filter" : "browse";
+    const all = suggestNames(kind);
+    const items = filterSuggestNames(all, input.value, openMode);
     const q = String(input.value || "").trim();
-    const exact = items.findIndex((name) => catalogNameKey(name) === catalogNameKey(q));
-    let index = productSuggest.index;
-    if (productSuggest.input !== input) {
-      index = exact >= 0 ? exact : q ? 0 : -1;
+    const exact = items.findIndex((name) => catalogNameKey(suggestItemLabel(name)) === catalogNameKey(q));
+    let index = textSuggest.index;
+    if (textSuggest.input !== input || textSuggest.kind !== kind) {
+      index = exact >= 0 ? exact : openMode === "filter" && q ? 0 : -1;
     } else {
       if (index >= items.length) index = items.length - 1;
-      if (exact >= 0 && (index < 0 || catalogNameKey(items[index] || "") !== catalogNameKey(q))) index = exact;
+      if (exact >= 0 && (index < 0 || catalogNameKey(suggestItemLabel(items[index]) || "") !== catalogNameKey(q))) index = exact;
     }
-    productSuggest.input = input;
-    productSuggest.items = items;
-    productSuggest.index = index;
-    renderProductSuggestBox();
+    textSuggest.input = input;
+    textSuggest.items = items;
+    textSuggest.index = index;
+    textSuggest.kind = kind;
+    textSuggest.mode = openMode;
+    renderTextSuggestBox();
+  }
+
+  function openSelectSuggest(select) {
+    if (!select || select.disabled || select.multiple) return;
+    if (textSuggestOpen() && textSuggest.selectEl === select) {
+      closeTextSuggest();
+      return;
+    }
+    const items = [...select.options].map((opt) => ({
+      value: opt.value,
+      label: String(opt.textContent || "").trim() || opt.value,
+    }));
+    if (!items.length) return;
+    textSuggest.input = null;
+    textSuggest.selectEl?.classList.remove("is-suggest-open");
+    textSuggest.selectEl = select;
+    textSuggest.items = items;
+    textSuggest.kind = "select";
+    textSuggest.mode = "browse";
+    const selected = Math.max(
+      0,
+      items.findIndex((item) => item.value === select.value)
+    );
+    textSuggest.index = selected;
+    select.classList.add("is-suggest-open");
+    select.focus({ preventScroll: true });
+    renderTextSuggestBox();
+  }
+
+  function openProductSuggest(input, mode) {
+    openTextSuggest(input, "product", mode || "filter");
+  }
+
+  function moveTextSuggest(delta) {
+    const n = textSuggest.items.length;
+    if (!n) return;
+    let i = textSuggest.index;
+    if (i < 0) i = delta > 0 ? 0 : n - 1;
+    else i = (i + delta + n) % n;
+    textSuggest.index = i;
+    renderTextSuggestBox();
   }
 
   function moveProductSuggest(delta) {
-    const n = productSuggest.items.length;
-    if (!n) return;
-    let i = productSuggest.index;
-    if (i < 0) i = delta > 0 ? 0 : n - 1;
-    else i = (i + delta + n) % n;
-    productSuggest.index = i;
-    renderProductSuggestBox();
+    moveTextSuggest(delta);
   }
 
-  function pickProductSuggest(name) {
-    const input = productSuggest.input;
-    if (!input || name == null) return;
-    productSuggest.picking = true;
+  function pickTextSuggest(item) {
+    if (textSuggest.kind === "select" && textSuggest.selectEl) {
+      const sel = textSuggest.selectEl;
+      const value = suggestItemValue(item);
+      sel.value = value;
+      textSuggest.picking = true;
+      sel.dispatchEvent(new Event("input", { bubbles: true }));
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+      textSuggest.picking = false;
+      closeTextSuggest();
+      return;
+    }
+    const input = textSuggest.input;
+    if (!input || item == null) return;
+    const name = suggestItemLabel(item);
+    textSuggest.picking = true;
     input.value = name;
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
-    productSuggest.picking = false;
-    closeProductSuggest();
+    textSuggest.picking = false;
+    closeTextSuggest();
+  }
+
+  function pickProductSuggest(name) {
+    pickTextSuggest(name);
+  }
+
+  function suggestKindOf(el) {
+    const kind = el?.dataset?.suggest;
+    if (kind === "customer" || kind === "product") return kind;
+    if (el?.dataset?.lk === "product") return "product";
+    if (el?.dataset?.k === "customer") return "customer";
+    if (el?.id === "f-customer") return "customer";
+    if (el?.id === "f-product") return "product";
+    if (el?.dataset?.filterField === "customer") return "customer";
+    return "";
+  }
+
+  function bindTextSuggestKeys(e) {
+    if (e.target?.tagName === "SELECT") {
+      const open = textSuggestOpen() && textSuggest.selectEl === e.target;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (open) moveTextSuggest(e.key === "ArrowDown" ? 1 : -1);
+        else openSelectSuggest(e.target);
+        return true;
+      }
+      if ((e.key === "Enter" || e.key === " ") && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        if (open && textSuggest.index >= 0) pickTextSuggest(textSuggest.items[textSuggest.index]);
+        else openSelectSuggest(e.target);
+        return true;
+      }
+      if (e.key === "Escape" && open) {
+        e.preventDefault();
+        closeTextSuggest();
+        return true;
+      }
+      if (e.key === "Tab") closeTextSuggest();
+      return false;
+    }
+    const kind = suggestKindOf(e.target);
+    if (!kind) return false;
+    const open = textSuggestOpen() && textSuggest.input === e.target;
+    if (e.key === "ArrowDown" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      if (open) moveTextSuggest(1);
+      else openTextSuggest(e.target, kind, "browse");
+      return true;
+    }
+    if (e.key === "ArrowUp" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      if (open) moveTextSuggest(-1);
+      else openTextSuggest(e.target, kind, "browse");
+      return true;
+    }
+    if (e.key === "Enter" && !e.ctrlKey && !e.altKey && open && textSuggest.index >= 0) {
+      e.preventDefault();
+      pickTextSuggest(textSuggest.items[textSuggest.index]);
+      return true;
+    }
+    if (e.key === "Escape" && open) {
+      e.preventDefault();
+      closeTextSuggest();
+      return true;
+    }
+    if (e.key === "Tab") closeTextSuggest();
+    return false;
   }
 
   function catalogProduct(name) {
@@ -6303,11 +6530,83 @@
       taxMode,
       qtyValue,
       lineUnitPrice: (line) => Math.max(0, numExpr(line, "price_expr", "price")),
+      statuses: () => (state.doc?.statuses || []).map((s) => s.name),
+      customers: () => unique((state.doc?.orders || []).map((o) => o.customer).filter(Boolean)),
+      calcStats: (opts) => calcNodeStats(opts || {}),
       copyText: async (text) => {
         if (state.desktop) await apiPost("/api/clipboard-text", { text });
         else if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
         else throw new Error("clipboard");
       },
+    };
+  }
+
+  function calcNodeStats(opts) {
+    const customer = String(opts.customer || "").trim().toLowerCase();
+    const orderId = String(opts.orderId || "").trim();
+    const period = opts.period || "all";
+    const payFilter = opts.payFilter || "all";
+    const status = String(opts.status || "").trim();
+    const dateFrom = dateDay(opts.dateFrom);
+    const dateTo = dateDay(opts.dateTo);
+    let rows = allRows();
+    if (orderId) rows = rows.filter(({ order }) => order.id === orderId);
+    if (customer) rows = rows.filter(({ order }) => String(order.customer || "").toLowerCase().includes(customer));
+    if (status) rows = rows.filter(({ line }) => line.status === status);
+    if (payFilter && payFilter !== "all") rows = rows.filter(({ order }) => orderFilterMatch(order, payFilter));
+    if (period === "range") {
+      rows = rows.filter(({ line }) => {
+        const d = dateDay(line.order_date);
+        if (!d) return false;
+        if (dateFrom && d < dateFrom) return false;
+        if (dateTo && d > dateTo) return false;
+        return true;
+      });
+    } else if (period && period !== "all") {
+      rows = rows.filter(({ line }) => dashPeriodMatch(line.order_date, period));
+    }
+    const s = summarize(rows);
+    const active = rows.filter(({ line }) => !/отмен|аннул|черн/i.test(line.status));
+    const as = summarize(active);
+    const now = new Date();
+    const curKey = monthKeyOf(now.toISOString());
+    let monthAfter = 0;
+    let monthCost = 0;
+    rows.forEach(({ line, totals }) => {
+      if (monthKeyOf(line.order_date) !== curKey) return;
+      if (totals.expense) monthCost += totals.cost;
+      else monthAfter += totals.after;
+    });
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const dayOfMonth = now.getDate() || 1;
+    const monthAgo = localStamp(new Date(now.getTime() - 30 * 86400000));
+    const overdueRows = rows.filter(({ line, totals }) => totals.unpaid > 0.005 && line.order_date && dateDay(line.order_date) < monthAgo);
+    const overdueSum = overdueRows.reduce((acc, r) => acc + r.totals.unpaid, 0);
+    const orderSums = new Map();
+    rows.forEach(({ order, totals }) => {
+      if (totals.expense) return;
+      orderSums.set(order.id, (orderSums.get(order.id) || 0) + totals.after);
+    });
+    const paidOrders = [...orderSums.values()].filter((v) => v > 0);
+    const avgCheck = paidOrders.length ? paidOrders.reduce((a, b) => a + b, 0) / paidOrders.length : 0;
+    return {
+      orders: s.orderCount,
+      lines: s.count,
+      after: s.after,
+      afterActive: as.after,
+      paid: s.paid,
+      unpaid: s.unpaid,
+      total: s.total,
+      cost: s.cost,
+      costCount: s.costCount,
+      net: s.net,
+      paidShare: s.after ? Math.round((s.paid / s.after) * 100) : 0,
+      avgCheck,
+      overdue: overdueRows.length,
+      overdueSum,
+      monthAfter,
+      monthCost,
+      forecast: monthAfter ? (monthAfter / dayOfMonth) * daysInMonth : 0,
     };
   }
 
@@ -6873,7 +7172,30 @@
     await renderStartLists();
   }
 
-  function askClose() {
+  async function askClose() {
+    await flushPendingSaves();
+    if (!state.dirty) {
+      if (state._home) {
+        state._home = false;
+        showStart();
+        return;
+      }
+      if (state.newAfterSave) {
+        state.newAfterSave = false;
+        await createNew();
+        return;
+      }
+      if (state.desktop) {
+        try {
+          await apiPost("/api/quit", {});
+        } catch {
+          window.close();
+        }
+      } else {
+        window.close();
+      }
+      return;
+    }
     $("close-modal").classList.add("open");
   }
 
@@ -7081,28 +7403,101 @@
       if (e.key === "Escape") closeLineMenu();
     });
     $("orders-list").addEventListener("focusin", (e) => {
-      if (e.target.dataset?.lk === "product") openProductSuggest(e.target);
+      const kind = suggestKindOf(e.target);
+      if (kind) openTextSuggest(e.target, kind, "browse");
     });
     $("orders-list").addEventListener("focusout", (e) => {
-      if (e.target.dataset?.lk !== "product") return;
+      if (!suggestKindOf(e.target)) return;
       requestAnimationFrame(() => {
-        if (document.activeElement === productSuggest.input) return;
-        if ($("product-suggest")?.contains(document.activeElement)) return;
-        closeProductSuggest();
+        if (document.activeElement === textSuggest.input) return;
+        if (($("text-suggest") || $("product-suggest"))?.contains(document.activeElement)) return;
+        closeTextSuggest();
       });
     });
-    $("product-suggest")?.addEventListener("mousedown", (e) => {
+    $("orders-list").addEventListener("mousedown", (e) => {
+      const input = e.target.closest?.("input[data-suggest], input[data-lk='product'], input[data-k='customer']");
+      if (!input || !suggestKindOf(input)) return;
+      if (document.activeElement === input) {
+        requestAnimationFrame(() => openTextSuggest(input, suggestKindOf(input), "browse"));
+      }
+    });
+    const suggestBox = () => suggestBoxEl();
+    suggestBox()?.addEventListener("mousedown", (e) => {
       const btn = e.target.closest("[data-i]");
       if (!btn) return;
       e.preventDefault();
-      const name = productSuggest.items[Number(btn.dataset.i)];
-      if (name != null) pickProductSuggest(name);
+      const item = textSuggest.items[Number(btn.dataset.i)];
+      if (item != null) pickTextSuggest(item);
     });
     window.addEventListener("scroll", () => {
-      if (productSuggest.input) positionProductSuggest();
+      if (textSuggest.input || textSuggest.selectEl) positionTextSuggest();
     }, true);
     window.addEventListener("resize", () => {
-      if (productSuggest.input) positionProductSuggest();
+      if (textSuggest.input || textSuggest.selectEl) positionTextSuggest();
+    });
+    document.addEventListener(
+      "mousedown",
+      (e) => {
+        if (e.button !== 0) return;
+        const sel = e.target.closest?.("select");
+        if (sel && !sel.disabled && !sel.multiple) {
+          e.preventDefault();
+          openSelectSuggest(sel);
+          return;
+        }
+        if (!textSuggestOpen()) return;
+        if (suggestBox()?.contains(e.target)) return;
+        if (textSuggest.selectEl && e.target === textSuggest.selectEl) return;
+        if (textSuggest.input && (e.target === textSuggest.input || textSuggest.input.contains?.(e.target))) return;
+        closeTextSuggest();
+      },
+      true
+    );
+    document.addEventListener("focusin", (e) => {
+      if (e.target.closest?.("#orders-list")) return;
+      const kind = suggestKindOf(e.target);
+      if (!kind) return;
+      openTextSuggest(e.target, kind, "browse");
+    });
+    document.addEventListener("focusout", (e) => {
+      if (e.target.closest?.("#orders-list")) return;
+      if (e.target?.tagName === "SELECT") {
+        requestAnimationFrame(() => {
+          if (suggestBox()?.contains(document.activeElement)) return;
+          if (document.activeElement === textSuggest.selectEl) return;
+          if (textSuggest.kind === "select") closeTextSuggest();
+        });
+        return;
+      }
+      if (!suggestKindOf(e.target)) return;
+      requestAnimationFrame(() => {
+        if (document.activeElement === textSuggest.input) return;
+        if (suggestBox()?.contains(document.activeElement)) return;
+        closeTextSuggest();
+      });
+    });
+    document.addEventListener("mousedown", (e) => {
+      if (e.target.closest?.("#orders-list")) return;
+      const input = e.target.closest?.("input[data-suggest], #f-customer, #f-product, input[data-filter-field='customer']");
+      if (!input || !suggestKindOf(input)) return;
+      if (document.activeElement === input) {
+        requestAnimationFrame(() => openTextSuggest(input, suggestKindOf(input), "browse"));
+      }
+    });
+    document.addEventListener("input", (e) => {
+      if (textSuggest.picking) return;
+      const kind = suggestKindOf(e.target);
+      if (!kind) return;
+      if (e.target.closest?.("#orders-list") && e.target.dataset?.lk === "product") return;
+      openTextSuggest(e.target, kind, "filter");
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.target?.tagName === "SELECT") {
+        bindTextSuggestKeys(e);
+        return;
+      }
+      if (e.target.closest?.("#orders-list")) return;
+      bindTextSuggestKeys(e);
     });
     $("order-filter")?.addEventListener("click", (e) => {
       if (e.target.closest("#btn-order-filter")) {
@@ -8160,7 +8555,7 @@
       if (key === "product") {
         if (e.type === "change") ensureProduct(line.product, line.unit, line.price);
         applyLineProductDefaults(tr, line);
-        if (e.type === "input" && !productSuggest.picking) openProductSuggest(e.target);
+        if (e.type === "input" && !productSuggest.picking) openProductSuggest(e.target, "filter");
       }
       if (key === "tax_mode") {
         markDirty();
@@ -9195,32 +9590,7 @@
   const NAV_SKIP_INPUT_TYPES = new Set(["datetime-local", "date", "time", "number"]);
 
   function onOrderKeydown(e) {
-    if (e.target.dataset?.lk === "product") {
-      const open = productSuggestOpen();
-      if (e.key === "ArrowDown" && !e.altKey && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault();
-        if (open) moveProductSuggest(1);
-        else openProductSuggest(e.target);
-        return;
-      }
-      if (e.key === "ArrowUp" && !e.altKey && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault();
-        if (open) moveProductSuggest(-1);
-        else openProductSuggest(e.target);
-        return;
-      }
-      if (e.key === "Enter" && !e.ctrlKey && !e.altKey && open && productSuggest.index >= 0) {
-        e.preventDefault();
-        pickProductSuggest(productSuggest.items[productSuggest.index]);
-        return;
-      }
-      if (e.key === "Escape" && open) {
-        e.preventDefault();
-        closeProductSuggest();
-        return;
-      }
-      if (e.key === "Tab") closeProductSuggest();
-    }
+    if (bindTextSuggestKeys(e)) return;
     const tr = e.target.closest?.("tr[data-line]");
     const td = e.target.closest?.("td");
     if (!tr || !td) return;
@@ -9283,7 +9653,7 @@
 
   function syncSearchClear(input) {
     if (!input) return;
-    const wrap = input.closest(".search, .cloud-search, .calc-search");
+    const wrap = input.closest(".search, .cloud-search, .calc-search, .palette-input");
     wrap?.classList.toggle("has-value", !!String(input.value || "").length);
   }
 
@@ -9306,7 +9676,7 @@
         clearSearchInput(input);
       });
     });
-    ["global-search", "cloud-search"].forEach((id) => {
+    ["global-search", "cloud-search", "palette-input"].forEach((id) => {
       const input = $(id);
       if (!input || input.dataset.boundClearSync) return;
       input.dataset.boundClearSync = "1";
@@ -9641,6 +10011,7 @@
     $("palette").classList.add("open");
     const input = $("palette-input");
     input.value = "";
+    syncSearchClear(input);
     renderPaletteList("");
     setTimeout(() => input.focus(), 10);
   }
