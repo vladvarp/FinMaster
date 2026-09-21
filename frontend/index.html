@@ -106,7 +106,15 @@
       <div class="sidebar-core">
         <div class="file-box">
           <div class="file-title">Текущий отчёт</div>
-          <div class="file-name"><input id="report-title" value="Новый отчёт" /></div>
+          <div class="file-name">
+            <button type="button" class="file-settings-btn" id="btn-report-settings" title="Настройки отчёта: валюта и округление" aria-label="Настройки отчёта">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.8"/>
+                <path d="M19.4 13.5a7.6 7.6 0 0 0 .1-1.5 7.6 7.6 0 0 0-.1-1.5l1.7-1.3-1.6-2.8-2 .8a7.8 7.8 0 0 0-2.6-1.5l-.3-2.1h-3.2l-.3 2.1a7.8 7.8 0 0 0-2.6 1.5l-2-.8-1.6 2.8 1.7 1.3a7.6 7.6 0 0 0-.1 1.5 7.6 7.6 0 0 0 .1 1.5L4.3 14.8l1.6 2.8 2-.8a7.8 7.8 0 0 0 2.6 1.5l.3 2.1h3.2l.3-2.1a7.8 7.8 0 0 0 2.6-1.5l2 .8 1.6-2.8-1.7-1.3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <input id="report-title" value="Новый отчёт" maxlength="120" spellcheck="false" />
+          </div>
           <div class="file-path" id="file-path">Файл ещё не сохранён</div>
           <label class="side-check"><input type="checkbox" id="autosave" /> <span>Автосохранение</span><span class="dirty-dot hidden" id="dirty-dot" title="Есть несохранённые изменения"></span></label>
         </div>
@@ -900,6 +908,46 @@
     </div>
   </div>
 
+  <div class="modal" id="report-settings-modal">
+    <div class="modal-card report-settings-modal">
+      <h3>Настройки отчёта</h3>
+      <p class="report-settings-lead">Валюта и округление сумм во всём отчёте — таблицы, графики, мобильный и Telegram.</p>
+
+      <div class="report-settings-block">
+        <div class="report-settings-label">Валюта</div>
+        <label class="report-currency-field">
+          <span>Символ</span>
+          <input id="report-currency" value="₽" maxlength="8" spellcheck="false" title="Символ валюты в суммах" aria-label="Символ валюты" />
+        </label>
+        <div class="report-currency-presets" role="group" aria-label="Быстрый выбор валюты">
+          <button type="button" class="report-currency-chip" data-currency="₽" title="Рубль">₽</button>
+          <button type="button" class="report-currency-chip" data-currency="$" title="Доллар">$</button>
+          <button type="button" class="report-currency-chip" data-currency="€" title="Евро">€</button>
+          <button type="button" class="report-currency-chip" data-currency="₸" title="Тенге">₸</button>
+          <button type="button" class="report-currency-chip" data-currency="₴" title="Гривна">₴</button>
+          <button type="button" class="report-currency-chip" data-currency="£" title="Фунт">£</button>
+        </div>
+      </div>
+
+      <div class="report-settings-block">
+        <div class="report-settings-label">Точность сумм</div>
+        <p class="report-settings-hint">Сколько знаков после запятой показывать в ценах. «Целые» — округление без копеек.</p>
+        <div class="report-decimals-presets" role="group" aria-label="Знаков после запятой">
+          <button type="button" class="report-decimals-chip" data-decimals="0" title="Округлить до целых">Целые</button>
+          <button type="button" class="report-decimals-chip" data-decimals="1">0.0</button>
+          <button type="button" class="report-decimals-chip" data-decimals="2">0.00</button>
+          <button type="button" class="report-decimals-chip" data-decimals="3">0.000</button>
+          <button type="button" class="report-decimals-chip" data-decimals="4">0.0000</button>
+        </div>
+        <div class="report-settings-preview" id="report-settings-preview">Пример: 1 234,56 ₽</div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" id="report-settings-close">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal" id="help-modal">
     <div class="modal-card help-modal">
       <h3>Горячие клавиши</h3>
@@ -951,6 +999,7 @@
           <div class="help-row"><span>Протянуть связь</span><span>выход→вход или вход→выход</span></div>
           <div class="help-row"><span>Удалить связь</span><span>крестик на линии / на входе</span></div>
           <div class="help-row"><span>Удалить выбранную ноду</span><span><kbd>Delete</kbd> / крестик</span></div>
+          <div class="help-row"><span>Дублировать выбранную ноду</span><span><kbd>Ctrl</kbd><kbd>D</kbd></span></div>
           <div class="help-row"><span>Отменить тянущуюся связь</span><span><kbd>Esc</kbd></span></div>
           <div class="help-row"><span>Снять связь со входа</span><span><kbd>Alt</kbd>+клик по входу</span></div>
           <div class="help-row"><span>Масштаб / сдвиг схемы</span><span>колесо / перетаскивание поля</span></div>

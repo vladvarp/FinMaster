@@ -66,10 +66,32 @@ def num_expr(line: dict[str, Any], expr_key: str, num_key: str) -> float:
     return num(line.get(num_key))
 
 
-def money(n: Any, currency: str = "₽") -> str:
-    value = round2(n)
+def money_decimals(raw: Any, default: int = 2) -> int:
+    """Знаков после запятой в суммах: 0…4 (0 — целые)."""
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(4, value))
+
+
+def round_money(n: Any, decimals: int = 2) -> float:
+    digits = money_decimals(decimals)
+    factor = 10**digits
+    try:
+        return round(float(n or 0) * factor) / factor
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def money(n: Any, currency: str = "₽", decimals: int = 2) -> str:
+    digits = money_decimals(decimals)
+    value = round_money(n, digits)
     sign = "-" if value < 0 else ""
-    text = f"{abs(value):,.2f}".replace(",", " ").replace(".", ",")
+    if digits == 0:
+        text = f"{abs(int(round(value))):,}".replace(",", " ")
+    else:
+        text = f"{abs(value):,.{digits}f}".replace(",", " ").replace(".", ",")
     return f"{sign}{text} {currency}"
 
 

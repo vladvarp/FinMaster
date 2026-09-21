@@ -17,6 +17,7 @@ from backend import storage
 from backend.document import normalize_document
 from backend.finance import (
     html_esc,
+    money_decimals,
     line_kind,
     line_totals,
     money,
@@ -458,13 +459,13 @@ def _live_path() -> str:
     return str(REMOTE.path or "") if REMOTE.enabled else ""
 
 
-def _order_label(order: dict[str, Any], currency: str, types: dict[str, str] | None = None) -> str:
+def _order_label(order: dict[str, Any], currency: str, types: dict[str, str] | None = None, decimals: int = 2) -> str:
     tot = order_totals(order, types)
     title = " · ".join(part for part in (str(order.get("number") or "—"), str(order.get("name") or "без названия")) if part)
     if tot["unpaid"] > 0.005:
-        extra = f"долг {money(tot['unpaid'], currency)}"
+        extra = f"долг {money(tot['unpaid'], currency, decimals)}"
     else:
-        extra = "оплачен" if tot["after"] > 0.005 else money(tot["after"], currency)
+        extra = "оплачен" if tot["after"] > 0.005 else money(tot["after"], currency, decimals)
     return f"{title} · {extra}"
 
 
@@ -1042,7 +1043,7 @@ class TelegramBot:
             session.path = str(REMOTE.path or session.path)
             session.live = True
             return REMOTE.doc, True
-        return {"title": "", "currency": "₽", "orders": [], "customers": []}, False
+        return {"title": "", "currency": "₽", "money_decimals": 2, "orders": [], "customers": []}, False
 
     def _find_order(self, doc: dict[str, Any], order_id: str) -> dict[str, Any]:
         for order in doc.get("orders") or []:
@@ -1220,6 +1221,7 @@ class TelegramBot:
         orders = self._filtered_orders(session, doc)
         session.orders = [str(order.get("id") or "") for order in orders]
         currency = str(doc.get("currency") or "₽")
+        decimals = money_decimals(doc.get("money_decimals"))
         types = type_index(doc)
         debt = sum(order_totals(order, types)["unpaid"] for order in (doc.get("orders") or []) if isinstance(order, dict))
         pages = max(1, (len(orders) + PAGE - 1) // PAGE)
@@ -1230,13 +1232,13 @@ class TelegramBot:
         search = f"\nпоиск: <i>{html_esc(session.search)}</i>" if session.search else ""
         text = (
             f"<b>{html_esc(doc.get('title') or 'Отчёт')}</b>{live_note}\n"
-            f"{len(doc.get('orders') or [])} заказов · долг {html_esc(money(debt, currency))}\n"
+            f"{len(doc.get('orders') or [])} заказов · долг {html_esc(money(debt, currency, decimals))}\n"
             f"фильтр: {filt} · показано {len(orders)}{search}"
         )
         rows: list[list[dict[str, str]]] = []
         offset = session.opage * PAGE
         for i, order in enumerate(chunk):
-            rows.append([_btn(_clip(_order_label(order, currency, types)), f"Oi:{offset + i}")])
+            rows.append([_btn(_clip(_order_label(order, currency, types, decimals)), f"Oi:{offset + i}")])
         if not chunk:
             text += "\n\nНичего не нашлось."
         rows.append(
@@ -1266,6 +1268,7 @@ class TelegramBot:
         if not order:
             return "Заказ не найден.", [[_btn("К заказам", "O")]]
         currency = str(doc.get("currency") or "₽")
+        decimals = money_decimals(doc.get("money_decimals"))
         types = type_index(doc)
         tot = order_totals(order, types)
         income, expense = split_lines(
@@ -1276,24 +1279,24 @@ class TelegramBot:
             bit = order_totals({"lines": [line]}, types)
             lines_out.append(
                 f"• {html_esc(line.get('product') or '—')} · {html_esc(qty_text(line))} · "
-                f"{html_esc(money(bit['after'], currency))} · {html_esc(line.get('status') or '—')}"
+                f"{html_esc(money(bit['after'], currency, decimals))} · {html_esc(line.get('status') or '—')}"
             )
         cost_out = []
         for line in expense:
             bit = line_totals(line, types, order)
             tag = "налог" if bit["kind"] == "tax" else "затрата"
-            how = qty_text(line) if bit["mode"] == "amount" else f"{bit['percent']:g} % от {money(bit['base'], currency)}"
+            how = qty_text(line) if bit["mode"] == "amount" else f"{bit['percent']:g} % от {money(bit['base'], currency, decimals)}"
             cost_out.append(
                 f"− {html_esc(line.get('product') or line.get('order_type') or '—')} · {html_esc(how)} · "
-                f"{html_esc(money(bit['cost'], currency))} · {tag}"
+                f"{html_esc(money(bit['cost'], currency, decimals))} · {tag}"
             )
         notes = str(order.get("notes") or "").strip()
         sums = (
-            f"Итого {html_esc(money(tot['after'], currency))} · оплачено {html_esc(money(tot['paid'], currency))} · "
-            f"долг {html_esc(money(tot['unpaid'], currency))}"
+            f"Итого {html_esc(money(tot['after'], currency, decimals))} · оплачено {html_esc(money(tot['paid'], currency, decimals))} · "
+            f"долг {html_esc(money(tot['unpaid'], currency, decimals))}"
         )
         if tot["cost"] > 0.005:
-            sums += f"\nРасход {html_esc(money(tot['cost'], currency))} · чистыми {html_esc(money(tot['net'], currency))}"
+            sums += f"\nРасход {html_esc(money(tot['cost'], currency, decimals))} · чистыми {html_esc(money(tot['net'], currency, decimals))}"
         text = (
             f"<b>{html_esc(order.get('number') or '—')} · {html_esc(order.get('name') or 'без названия')}</b>\n"
             f"Заказчик: {html_esc(order.get('customer') or '—')}\n"
@@ -1383,6 +1386,7 @@ class TelegramBot:
     def _screen_add(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
         doc, _ = self._doc_of(session)
         currency = str(doc.get("currency") or "₽")
+        decimals = money_decimals(doc.get("money_decimals"))
         chosen = set(session.snap.get("order_ids") or [])
         orders = self._filtered_orders(session, doc)
         session.orders = [str(order.get("id") or "") for order in orders]
@@ -1390,7 +1394,7 @@ class TelegramBot:
         rows: list[list[dict[str, str]]] = []
         for index, order in enumerate(orders[:18]):
             mark = "✓ " if str(order.get("id") or "") in chosen else ""
-            rows.append([_btn(_clip(f"{mark}{_order_label(order, currency, types)}"), f"Sa:{index}")])
+            rows.append([_btn(_clip(f"{mark}{_order_label(order, currency, types, decimals)}"), f"Sa:{index}")])
         if not rows:
             rows.append([_btn("Нет заказов", "S")])
         rows.append([_btn("Готово", "S")])

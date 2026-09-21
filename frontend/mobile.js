@@ -7,7 +7,20 @@
   const LS_NAME = "finmaster.remote.name";
   const LS_CID = "finmaster.remote.cid";
   const LS_SNAP = "finmaster.mobile.snapshot";
-  const moneyFmt = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  let moneyFmt = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const qtyFmt = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+
+  function moneyDecimals(doc) {
+    const n = Number((doc || state.doc)?.money_decimals);
+    return Number.isFinite(n) ? Math.max(0, Math.min(4, Math.round(n))) : 2;
+  }
+
+  function syncMoneyFmt(decimals) {
+    const n = Number(decimals);
+    const d = Number.isFinite(n) ? Math.max(0, Math.min(4, Math.round(n))) : 2;
+    moneyFmt = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: d, maximumFractionDigits: d });
+    return d;
+  }
 
   const state = {
     token: "",
@@ -305,14 +318,14 @@
   function qtyText(line) {
     const t = lineTotals(line);
     const q = Math.round(t.qty * 1000) / 1000;
-    return `${moneyFmt.format(q).replace(",000", "").replace(/,00$/, "")} ${line.unit || ""}`.trim();
+    return `${qtyFmt.format(q)} ${line.unit || ""}`.trim();
   }
 
   function compact(n) {
     const v = Number(n) || 0;
     if (Math.abs(v) >= 1e6) return `${(v / 1e6).toFixed(1).replace(".", ",")} млн`;
     if (Math.abs(v) >= 1e4) return `${Math.round(v / 1e3)} тыс`;
-    return moneyFmt.format(v).replace(",00", "");
+    return qtyFmt.format(v);
   }
 
   function statusMeta(name) {
@@ -1133,6 +1146,7 @@
     }
     if (incomingVer != null) state.docVersion = Math.max(state.docVersion, incomingVer);
     state.doc = data.document;
+    syncMoneyFmt(moneyDecimals());
     const opened = !initial && (!prevHadDoc || pathChanged || expectHit);
     if (expectHit) state.expectPath = "";
     if (!initial) {
@@ -1151,6 +1165,7 @@
     if (!state.pending || isTyping()) return;
     state.doc = state.pending;
     state.pending = null;
+    syncMoneyFmt(moneyDecimals());
     renderCurrent();
     setSync("ok", "обновлено с компьютера");
   }
@@ -1685,7 +1700,7 @@
     const calc =
       t.mode === "amount"
         ? `${qtyText(line)} × ${money(t.price)}`
-        : `${moneyFmt.format(t.percent).replace(",00", "")} % от ${money(t.base)}${t.mode === "net" ? " (без затрат)" : ""}`;
+        : `${qtyFmt.format(t.percent)} % от ${money(t.base)}${t.mode === "net" ? " (без затрат)" : ""}`;
     return `<article class="line-row cost-row${isFrozenLine(line) ? " is-frozen" : ""}" data-edit="${esc(line.id)}">
       <button type="button" class="lr-drag" aria-label="Перетащить" title="Перетащить"><span></span></button>
       <span class="lr-index">${index + 1}</span>
@@ -2078,7 +2093,7 @@
     if (t.expense) {
       return `
       <div class="ed-sum"><span>Вид</span><b>${esc(
-        t.mode === "amount" ? kindLabel(t.kind) : `${moneyFmt.format(t.percent).replace(",00", "")} %`
+        t.mode === "amount" ? kindLabel(t.kind) : `${qtyFmt.format(t.percent)} %`
       )}</b></div>
       ${t.mode === "amount" ? "" : `<div class="ed-sum"><span>База</span><b>${esc(money(t.base))}</b></div>`}
       <div class="ed-sum cost"><span>Вычитается</span><b>−${esc(money(t.cost))}</b></div>`;
@@ -3590,6 +3605,18 @@
           <div class="field"><label>Название отчёта</label><input type="text" data-d="title" value="${esc(state.doc?.title || "")}" /></div>
           <div class="field"><label>Валюта</label><input type="text" data-d="currency" value="${esc(state.doc?.currency || "₽")}" /></div>
         </div>
+        <div class="field">
+          <label>Точность сумм</label>
+          <select data-d="money_decimals">
+            ${[0, 1, 2, 3, 4]
+              .map((d) => {
+                const label = d === 0 ? "Целые" : `0.${"0".repeat(d)}`;
+                const sel = moneyDecimals() === d ? " selected" : "";
+                return `<option value="${d}"${sel}>${label}</option>`;
+              })
+              .join("")}
+          </select>
+        </div>
         <small class="muted" style="word-break:break-all">${esc(state.path || "файл ещё не сохранён")}</small>
         <div class="stack">
           <button type="button" class="btn primary wide" id="cmd-save">${state.dirty ? "Сохранить изменения" : "Сохранить"}${
@@ -3930,10 +3957,16 @@
     const el = e.target;
     const docField = el.dataset?.d;
     if (docField && state.doc) {
-      state.doc[docField] = el.value;
+      if (docField === "money_decimals") {
+        state.doc.money_decimals = moneyDecimals({ money_decimals: el.value });
+        syncMoneyFmt(state.doc.money_decimals);
+      } else {
+        state.doc[docField] = el.value;
+      }
       touchDoc();
       pushSoon();
       updateHead();
+      if (docField === "currency" || docField === "money_decimals") renderCurrent();
       return;
     }
     const field = el.dataset?.f;

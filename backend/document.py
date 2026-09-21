@@ -360,8 +360,8 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         node["orderId"] = _clip_text(raw.get("orderId"), 80)
         open_fields: dict[str, list[str]] = {}
         raw_open = raw.get("openFields")
+        allowed = {"qty", "price", "discount", "paid", "unpaid", "percent"}
         if isinstance(raw_open, dict):
-            allowed = {"qty", "price", "discount", "paid", "unpaid", "percent"}
             for key, fields in raw_open.items():
                 line_id = _clip_text(key, 80)
                 if not line_id or not isinstance(fields, list):
@@ -378,6 +378,37 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
                     open_fields[line_id] = cleaned
         if open_fields:
             node["openFields"] = open_fields
+        open_types: list[str] = []
+        seen_types: set[str] = set()
+        raw_types = raw.get("openTypes")
+        if isinstance(raw_types, list):
+            for item in raw_types[:40]:
+                name = _clip_text(item, 48) or "Без типа"
+                if name in seen_types:
+                    continue
+                seen_types.add(name)
+                open_types.append(name)
+        if open_types:
+            node["openTypes"] = open_types
+        open_type_fields: dict[str, list[str]] = {}
+        raw_type_fields = raw.get("openTypeFields")
+        if isinstance(raw_type_fields, dict):
+            for key, fields in raw_type_fields.items():
+                type_name = _clip_text(key, 48) or "Без типа"
+                if not isinstance(fields, list):
+                    continue
+                cleaned_tf: list[str] = []
+                seen_tf: set[str] = set()
+                for item in fields[:8]:
+                    name = _clip_text(item, 16)
+                    if name not in allowed or name in seen_tf:
+                        continue
+                    seen_tf.add(name)
+                    cleaned_tf.append(name)
+                if cleaned_tf:
+                    open_type_fields[type_name] = cleaned_tf
+        if open_type_fields:
+            node["openTypeFields"] = open_type_fields
     elif kind == "math":
         op = str(raw.get("op") or "+")
         node["op"] = op if op in CALC_OPS else "+"
@@ -431,7 +462,8 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
             used.add(name)
             fixed.append({"id": port.get("id") or name.lower(), "name": name})
         node["inputs"] = fixed or [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}]
-        node["outputs"] = _calc_ports(
+        used = {str(port.get("name") or "") for port in node["inputs"]}
+        outputs = _calc_ports(
             raw.get("outputs"),
             "out",
             [
@@ -439,6 +471,27 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
                 {"id": "d", "name": "D", "expr": "(-40+A)*B"},
             ],
         )
+        out_fixed: list[dict[str, Any]] = []
+        default_exprs = ["A+B", "(-40+A)*B"]
+        for i, port in enumerate(outputs[:CALC_MAX_PORTS]):
+            name = str(port.get("name") or "").strip().upper()
+            if len(name) != 1 or name not in letters or name in used:
+                name = next((ch for ch in letters if ch not in used), "")
+            if not name:
+                break
+            used.add(name)
+            expr = str(port.get("expr") or "").strip()
+            if "=" in expr:
+                left, _, _right = expr.rpartition("=")
+                if left.strip():
+                    expr = left.strip()
+            if not expr:
+                expr = default_exprs[i] if i < len(default_exprs) else "0"
+            out_fixed.append({"id": port.get("id") or name.lower(), "name": name, "expr": expr[:200] or "0"})
+        node["outputs"] = out_fixed or [
+            {"id": "c", "name": "C", "expr": "A+B"},
+            {"id": "d", "name": "D", "expr": "(-40+A)*B"},
+        ]
     return node
 
 
@@ -751,6 +804,7 @@ def empty_document(title: str = "Новый отчёт") -> dict[str, Any]:
         "created_at": stamp,
         "modified_at": stamp,
         "currency": "₽",
+        "money_decimals": 2,
         "statuses": [dict(item) for item in DEFAULT_STATUSES],
         "units": list(DEFAULT_UNITS),
         "order_types": [dict(item) for item in DEFAULT_ORDER_TYPES],
@@ -780,7 +834,12 @@ def normalize_document(raw: Any) -> dict[str, Any]:
     base["version"] = SCHEMA_VERSION
     base["created_at"] = str(raw.get("created_at") or base["created_at"])
     base["modified_at"] = str(raw.get("modified_at") or now_iso())
-    base["currency"] = str(raw.get("currency") or "₽")
+    base["currency"] = str(raw.get("currency") or "₽").strip()[:8] or "₽"
+    try:
+        decimals = int(raw.get("money_decimals", 2))
+    except (TypeError, ValueError):
+        decimals = 2
+    base["money_decimals"] = max(0, min(4, decimals))
 
     statuses = raw.get("statuses")
     if isinstance(statuses, list) and statuses:

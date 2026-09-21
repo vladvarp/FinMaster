@@ -54,6 +54,7 @@
     bound: false,
     busy: false,
     selected: "",
+    selectedLink: "",
     linking: null,
     search: "",
     place: 0,
@@ -344,6 +345,70 @@
     return { lineId: m[1], field: m[2] || "" };
   }
 
+  function typeLabel(name) {
+    const text = String(name || "").trim();
+    return text || "Без типа";
+  }
+
+  function typePortKey(name) {
+    return encodeURIComponent(typeLabel(name));
+  }
+
+  function typePortId(name, field) {
+    const key = typePortKey(name);
+    return field ? `type:${key}:${field}` : `type:${key}`;
+  }
+
+  function parseTypePort(portId) {
+    const text = String(portId || "");
+    const m = text.match(/^type:([^:]+)(?::([a-z]+))?$/);
+    if (!m) return null;
+    let typeName = m[1];
+    try {
+      typeName = decodeURIComponent(m[1]);
+    } catch {
+      /* keep raw */
+    }
+    return { typeName, field: m[2] || "" };
+  }
+
+  function orderTypeNames(order) {
+    const names = [];
+    const seen = new Set();
+    orderLines(order).forEach((line) => {
+      const name = typeLabel(line.order_type);
+      if (seen.has(name)) return;
+      seen.add(name);
+      names.push(name);
+    });
+    return names;
+  }
+
+  function linesOfType(order, typeName) {
+    const want = typeLabel(typeName);
+    return orderLines(order).filter((line) => typeLabel(line.order_type) === want);
+  }
+
+  function typeTone(order, typeName) {
+    const lines = linesOfType(order, typeName);
+    if (!lines.length) return "income";
+    return lineTone(lines[0], order);
+  }
+
+  function typeAmount(order, typeName) {
+    return linesOfType(order, typeName).reduce((sum, line) => sum + lineAmount(line, order), 0);
+  }
+
+  function typeFieldOptions(order, typeName) {
+    const lines = linesOfType(order, typeName);
+    if (!lines.length) return [];
+    return lineFieldOptions(lines[0], order);
+  }
+
+  function typeFieldValue(order, typeName, field) {
+    return linesOfType(order, typeName).reduce((sum, line) => sum + lineFieldValue(line, order, field), 0);
+  }
+
   function openFieldsFor(node, lineId) {
     const map = node.openFields && typeof node.openFields === "object" ? node.openFields : {};
     return Array.isArray(map[lineId]) ? map[lineId].slice() : [];
@@ -360,6 +425,53 @@
     if (!node?.openFields || !Array.isArray(node.openFields[lineId])) return;
     node.openFields[lineId] = node.openFields[lineId].filter((item) => item !== field);
     if (!node.openFields[lineId].length) delete node.openFields[lineId];
+  }
+
+  function openTypesFor(node) {
+    const list = Array.isArray(node?.openTypes) ? node.openTypes : [];
+    const out = [];
+    const seen = new Set();
+    list.forEach((item) => {
+      const name = typeLabel(item);
+      if (seen.has(name)) return;
+      seen.add(name);
+      out.push(name);
+    });
+    return out;
+  }
+
+  function ensureOpenType(node, typeName) {
+    const name = typeLabel(typeName);
+    const list = openTypesFor(node);
+    if (!list.includes(name)) list.push(name);
+    node.openTypes = list;
+  }
+
+  function dropOpenType(node, typeName) {
+    const name = typeLabel(typeName);
+    node.openTypes = openTypesFor(node).filter((item) => item !== name);
+    if (node.openTypeFields && typeof node.openTypeFields === "object") delete node.openTypeFields[name];
+  }
+
+  function openTypeFieldsFor(node, typeName) {
+    const map = node.openTypeFields && typeof node.openTypeFields === "object" ? node.openTypeFields : {};
+    const list = map[typeLabel(typeName)];
+    return Array.isArray(list) ? list.slice() : [];
+  }
+
+  function ensureOpenTypeField(node, typeName, field) {
+    const name = typeLabel(typeName);
+    if (!node.openTypeFields || typeof node.openTypeFields !== "object") node.openTypeFields = {};
+    const list = Array.isArray(node.openTypeFields[name]) ? node.openTypeFields[name] : [];
+    if (!list.includes(field)) list.push(field);
+    node.openTypeFields[name] = list;
+  }
+
+  function dropOpenTypeField(node, typeName, field) {
+    const name = typeLabel(typeName);
+    if (!node?.openTypeFields || !Array.isArray(node.openTypeFields[name])) return;
+    node.openTypeFields[name] = node.openTypeFields[name].filter((item) => item !== field);
+    if (!node.openTypeFields[name].length) delete node.openTypeFields[name];
   }
 
   function linkedFromPorts(nodeId, links) {
@@ -762,6 +874,36 @@
           }
         });
       });
+      const openTypes = new Set(openTypesFor(node));
+      orderTypeNames(found).forEach((typeName) => {
+        const portId = typePortId(typeName);
+        const childLinked = typeFieldOptions(found, typeName).some((field) => linked.has(typePortId(typeName, field.id)));
+        if (!openTypes.has(typeName) && !linked.has(portId) && !childLinked) return;
+        const tone = typeTone(found, typeName);
+        ports.push({
+          id: portId,
+          name: `Σ ${typeName}`,
+          typeName,
+          tone,
+          child: false,
+          kind: "type",
+        });
+        const fields = new Set(openTypeFieldsFor(node, typeName));
+        typeFieldOptions(found, typeName).forEach((field) => {
+          const fieldId = typePortId(typeName, field.id);
+          if (fields.has(field.id) || linked.has(fieldId)) {
+            ports.push({
+              id: fieldId,
+              name: field.name,
+              typeName,
+              tone,
+              child: true,
+              field: field.id,
+              kind: "type",
+            });
+          }
+        });
+      });
       ports.push({ id: "total", name: "Итого", tone: "total", child: false });
       return ports;
     }
@@ -770,30 +912,25 @@
 
   function formulaConflict(node) {
     const names = new Set();
-    const assigns = new Map();
     let error = false;
     for (const port of node.inputs || []) {
       const name = String(port.name || "").trim();
       if (!/^[A-Z]$/.test(name) || names.has(name)) error = true;
-      names.add(name);
+      if (name) names.add(name);
     }
     for (const port of node.outputs || []) {
-      const parsed = splitAssign(port.expr ? (String(port.expr).includes("=") ? port.expr : `${port.expr}=${port.name}`) : port.name);
-      const outName = parsed.out || String(port.name || "").trim();
-      const expr = parsed.expr.replace(/\s+/g, "");
-      if (!outName) error = true;
-      if (names.has(outName) && (node.inputs || []).some((item) => item.name === outName)) error = true;
-      if (assigns.has(outName) && assigns.get(outName) !== expr) error = true;
-      if (parsed.out && port.name && parsed.out !== String(port.name).trim()) error = true;
-      assigns.set(outName, expr);
+      const name = String(port.name || "").trim();
+      if (!/^[A-Z]$/.test(name) || names.has(name)) error = true;
+      if (name) names.add(name);
+      const raw = String(port.expr || "").includes("=") ? port.expr : `${port.expr || "0"}=${port.name}`;
+      const parsed = splitAssign(raw);
+      if (parsed.out && parsed.out !== name) error = true;
       try {
         evalExpr(parsed.expr || "0", {});
       } catch {
         error = true;
       }
     }
-    const outNames = (node.outputs || []).map((port) => String(port.name || "").trim());
-    if (new Set(outNames).size !== outNames.length) error = true;
     return error;
   }
 
@@ -841,6 +978,12 @@
             total += amount;
             lineFieldOptions(line, order).forEach((field) => {
               setVal(nodeId, `line:${line.id}:${field.id}`, lineFieldValue(line, order, field.id));
+            });
+          });
+          orderTypeNames(order).forEach((typeName) => {
+            setVal(nodeId, typePortId(typeName), typeAmount(order, typeName));
+            typeFieldOptions(order, typeName).forEach((field) => {
+              setVal(nodeId, typePortId(typeName, field.id), typeFieldValue(order, typeName, field.id));
             });
           });
           const totals = api.orderTotals(order);
@@ -912,9 +1055,13 @@
         });
         (node.outputs || []).forEach((port) => {
           const parsed = splitAssign(String(port.expr || "").includes("=") ? port.expr : `${port.expr || "0"}=${port.name}`);
+          const outName = String(port.name || parsed.out || "").trim();
           try {
             const value = evalExpr(parsed.expr || "0", vars);
             setVal(nodeId, port.id, value);
+            if (/^[A-Z]$/.test(outName) && value != null && Number.isFinite(value)) {
+              vars[outName] = value;
+            }
           } catch {
             errors.add(nodeId);
             setVal(nodeId, port.id, null);
@@ -971,13 +1118,7 @@
   }
 
   function worldPoint(bp, clientX, clientY) {
-    const board = $("calc-board");
-    const rect = board.getBoundingClientRect();
-    const zoom = bp.zoom || 1;
-    return {
-      x: (clientX - rect.left - (bp.x || 0)) / zoom,
-      y: (clientY - rect.top - (bp.y || 0)) / zoom,
-    };
+    return screenToWorld(clientX, clientY, bp);
   }
 
   function applyWorld(bp) {
@@ -1347,6 +1488,21 @@
     return `P${i}`;
   }
 
+  function formulaLetterSet(node, exceptId) {
+    const used = new Set();
+    for (const port of node.inputs || []) {
+      if (exceptId && port.id === exceptId) continue;
+      const name = String(port.name || "").trim();
+      if (name) used.add(name);
+    }
+    for (const port of node.outputs || []) {
+      if (exceptId && port.id === exceptId) continue;
+      const name = String(port.name || "").trim();
+      if (name) used.add(name);
+    }
+    return used;
+  }
+
   function sanitizeFormulaInput(raw, used, fallback) {
     const letter = String(raw || "")
       .trim()
@@ -1434,6 +1590,37 @@
     bp.nodes = bp.nodes.filter((node) => node.id !== id);
     bp.links = bp.links.filter((link) => link.from !== id && link.to !== id);
     if (session.selected === id) session.selected = "";
+    dirty();
+    render();
+  }
+
+  function duplicateNode(id) {
+    const bp = activeBlueprint();
+    if (!bp || !id) return;
+    const src = (bp.nodes || []).find((node) => node.id === id);
+    if (!src) return;
+    let clone;
+    try {
+      clone = JSON.parse(JSON.stringify(src));
+    } catch {
+      return;
+    }
+    clone.id = uid();
+    clone.x = (Number(src.x) || 0) + 48;
+    clone.y = (Number(src.y) || 0) + 48;
+    if (clone.type === "formula") {
+      (clone.inputs || []).forEach((port) => {
+        port.id = uid();
+      });
+      (clone.outputs || []).forEach((port) => {
+        port.id = uid();
+      });
+    }
+    if (clone.type === "result") {
+      clone.priority = nextResultPriority(bp);
+    }
+    bp.nodes.push(clone);
+    session.selected = clone.id;
     dirty();
     render();
   }
@@ -1536,11 +1723,19 @@
 
   function releaseOrderField(bp, nodeId, fromPort) {
     const parsed = parseLinePort(fromPort);
-    if (!parsed?.field) return;
-    const still = (bp.links || []).some((link) => link.from === nodeId && link.fromPort === fromPort);
-    if (still) return;
-    const node = (bp.nodes || []).find((item) => item.id === nodeId && item.type === "order");
-    if (node) dropOpenField(node, parsed.lineId, parsed.field);
+    if (parsed?.field) {
+      const still = (bp.links || []).some((link) => link.from === nodeId && link.fromPort === fromPort);
+      if (still) return;
+      const node = (bp.nodes || []).find((item) => item.id === nodeId && item.type === "order");
+      if (node) dropOpenField(node, parsed.lineId, parsed.field);
+      return;
+    }
+    const typed = parseTypePort(fromPort);
+    if (!typed?.field) return;
+    const stillType = (bp.links || []).some((link) => link.from === nodeId && link.fromPort === fromPort);
+    if (stillType) return;
+    const orderNode = (bp.nodes || []).find((item) => item.id === nodeId && item.type === "order");
+    if (orderNode) dropOpenTypeField(orderNode, typed.typeName, typed.field);
   }
 
   function removeLink(id) {
@@ -1550,6 +1745,7 @@
     const before = bp.links.length;
     bp.links = bp.links.filter((link) => link.id !== id);
     if (bp.links.length !== before) {
+      if (session.selectedLink === id) session.selectedLink = "";
       if (gone) releaseOrderField(bp, gone.from, gone.fromPort);
       dirty();
       render();
@@ -1827,6 +2023,125 @@
     setTimeout(() => document.addEventListener("pointerdown", onDoc, true), 0);
   }
 
+  function placePortMenu(menu, clientX, clientY) {
+    const rect = menu.getBoundingClientRect();
+    let left = clientX;
+    let top = clientY;
+    if (left + rect.width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - rect.width - 8);
+    if (top + rect.height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - rect.height - 8);
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
+  function bindPortMenuClose(menu) {
+    const onDoc = (e) => {
+      if (e.target.closest?.(".calc-port-menu")) return;
+      hidePortMenu();
+      document.removeEventListener("pointerdown", onDoc, true);
+    };
+    setTimeout(() => document.addEventListener("pointerdown", onDoc, true), 0);
+  }
+
+  function showOrderTypeMenu(clientX, clientY, nodeId) {
+    hidePortMenu();
+    const bp = activeBlueprint();
+    const node = bp?.nodes.find((item) => item.id === nodeId && item.type === "order");
+    const order = api.findOrder(node?.orderId);
+    if (!bp || !node || !order) return;
+    const names = orderTypeNames(order);
+    const open = new Set(openTypesFor(node));
+    const linked = linkedFromPorts(node.id, bp.links);
+    const menu = document.createElement("div");
+    menu.className = "calc-port-menu";
+    menu.style.left = `${clientX}px`;
+    menu.style.top = `${clientY}px`;
+    if (!names.length) {
+      const empty = document.createElement("div");
+      empty.className = "calc-port-menu-empty";
+      empty.textContent = "Нет типов в заказе";
+      menu.appendChild(empty);
+    }
+    names.forEach((typeName) => {
+      const portId = typePortId(typeName);
+      const childLinked = typeFieldOptions(order, typeName).some((field) => linked.has(typePortId(typeName, field.id)));
+      const shown = open.has(typeName) || linked.has(portId) || childLinked;
+      const locked = linked.has(portId) || childLinked;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = typeName;
+      if (shown) {
+        btn.className = "is-shown";
+        btn.title = locked ? "Порт занят связью" : "Убрать с ноды";
+      } else {
+        btn.title = "Добавить сумму типа";
+      }
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (locked) return;
+        if (shown) dropOpenType(node, typeName);
+        else ensureOpenType(node, typeName);
+        hidePortMenu();
+        dirty();
+        render();
+      });
+      menu.appendChild(btn);
+    });
+    document.body.appendChild(menu);
+    placePortMenu(menu, clientX, clientY);
+    bindPortMenuClose(menu);
+  }
+
+  function showTypePortMenu(clientX, clientY, nodeId, typeName) {
+    hidePortMenu();
+    const bp = activeBlueprint();
+    const node = bp?.nodes.find((item) => item.id === nodeId && item.type === "order");
+    const order = api.findOrder(node?.orderId);
+    if (!bp || !node || !order) return;
+    const options = typeFieldOptions(order, typeName);
+    if (!options.length) return;
+    const open = new Set(openTypeFieldsFor(node, typeName));
+    const linked = linkedFromPorts(node.id, bp.links);
+    const menu = document.createElement("div");
+    menu.className = "calc-port-menu";
+    menu.style.left = `${clientX}px`;
+    menu.style.top = `${clientY}px`;
+    options.forEach((field) => {
+      const portId = typePortId(typeName, field.id);
+      const shown = open.has(field.id) || linked.has(portId);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = field.name;
+      if (shown) {
+        btn.className = "is-shown";
+        btn.title = "Убрать с ноды";
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          dropOpenTypeField(node, typeName, field.id);
+          bp.links = (bp.links || []).filter((link) => !(link.from === nodeId && link.fromPort === portId));
+          hidePortMenu();
+          dirty();
+          render();
+        });
+      } else {
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          ensureOpenType(node, typeName);
+          ensureOpenTypeField(node, typeName, field.id);
+          hidePortMenu();
+          dirty();
+          render();
+        });
+      }
+      menu.appendChild(btn);
+    });
+    document.body.appendChild(menu);
+    placePortMenu(menu, clientX, clientY);
+    bindPortMenuClose(menu);
+  }
+
   function orderNodeHtml(node, order, graph, bp) {
     const missing = !order;
     const ports = nodeOutputs(node, order, bp?.links);
@@ -1834,6 +2149,7 @@
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <span>${missing ? "Заказ удалён" : esc(order.number || "—")}</span>
+        <button type="button" class="calc-mini calc-order-types" data-order-types="${esc(node.id)}" title="Суммы по типам" ${missing ? "disabled" : ""}>Σ</button>
         <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
       </header>
       <div class="calc-node-sub">${missing ? "" : esc(order.name || order.customer || "")}</div>
@@ -1844,11 +2160,18 @@
             const tone = port.tone || "income";
             const child = port.child ? " is-child" : "";
             const fieldCls = port.child && port.field ? ` is-field-${port.field}` : "";
-            const tip = port.child ? esc(port.name) : `${esc(port.name)} · ПКМ — поля позиции`;
-            return `<div class="calc-row out is-${tone}${child}${fieldCls}">
+            const isType = port.kind === "type";
+            const tip = port.child
+              ? esc(port.name)
+              : isType
+                ? `${esc(port.name)} · ПКМ — поля типа`
+                : port.id === "total"
+                  ? esc(port.name)
+                  : `${esc(port.name)} · ПКМ — поля позиции`;
+            return `<div class="calc-row out is-${tone}${child}${fieldCls}${isType ? " is-type-sum" : ""}">
               <span class="calc-row-name" title="${tip}">${esc(port.name)}</span>
               <b>${esc(fmtShort(value))}</b>
-              <i class="calc-port out" data-port="${esc(port.id)}" data-io="out" data-line="${esc(port.line?.id || "")}" data-child="${port.child ? "1" : "0"}" title="${tip}"></i>
+              <i class="calc-port out" data-port="${esc(port.id)}" data-io="out" data-line="${esc(port.line?.id || "")}" data-type="${esc(port.typeName || "")}" data-child="${port.child ? "1" : "0"}" title="${tip}"></i>
             </div>`;
           })
           .join("")}
@@ -1918,7 +2241,7 @@
             return `<div class="calc-row out formula">
               <input class="calc-expr" data-out-expr="${esc(port.id)}" value="${esc(expr)}" spellcheck="false" />
               <span class="calc-eq">=</span>
-              <input class="calc-pname" data-out-name="${esc(port.id)}" value="${esc(port.name)}" maxlength="24" />
+              <input class="calc-pname" data-out-name="${esc(port.id)}" value="${esc(port.name)}" maxlength="1" spellcheck="false" title="Одна заглавная латинская буква" />
               <b class="calc-out-val">${esc(fmtShort(value))}</b>
               <i class="calc-port out" data-port="${esc(port.id)}" data-io="out"></i>
               <button type="button" class="calc-mini" data-del-out="${esc(port.id)}" title="Убрать выход">−</button>
@@ -2146,6 +2469,52 @@
     });
   }
 
+  function patchGraphLive() {
+    const bp = activeBlueprint();
+    if (!bp || session.busy) return;
+    rebuildPresentValues();
+    const graph = computeGraph(bp);
+    const host = nodesRoot();
+    if (!host) return;
+    host.querySelectorAll(".calc-node").forEach((el) => {
+      const nodeId = el.dataset.node;
+      if (!nodeId) return;
+      el.querySelectorAll(".calc-out-val").forEach((box) => {
+        const expr = box.closest(".calc-row")?.querySelector("[data-out-expr]");
+        if (!expr) return;
+        box.textContent = fmtShort(graph.values[`${nodeId}:${expr.dataset.outExpr}`]);
+      });
+      el.querySelectorAll(".calc-row.out > b:not(.calc-out-val)").forEach((box) => {
+        const port = box.closest(".calc-row")?.querySelector(".calc-port.out");
+        if (!port) return;
+        box.textContent = fmtShort(graph.values[`${nodeId}:${port.dataset.port}`]);
+      });
+      el.querySelectorAll(".calc-row.out > span").forEach((box) => {
+        if (box.classList.contains("calc-row-name")) return;
+        const port = box.closest(".calc-row")?.querySelector(".calc-port.out");
+        if (!port) return;
+        box.textContent = fmtShort(graph.values[`${nodeId}:${port.dataset.port}`]);
+      });
+      const screen = el.querySelector(".calc-screen-val");
+      if (screen) {
+        const value = graph.values[`${nodeId}:out`];
+        screen.textContent = fmtShort(value);
+        const btn = el.querySelector(".calc-screen-copy");
+        if (btn) {
+          const copy = fmtCopy(value);
+          btn.dataset.copy = copy || "";
+          btn.classList.toggle("is-off", !copy);
+          btn.disabled = !copy;
+        }
+      }
+    });
+    fitScreenNodes();
+    requestAnimationFrame(() => {
+      drawWires(bp, graph);
+      drawMinimap(bp);
+    });
+  }
+
   function renderNodes(bp, graph) {
     const host = nodesRoot();
     const groups = groupsRoot();
@@ -2203,12 +2572,20 @@
   }
 
   function screenToWorld(clientX, clientY, bp) {
+    const world = $("calc-world");
+    const zoom = bp?.zoom || 1;
+    if (world) {
+      const rect = world.getBoundingClientRect();
+      return {
+        x: (clientX - rect.left) / zoom,
+        y: (clientY - rect.top) / zoom,
+      };
+    }
     const board = $("calc-board");
     const rect = board.getBoundingClientRect();
-    const zoom = bp.zoom || 1;
     return {
-      x: (clientX - rect.left - (bp.x || 0)) / zoom,
-      y: (clientY - rect.top - (bp.y || 0)) / zoom,
+      x: (clientX - rect.left - (bp?.x || 0)) / zoom,
+      y: (clientY - rect.top - (bp?.y || 0)) / zoom,
     };
   }
 
@@ -2236,8 +2613,31 @@
   function portWorld(nodeEl, portId, io, bp) {
     const port = findPortEl(nodeEl, portId, io);
     if (!port) return null;
-    const rect = port.getBoundingClientRect();
-    return screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2, bp);
+    const world = $("calc-world");
+    const zoom = bp?.zoom || 1;
+    if (!world) {
+      const rect = port.getBoundingClientRect();
+      return screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2, bp);
+    }
+    const wr = world.getBoundingClientRect();
+    const pr = port.getBoundingClientRect();
+    const nr = nodeEl.getBoundingClientRect();
+    const cy = (pr.top + pr.height / 2 - wr.top) / zoom;
+    // Конец линии — на внешнем краю ноды (порт висит снаружи), чтобы провод не уходил под карточку.
+    if (io === "in") {
+      const edge = (nr.left - wr.left) / zoom;
+      const portOuter = (pr.left - wr.left) / zoom;
+      return { x: Math.min(edge, portOuter), y: cy };
+    }
+    if (io === "out") {
+      const edge = (nr.right - wr.left) / zoom;
+      const portOuter = (pr.right - wr.left) / zoom;
+      return { x: Math.max(edge, portOuter), y: cy };
+    }
+    return {
+      x: (pr.left + pr.width / 2 - wr.left) / zoom,
+      y: cy,
+    };
   }
 
   function bezierMid(a, b) {
@@ -2259,6 +2659,12 @@
         const line = (order?.lines || []).find((item) => item.id === parsed.lineId);
         if (line) return lineTone(line, order);
       }
+      const typed = parseTypePort(fromPort);
+      if (typed?.field) return `field-${typed.field}`;
+      if (typed) {
+        const order = api.findOrder(node.orderId);
+        if (order) return typeTone(order, typed.typeName);
+      }
       return "order";
     }
     if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme" || type === "group" || type === "filter" || type === "dashboard" || type === "present") return type;
@@ -2266,8 +2672,11 @@
   }
 
   function upstreamFlow(bp, nodeId) {
-    const ids = new Set();
-    if (!bp || !nodeId) return ids;
+    const linkIds = new Set();
+    const outPorts = new Set();
+    const inPorts = new Set();
+    const nodeIds = new Set();
+    if (!bp || !nodeId) return { linkIds, outPorts, inPorts, nodeIds };
     const incoming = {};
     (bp.links || []).forEach((link) => {
       if (!incoming[link.to]) incoming[link.to] = [];
@@ -2278,12 +2687,16 @@
       if (!id || seen.has(id)) return;
       seen.add(id);
       (incoming[id] || []).forEach((link) => {
-        ids.add(link.id);
+        linkIds.add(link.id);
+        outPorts.add(`${link.from}:${link.fromPort}`);
+        inPorts.add(`${link.to}:${link.toPort}`);
+        nodeIds.add(link.from);
+        nodeIds.add(link.to);
         walk(link.from);
       });
     }
     walk(nodeId);
-    return ids;
+    return { linkIds, outPorts, inPorts, nodeIds };
   }
 
   function upstreamNodeIds(bp, nodeId) {
@@ -2350,7 +2763,41 @@
     };
     const hostButtons = [];
     const byId = Object.fromEntries((bp.nodes || []).map((node) => [node.id, node]));
-    const flowIds = upstreamFlow(bp, session.selected);
+    const flow = upstreamFlow(bp, session.selected);
+    const picked = session.selectedLink
+      ? (bp.links || []).find((link) => link.id === session.selectedLink) || null
+      : null;
+    if (session.selectedLink && !picked) session.selectedLink = "";
+
+    const clearPickClass = (root) => {
+      root?.querySelectorAll(".is-link-pick").forEach((el) => el.classList.remove("is-link-pick"));
+    };
+    clearPickClass(host);
+    clearPickClass(groupsRoot());
+    clearPickClass(groupUiRoot());
+
+    host.querySelectorAll(".calc-port.is-flow").forEach((el) => el.classList.remove("is-flow"));
+    groupsRoot()?.querySelectorAll(".calc-port.is-flow").forEach((el) => el.classList.remove("is-flow"));
+    host.querySelectorAll(".calc-node.is-flow").forEach((el) => el.classList.remove("is-flow"));
+    groupsRoot()?.querySelectorAll(".calc-node.is-flow").forEach((el) => el.classList.remove("is-flow"));
+    groupUiRoot()?.querySelectorAll(".calc-group-chrome.is-flow").forEach((el) => el.classList.remove("is-flow"));
+    flow.nodeIds.forEach((id) => {
+      const el = findNodeEl(id);
+      el?.classList.add("is-flow");
+      if (el?.classList.contains("calc-group-chrome") || byId[id]?.type === "group") {
+        findGroupChrome(id)?.classList.add("is-flow");
+      }
+    });
+    if (picked) {
+      const fromEl = findNodeEl(picked.from);
+      const toEl = findNodeEl(picked.to);
+      fromEl?.classList.add("is-link-pick");
+      toEl?.classList.add("is-link-pick");
+      if (byId[picked.from]?.type === "group") findGroupChrome(picked.from)?.classList.add("is-link-pick");
+      if (byId[picked.to]?.type === "group") findGroupChrome(picked.to)?.classList.add("is-link-pick");
+      findPortEl(fromEl, picked.fromPort, "out")?.classList.add("is-link-pick");
+      findPortEl(toEl, picked.toPort, "in")?.classList.add("is-link-pick");
+    }
     (bp.links || []).forEach((link) => {
       const fromEl = findNodeEl(link.from);
       const toEl = findNodeEl(link.to);
@@ -2361,12 +2808,21 @@
       const dx = Math.max(40, Math.abs(b.x - a.x) * 0.45);
       const d = `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`;
       const src = byId[link.from];
-      const flow = flowIds.has(link.id);
+      const onFlow = flow.linkIds.has(link.id);
+      const onPick = !!(picked && picked.id === link.id);
       const err = graph.errors.has(link.from) || graph.errors.has(link.to);
-      const wire = addPath(d, `calc-wire is-${wireKind(src, link.fromPort)}${flow ? " is-flow" : ""}${err ? " is-error" : ""}`, {
-        "pointer-events": "none",
-        "data-link": link.id,
-      });
+      const wire = addPath(
+        d,
+        `calc-wire is-${wireKind(src, link.fromPort)}${onFlow ? " is-flow" : ""}${onPick ? " is-pick" : ""}${err ? " is-error" : ""}`,
+        {
+          "pointer-events": "none",
+          "data-link": link.id,
+        }
+      );
+      if (onFlow) {
+        findPortEl(fromEl, link.fromPort, "out")?.classList.add("is-flow");
+        findPortEl(toEl, link.toPort, "in")?.classList.add("is-flow");
+      }
       if (!session.linking && !session.drag && !session.pan) {
         const hit = addPath(d, "calc-wire-hit", { "data-link": link.id });
         const mid = bezierMid(a, b);
@@ -2388,6 +2844,7 @@
         btn.classList.add("is-show");
       };
       const hide = () => {
+        if (session.selectedLink === item.id) return;
         item.wire.classList.remove("is-hot");
         btn.classList.remove("is-show");
       };
@@ -2401,6 +2858,19 @@
         if (e.relatedTarget === item.hit) return;
         hide();
       });
+      item.hit.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        session.selectedLink = item.id;
+        session.selected = "";
+        document.querySelectorAll(".calc-node.is-on, .calc-group-chrome.is-on").forEach((el) => el.classList.remove("is-on"));
+        drawWires(bp, computeGraph(bp));
+      });
+      if (session.selectedLink === item.id) {
+        item.wire.classList.add("is-hot");
+        btn.classList.add("is-show");
+      }
       ui.appendChild(btn);
     });
     if (session.linking?.x != null) {
@@ -2708,8 +3178,6 @@
     if (!bp) return;
     if (e.button === 1) {
       e.preventDefault();
-      session.selected = "";
-      document.querySelectorAll(".calc-node.is-on, .calc-group-chrome.is-on").forEach((el) => el.classList.remove("is-on"));
       session.busy = true;
       session.pan = { x: e.clientX, y: e.clientY, ox: bp.x || 0, oy: bp.y || 0 };
       $("calc-board").setPointerCapture(e.pointerId);
@@ -2760,9 +3228,12 @@
       const io = port.dataset.io;
       const portId = port.dataset.port;
       session.selected = nodeId || "";
+      session.selectedLink = "";
       const lineId = port.dataset.line || "";
       const parsed = parseLinePort(portId);
+      const typed = parseTypePort(portId);
       const isMainLineOut = io === "out" && parsed && !parsed.field;
+      const isMainTypeOut = io === "out" && typed && !typed.field;
 
       if (e.button === 2) {
         if (session.linking) {
@@ -2771,6 +3242,7 @@
           if (bp) drawWires(bp, computeGraph(bp));
         }
         if (isMainLineOut) showLinePortMenu(e.clientX, e.clientY, nodeId, parsed.lineId);
+        else if (isMainTypeOut) showTypePortMenu(e.clientX, e.clientY, nodeId, typed.typeName);
         else {
           const owner = bp?.nodes.find((item) => item.id === nodeId);
           if (owner?.type === "dashboard") showDashPortMenu(e.clientX, e.clientY, nodeId);
@@ -2801,6 +3273,7 @@
         }
         const at = screenToWorld(e.clientX, e.clientY, bp);
         session.linking = { reverse: true, to: nodeId, toPort: portId, x: at.x, y: at.y, sx: e.clientX, sy: e.clientY };
+        session.selectedLink = "";
         session.busy = true;
         $("calc-board").setPointerCapture(e.pointerId);
         drawWires(bp, computeGraph(bp));
@@ -2809,6 +3282,7 @@
       const board = $("calc-board");
       const at = screenToWorld(e.clientX, e.clientY, bp);
       session.linking = { from: nodeId, fromPort: portId, x: at.x, y: at.y, sx: e.clientX, sy: e.clientY };
+      session.selectedLink = "";
       session.busy = true;
       board.setPointerCapture(e.pointerId);
       drawWires(bp, computeGraph(bp));
@@ -2816,12 +3290,14 @@
     }
     if (session.linking) {
       session.linking = null;
+      session.selectedLink = "";
       drawWires(bp, computeGraph(bp));
     }
     if (e.target.closest("button")) return;
     if (drag && node) {
       e.preventDefault();
       session.selected = node.dataset.node;
+      session.selectedLink = "";
       session.busy = true;
       const id = node.dataset.node;
       const origins = [];
@@ -2853,6 +3329,7 @@
     }
     if (node) {
       session.selected = node.dataset.node;
+      session.selectedLink = "";
       document.querySelectorAll("#calc-nodes .calc-node, #calc-groups .calc-node, #calc-group-ui .calc-group-chrome").forEach((el) => {
         el.classList.toggle("is-on", el.dataset.node === node.dataset.node);
       });
@@ -2860,6 +3337,7 @@
       return;
     }
     session.selected = "";
+    session.selectedLink = "";
     document.querySelectorAll("#calc-nodes .calc-node, #calc-groups .calc-node, #calc-group-ui .calc-group-chrome").forEach((el) => el.classList.remove("is-on"));
     drawWires(bp, computeGraph(bp));
     session.busy = true;
@@ -2870,6 +3348,19 @@
   function onBoardPointerMove(e) {
     const bp = activeBlueprint();
     if (!bp) return;
+    if (session.pan) {
+      bp.x = session.pan.ox + (e.clientX - session.pan.x);
+      bp.y = session.pan.oy + (e.clientY - session.pan.y);
+      applyWorld(bp);
+      if (session.linking) {
+        const at = screenToWorld(e.clientX, e.clientY, bp);
+        session.linking.x = at.x;
+        session.linking.y = at.y;
+        drawWires(bp, computeGraph(bp));
+      }
+      drawMinimap(bp);
+      return;
+    }
     if (session.linking) {
       const at = screenToWorld(e.clientX, e.clientY, bp);
       session.linking.x = at.x;
@@ -2903,12 +3394,6 @@
       drawMinimap(bp);
       return;
     }
-    if (session.pan) {
-      bp.x = session.pan.ox + (e.clientX - session.pan.x);
-      bp.y = session.pan.oy + (e.clientY - session.pan.y);
-      applyWorld(bp);
-      drawMinimap(bp);
-    }
   }
 
   function onBoardPointerUp(e) {
@@ -2920,6 +3405,23 @@
     session.drag = null;
     session.pan = null;
     session.resize = null;
+
+    // Средняя кнопка — только панорама; тянущуюся связь не сбрасываем.
+    if (e.button === 1) {
+      session.busy = !!session.linking;
+      if (bp) {
+        if (session.linking) {
+          const at = screenToWorld(e.clientX, e.clientY, bp);
+          session.linking.x = at.x;
+          session.linking.y = at.y;
+          drawWires(bp, computeGraph(bp));
+        }
+        drawMinimap(bp);
+      }
+      setLinkingClass();
+      return;
+    }
+
     session.busy = false;
     if (e.target.closest?.("input, textarea, select, .calc-bp-name, .calc-refresh, .calc-chain-move, .calc-board-tools")) return;
     if (resized) {
@@ -2938,6 +3440,10 @@
         if (linking.reverse && io === "out" && nodeId) {
           const parsed = parseLinePort(over.dataset.port);
           if (parsed && !parsed.field) showLinePortMenu(e.clientX, e.clientY, nodeId, parsed.lineId);
+          else {
+            const typed = parseTypePort(over.dataset.port);
+            if (typed && !typed.field) showTypePortMenu(e.clientX, e.clientY, nodeId, typed.typeName);
+          }
         }
         return;
       }
@@ -2962,6 +3468,13 @@
       }
       return;
     }
+    if (movedPan) {
+      const dx = e.clientX - movedPan.x;
+      const dy = e.clientY - movedPan.y;
+      if (dx * dx + dy * dy > 16) dirty();
+      if (bp) drawMinimap(bp);
+      return;
+    }
     if (movedNode) {
       if (bp && !movedNode.isGroup) {
         const byId = Object.fromEntries((bp.nodes || []).map((item) => [item.id, item]));
@@ -2976,12 +3489,6 @@
         drawWires(bp, computeGraph(bp));
         drawMinimap(bp);
       }
-      return;
-    }
-    if (movedPan) {
-      const dx = e.clientX - movedPan.x;
-      const dy = e.clientY - movedPan.y;
-      if (dx * dx + dy * dy > 16) dirty();
     }
   }
 
@@ -3377,7 +3884,7 @@
       }
       if (e.target.closest("[data-add-in]") && node.type === "formula") {
         if ((node.inputs || []).length >= 26) return;
-        const used = new Set((node.inputs || []).map((port) => port.name));
+        const used = formulaLetterSet(node);
         const name = nextLetter(used);
         if (!name) return;
         node.inputs.push({ id: uid(), name });
@@ -3387,9 +3894,10 @@
       }
       if (e.target.closest("[data-add-out]") && node.type === "formula") {
         if ((node.outputs || []).length >= MATH_MAX) return;
-        const used = new Set((node.inputs || []).map((port) => port.name).concat((node.outputs || []).map((port) => port.name)));
-        const name = nextName(used);
-        node.outputs.push({ id: uid(), name, expr: name === "C" ? "A+B" : "0" });
+        const used = formulaLetterSet(node);
+        const name = nextLetter(used);
+        if (!name) return;
+        node.outputs.push({ id: uid(), name, expr: "0" });
         dirty();
         render();
         return;
@@ -3415,6 +3923,11 @@
       const dashPorts = e.target.closest("[data-dash-ports]");
       if (dashPorts && node.type === "dashboard") {
         showDashPortMenu(e.clientX, e.clientY, node.id);
+        return;
+      }
+      const orderTypes = e.target.closest("[data-order-types]");
+      if (orderTypes && node.type === "order") {
+        showOrderTypeMenu(e.clientX, e.clientY, node.id);
       }
     });
     root.addEventListener("input", (e) => {
@@ -3432,10 +3945,28 @@
         }
         return;
       }
-      if (!e.target.dataset?.constValue) return;
+      const nodeEl = e.target.closest(".calc-node");
       const bp = activeBlueprint();
-      fitScreenNodes();
-      if (bp) requestAnimationFrame(() => drawWires(bp, computeGraph(bp)));
+      const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node) : null;
+      if (!node || !bp) return;
+      if (e.target.dataset?.constValue && node.type === "const") {
+        const text = String(e.target.value || "").replace(",", ".").trim();
+        if (text && text !== "-" && text !== "." && text !== "-.") {
+          const value = Number(text);
+          if (Number.isFinite(value)) node.value = value;
+        } else if (!text) {
+          node.value = 0;
+        }
+        dirty();
+        patchGraphLive();
+        return;
+      }
+      if (e.target.dataset?.outExpr && node.type === "formula") {
+        const port = (node.outputs || []).find((item) => item.id === e.target.dataset.outExpr);
+        if (port) port.expr = e.target.value;
+        dirty();
+        patchGraphLive();
+      }
     });
     root.addEventListener("change", (e) => {
       const nodeEl = e.target.closest(".calc-node, .calc-group-chrome");
@@ -3505,14 +4036,18 @@
       if (e.target.dataset.inName) {
         const port = node.inputs.find((item) => item.id === e.target.dataset.inName);
         if (port) {
-          const used = new Set((node.inputs || []).filter((item) => item.id !== port.id).map((item) => item.name));
+          const used = formulaLetterSet(node, port.id);
           port.name = sanitizeFormulaInput(e.target.value, used, port.name);
           e.target.value = port.name;
         }
       }
       if (e.target.dataset.outName) {
         const port = node.outputs.find((item) => item.id === e.target.dataset.outName);
-        if (port) port.name = e.target.value.trim().slice(0, 24) || port.name;
+        if (port) {
+          const used = formulaLetterSet(node, port.id);
+          port.name = sanitizeFormulaInput(e.target.value, used, port.name);
+          e.target.value = port.name;
+        }
       }
       if (e.target.dataset.outExpr) {
         const port = node.outputs.find((item) => item.id === e.target.dataset.outExpr);
@@ -3546,15 +4081,35 @@
       if (e.key === "Escape") {
         hidePortMenu();
         session.resize = null;
+        let redraw = false;
         if (session.linking) {
           session.linking = null;
           setLinkingClass();
+          redraw = true;
+        }
+        if (session.selectedLink) {
+          session.selectedLink = "";
+          redraw = true;
+        }
+        if (redraw) {
           const bp = activeBlueprint();
           if (bp) drawWires(bp, computeGraph(bp));
         }
         return;
       }
-      if (!/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && (e.key === "Delete" || e.key === "Backspace") && session.selected) {
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
+      if (typing) return;
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === "KeyD" && session.selected) {
+        e.preventDefault();
+        duplicateNode(session.selected);
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && session.selectedLink) {
+        e.preventDefault();
+        removeLink(session.selectedLink);
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && session.selected) {
         e.preventDefault();
         removeNode(session.selected);
       }

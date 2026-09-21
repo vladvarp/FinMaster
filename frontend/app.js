@@ -1,7 +1,19 @@
 (() => {
   const LS_RECENT = "finmaster.recent";
   const LS_AUTOSAVE = "finmaster.autosave";
-  const moneyFmt = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  let moneyFmt = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  function moneyDecimals(doc = state?.doc) {
+    const n = Number(doc?.money_decimals);
+    return Number.isFinite(n) ? Math.max(0, Math.min(4, Math.round(n))) : 2;
+  }
+
+  function syncMoneyFmt(decimals) {
+    const d = Math.max(0, Math.min(4, Number(decimals)));
+    const safe = Number.isFinite(d) ? d : 2;
+    moneyFmt = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: safe, maximumFractionDigits: safe });
+    return safe;
+  }
 
   const state = {
     doc: null,
@@ -578,6 +590,13 @@
     return `${moneyFmt.format(Number(n) || 0)} ${cur}`;
   }
 
+  function formatMoneySample(n = 1234.5678) {
+    const cur = String(state.doc?.currency || "₽").slice(0, 8) || "₽";
+    const d = moneyDecimals();
+    const fmt = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: d, maximumFractionDigits: d });
+    return `${fmt.format(Number(n) || 0)} ${cur}`;
+  }
+
   function num(v) {
     const n = Number(v);
     return Number.isFinite(n) ? n : 0;
@@ -768,6 +787,7 @@
       created_at: new Date().toISOString(),
       modified_at: new Date().toISOString(),
       currency: "₽",
+      money_decimals: 2,
       statuses: [
         { id: "new", name: "Новый заказ", color: "#0284c7" },
         { id: "in_progress", name: "Выполняется", color: "#2563eb" },
@@ -1021,6 +1041,20 @@
     if (titleEl && document.activeElement !== titleEl) {
       titleEl.value = state.doc?.title || "Отчёт";
     }
+    const currencyEl = $("report-currency");
+    const cur = String(state.doc?.currency || "₽").slice(0, 8) || "₽";
+    if (currencyEl && document.activeElement !== currencyEl) {
+      currencyEl.value = cur;
+    }
+    document.querySelectorAll(".report-currency-chip").forEach((btn) => {
+      btn.classList.toggle("is-on", btn.dataset.currency === cur);
+    });
+    const dec = moneyDecimals();
+    document.querySelectorAll(".report-decimals-chip").forEach((btn) => {
+      btn.classList.toggle("is-on", Number(btn.dataset.decimals) === dec);
+    });
+    const preview = $("report-settings-preview");
+    if (preview) preview.textContent = `Пример: ${formatMoneySample()}`;
     const pathEl = $("file-path");
     if (pathEl) pathEl.textContent = state.path || "Файл ещё не сохранён";
     $("dirty-dot")?.classList.toggle("hidden", !state.dirty);
@@ -1029,6 +1063,53 @@
     document.title = `${state.dirty ? "• " : ""}${state.doc?.title || "FinMaster"} — FinMaster`;
     updateHistoryButtons();
     applySidebar();
+  }
+
+  function setCurrency(raw, opts = {}) {
+    if (!state.doc) return;
+    const refresh = opts.refresh !== false;
+    let next = String(raw ?? "").slice(0, 8);
+    if (refresh) next = next.trim() || "₽";
+    if (state.doc.currency === next) {
+      updateChrome();
+      return;
+    }
+    state.doc.currency = next;
+    markDirty("Валюта");
+    if (refresh) renderAll();
+    else {
+      FinCharts?.setCurrency?.(next || "₽");
+      updateChrome();
+    }
+  }
+
+  function setMoneyDecimals(raw, opts = {}) {
+    if (!state.doc) return;
+    const refresh = opts.refresh !== false;
+    const next = moneyDecimals({ money_decimals: raw });
+    if (Number(state.doc.money_decimals) === next) {
+      syncMoneyFmt(next);
+      updateChrome();
+      return;
+    }
+    state.doc.money_decimals = next;
+    syncMoneyFmt(next);
+    markDirty("Точность сумм");
+    if (refresh) renderAll();
+    else {
+      FinCharts?.setMoneyDecimals?.(next);
+      updateChrome();
+    }
+  }
+
+  function openReportSettings() {
+    updateChrome();
+    $("report-settings-modal")?.classList.add("open");
+    $("report-currency")?.focus();
+  }
+
+  function closeReportSettings() {
+    $("report-settings-modal")?.classList.remove("open");
   }
 
   function showApp() {
@@ -6773,6 +6854,8 @@
     normalizeOrderTypes();
     normalizeProducts();
     FinCharts.setCurrency(state.doc.currency || "₽");
+    FinCharts.setMoneyDecimals?.(moneyDecimals());
+    syncMoneyFmt(moneyDecimals());
     updateChrome();
     fillFilterSelects();
     if (state.view === "dashboard") renderDashboard();
@@ -7384,6 +7467,27 @@
       if (!state.doc) return;
       state.doc.title = e.target.value;
       markDirty();
+    });
+    $("btn-report-settings")?.addEventListener("click", () => openReportSettings());
+    $("report-settings-close")?.addEventListener("click", () => closeReportSettings());
+    $("report-settings-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("report-settings-modal")) closeReportSettings();
+    });
+    $("report-currency")?.addEventListener("input", (e) => {
+      setCurrency(e.target.value, { refresh: false });
+    });
+    $("report-currency")?.addEventListener("change", (e) => {
+      setCurrency(e.target.value, { refresh: true });
+    });
+    document.querySelector(".report-currency-presets")?.addEventListener("click", (e) => {
+      const chip = e.target.closest("[data-currency]");
+      if (!chip) return;
+      setCurrency(chip.dataset.currency, { refresh: true });
+    });
+    document.querySelector(".report-decimals-presets")?.addEventListener("click", (e) => {
+      const chip = e.target.closest("[data-decimals]");
+      if (!chip) return;
+      setMoneyDecimals(chip.dataset.decimals, { refresh: true });
     });
     $("btn-add-order").addEventListener("click", () => {
       state.doc.orders.push(emptyOrder());
@@ -8342,6 +8446,11 @@
           return;
         }
         if ($("help-modal").classList.contains("open")) $("help-modal").classList.remove("open");
+        if ($("report-settings-modal")?.classList.contains("open")) {
+          e.preventDefault();
+          closeReportSettings();
+          return;
+        }
         if ($("device-info-modal")?.classList.contains("open")) {
           $("device-info-modal").classList.remove("open");
           return;

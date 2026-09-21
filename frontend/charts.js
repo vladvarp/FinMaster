@@ -2,9 +2,10 @@ const FinCharts = (() => {
   const instances = new WeakMap();
   const DUR = 560;
   let CURRENCY = "₽";
+  let MONEY_DECIMALS = 2;
 
   const nfInt = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
-  const nfMoney = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  let nfMoney = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const reduceMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
@@ -718,5 +719,12 @@ const FinCharts = (() => {
     if (cur) CURRENCY = String(cur);
   }
 
-  return { line, bar, doughnut, setCurrency };
+  function setMoneyDecimals(raw) {
+    const n = Number(raw);
+    const d = Number.isFinite(n) ? Math.max(0, Math.min(4, Math.round(n))) : 2;
+    MONEY_DECIMALS = d;
+    nfMoney = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: d, maximumFractionDigits: d });
+  }
+
+  return { line, bar, doughnut, setCurrency, setMoneyDecimals };
 })();
