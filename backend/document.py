@@ -233,11 +233,18 @@ def _line_series_ui(raw: Any) -> dict[str, Any]:
 
 
 CALC_OPS = ("+", "-", "*", "/")
-CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group", "filter", "dashboard")
+CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group", "filter", "dashboard", "present")
 CALC_MAX_BLUEPRINTS = 24
 CALC_MAX_NODES = 120
 CALC_MAX_LINKS = 400
 CALC_MAX_PORTS = 20
+PRES_MAX_PAGES = 24
+PRES_MAX_BLOCKS = 80
+PRES_BLOCK_TYPES = ("kpi", "metric", "compare", "delta", "progress", "bars", "share", "title", "note", "spacer")
+PRES_STYLE_PRESETS = ("card", "glass", "solid", "outline", "ink", "neon", "soft", "bare")
+PRES_STYLE_FILLS = ("auto", "solid", "gradient", "glass", "none")
+PRES_STYLE_ALIGNS = ("start", "center", "end")
+PRES_STYLE_WEIGHTS = ("normal", "bold", "black")
 CALC_PERIODS = ("all", "today", "week", "month", "year", "range")
 CALC_PAY_FILTERS = ("all", "debt", "paid", "month", "empty")
 CALC_DASH_PORTS = (
@@ -393,6 +400,13 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
     elif kind == "dashboard":
         node.update(_calc_filter_fields(raw))
         node["openPorts"] = _calc_dash_ports(raw.get("openPorts"))
+    elif kind == "present":
+        node["pageId"] = _clip_text(raw.get("pageId"), 80)
+        node["blockId"] = _clip_text(raw.get("blockId"), 80)
+        node["blockType"] = _clip_text(raw.get("blockType"), 24, "metric")
+        if node["blockType"] not in PRES_BLOCK_TYPES:
+            node["blockType"] = "metric"
+        node["title"] = _clip_text(raw.get("title"), 64, "Блок")
     elif kind == "group":
         node["name"] = _clip_text(raw.get("name"), 48, "Группа")
         color = str(raw.get("color") or "").strip().lower()
@@ -520,6 +534,160 @@ def _calculator_ui(raw: Any) -> dict[str, Any]:
     return {"active": active, "blueprints": blueprints, "folds": folds}
 
 
+def _snap10(value: int) -> int:
+    return int(round(value / 10) * 10)
+
+
+def _hex_color(value: Any, default: str = "") -> str:
+    color = str(value or "").strip().lower()
+    if len(color) == 7 and color.startswith("#") and all(ch in "0123456789abcdef" for ch in color[1:]):
+        return color
+    if len(color) == 4 and color.startswith("#") and all(ch in "0123456789abcdef" for ch in color[1:]):
+        return "#" + "".join(ch * 2 for ch in color[1:])
+    return default
+
+
+def _float_in_range(value: Any, default: float, low: float, high: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if number != number:
+        return default
+    return max(low, min(high, number))
+
+
+def _presentation_style(raw: Any) -> dict[str, Any]:
+    s = raw if isinstance(raw, dict) else {}
+    preset = str(s.get("preset") or "card")
+    if preset not in PRES_STYLE_PRESETS:
+        preset = "card"
+    fill = str(s.get("fill") or "auto")
+    if fill not in PRES_STYLE_FILLS:
+        fill = "auto"
+    align = str(s.get("align") or "start")
+    if align not in PRES_STYLE_ALIGNS:
+        align = "start"
+    weight = str(s.get("weight") or "bold")
+    if weight not in PRES_STYLE_WEIGHTS:
+        weight = "bold"
+    return {
+        "preset": preset,
+        "fill": fill,
+        "bg": _hex_color(s.get("bg")),
+        "bg2": _hex_color(s.get("bg2")),
+        "fg": _hex_color(s.get("fg")),
+        "muted": _hex_color(s.get("muted")),
+        "accent": _hex_color(s.get("accent")),
+        "border": _hex_color(s.get("border")),
+        "borderW": _int_in_range(s.get("borderW"), -1, -1, 12),
+        "radius": _int_in_range(s.get("radius"), -1, -1, 64),
+        "shadow": _int_in_range(s.get("shadow"), -1, -1, 4),
+        "align": align,
+        "pad": _float_in_range(s.get("pad"), 1.0, 0.4, 2.4),
+        "weight": weight,
+        "label": bool(s.get("label", True)),
+        "opacity": _float_in_range(s.get("opacity"), 1.0, 0.15, 1.0),
+        "fs": _float_in_range(s.get("fs"), 1.0, 0.55, 2.2),
+    }
+
+
+def _presentation_block(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    block_id = _clip_text(raw.get("id"), 80)
+    kind = str(raw.get("type") or "")
+    if not block_id or kind not in PRES_BLOCK_TYPES:
+        return None
+    labels_raw = raw.get("labels") if isinstance(raw.get("labels"), dict) else {}
+    labels = {
+        "a": _clip_text(labels_raw.get("a"), 24, "A"),
+        "b": _clip_text(labels_raw.get("b"), 24, "B"),
+        "c": _clip_text(labels_raw.get("c"), 24, "C"),
+        "d": _clip_text(labels_raw.get("d"), 24, "D"),
+    }
+    values_raw = raw.get("values") if isinstance(raw.get("values"), dict) else {}
+    values: dict[str, float] = {}
+    for key, item in values_raw.items():
+        port = _clip_text(key, 24)
+        if not port:
+            continue
+        try:
+            number = float(item)
+        except (TypeError, ValueError):
+            continue
+        if number != number:
+            continue
+        values[port] = number
+    return {
+        "id": block_id,
+        "type": kind,
+        "title": _clip_text(raw.get("title"), 64, kind),
+        "text": _clip_text(raw.get("text"), 400),
+        "x": _snap10(_int_in_range(raw.get("x"), 40, -8000, 8000)),
+        "y": _snap10(_int_in_range(raw.get("y"), 40, -8000, 8000)),
+        "w": max(80, _snap10(_int_in_range(raw.get("w"), 200, 40, 4000))),
+        "h": max(40, _snap10(_int_in_range(raw.get("h"), 100, 24, 4000))),
+        "z": _int_in_range(raw.get("z"), 1, 0, 9999),
+        "labels": labels,
+        "values": values,
+        "style": _presentation_style(raw.get("style")),
+    }
+
+
+def _presentation_page(raw: Any, index: int) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    page_id = _clip_text(raw.get("id"), 80)
+    if not page_id:
+        return None
+    blocks: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw.get("blocks") if isinstance(raw.get("blocks"), list) else []:
+        block = _presentation_block(item)
+        if not block or block["id"] in seen:
+            continue
+        seen.add(block["id"])
+        blocks.append(block)
+        if len(blocks) >= PRES_MAX_BLOCKS:
+            break
+    return {
+        "id": page_id,
+        "name": _clip_text(raw.get("name"), 48, f"Страница {index + 1}"),
+        "w": max(400, _snap10(_int_in_range(raw.get("w"), 1200, 400, 8000))),
+        "h": max(300, _snap10(_int_in_range(raw.get("h"), 800, 300, 8000))),
+        "bg": _hex_color(raw.get("bg")),
+        "showGrid": bool(raw.get("showGrid", False)),
+        "blocks": blocks,
+    }
+
+
+def _presentation_ui(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {"active": "", "pages": [], "inspectorOpen": True, "canvasLocked": False}
+    pages: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, item in enumerate(raw.get("pages") if isinstance(raw.get("pages"), list) else []):
+        page = _presentation_page(item, i)
+        if not page or page["id"] in seen:
+            continue
+        seen.add(page["id"])
+        pages.append(page)
+        if len(pages) >= PRES_MAX_PAGES:
+            break
+    active = _clip_text(raw.get("active"), 80)
+    if active and active not in seen:
+        active = pages[0]["id"] if pages else ""
+    elif not active and pages:
+        active = pages[0]["id"]
+    return {
+        "active": active,
+        "pages": pages,
+        "inspectorOpen": raw.get("inspectorOpen") is not False,
+        "canvasLocked": bool(raw.get("canvasLocked")),
+    }
+
+
 def _int_in_range(value: Any, default: int, low: int, high: int) -> int:
     try:
         number = int(round(float(value)))
@@ -599,6 +767,7 @@ def empty_document(title: str = "Новый отчёт") -> dict[str, Any]:
             "cloud": {},
             "line_series": {},
             "calculator": {"active": "", "blueprints": [], "folds": {"nodes": True, "schemes": True, "orders": True}},
+            "presentation": {"active": "", "pages": [], "inspectorOpen": True, "canvasLocked": False},
         },
     }
 
@@ -750,6 +919,7 @@ def normalize_document(raw: Any) -> dict[str, Any]:
             "calendar": _calendar_ui(ui.get("calendar")),
             "line_series": _line_series_ui(ui.get("line_series")),
             "calculator": _calculator_ui(ui.get("calculator")),
+            "presentation": _presentation_ui(ui.get("presentation")),
         }
         if base["ui"]["cash_horizon"] not in CASH_HORIZONS:
             base["ui"]["cash_horizon"] = DEFAULT_CASH_HORIZON

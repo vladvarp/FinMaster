@@ -47,6 +47,7 @@
   ];
   const DASH_DEFAULT = ["orders", "after", "paid", "unpaid"];
   const FILTER_PORTS = ["orders", "lines", "after", "paid", "unpaid", "cost", "net"];
+  const presentValues = new Map();
 
   let api = null;
   const session = {
@@ -65,6 +66,10 @@
     miniHidden: false,
     resize: null,
     folds: null,
+    presentPanel: false,
+    presentDrag: null,
+    presentHover: "",
+    presentListScroll: 0,
   };
 
   function $(id) {
@@ -615,7 +620,103 @@
       { id: "in2", name: "%" },
     ];
     if (node.type === "formula") return node.inputs || [];
+    if (node.type === "present") return presentPorts(node);
     return [];
+  }
+
+  function presentPorts(node) {
+    const meta = window.FinPresent?.blockMeta?.(node.blockType || "metric");
+    return (meta?.ports || []).map((port) => ({ id: port.id, name: port.name }));
+  }
+
+  function presentOwner(blockId, portId, exceptBpId) {
+    const calc = ensureState();
+    for (const bp of calc.blueprints || []) {
+      if (exceptBpId && bp.id === exceptBpId) continue;
+      const nodes = bp.nodes || [];
+      for (const link of bp.links || []) {
+        const dst = nodes.find((item) => item.id === link.to);
+        if (!dst || dst.type !== "present" || dst.blockId !== blockId) continue;
+        if (link.toPort !== portId) continue;
+        return { blueprint: bp, node: dst, link };
+      }
+    }
+    return null;
+  }
+
+  function presentUsage(blockId) {
+    const calc = ensureState();
+    const activeId = activeBlueprint()?.id || "";
+    let onActive = 0;
+    let onOther = 0;
+    const otherNames = [];
+    for (const bp of calc.blueprints || []) {
+      const count = (bp.nodes || []).filter((node) => node.type === "present" && node.blockId === blockId).length;
+      if (!count) continue;
+      if (bp.id === activeId) onActive += count;
+      else {
+        onOther += count;
+        if (bp.name) otherNames.push(bp.name);
+      }
+    }
+    return { onActive, onOther, otherNames };
+  }
+
+  function setPresentHover(blockId) {
+    session.presentHover = blockId || "";
+    const host = nodesRoot();
+    if (!host) return;
+    host.querySelectorAll(".calc-node.is-present").forEach((el) => {
+      const match = !!session.presentHover && el.dataset.presentBlockId === session.presentHover;
+      el.classList.toggle("is-present-hl", match);
+    });
+  }
+
+  function freePresentPort(blockId, portId) {
+    const calc = ensureState();
+    let changed = false;
+    (calc.blueprints || []).forEach((bp) => {
+      const before = (bp.links || []).length;
+      bp.links = (bp.links || []).filter((link) => {
+        const dst = (bp.nodes || []).find((item) => item.id === link.to);
+        if (!dst || dst.type !== "present") return true;
+        if (dst.blockId !== blockId || link.toPort !== portId) return true;
+        return false;
+      });
+      if (bp.links.length !== before) changed = true;
+    });
+    if (changed) {
+      dirty();
+      render();
+      renderPresentPanel();
+    }
+    return changed;
+  }
+
+  function removePresentBlockNodes(blockId) {
+    if (!blockId) return false;
+    const calc = ensureState();
+    if (!calc) return false;
+    let changed = false;
+    (calc.blueprints || []).forEach((bp) => {
+      const drop = new Set(
+        (bp.nodes || []).filter((node) => node.type === "present" && node.blockId === blockId).map((node) => node.id)
+      );
+      if (!drop.size) return;
+      bp.nodes = (bp.nodes || []).filter((node) => !drop.has(node.id));
+      bp.links = (bp.links || []).filter((link) => !drop.has(link.from) && !drop.has(link.to));
+      if (session.selected && drop.has(session.selected)) session.selected = "";
+      changed = true;
+    });
+    [...presentValues.keys()].forEach((key) => {
+      if (key.startsWith(`${blockId}:`)) presentValues.delete(key);
+    });
+    if (changed) {
+      dirty();
+      if (api?.view?.() === "calculator") render();
+      else renderPresentPanel();
+    }
+    return changed;
   }
 
   function nodeOutputs(node, order, links) {
@@ -839,6 +940,27 @@
           const value = Number(stats[id]);
           setVal(nodeId, id, Number.isFinite(value) ? value : 0);
         });
+      } else if (node.type === "present") {
+        presentPorts(node).forEach((port) => {
+          const link = (incoming[nodeId] || []).find((item) => item.toPort === port.id);
+          let value = null;
+          if (link) {
+            walk(link.from);
+            const found = values[`${link.from}:${link.fromPort}`];
+            if (found != null && Number.isFinite(found)) value = found;
+          }
+          setVal(nodeId, port.id, value);
+          // Пишем только при наличии связи: иначе активная схема затирает значения других схем.
+          if (node.blockId && link && value != null && Number.isFinite(value)) {
+            const key = `${node.blockId}:${port.id}`;
+            presentValues.set(key, value);
+            const found = window.FinPresent?.findBlock?.(node.blockId);
+            if (found?.block) {
+              if (!found.block.values || typeof found.block.values !== "object") found.block.values = {};
+              found.block.values[port.id] = value;
+            }
+          }
+        });
       }
       visiting.delete(nodeId);
       done.add(nodeId);
@@ -872,6 +994,7 @@
     if (node.type === "scheme") return { w: 220, h: 100 };
     if (node.type === "result") return { w: 376, h: 120 };
     if (node.type === "filter" || node.type === "dashboard") return { w: 384, h: 280 };
+    if (node.type === "present") return { w: 220, h: 160 };
     if (node.type === "group") return { w: Math.max(160, node.w || 320), h: Math.max(120, node.h || 220) };
     return { w: 188, h: 120 };
   }
@@ -1043,6 +1166,7 @@
       scheme: "#eab308",
       filter: "#0ea5e9",
       dashboard: "#14b8a6",
+      present: "#8b5cf6",
       group: "#94a3b8",
     };
     return map[kind] || "#0d9488";
@@ -1286,6 +1410,12 @@
       node.dateTo = "";
       node.openPorts = DASH_DEFAULT.slice();
     }
+    if (type === "present") {
+      node.pageId = extra?.pageId || "";
+      node.blockId = extra?.blockId || "";
+      node.blockType = extra?.blockType || "metric";
+      node.title = extra?.title || "Блок";
+    }
     if (type === "group") {
       node.name = "Группа";
       node.color = GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
@@ -1388,6 +1518,13 @@
     if (!fromHit) return false;
     const port = resolveToPort(dst, toPort, bp.links);
     if (!port) return false;
+    if (dst.type === "present" && dst.blockId) {
+      const owner = presentOwner(dst.blockId, port, bp.id);
+      if (owner) {
+        api?.toast?.(`Вход занят схемой «${owner.blueprint.name || "Схема"}»`);
+        return false;
+      }
+    }
     const replaced = (bp.links || []).filter((link) => link.to === to && link.toPort === port);
     bp.links = bp.links.filter((link) => !(link.to === to && link.toPort === port));
     bp.links.push({ id: uid(), from, fromPort: fromHit, to, toPort: port });
@@ -1952,6 +2089,45 @@
     </article>`;
   }
 
+  function presentNodeHtml(node, bp, graph) {
+    const found = window.FinPresent?.findBlock?.(node.blockId);
+    const title = found?.block?.title || node.title || "Блок";
+    const pageName = found?.page?.name || "Страница";
+    const meta = window.FinPresent?.blockMeta?.(node.blockType || found?.block?.type || "metric");
+    const linked = usedInputPorts(node.id, bp.links);
+    const ports = presentPorts(node);
+    return `<article class="calc-node is-present ${session.selected === node.id ? "is-on" : ""} ${session.presentHover && session.presentHover === node.blockId ? "is-present-hl" : ""}" data-node="${esc(node.id)}" data-present-block-id="${esc(node.blockId || "")}" style="left:${node.x}px;top:${node.y}px">
+      <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
+      <header class="calc-node-h">
+        <span title="${esc(pageName)} · ${esc(title)}"><span class="pres-tool-ico" aria-hidden="true">${esc(meta?.ico || "▣")}</span><span class="pres-tool-name">${esc(title)}</span></span>
+        <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
+      </header>
+      <div class="calc-node-sub">${esc(pageName)} · ${esc(meta?.name || node.blockType || "")}</div>
+      <div class="calc-ports">
+        ${
+          ports.length
+            ? ports
+                .map((port) => {
+                  const value = graph.values[`${node.id}:${port.id}`];
+                  const owner = presentOwner(node.blockId, port.id, bp.id);
+                  const locked = !!owner && !linked.has(port.id);
+                  const tip = locked
+                    ? `Занято схемой «${owner.blueprint.name || "Схема"}». ПКМ — освободить.`
+                    : port.name;
+                  return `<div class="calc-row in ${locked ? "is-locked" : ""}" title="${esc(tip)}">
+                    <i class="calc-port in ${locked ? "is-locked" : ""}" data-port="${esc(port.id)}" data-io="in" data-present-lock="${locked ? "1" : ""}" title="${esc(tip)}"></i>
+                    <span>${esc(port.name)}</span>
+                    <b>${esc(fmtShort(value))}</b>
+                    ${linked.has(port.id) ? `<button type="button" class="calc-mini" data-del-in-link="${esc(port.id)}" title="Удалить связь">×</button>` : ""}
+                  </div>`;
+                })
+                .join("")
+            : `<div class="calc-empty">Нет входов</div>`
+        }
+      </div>
+    </article>`;
+  }
+
   function fitScreenNodes() {
     const host = nodesRoot();
     if (!host) return;
@@ -2004,6 +2180,7 @@
         if (node.type === "scheme") return schemeNodeHtml(node, graph);
         if (node.type === "filter") return filterNodeHtml(node, graph);
         if (node.type === "dashboard") return dashboardNodeHtml(node, bp, graph);
+        if (node.type === "present") return presentNodeHtml(node, bp, graph);
         return orderNodeHtml(node, api.findOrder(node.orderId), graph, bp);
       })
       .join("");
@@ -2084,7 +2261,7 @@
       }
       return "order";
     }
-    if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme" || type === "group" || type === "filter" || type === "dashboard") return type;
+    if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme" || type === "group" || type === "filter" || type === "dashboard" || type === "present") return type;
     return "order";
   }
 
@@ -2251,8 +2428,39 @@
     drawMinimap(bp);
   }
 
+  function rebuildPresentValues() {
+    presentValues.clear();
+    try {
+      (window.FinPresent?.pages?.() || []).forEach((page) => {
+        (page.blocks || []).forEach((block) => {
+          block.values = {};
+        });
+      });
+    } catch {
+      /* ignore */
+    }
+    const calc = ensureState();
+    if (!calc) return;
+    (calc.blueprints || []).forEach((bp) => computeGraph(bp));
+  }
+
+  function hidePresentPanel() {
+    session.presentPanel = false;
+    session.presentDrag = null;
+    setPresentHover("");
+    const btn = $("calc-present-btn");
+    btn?.classList.remove("is-on");
+    btn?.setAttribute("aria-pressed", "false");
+    const el = $("calc-present-panel");
+    if (el) el.hidden = true;
+  }
+
   function render() {
-    if (!api || api.view() !== "calculator") return;
+    if (!api || api.view() !== "calculator") {
+      const panel = $("calc-present-panel");
+      if (panel) panel.hidden = true;
+      return;
+    }
     const calc = ensureState();
     const bp = activeBlueprint();
     if (!calc || !bp) return;
@@ -2263,15 +2471,221 @@
       drawMinimap(bp);
       return;
     }
+    rebuildPresentValues();
     const graph = computeGraph(bp);
     renderTabs(calc);
     renderTitle(bp);
     renderSide(bp);
     renderNodes(bp, graph);
+    if (session.presentHover) setPresentHover(session.presentHover);
+    const btn = $("calc-present-btn");
+    btn?.classList.toggle("is-on", session.presentPanel);
+    btn?.setAttribute("aria-pressed", session.presentPanel ? "true" : "false");
+    renderPresentPanel();
     requestAnimationFrame(() => {
       drawWires(bp, graph);
       drawMinimap(bp);
     });
+  }
+
+  function presentPanelEl() {
+    let el = $("calc-present-panel");
+    if (el) return el;
+    el = document.createElement("div");
+    el.id = "calc-present-panel";
+    el.className = "calc-present-panel";
+    el.hidden = true;
+    document.body.appendChild(el);
+    el.addEventListener("pointerdown", (e) => {
+      const handle = e.target.closest("[data-present-drag]");
+      if (!handle || e.button !== 0) return;
+      if (e.target.closest("button, details, summary, .calc-present-block")) return;
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      session.presentDrag = {
+        dx: e.clientX - rect.left,
+        dy: e.clientY - rect.top,
+      };
+      el.setPointerCapture(e.pointerId);
+    });
+    el.addEventListener("pointermove", (e) => {
+      if (!session.presentDrag) return;
+      const x = Math.max(8, Math.min(window.innerWidth - 80, e.clientX - session.presentDrag.dx));
+      const y = Math.max(8, Math.min(window.innerHeight - 80, e.clientY - session.presentDrag.dy));
+      el.style.left = `${x}px`;
+      el.style.top = `${y}px`;
+      el.style.right = "auto";
+      el.dataset.moved = "1";
+    });
+    el.addEventListener("pointerup", () => {
+      session.presentDrag = null;
+    });
+    el.addEventListener("pointercancel", () => {
+      session.presentDrag = null;
+    });
+    el.addEventListener("pointerover", (e) => {
+      const item = e.target.closest("[data-present-block]");
+      if (!item || !el.contains(item)) return;
+      if (item.dataset.presentUsed !== "1") {
+        if (session.presentHover) setPresentHover("");
+        return;
+      }
+      const blockId = item.dataset.presentBlock || "";
+      if (session.presentHover === blockId) return;
+      setPresentHover(blockId);
+    });
+    el.addEventListener("pointerout", (e) => {
+      const item = e.target.closest("[data-present-block]");
+      if (!item || !el.contains(item)) return;
+      if (e.relatedTarget && item.contains(e.relatedTarget)) return;
+      if (session.presentHover && session.presentHover === item.dataset.presentBlock) {
+        setPresentHover("");
+      }
+    });
+    el.addEventListener(
+      "scroll",
+      (e) => {
+        if (e.target?.classList?.contains("calc-present-list")) {
+          session.presentListScroll = e.target.scrollTop;
+        }
+      },
+      true
+    );
+    return el;
+  }
+
+  function togglePresentPanel(force) {
+    if (api?.view?.() !== "calculator") {
+      hidePresentPanel();
+      return;
+    }
+    session.presentPanel = force == null ? !session.presentPanel : !!force;
+    const btn = $("calc-present-btn");
+    btn?.classList.toggle("is-on", session.presentPanel);
+    btn?.setAttribute("aria-pressed", session.presentPanel ? "true" : "false");
+    renderPresentPanel();
+  }
+
+  function renderPresentPanel() {
+    const el = presentPanelEl();
+    if (!el) return;
+    const show = api?.view?.() === "calculator" && session.presentPanel;
+    el.hidden = !show;
+    if (!session.presentPanel) {
+      setPresentHover("");
+      return;
+    }
+    if (show && !el.dataset.moved) {
+      const board = $("calc-board");
+      const rect = board?.getBoundingClientRect();
+      if (rect) {
+        el.style.left = `${Math.max(12, rect.left + 12)}px`;
+        el.style.top = `${Math.max(12, rect.top + 52)}px`;
+      }
+    }
+    const skip = new Set(["title", "note", "spacer"]);
+    const pages = window.FinPresent?.pages?.() || [];
+    const prevList = el.querySelector(".calc-present-list");
+    if (prevList) session.presentListScroll = prevList.scrollTop;
+    const scrollTop = session.presentListScroll || 0;
+    if (!pages.length) {
+      el.innerHTML = `<div class="calc-present-h" data-present-drag="1">Презентация <button type="button" class="calc-mini" data-close-present-panel="1" title="Закрыть">×</button></div><div class="calc-empty">Создайте страницы во вкладке «Презентация»</div>`;
+      return;
+    }
+    el.innerHTML = `<div class="calc-present-h" data-present-drag="1"><span>Презентация</span> <button type="button" class="calc-mini" data-close-present-panel="1" title="Закрыть">×</button></div>
+      <div class="calc-present-list">
+        ${pages
+          .map((page) => {
+            const blocks = (page.blocks || []).filter((block) => !skip.has(block.type));
+            return `<details class="calc-present-page" open>
+              <summary>${esc(page.name || "Страница")} <span>${blocks.length}</span></summary>
+              <div class="calc-present-blocks">
+                ${
+                  blocks.length
+                    ? blocks
+                        .map((block) => {
+                          const meta = window.FinPresent?.blockMeta?.(block.type) || { ico: "▣", name: block.type, ports: [] };
+                          const ports = meta.ports || [];
+                          const usage = presentUsage(block.id);
+                          const onScheme = usage.onActive > 0;
+                          const onOther = !onScheme && usage.onOther > 0;
+                          let status = "Не на схеме";
+                          let tip = "Добавить ноду на схему";
+                          if (onScheme) {
+                            status = "На схеме";
+                            tip = "Уже на этой схеме — наведите, чтобы подсветить";
+                          } else if (onOther) {
+                            status = "Другая схема";
+                            tip = `Есть на: ${usage.otherNames.slice(0, 3).join(", ") || "другой схеме"}`;
+                          }
+                          return `<button type="button" class="calc-present-block ${onScheme ? "is-used" : ""} ${onOther ? "is-used-other" : ""}" draggable="true" data-present-block="${esc(block.id)}" data-present-page="${esc(page.id)}" data-present-used="${onScheme ? "1" : "0"}" title="${esc(tip)}">
+                            <b><span class="pres-tool-ico" aria-hidden="true">${esc(meta.ico || "▣")}</span><span class="pres-tool-name">${esc(block.title || meta.name)}</span></b>
+                            <span>${esc(meta.name)}${ports.length ? ` · ${ports.length} вх.` : ""}</span>
+                            <em class="calc-present-badge ${onScheme ? "is-on" : ""} ${onOther ? "is-other" : ""}">${esc(status)}</em>
+                          </button>`;
+                        })
+                        .join("")
+                    : `<div class="calc-empty">Нет блоков со входами</div>`
+                }
+              </div>
+            </details>`;
+          })
+          .join("")}
+      </div>`;
+    const nextList = el.querySelector(".calc-present-list");
+    if (nextList) nextList.scrollTop = scrollTop;
+  }
+
+  function addPresentNode(pageId, blockId, point) {
+    const found = window.FinPresent?.findBlock?.(blockId);
+    if (!found) return;
+    const bp = activeBlueprint();
+    if (!bp) return;
+    const existing = (bp.nodes || []).find((node) => node.type === "present" && node.blockId === blockId);
+    if (existing) {
+      session.selected = existing.id;
+      render();
+      return;
+    }
+    addNode("present", point || null, {
+      pageId: pageId || found.page.id,
+      blockId: found.block.id,
+      blockType: found.block.type,
+      title: found.block.title || found.block.type,
+    });
+  }
+
+  function showPresentPortMenu(clientX, clientY, nodeId, portId) {
+    document.querySelector(".calc-port-menu")?.remove();
+    const bp = activeBlueprint();
+    const node = bp?.nodes?.find((item) => item.id === nodeId && item.type === "present");
+    if (!node || !node.blockId || !portId) return;
+    const owner = presentOwner(node.blockId, portId, null);
+    const menu = document.createElement("div");
+    menu.className = "calc-port-menu";
+    menu.style.left = `${clientX}px`;
+    menu.style.top = `${clientY}px`;
+    if (owner) {
+      menu.innerHTML = `<button type="button" data-free-present="1">Освободить вход</button>
+        <div class="calc-port-menu-note">Сейчас: «${esc(owner.blueprint.name || "Схема")}»</div>`;
+    } else {
+      menu.innerHTML = `<div class="calc-port-menu-note">Вход свободен</div>`;
+    }
+    document.body.appendChild(menu);
+    const close = () => {
+      menu.remove();
+      document.removeEventListener("pointerdown", onDoc, true);
+    };
+    const onDoc = (ev) => {
+      if (!menu.contains(ev.target)) close();
+    };
+    menu.addEventListener("click", (ev) => {
+      if (ev.target.closest("[data-free-present]")) {
+        freePresentPort(node.blockId, portId);
+        close();
+      }
+    });
+    setTimeout(() => document.addEventListener("pointerdown", onDoc, true), 0);
   }
 
   function recalculate() {
@@ -2316,7 +2730,7 @@
       else disconnectInput(unlink.closest(".calc-node")?.dataset.node, unlink.dataset.delInLink);
       return;
     }
-    if (e.target.closest(".calc-refresh, .calc-chain-move, .calc-board-tools, .calc-bp-name, .calc-screen-copy, .calc-minimap, .calc-mini-toggle, .calc-mini-wrap, input, textarea, select")) return;
+    if (e.target.closest(".calc-refresh, .calc-chain-move, .calc-present-btn, .calc-present-panel, .calc-board-tools, .calc-bp-name, .calc-screen-copy, .calc-minimap, .calc-mini-toggle, .calc-mini-wrap, input, textarea, select")) return;
     const resize = e.target.closest("[data-resize-group]");
     if (resize) {
       e.preventDefault();
@@ -2360,10 +2774,12 @@
         else {
           const owner = bp?.nodes.find((item) => item.id === nodeId);
           if (owner?.type === "dashboard") showDashPortMenu(e.clientX, e.clientY, nodeId);
+          else if (owner?.type === "present" && io === "in") showPresentPortMenu(e.clientX, e.clientY, nodeId, portId);
         }
         return;
       }
       if (e.button !== 0) return;
+      if (io === "in" && port.dataset.presentLock === "1") return;
 
       if (session.linking) {
         const src = session.linking;
@@ -2594,9 +3010,12 @@
     const orderId = e.dataTransfer?.getData("text/finmaster-order") || e.dataTransfer?.getData("text/plain");
     const kind = e.dataTransfer?.getData("text/finmaster-node");
     const blueprintId = e.dataTransfer?.getData("text/finmaster-blueprint");
+    const presentBlock = e.dataTransfer?.getData("text/finmaster-present");
+    const presentPage = e.dataTransfer?.getData("text/finmaster-present-page");
     e.preventDefault();
     const at = worldPoint(bp, e.clientX, e.clientY);
-    if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "filter" || kind === "dashboard") addNode(kind, at);
+    if (presentBlock) addPresentNode(presentPage, presentBlock, at);
+    else if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "filter" || kind === "dashboard") addNode(kind, at);
     else if (blueprintId && blueprintId !== bp.id) addNode("scheme", at, { blueprintId });
     else if (orderId && api.findOrder(orderId)) addNode("order", at, { orderId });
   }
@@ -2743,6 +3162,29 @@
           btn.title = "Убрать ноды без связей";
         }, 1600);
       }
+    });
+    $("calc-present-btn")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      togglePresentPanel();
+    });
+    document.addEventListener("click", (e) => {
+      if (!session.presentPanel) return;
+      if (e.target.closest("[data-close-present-panel]")) {
+        togglePresentPanel(false);
+        return;
+      }
+      const item = e.target.closest("[data-present-block]");
+      if (item && item.closest("#calc-present-panel")) {
+        addPresentNode(item.dataset.presentPage, item.dataset.presentBlock);
+      }
+    });
+    document.addEventListener("dragstart", (e) => {
+      const item = e.target.closest("[data-present-block]");
+      if (!item || !item.closest("#calc-present-panel")) return;
+      e.dataTransfer.setData("text/finmaster-present", item.dataset.presentBlock);
+      e.dataTransfer.setData("text/finmaster-present-page", item.dataset.presentPage || "");
+      e.dataTransfer.effectAllowed = "copy";
     });
     syncChainMoveBtn();
     syncMiniToggle();
@@ -3136,6 +3578,24 @@
     render(next) {
       if (next) api = next;
       render();
+    },
+    presentValue(blockId, portId) {
+      const key = `${blockId}:${portId}`;
+      if (!presentValues.has(key)) return null;
+      return presentValues.get(key);
+    },
+    syncPresentValues(next) {
+      if (next) api = next;
+      rebuildPresentValues();
+    },
+    refreshPresent() {
+      renderPresentPanel();
+    },
+    hidePresentPanel() {
+      hidePresentPanel();
+    },
+    removePresentBlock(blockId) {
+      return removePresentBlockNodes(blockId);
     },
   };
 })();

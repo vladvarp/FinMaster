@@ -118,6 +118,7 @@
           <button data-view="cashflow" title="Касса: платёжный календарь и дебиторка"><span class="nav-ico">₽</span><span class="nav-label">Касса</span></button>
           <button data-view="calendar" title="Календарь работ: когда заказы начаты, идут и закончены"><span class="nav-ico">▦</span><span class="nav-label">Календарь</span></button>
           <button data-view="calculator" title="Калькулятор: схемы из заказов, операторов и формул"><span class="nav-ico">∑</span><span class="nav-label">Калькулятор</span></button>
+          <button data-view="presentation" title="Презентация: инфографика из блоков и схем"><span class="nav-ico">▣</span><span class="nav-label">Презентация</span></button>
           <button data-view="cloud" title="Облако заказов: интерактивная карта связей"><span class="nav-ico">✣</span><span class="nav-label">Облако</span></button>
           <button data-view="customers" title="Заказчики"><span class="nav-ico">◉</span><span class="nav-label">Заказчики</span></button>
           <button data-view="catalogs" title="Справочники"><span class="nav-ico">⚙</span><span class="nav-label">Справочники</span></button>
@@ -436,6 +437,7 @@
             <div class="card calc-board" id="calc-board">
               <div class="calc-board-tools">
                 <button type="button" class="calc-refresh" id="calc-refresh" title="Пересчитать схему">↻</button>
+                <button type="button" class="calc-present-btn" id="calc-present-btn" title="Блоки презентации" aria-pressed="false">▣</button>
                 <button type="button" class="calc-chain-move" id="calc-chain-move" title="Тянуть цепочку входов" aria-pressed="false">⛓</button>
                 <button type="button" class="calc-prune" id="calc-prune" title="Убрать ноды без связей">∅</button>
               </div>
@@ -466,6 +468,33 @@
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <div class="view calc-view pres-view" id="view-presentation">
+          <div class="calc-tabbar">
+            <div class="calc-tabs" id="pres-tabs" role="tablist" aria-label="Страницы презентации"></div>
+            <button type="button" class="calc-tab add" data-add-pres-page="1" title="Новая страница">+</button>
+          </div>
+          <div class="calc-layout">
+            <aside class="card calc-side" id="pres-side"></aside>
+            <div class="card calc-board pres-board" id="pres-board">
+              <div class="pres-board-tools">
+                <button type="button" class="pres-lock-btn" id="pres-lock-btn" data-pres-canvas-lock aria-pressed="false" title="Заблокировать выделение и перемещение">⊡</button>
+              </div>
+              <input id="pres-page-name" class="calc-bp-name" maxlength="48" spellcheck="false" title="Название страницы" />
+              <div class="pres-world" id="pres-world"></div>
+              <div class="calc-hint hint-i">
+                <button type="button" class="info-btn" aria-label="Подсказка по презентации">i</button>
+                <div class="hint-i-pop" role="tooltip">
+                  Соберите инфографику из блоков. Числа подтягиваются из калькулятора: откройте схему и кнопку «Презентация», затем соедините выходы схем со входами блоков.
+                </div>
+              </div>
+            </div>
+            <aside class="card pres-inspector" id="pres-inspector-shell">
+              <button type="button" class="pres-inspector-toggle" data-pres-inspector-toggle aria-expanded="true" title="Свернуть панель">›</button>
+              <div class="pres-inspector-main" id="pres-inspector"></div>
+            </aside>
           </div>
         </div>
 
@@ -966,6 +995,7 @@
   <script src="/charts.js"></script>
   <script src="/cloud.js"></script>
   <script src="/calc.js"></script>
+  <script src="/presentation.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

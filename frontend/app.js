@@ -146,6 +146,7 @@
       if (JSON.stringify(a.order_types || []) !== JSON.stringify(b.order_types || [])) return "Типы заказов";
       if (JSON.stringify(a.ui?.calendar || {}) !== JSON.stringify(b.ui?.calendar || {})) return "Календарь";
       if (JSON.stringify(a.ui?.calculator || {}) !== JSON.stringify(b.ui?.calculator || {})) return "Калькулятор";
+      if (JSON.stringify(a.ui?.presentation || {}) !== JSON.stringify(b.ui?.presentation || {})) return "Презентация";
       if (a.title !== b.title) return "Название отчёта";
     } catch {
       /* ignore */
@@ -787,7 +788,7 @@
       products: [],
       customers: [],
       orders: [],
-      ui: { sidebar_collapsed: false, column_widths: {}, share_fields: [], share_theme: "teal", cloud: {}, line_series: {}, calculator: { active: "", blueprints: [] } },
+      ui: { sidebar_collapsed: false, column_widths: {}, share_fields: [], share_theme: "teal", cloud: {}, line_series: {}, calculator: { active: "", blueprints: [] }, presentation: { active: "", pages: [] } },
     };
   }
 
@@ -6520,6 +6521,7 @@
       view: () => state.view,
       uid,
       money,
+      toast,
       markDirty,
       orders: () => state.doc?.orders || [],
       findOrder,
@@ -6533,11 +6535,23 @@
       statuses: () => (state.doc?.statuses || []).map((s) => s.name),
       customers: () => unique((state.doc?.orders || []).map((o) => o.customer).filter(Boolean)),
       calcStats: (opts) => calcNodeStats(opts || {}),
+      presentValue: (blockId, portId) => window.FinCalc?.presentValue?.(blockId, portId) ?? null,
       copyText: async (text) => {
         if (state.desktop) await apiPost("/api/clipboard-text", { text });
         else if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
         else throw new Error("clipboard");
       },
+    };
+  }
+
+  function presentationApi() {
+    return {
+      doc: () => state.doc,
+      view: () => state.view,
+      uid,
+      money,
+      markDirty,
+      presentValue: (blockId, portId) => window.FinCalc?.presentValue?.(blockId, portId) ?? null,
     };
   }
 
@@ -6616,6 +6630,15 @@
 
   function bindCalculator() {
     window.FinCalc?.bind(calculatorApi());
+  }
+
+  function renderPresentation() {
+    window.FinCalc?.syncPresentValues?.(calculatorApi());
+    window.FinPresent?.render(presentationApi());
+  }
+
+  function bindPresentation() {
+    window.FinPresent?.bind(presentationApi());
   }
 
   function cloudFullscreenElement() {
@@ -6758,6 +6781,7 @@
     if (state.view === "cashflow") renderCashflow();
     if (state.view === "calendar") renderCalendar();
     if (state.view === "calculator") renderCalculator();
+    if (state.view === "presentation") renderPresentation();
     if (state.view === "cloud") renderCloud();
     if (state.view === "catalogs") renderCatalogs();
     if (state.view === "customers") renderCustomers();
@@ -6776,6 +6800,11 @@
   function setView(name) {
     closeProductSuggest();
     if (name !== "cloud") orderCloud?.stopTour();
+    if (name !== "calculator") {
+      const panel = document.getElementById("calc-present-panel");
+      if (panel) panel.hidden = true;
+      $("calc-present-btn")?.classList.remove("is-on");
+    }
     state.view = name;
     document.querySelectorAll(".nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
     document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
@@ -6795,6 +6824,7 @@
       requestAnimationFrame(() => orderCloud?.resize?.());
     }
     if (name === "calculator") requestAnimationFrame(() => renderCalculator());
+    if (name === "presentation") requestAnimationFrame(() => renderPresentation());
   }
 
   function createNew() {
@@ -7343,6 +7373,7 @@
     bindFileMenu();
     bindCloud();
     bindCalculator();
+    bindPresentation();
     bindSearchClears();
     $("global-search").addEventListener("input", (e) => {
       state.search = e.target.value;
@@ -9718,6 +9749,7 @@
       { group: "Разделы", ico: "₽", title: "Касса", sub: "платёжный календарь и дебиторка", run: () => setView("cashflow") },
       { group: "Разделы", ico: "▦", title: "Календарь", sub: "старт, финиш и что идёт сейчас", run: () => setView("calendar") },
       { group: "Разделы", ico: "∑", title: "Калькулятор", sub: "схемы из заказов, операторов и формул", run: () => setView("calculator") },
+      { group: "Разделы", ico: "▣", title: "Презентация", sub: "инфографика из блоков и схем", run: () => setView("presentation") },
       { group: "Разделы", ico: "✣", title: "Облако заказов", sub: "живая карта заказов и позиций", run: () => setView("cloud") },
       { group: "Разделы", ico: "◉", title: "Заказчики", sub: "контакты и рейтинг", run: () => setView("customers") },
       { group: "Разделы", ico: "⚙", title: "Справочники", sub: "статусы, единицы, продукты", run: () => setView("catalogs") },
