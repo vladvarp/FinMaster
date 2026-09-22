@@ -343,6 +343,11 @@
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
 
+  function localDateTimeStamp(d) {
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+
   function dateValue(v) {
     return String(v || "").slice(0, 10);
   }
@@ -1331,7 +1336,7 @@
       customer: "",
       name: "",
       notes: "",
-      created_at: localStamp(new Date()),
+      created_at: localDateTimeStamp(new Date()),
       work_start: "",
       work_end: "",
       work_pauses: [],
@@ -4784,7 +4789,7 @@
         ...JSON.parse(JSON.stringify(order)),
         id: uid(),
         number: nextOrderNumber(),
-        created_at: localStamp(new Date()),
+        created_at: localDateTimeStamp(new Date()),
       };
       copy.lines = (copy.lines || []).map((l) => ({ ...l, id: uid() }));
       state.doc.orders = orders().concat([copy]);

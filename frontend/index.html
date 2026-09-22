@@ -105,9 +105,12 @@
       </div>
       <div class="sidebar-core">
         <div class="file-box">
-          <div class="file-title">Текущий отчёт</div>
+          <div class="file-title">
+            <span>Текущий отчёт</span>
+            <span class="dirty-dot hidden" id="dirty-dot" title="Есть несохранённые изменения" aria-label="Есть несохранённые изменения"></span>
+          </div>
           <div class="file-name">
-            <button type="button" class="file-settings-btn" id="btn-report-settings" title="Настройки отчёта: валюта и округление" aria-label="Настройки отчёта">
+            <button type="button" class="file-settings-btn" id="btn-report-settings" title="Настройки отчёта: файл, автосохранение, валюта и округление" aria-label="Настройки отчёта">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.8"/>
                 <path d="M19.4 13.5a7.6 7.6 0 0 0 .1-1.5 7.6 7.6 0 0 0-.1-1.5l1.7-1.3-1.6-2.8-2 .8a7.8 7.8 0 0 0-2.6-1.5l-.3-2.1h-3.2l-.3 2.1a7.8 7.8 0 0 0-2.6 1.5l-2-.8-1.6 2.8 1.7 1.3a7.6 7.6 0 0 0-.1 1.5 7.6 7.6 0 0 0 .1 1.5L4.3 14.8l1.6 2.8 2-.8a7.8 7.8 0 0 0 2.6 1.5l.3 2.1h3.2l.3-2.1a7.8 7.8 0 0 0 2.6-1.5l2 .8 1.6-2.8-1.7-1.3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
@@ -115,8 +118,6 @@
             </button>
             <input id="report-title" value="Новый отчёт" maxlength="120" spellcheck="false" />
           </div>
-          <div class="file-path" id="file-path">Файл ещё не сохранён</div>
-          <label class="side-check"><input type="checkbox" id="autosave" /> <span>Автосохранение</span><span class="dirty-dot hidden" id="dirty-dot" title="Есть несохранённые изменения"></span></label>
         </div>
         <nav class="nav" id="nav">
           <button data-view="orders" title="Заказы"><span class="nav-ico">☰</span><span class="nav-label">Заказы</span></button>
@@ -220,8 +221,10 @@
               <button class="btn primary" id="btn-add-order">+ Заказ</button>
               <button class="btn" type="button" id="btn-share-many">Снимок заказов</button>
               <select id="order-sort" class="btn">
-                <option value="date-desc">Сначала новые</option>
-                <option value="date-asc">Сначала старые</option>
+                <option value="date-desc">Сначала новые (по дате заказа)</option>
+                <option value="date-asc">Сначала старые (по дате заказа)</option>
+                <option value="created-desc">Сначала недавно созданные</option>
+                <option value="created-asc">Сначала давно созданные</option>
                 <option value="number">По номеру</option>
                 <option value="customer">По заказчику</option>
                 <option value="amount-desc">По сумме ↓</option>
@@ -911,7 +914,13 @@
   <div class="modal" id="report-settings-modal">
     <div class="modal-card report-settings-modal">
       <h3>Настройки отчёта</h3>
-      <p class="report-settings-lead">Валюта и округление сумм во всём отчёте — таблицы, графики, мобильный и Telegram.</p>
+      <p class="report-settings-lead">Файл, автосохранение, валюта и округление сумм во всём отчёте — таблицы, графики, мобильный и Telegram.</p>
+
+      <div class="report-settings-block">
+        <div class="report-settings-label">Файл</div>
+        <div class="report-settings-path" id="file-path">Файл ещё не сохранён</div>
+        <label class="report-settings-check"><input type="checkbox" id="autosave" /> <span>Автосохранение</span></label>
+      </div>
 
       <div class="report-settings-block">
         <div class="report-settings-label">Валюта</div>

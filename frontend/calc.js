@@ -71,6 +71,9 @@
     presentDrag: null,
     presentHover: "",
     presentListScroll: 0,
+    filterMultiOpen: null,
+    filterMultiLock: false,
+    filterMultiScroll: 0,
   };
 
   function $(id) {
@@ -514,20 +517,91 @@
     if (!node.openPorts.length) node.openPorts = DASH_DEFAULT.slice();
   }
 
-  function filterOpts(node) {
+  const FILTER_MULTI_MAX = 48;
+  const DASH_PAY_MULTI = DASH_PAY_FILTERS.filter(([id]) => id !== "all");
+
+  function uniqueStrings(items) {
+    const seen = new Set();
+    const out = [];
+    (items || []).forEach((item) => {
+      const text = String(item || "").trim();
+      if (!text || seen.has(text)) return;
+      seen.add(text);
+      out.push(text);
+    });
+    return out;
+  }
+
+  function filterList(node, key, legacyKey = "", { allowAll = false } = {}) {
+    const raw = node?.[key];
+    if (Array.isArray(raw)) {
+      return uniqueStrings(raw)
+        .filter((item) => allowAll || item !== "all")
+        .slice(0, FILTER_MULTI_MAX);
+    }
+    const legacy = legacyKey ? node?.[legacyKey] : null;
+    const text = String(legacy ?? "").trim();
+    if (!text || (!allowAll && text === "all")) return [];
+    return [text];
+  }
+
+  function normalizeFilterNode(node) {
+    if (!node || (node.type !== "filter" && node.type !== "dashboard")) return node;
+    node.customers = filterList(node, "customers", "customer");
+    node.orderIds = filterList(node, "orderIds", "orderId");
+    node.payFilters = filterList(node, "payFilters", "payFilter");
+    node.orderTypes = filterList(node, "orderTypes", "orderType");
+    node.products = filterList(node, "products", "product");
+    node.statuses = filterList(node, "statuses", "status");
+    node.customer = "";
+    node.orderId = "";
+    node.payFilter = "all";
+    node.status = "";
+    node.orderType = "";
+    node.product = "";
+    return node;
+  }
+
+  function emptyFilterOpts() {
     return {
-      customer: String(node?.customer || "").trim(),
-      orderId: String(node?.orderId || "").trim(),
-      period: node?.period || "all",
-      payFilter: node?.payFilter || "all",
-      status: String(node?.status || "").trim(),
-      dateFrom: node?.dateFrom || "",
-      dateTo: node?.dateTo || "",
+      customers: [],
+      orderIds: [],
+      period: "all",
+      payFilters: [],
+      statuses: [],
+      orderTypes: [],
+      products: [],
+      dateFrom: "",
+      dateTo: "",
     };
   }
 
+  function filterOpts(node) {
+    try {
+      normalizeFilterNode(node);
+      return {
+        customers: Array.isArray(node.customers) ? node.customers.slice() : [],
+        orderIds: Array.isArray(node.orderIds) ? node.orderIds.slice() : [],
+        period: node?.period || "all",
+        payFilters: Array.isArray(node.payFilters) ? node.payFilters.slice() : [],
+        statuses: Array.isArray(node.statuses) ? node.statuses.slice() : [],
+        orderTypes: Array.isArray(node.orderTypes) ? node.orderTypes.slice() : [],
+        products: Array.isArray(node.products) ? node.products.slice() : [],
+        dateFrom: node?.dateFrom || "",
+        dateTo: node?.dateTo || "",
+      };
+    } catch {
+      return emptyFilterOpts();
+    }
+  }
+
   function dashStats(node) {
-    return api?.calcStats?.(filterOpts(node)) || {};
+    try {
+      return api?.calcStats?.(filterOpts(node)) || {};
+    } catch (err) {
+      console.warn("calc filter stats", err);
+      return {};
+    }
   }
 
   function loadFolds() {
@@ -576,48 +650,91 @@
     }
   }
 
+  function multiSummary(selected, emptyLabel = "Все") {
+    if (!selected.length) return emptyLabel;
+    if (selected.length === 1) return selected[0];
+    return `${selected.length} выбр.`;
+  }
+
+  function multiPickHtml(nodeId, field, label, options, selected, opts = {}) {
+    // Avoid destructuring `valueOf`/`toString` — they inherit from Object.prototype and break defaults.
+    const getValue = typeof opts.getValue === "function" ? opts.getValue : (item) => item;
+    const getLabel = typeof opts.getLabel === "function" ? opts.getLabel : (item) => item;
+    const title = opts.title || "";
+    const open = session.filterMultiOpen?.field === field && session.filterMultiOpen?.nodeId === nodeId;
+    const list = Array.isArray(options) ? options : [];
+    const picked = Array.isArray(selected) ? selected : [];
+    const selectedSet = new Set(picked);
+    const canClear = picked.length > 1;
+    const summary = multiSummary(
+      picked.map((id) => {
+        const hit = list.find((item) => getValue(item) === id);
+        return hit ? getLabel(hit) : id;
+      })
+    );
+    return `<div class="calc-filter-row">
+      <span>${esc(label)}</span>
+      <div class="calc-multi-wrap${canClear ? " has-value" : ""}">
+        <details class="calc-multi" data-filter-multi-field="${esc(field)}" ${open ? "open" : ""} title="${esc(title || label)}">
+          <summary class="calc-multi-sum calc-filter-input">${esc(summary)}</summary>
+          <div class="calc-multi-list">
+            ${
+              list.length
+                ? list
+                    .map((item) => {
+                      const value = getValue(item);
+                      const text = getLabel(item);
+                      const on = selectedSet.has(value);
+                      return `<label class="calc-multi-opt"><input type="checkbox" data-filter-multi="${esc(field)}" value="${esc(value)}" ${on ? "checked" : ""} /><span>${esc(text)}</span></label>`;
+                    })
+                    .join("")
+                : `<div class="calc-multi-empty">Нет вариантов</div>`
+            }
+          </div>
+        </details>
+        ${
+          canClear
+            ? `<button type="button" class="search-clear" data-filter-multi-clear="${esc(field)}" title="Сбросить" aria-label="Сбросить выбор">×</button>`
+            : ""
+        }
+      </div>
+    </div>`;
+  }
+
   function filterFieldsHtml(node) {
-    const statuses = api?.statuses?.() || [];
-    const customer = String(node.customer || "").trim();
-    const customerKey = customer.toLowerCase();
-    const orders = (api?.orders?.() || [])
-      .map((order, index) => ({ order, index }))
-      .filter(({ order }) => {
-        if (!customerKey) return true;
-        return String(order.customer || "")
-          .toLowerCase()
-          .includes(customerKey);
-      })
-      .sort((a, b) => {
-        const da = orderStamp(a.order);
-        const db = orderStamp(b.order);
-        if (db !== da) return db.localeCompare(da);
-        return b.index - a.index;
-      })
-      .map((item) => item.order);
-    const period = node.period || "all";
-    const pay = node.payFilter || "all";
-    const status = String(node.status || "");
-    let orderId = String(node.orderId || "");
-    if (orderId && !orders.some((order) => order.id === orderId)) orderId = "";
-    const range = period === "range";
-    return `<div class="calc-filter-fields">
-      <label class="calc-filter-row">
-        <span>Заказчик</span>
-        <input class="calc-filter-input" data-suggest="customer" data-filter-field="customer" value="${esc(customer)}" placeholder="Все" autocomplete="off" spellcheck="false" />
-      </label>
-      <label class="calc-filter-row">
-        <span>Заказ</span>
-        <select class="calc-filter-input" data-filter-field="orderId" title="Конкретный заказ">
-          <option value="" ${!orderId ? "selected" : ""}>Все</option>
-          ${orders
-            .map((order) => {
-              const label = `${order.number || "—"} — ${order.name || order.customer || "Без названия"}`;
-              return `<option value="${esc(order.id)}" ${orderId === order.id ? "selected" : ""}>${esc(label)}</option>`;
-            })
-            .join("")}
-        </select>
-      </label>
+    try {
+      normalizeFilterNode(node);
+      const statuses = Array.isArray(api?.statuses?.()) ? api.statuses() : [];
+      const types = Array.isArray(api?.orderTypes?.()) ? api.orderTypes() : [];
+      const products = Array.isArray(api?.products?.()) ? api.products() : [];
+      const customers = Array.isArray(api?.customers?.()) ? api.customers() : [];
+      const selectedCustomers = Array.isArray(node.customers) ? node.customers : [];
+      const customerKeys = new Set(selectedCustomers.map((name) => String(name || "").toLowerCase()));
+      const orders = (api?.orders?.() || [])
+        .map((order, index) => ({ order, index }))
+        .filter(({ order }) => {
+          if (!customerKeys.size) return true;
+          return customerKeys.has(String(order.customer || "").toLowerCase());
+        })
+        .sort((a, b) => {
+          const da = orderStamp(a.order);
+          const db = orderStamp(b.order);
+          if (db !== da) return db.localeCompare(da);
+          return b.index - a.index;
+        })
+        .map((item) => item.order);
+      const orderIds = (Array.isArray(node.orderIds) ? node.orderIds : []).filter((id) => orders.some((order) => order.id === id));
+      if (orderIds.length !== (node.orderIds || []).length) node.orderIds = orderIds;
+      const period = node.period || "all";
+      const range = period === "range";
+      const nid = node.id;
+      return `<div class="calc-filter-fields">
+      ${multiPickHtml(nid, "customers", "Заказчик", customers, selectedCustomers, { title: "Несколько заказчиков" })}
+      ${multiPickHtml(nid, "orderIds", "Заказ", orders, orderIds, {
+        getValue: (order) => order.id,
+        getLabel: (order) => `${order.number || "—"} — ${order.name || order.customer || "Без названия"}`,
+        title: "Несколько заказов",
+      })}
       <label class="calc-filter-row">
         <span>Период</span>
         <select class="calc-filter-input" data-filter-field="period">
@@ -632,20 +749,26 @@
         <span>По</span>
         <input class="calc-filter-input" type="date" data-filter-field="dateTo" value="${esc(node.dateTo || "")}" />
       </label>
-      <label class="calc-filter-row">
-        <span>Фильтр</span>
-        <select class="calc-filter-input" data-filter-field="payFilter">
-          ${DASH_PAY_FILTERS.map(([id, label]) => `<option value="${id}" ${pay === id ? "selected" : ""}>${esc(label)}</option>`).join("")}
-        </select>
-      </label>
-      <label class="calc-filter-row">
-        <span>Статус</span>
-        <select class="calc-filter-input" data-filter-field="status">
-          <option value="" ${!status ? "selected" : ""}>Все</option>
-          ${statuses.map((name) => `<option value="${esc(name)}" ${status === name ? "selected" : ""}>${esc(name)}</option>`).join("")}
-        </select>
-      </label>
+      ${multiPickHtml(
+        nid,
+        "payFilters",
+        "Фильтр",
+        DASH_PAY_MULTI.map(([id, label]) => ({ id, label })),
+        Array.isArray(node.payFilters) ? node.payFilters : [],
+        {
+          getValue: (item) => item.id,
+          getLabel: (item) => item.label,
+          title: "Несколько фильтров оплаты",
+        }
+      )}
+      ${multiPickHtml(nid, "orderTypes", "Тип", types, Array.isArray(node.orderTypes) ? node.orderTypes : [], { title: "Несколько типов" })}
+      ${multiPickHtml(nid, "products", "Продукт", products, Array.isArray(node.products) ? node.products : [], { title: "Несколько продуктов" })}
+      ${multiPickHtml(nid, "statuses", "Статус", statuses, Array.isArray(node.statuses) ? node.statuses : [], { title: "Несколько статусов" })}
     </div>`;
+    } catch (err) {
+      console.warn("calc filter fields", err);
+      return `<div class="calc-filter-fields"><div class="calc-multi-empty">Не удалось показать фильтры</div></div>`;
+    }
   }
 
   function statsPortsHtml(node, portIds, graph, tip) {
@@ -1134,7 +1257,7 @@
     if (node.type === "order") return { w: 230, h: 140 };
     if (node.type === "scheme") return { w: 220, h: 100 };
     if (node.type === "result") return { w: 376, h: 120 };
-    if (node.type === "filter" || node.type === "dashboard") return { w: 384, h: 280 };
+    if (node.type === "filter" || node.type === "dashboard") return { w: 384, h: 420 };
     if (node.type === "present") return { w: 220, h: 160 };
     if (node.type === "group") return { w: Math.max(160, node.w || 320), h: Math.max(120, node.h || 220) };
     return { w: 188, h: 120 };
@@ -1548,20 +1671,24 @@
     }
     if (type === "order") node.orderId = extra?.orderId || "";
     if (type === "filter") {
-      node.customer = "";
-      node.orderId = "";
+      node.customers = [];
+      node.orderIds = [];
       node.period = "all";
-      node.payFilter = "all";
-      node.status = "";
+      node.payFilters = [];
+      node.statuses = [];
+      node.orderTypes = [];
+      node.products = [];
       node.dateFrom = "";
       node.dateTo = "";
     }
     if (type === "dashboard") {
-      node.customer = "";
-      node.orderId = "";
+      node.customers = [];
+      node.orderIds = [];
       node.period = "all";
-      node.payFilter = "all";
-      node.status = "";
+      node.payFilters = [];
+      node.statuses = [];
+      node.orderTypes = [];
+      node.products = [];
       node.dateFrom = "";
       node.dateTo = "";
       node.openPorts = DASH_DEFAULT.slice();
@@ -2533,6 +2660,13 @@
       : null;
     const groupNodes = sortGroupsByArea((bp.nodes || []).filter((node) => node.type === "group"));
     const plainNodes = (bp.nodes || []).filter((node) => node.type !== "group");
+    const multiOpen = session.filterMultiOpen;
+    if (multiOpen?.nodeId && multiOpen?.field) {
+      const prevList = host.querySelector(
+        `[data-node="${cssEsc(multiOpen.nodeId)}"] .calc-multi[data-filter-multi-field="${cssEsc(multiOpen.field)}"] .calc-multi-list`
+      );
+      if (prevList) session.filterMultiScroll = prevList.scrollTop;
+    }
     if (groups) {
       groups.innerHTML = groupNodes.map((node, i) => groupNodeHtml(node, i)).join("");
     }
@@ -2555,6 +2689,12 @@
       .join("");
     fitScreenNodes();
     applyWorld(bp);
+    if (multiOpen?.nodeId && multiOpen?.field) {
+      const nextList = host.querySelector(
+        `[data-node="${cssEsc(multiOpen.nodeId)}"] .calc-multi[data-filter-multi-field="${cssEsc(multiOpen.field)}"] .calc-multi-list`
+      );
+      if (nextList) nextList.scrollTop = session.filterMultiScroll || 0;
+    }
     if (keep?.name || keep?.filterField) {
       const again = keep.filterField && keep.nodeId
         ? host.querySelector(`[data-node="${cssEsc(keep.nodeId)}"] [data-filter-field="${cssEsc(keep.filterField)}"]`)
@@ -2911,7 +3051,13 @@
     }
     const calc = ensureState();
     if (!calc) return;
-    (calc.blueprints || []).forEach((bp) => computeGraph(bp));
+    (calc.blueprints || []).forEach((bp) => {
+      try {
+        computeGraph(bp);
+      } catch (err) {
+        console.warn("calc graph", bp?.id, err);
+      }
+    });
   }
 
   function hidePresentPanel() {
@@ -2942,7 +3088,13 @@
       return;
     }
     rebuildPresentValues();
-    const graph = computeGraph(bp);
+    let graph;
+    try {
+      graph = computeGraph(bp);
+    } catch (err) {
+      console.warn("calc render graph", err);
+      graph = { values: {}, errors: new Set() };
+    }
     renderTabs(calc);
     renderTitle(bp);
     renderSide(bp);
@@ -3492,9 +3644,29 @@
     }
   }
 
+  function closeOpenFilterMultis(except) {
+    const open = nodesRoot()?.querySelectorAll(".calc-multi[open]") || [];
+    if (!open.length && !session.filterMultiOpen) return;
+    session.filterMultiLock = true;
+    try {
+      open.forEach((el) => {
+        if (except && (el === except || el.contains(except))) return;
+        el.open = false;
+      });
+    } finally {
+      session.filterMultiLock = false;
+    }
+    if (!except || !except.closest?.(".calc-multi")) {
+      session.filterMultiOpen = null;
+      session.filterMultiScroll = 0;
+    }
+  }
+
   function onBoardWheel(e) {
     const bp = activeBlueprint();
-    if (!bp || e.target.closest("input, textarea")) return;
+    if (!bp) return;
+    // Let nested scrollables (multi-select lists, side panels) scroll instead of zooming.
+    if (e.target.closest("input, textarea, select, .calc-multi-list, .calc-side, .calc-present-list, .calc-tabs")) return;
     e.preventDefault();
     const before = bp.zoom || 1;
     const next = Math.max(0.35, Math.min(2.5, before * (e.deltaY > 0 ? 0.92 : 1.08)));
@@ -3686,6 +3858,16 @@
         addPresentNode(item.dataset.presentPage, item.dataset.presentBlock);
       }
     });
+    document.addEventListener(
+      "pointerdown",
+      (e) => {
+        if (!session.filterMultiOpen && !nodesRoot()?.querySelector(".calc-multi[open]")) return;
+        const hit = e.target.closest?.(".calc-multi, [data-filter-multi-clear]");
+        if (hit) return;
+        closeOpenFilterMultis();
+      },
+      true
+    );
     document.addEventListener("dragstart", (e) => {
       const item = e.target.closest("[data-present-block]");
       if (!item || !item.closest("#calc-present-panel")) return;
@@ -3855,6 +4037,30 @@
       }, 1400);
     });
     root.addEventListener("click", (e) => {
+      const clearMulti = e.target.closest("[data-filter-multi-clear]");
+      if (clearMulti) {
+        e.preventDefault();
+        e.stopPropagation();
+        const nodeEl = clearMulti.closest(".calc-node");
+        const bp = activeBlueprint();
+        const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node) : null;
+        const field = clearMulti.dataset.filterMultiClear || "";
+        const allowed = new Set(["customers", "orderIds", "payFilters", "orderTypes", "products", "statuses"]);
+        if (!node || !allowed.has(field) || (node.type !== "filter" && node.type !== "dashboard")) return;
+        node[field] = [];
+        if (field === "customers") {
+          /* keep orderIds — user can clear orders separately */
+        }
+        normalizeFilterNode(node);
+        if (session.filterMultiOpen?.nodeId === node.id && session.filterMultiOpen?.field === field) {
+          session.filterMultiOpen = null;
+          session.filterMultiScroll = 0;
+        }
+        session.selected = node.id;
+        dirty();
+        render();
+        return;
+      }
       const nodeEl = e.target.closest(".calc-node");
       const bp = activeBlueprint();
       if (e.target.closest("[data-del-node]")) {
@@ -3968,6 +4174,29 @@
         patchGraphLive();
       }
     });
+    root.addEventListener("toggle", (e) => {
+      if (session.filterMultiLock) return;
+      const box = e.target;
+      if (!(box instanceof HTMLDetailsElement) || !box.classList.contains("calc-multi")) return;
+      const nodeEl = box.closest("[data-node]");
+      const field = box.dataset.filterMultiField || "";
+      const nodeId = nodeEl?.dataset?.node || "";
+      if (!field || !nodeId) return;
+      if (box.open) {
+        session.filterMultiOpen = { nodeId, field };
+        session.filterMultiLock = true;
+        try {
+          nodesRoot()?.querySelectorAll(".calc-multi[open]").forEach((el) => {
+            if (el !== box) el.open = false;
+          });
+        } finally {
+          session.filterMultiLock = false;
+        }
+      } else if (session.filterMultiOpen?.nodeId === nodeId && session.filterMultiOpen?.field === field) {
+        session.filterMultiOpen = null;
+        session.filterMultiScroll = 0;
+      }
+    }, true);
     root.addEventListener("change", (e) => {
       const nodeEl = e.target.closest(".calc-node, .calc-group-chrome");
       const bp = activeBlueprint();
@@ -4014,20 +4243,35 @@
       if (e.target.dataset.filterField && (node.type === "filter" || node.type === "dashboard")) {
         const field = e.target.dataset.filterField;
         const raw = String(e.target.value || "").trim();
-        if (field === "customer") {
-          node.customer = raw.slice(0, 80);
-          const key = node.customer.toLowerCase();
-          if (node.orderId && key) {
-            const order = api.findOrder?.(node.orderId);
-            const match = order && String(order.customer || "").toLowerCase().includes(key);
-            if (!match) node.orderId = "";
-          }
-        } else if (field === "orderId") node.orderId = raw.slice(0, 80);
-        else if (field === "period") node.period = DASH_PERIODS.some(([id]) => id === raw) ? raw : "all";
-        else if (field === "payFilter") node.payFilter = DASH_PAY_FILTERS.some(([id]) => id === raw) ? raw : "all";
-        else if (field === "status") node.status = raw.slice(0, 48);
+        if (field === "period") node.period = DASH_PERIODS.some(([id]) => id === raw) ? raw : "all";
         else if (field === "dateFrom") node.dateFrom = raw.slice(0, 10);
         else if (field === "dateTo") node.dateTo = raw.slice(0, 10);
+        dirty();
+        render();
+        return;
+      }
+      if (e.target.dataset.filterMulti && (node.type === "filter" || node.type === "dashboard")) {
+        const field = e.target.dataset.filterMulti;
+        const box = e.target.closest(".calc-multi");
+        const checked = [...(box?.querySelectorAll(`input[data-filter-multi="${cssEsc(field)}"]:checked`) || [])].map((el) =>
+          String(el.value || "").trim()
+        );
+        const allowed = new Set(["customers", "orderIds", "payFilters", "orderTypes", "products", "statuses"]);
+        if (!allowed.has(field)) return;
+        node[field] = uniqueStrings(checked).slice(0, FILTER_MULTI_MAX);
+        if (field === "customers") {
+          const keys = new Set(node.customers.map((name) => name.toLowerCase()));
+          if (keys.size) {
+            node.orderIds = (node.orderIds || []).filter((id) => {
+              const order = api.findOrder?.(id);
+              return order && keys.has(String(order.customer || "").toLowerCase());
+            });
+          }
+        }
+        normalizeFilterNode(node);
+        session.filterMultiOpen = { nodeId: node.id, field };
+        const listEl = box?.querySelector(".calc-multi-list");
+        if (listEl) session.filterMultiScroll = listEl.scrollTop;
         dirty();
         render();
         return;

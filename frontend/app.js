@@ -580,6 +580,12 @@
     return localStamp(new Date());
   }
 
+  function nowLocalDateTime() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+
   function dateDay(v) {
     const s = String(v || "");
     return s.length >= 10 ? s.slice(0, 10) : s;
@@ -847,7 +853,7 @@
       customer: "",
       name: "",
       notes: "",
-      created_at: nowLocal(),
+      created_at: nowLocalDateTime(),
       work_start: "",
       work_end: "",
       work_pauses: [],
@@ -890,7 +896,9 @@
     } catch {
       /* ignore */
     }
-    if (state.dirty && state.doc && state.path) {
+    // Only auto-write the document when autosave is on. Otherwise askClose keeps dirty
+    // and shows save/discard — closing must not silently persist edits.
+    if (state.autosave && state.dirty && state.doc && state.path) {
       try {
         await save({ silent: true });
       } catch {
@@ -2775,8 +2783,16 @@
     return dateDay(order.created_at) || "";
   }
 
+  function orderCreatedStamp(order) {
+    const raw = String(order?.created_at || "").trim();
+    if (raw) return raw;
+    return orderNewestStamp(order);
+  }
+
   function compareOrders(a, b, sort) {
     if (sort === "date-asc") return orderNewestStamp(a).localeCompare(orderNewestStamp(b));
+    if (sort === "created-desc") return orderCreatedStamp(b).localeCompare(orderCreatedStamp(a));
+    if (sort === "created-asc") return orderCreatedStamp(a).localeCompare(orderCreatedStamp(b));
     if (sort === "number") return String(a.number || "").localeCompare(String(b.number || ""), "ru", { numeric: true });
     if (sort === "customer") return String(a.customer || "").localeCompare(String(b.customer || ""), "ru");
     if (sort === "amount-desc") return orderTotals(b).after - orderTotals(a).after;
@@ -3572,6 +3588,8 @@
   const CAL_BAR_PAID = "#059669";
   const CAL_BAR_DEBT = "#d97706";
   const CAL_BAR_DUE = "#dc2626";
+  const CAL_BAR_PLANNED = "#0284c8";
+  const LINE_DRAG_HORIZON_DAYS = 730;
   const DEFAULT_WEEKENDS = [5, 6];
   let calDrag = null;
   let calNav = null;
@@ -3856,9 +3874,13 @@
       order.work_start = end;
       order.work_end = start;
     }
+    const isOrder = Array.isArray(order?.lines);
     if (!order.work_start && !order.work_end) order.work_pauses = [];
-    else normalizeWorkPauses(order, mergePauses);
-    if (lines) normalizeOrderLinesWork(order);
+    else if (!isOrder) normalizeWorkPauses(order, mergePauses);
+    if (lines && isOrder) {
+      normalizeOrderLinesWork(order);
+      syncOrderPausesFromLines(order);
+    }
     return order;
   }
 
@@ -3899,6 +3921,78 @@
     };
   }
 
+  /** Срок позиции без расширения по sibling-линиям заказа. */
+  function lineOwnDrawSpan(order, line, today = dayStart(new Date())) {
+    const floor = lineDateFloor(line);
+    let start = dateDay(line?.work_start) || dateDay(order?.work_start);
+    let end = dateDay(line?.work_end) || dateDay(order?.work_end);
+    if (floor) {
+      if (start && start < floor) start = floor;
+      if (end && end < floor) end = floor;
+    }
+    return orderDrawSpan({ work_start: start || "", work_end: end || "", work_pauses: [] }, today);
+  }
+
+  function dayIsOrderDerivedPause(order, day, today = dayStart(new Date())) {
+    const lines = calendarWorkLines(order);
+    if (!lines.length) return false;
+    const d = dayStart(typeof day === "string" ? parseDay(day) : day);
+    if (!d) return false;
+    const covering = lines.filter((line) => {
+      const span = lineOwnDrawSpan(order, line, today);
+      return span && d >= span.from && d <= span.till;
+    });
+    if (!covering.length) return true;
+    return covering.every((line) => isPaused(lineWorkProxy(order, line), d));
+  }
+
+  function syncOrderPausesFromLines(order) {
+    if (!Array.isArray(order?.lines)) return order;
+    if (!dateDay(order.work_start) && !dateDay(order.work_end)) {
+      order.work_pauses = [];
+      return order;
+    }
+    const lines = calendarWorkLines(order);
+    if (!lines.length) {
+      order.work_pauses = [];
+      return order;
+    }
+    const today = dayStart(new Date());
+    const span = orderDrawSpan(order, today);
+    if (!span) {
+      order.work_pauses = [];
+      return order;
+    }
+    const items = [];
+    let run = null;
+    for (let d = span.from; d <= span.till; d = addDays(d, 1)) {
+      if (isWeekend(d)) {
+        if (run) {
+          items.push(run);
+          run = null;
+        }
+        continue;
+      }
+      if (dayIsOrderDerivedPause(order, d, today)) {
+        if (!run) run = { start: dayKey(d), end: dayKey(d) };
+        else run.end = dayKey(d);
+      } else if (run) {
+        items.push(run);
+        run = null;
+      }
+    }
+    if (run) items.push(run);
+    const openOrder = !dateDay(order.work_end);
+    const todayKey = dayKey(today);
+    order.work_pauses = items.map((pause) => {
+      if (openOrder && pause.start <= todayKey && pause.end >= todayKey) {
+        return { start: pause.start, end: "", open: true };
+      }
+      return { start: pause.start, end: pause.end };
+    });
+    return order;
+  }
+
   function clampLineToOrder(order, start, end, line) {
     const oStart = dateDay(order?.work_start);
     const oEnd = dateDay(order?.work_end);
@@ -3933,17 +4027,20 @@
       line.work_start = "";
       line.work_end = "";
       line.work_pauses = [];
+      syncOrderPausesFromLines(order);
       return;
     }
     if (sameDates) {
       line.work_start = "";
       line.work_end = "";
       line.work_pauses = pauses;
+      syncOrderPausesFromLines(order);
       return;
     }
     line.work_start = dateDay(proxy.work_start);
     line.work_end = dateDay(proxy.work_end);
     line.work_pauses = pauses;
+    syncOrderPausesFromLines(order);
   }
 
   function normalizeOrderLinesWork(order) {
@@ -3963,16 +4060,18 @@
   }
 
   function lineDrawEnvelope(order, line) {
-    const env = orderDrawSpan(order);
-    if (!env) return null;
+    const oStart = parseDay(order?.work_start);
+    const oEnd = parseDay(order?.work_end);
     const floor = parseDay(lineDateFloor(line));
-    let from = env.from;
-    if (floor) {
-      if (floor > env.till) from = env.till;
-      else if (floor > from) from = floor;
+    let from = oStart;
+    if (floor && (!from || floor > from)) from = floor;
+    if (!from) return null;
+    if (oEnd) {
+      if (from > oEnd) return null;
+      return { from, till: oEnd };
     }
-    if (from > env.till) return null;
-    return { from, till: env.till };
+    // Без конца у заказа позицию можно увести в будущее — полоса заказа удлинится.
+    return { from, till: addDays(dayStart(new Date()), LINE_DRAG_HORIZON_DAYS) };
   }
 
   function clampLineProxy(order, proxy, drag) {
@@ -4237,9 +4336,26 @@
     if (start && !end) {
       if (start > today) {
         const from = isWeekend(start) ? firstWorkOnOrAfter(start) : start;
-        return from ? { from, till: from } : null;
+        if (!from) return null;
+        let till = from;
+        if (Array.isArray(order?.lines)) {
+          calendarWorkLines(order).forEach((line) => {
+            const own = lineOwnDrawSpan(order, line, today);
+            if (own && own.till > till) till = own.till;
+          });
+        }
+        return { from, till };
       }
-      return { from: start, till: today };
+      let till = today;
+      if (Array.isArray(order?.lines)) {
+        calendarWorkLines(order).forEach((line) => {
+          const own = lineOwnDrawSpan(order, line, today);
+          if (!own) return;
+          if (own.till > till) till = own.till;
+          if (own.from > till) till = own.from;
+        });
+      }
+      return { from: start, till };
     }
     if (!start && end) return { from: end, till: end };
     return { from: start, till: end };
@@ -4399,6 +4515,8 @@
 
   function calendarLineBarColor(order, line) {
     if (!line || isFrozenLine(line) || isExpenseLine(line)) return calendarBarColor(order);
+    const proxy = lineWorkProxy(order, line);
+    if (workStatus(proxy) === "planned") return CAL_BAR_PLANNED;
     const t = lineTotals(line, order);
     if (t.unpaid > 0.005) return workStatus(order) === "done" ? CAL_BAR_DUE : CAL_BAR_DEBT;
     if (t.after > 0.005) return CAL_BAR_PAID;
@@ -4477,6 +4595,7 @@
 
   function renderCalendar() {
     if (!state.doc || !$("cal-board")) return;
+    (state.doc.orders || []).forEach((order) => syncOrderPausesFromLines(order));
     const cal = calendarState();
     const win = calendarWindow();
     const all = calendarOrdersAll();
@@ -4693,7 +4812,33 @@
     const pauses = orderPauseSegments(target, win.from, win.to, win.today);
     if (!segs.length && !pauses.length) return "";
     const due = orderDeadline(target, win.today);
-    const tip = due ? `${label} · дедлайн ${calFmtDay(due, true)}` : label;
+    const openEnd = !dateDay(target.work_end);
+    const planned = status.id === "planned";
+    const isOrderBar = !lineId;
+    let openEndAt = null;
+    if (openEnd) {
+      const marks = segs
+        .map((seg, i) => ({ kind: "work", i, till: seg.till.getTime() }))
+        .concat(pauses.map((seg, i) => ({ kind: "pause", i, till: seg.till.getTime() })));
+      openEndAt = marks.reduce((best, cur) => (!best || cur.till >= best.till ? cur : best), null);
+    }
+    // У заказа ручки длины только на крайних концах всей полосы (не на каждом обрывке после паузы).
+    let edgeStart = null;
+    let edgeEnd = null;
+    if (isOrderBar) {
+      const marks = segs
+        .map((seg, i) => ({ kind: "work", i, from: seg.from.getTime(), till: seg.till.getTime() }))
+        .concat(pauses.map((seg, i) => ({ kind: "pause", i, from: seg.from.getTime(), till: seg.till.getTime() })));
+      if (marks.length) {
+        edgeStart = marks.reduce((best, cur) => (!best || cur.from < best.from ? cur : best), null);
+        edgeEnd = marks.reduce((best, cur) => (!best || cur.till > best.till ? cur : best), null);
+      }
+    }
+    const tip = due
+      ? `${label} · дедлайн ${calFmtDay(due, true)}`
+      : openEnd
+        ? `${label} · выполняется`
+        : label;
     const lineAttr = lineId ? ` data-cal-line="${esc(lineId)}"` : "";
     const id = esc(order.id);
     return segs
@@ -4702,22 +4847,33 @@
         const span = dayDiff(seg.from, seg.till) + 1;
         const first = i === 0;
         const last = i === segs.length - 1;
+        const showOpenEnd = openEndAt?.kind === "work" && openEndAt.i === i;
+        const showStart = isOrderBar ? edgeStart?.kind === "work" && edgeStart.i === i : first;
+        const showEnd = isOrderBar ? edgeEnd?.kind === "work" && edgeEnd.i === i : last;
         const cut = `${first ? "" : " is-cut-start"}${last ? "" : " is-cut-end"}`;
-        return `<div class="gantt-bar tone-${status.tone} ${status.id === "now" ? "is-live" : ""} ${due && last ? "has-deadline" : ""}${cut}" data-cal-id="${id}"${lineAttr} data-cal-drag="move" style="--from:${left};--span:${span};--bar:${esc(color)}" title="${esc(tip)}">
-          ${first ? `<i class="gantt-h start" data-cal-drag="start"></i>` : ""}
-          ${last ? `<i class="gantt-h end" data-cal-drag="end"></i>` : ""}
+        return `<div class="gantt-bar tone-${status.tone} ${status.id === "now" ? "is-live" : ""} ${planned ? "is-planned" : ""} ${due && showEnd ? "has-deadline" : ""} ${showOpenEnd ? "is-open-end" : ""}${cut}" data-cal-id="${id}"${lineAttr} data-cal-drag="move" style="--from:${left};--span:${span};--bar:${esc(color)}" title="${esc(tip)}">
+          ${showStart ? `<i class="gantt-h start" data-cal-drag="start"></i>` : ""}
+          ${showEnd ? `<i class="gantt-h end" data-cal-drag="end"></i>` : ""}
         </div>`;
       })
       .concat(
-        pauses.map((seg) => {
+        pauses.map((seg, i) => {
           const left = dayDiff(win.from, seg.from);
           const span = dayDiff(seg.from, seg.till) + 1;
-          const pauseTip = pauseIsOpen(target, workPauses(target)[seg.index])
-            ? `${label} · пауза с ${calFmtDay(seg.from)} · идёт, пока не снимете`
-            : `${label} · пауза ${calFmtDay(seg.from)}${span > 1 ? ` — ${calFmtDay(seg.till)}` : ""}`;
-          return `<div class="gantt-bar is-pause" data-cal-id="${id}"${lineAttr} data-pause-i="${seg.index}" data-cal-drag="pause-move" style="--from:${left};--span:${span};--bar:${esc(color)}" title="${esc(pauseTip)}">
-            ${seg.showStart ? `<i class="gantt-h start" data-cal-drag="pause-start"></i>` : "<i></i>"}
-            ${seg.showEnd ? `<i class="gantt-h end" data-cal-drag="pause-end"></i>` : "<i></i>"}
+          const openPause = pauseIsOpen(target, workPauses(target)[seg.index]);
+          const showOpenEnd = openEndAt?.kind === "pause" && openEndAt.i === i;
+          const derived = isOrderBar;
+          const showOrderStart = derived && edgeStart?.kind === "pause" && edgeStart.i === i;
+          const showOrderEnd = derived && edgeEnd?.kind === "pause" && edgeEnd.i === i;
+          const pauseTip = openPause
+            ? `${label} · пауза с ${calFmtDay(seg.from)} · идёт, пока не снимете${openEnd ? " · выполняется" : ""}${derived ? " · из позиций" : ""}`
+            : `${label} · пауза ${calFmtDay(seg.from)}${span > 1 ? ` — ${calFmtDay(seg.till)}` : ""}${derived ? " · из позиций" : ""}`;
+          const orderLenHandles = derived
+            ? `${showOrderStart ? `<i class="gantt-h start" data-cal-drag="start"></i>` : ""}${showOrderEnd ? `<i class="gantt-h end" data-cal-drag="end"></i>` : ""}`
+            : `${seg.showStart ? `<i class="gantt-h start" data-cal-drag="pause-start"></i>` : "<i></i>"}
+            ${seg.showEnd ? `<i class="gantt-h end" data-cal-drag="pause-end"></i>` : "<i></i>"}`;
+          return `<div class="gantt-bar is-pause ${showOpenEnd ? "is-open-end" : ""} ${derived ? "is-derived" : ""} ${showOrderStart || showOrderEnd ? "has-len-h" : ""}" data-cal-id="${id}"${lineAttr} data-pause-i="${seg.index}" ${derived ? "" : `data-cal-drag="pause-move"`} style="--from:${left};--span:${span};--bar:${esc(color)}" title="${esc(pauseTip)}">
+            ${orderLenHandles}
           </div>`;
         })
       )
@@ -4752,7 +4908,16 @@
         const title = item.line
           ? `${orderNum(item.order)} ${lineWorkName(item.line)}`.trim()
           : `${orderNum(item.order)} ${orderTitle(item.order)}`.trim();
-        const due = orderDeadline(item.line ? lineWorkProxy(item.order, item.line) : item.order, win.today);
+        const target = item.line ? lineWorkProxy(item.order, item.line) : item.order;
+        const due = orderDeadline(target, win.today);
+        const openEnd = !dateDay(target.work_end);
+        let openEndAt = null;
+        if (openEnd) {
+          const marks = item.segs
+            .map((seg, i) => ({ kind: "work", i, till: seg.till.getTime() }))
+            .concat((item.pauses || []).map((seg, i) => ({ kind: "pause", i, till: seg.till.getTime() })));
+          openEndAt = marks.reduce((best, cur) => (!best || cur.till >= best.till ? cur : best), null);
+        }
         const color = item.color || calendarBarColor(item.order);
         const lineAttr = item.line ? ` data-cal-line="${esc(item.line.id)}"` : "";
         const lineClass = item.kind === "line" ? " is-line" : "";
@@ -4761,15 +4926,18 @@
           const till = Math.min(full.span - 1, dayDiff(full.from, seg.till));
           if (till < from) return "";
           const len = till - from + 1;
-          const cut = `${i ? " is-cut-start" : ""}${i < item.segs.length - 1 ? " is-cut-end" : ""}`;
-          return `<div class="tl-nav-bar ${due ? "has-deadline" : ""}${lineClass}${cut}" data-cal-id="${esc(item.order.id)}"${lineAttr} style="--lane:${item.lane};--from:${from};--len:${len};--span:${full.span};--bar:${esc(color)}" title="${esc(title)}${due ? ` · до ${calFmtDay(due, true)}` : ""}"></div>`;
+          const last = i === item.segs.length - 1;
+          const showOpenEnd = openEndAt?.kind === "work" && openEndAt.i === i;
+          const cut = `${i ? " is-cut-start" : ""}${last ? "" : " is-cut-end"}`;
+          return `<div class="tl-nav-bar ${due ? "has-deadline" : ""}${showOpenEnd ? " is-open-end" : ""}${workStatus(target) === "planned" ? " is-planned" : ""}${lineClass}${cut}" data-cal-id="${esc(item.order.id)}"${lineAttr} style="--lane:${item.lane};--from:${from};--len:${len};--span:${full.span};--bar:${esc(color)}" title="${esc(title)}${due ? ` · до ${calFmtDay(due, true)}` : openEnd ? " · выполняется" : ""}"></div>`;
         }).concat(
-          (item.pauses || []).map((seg) => {
+          (item.pauses || []).map((seg, i) => {
             const from = Math.max(0, dayDiff(full.from, seg.from));
             const till = Math.min(full.span - 1, dayDiff(full.from, seg.till));
             if (till < from) return "";
             const len = till - from + 1;
-            return `<div class="tl-nav-bar is-pause${lineClass}" data-cal-id="${esc(item.order.id)}"${lineAttr} style="--lane:${item.lane};--from:${from};--len:${len};--span:${full.span};--bar:${esc(color)}" title="${esc(title)} · пауза"></div>`;
+            const showOpenEnd = openEndAt?.kind === "pause" && openEndAt.i === i;
+            return `<div class="tl-nav-bar is-pause${showOpenEnd ? " is-open-end" : ""}${lineClass}" data-cal-id="${esc(item.order.id)}"${lineAttr} style="--lane:${item.lane};--from:${from};--len:${len};--span:${full.span};--bar:${esc(color)}" title="${esc(title)} · пауза${openEnd ? " · выполняется" : ""}"></div>`;
           })
         );
       })
@@ -4889,7 +5057,7 @@
     <div class="cal-hint hint-i">
       <button type="button" class="info-btn" title="Подсказка по таймлайну" aria-label="Подсказка по таймлайну">i</button>
       <div class="hint-i-pop" role="tooltip">
-        Колесо на навигаторе — масштаб, на датах — период. Полосу двигают, края меняют даты. Стрелка — позиции. Shift+клик — пауза, Shift+двойной клик снимает.
+        Колесо на навигаторе — масштаб, на датах — период. Полосу двигают, края меняют даты. Стрелка — позиции. Паузы правят у позиций (Shift+клик); у заказа пауза сама, если день пустой или все позиции стоят.
       </div>
     </div>`;
   }
@@ -4964,7 +5132,7 @@
     const selectedLine = selected && cal.selectedLine ? findCalendarLine(selected, cal.selectedLine) : null;
     const workTarget = selectedLine ? lineWorkProxy(selected, selectedLine) : selected;
     const due = workTarget ? orderDeadline(workTarget, today) : null;
-    const pauses = workTarget ? workPauses(workTarget) : [];
+    const pauses = selectedLine ? workPauses(workTarget) : workPauses(selected || {});
     const inheritLine = !!(selectedLine && !dateDay(selectedLine.work_start) && !dateDay(selectedLine.work_end));
     const pauseList = pauses.length
       ? `<div class="cal-pauses">${pauses
@@ -4981,11 +5149,17 @@
                   : calFmtDay(from);
             return `<div class="cal-pause-row">
               <span>Пауза ${esc(label)}</span>
-              <button type="button" class="btn small" data-cal-act="remove-pause" data-pause-i="${i}">Снять</button>
+              ${
+                selectedLine
+                  ? `<button type="button" class="btn small" data-cal-act="remove-pause" data-pause-i="${i}">Снять</button>`
+                  : `<small class="cal-pause-auto">из позиций</small>`
+              }
             </div>`;
           })
           .join("")}</div>`
-      : "";
+      : selected && !selectedLine
+        ? `<div class="cal-pause-note">Паузы заказа считаются сами: пустой день или все позиции на паузе.</div>`
+        : "";
     const lineIdx = selectedLine ? calendarWorkLines(selected).findIndex((line) => line.id === selectedLine.id) : -1;
     const sel = selected
       ? `<div class="cal-sel">
@@ -5018,7 +5192,7 @@
             <button type="button" class="btn small" data-cal-act="open">Открыть заказ</button>
           </div>
         </div>`
-      : `<div class="cal-sel idle">Выберите заказ на доске — здесь можно поставить старт и финиш, паузы внутри срока, сдвинуть или открыть карточку. Стрелка на таймлайне раскрывает позиции.</div>`;
+      : `<div class="cal-sel idle">Выберите заказ на доске — здесь можно поставить старт и финиш, сдвинуть или открыть карточку. Паузы правят у позиций; у заказа они собираются сами. Стрелка на таймлайне раскрывает позиции.</div>`;
     const pickOff = pick ? isWeekend(pick) : false;
     const pickKey = pick ? dayKey(pick) : "";
     const offSets = calendarOffSettings();
@@ -5032,7 +5206,7 @@
             ? " · выходной"
             : "";
     const pickPaused = workTarget && pick && isPaused(workTarget, pick);
-    const pickCanPause = workTarget && pick && pauseInEnvelope(workTarget, pick);
+    const pickCanPause = !!(selectedLine && workTarget && pick && pauseInEnvelope(workTarget, pick));
     const pickBlock = pick
       ? `<div class="cal-block">
           <h3>${esc(calFmtDay(pick, true))}${pickMark}${pickItems.length >= CAL_HOT_LOAD ? " · перегруз" : ""}</h3>
@@ -5040,7 +5214,7 @@
             <button type="button" class="btn small" data-cal-act="toggle-off">${pickOff ? "Сделать рабочим" : "Сделать выходным"}</button>
             <button type="button" class="btn small" data-cal-act="pick-start" ${selected ? "" : "disabled"}>Старт выбранного</button>
             <button type="button" class="btn small" data-cal-act="pick-end" ${selected ? "" : "disabled"}>Финиш выбранного</button>
-            <button type="button" class="btn small" data-cal-act="${pickPaused ? "remove-pause-day" : "add-pause"}" ${pickCanPause ? "" : "disabled"}>${pickPaused ? "Убрать паузу" : "Пауза в этот день"}</button>
+            <button type="button" class="btn small" data-cal-act="${pickPaused ? "remove-pause-day" : "add-pause"}" ${pickCanPause ? "" : "disabled"} title="${selectedLine ? "" : "Паузу ставят на позиции"}">${pickPaused && selectedLine ? "Убрать паузу" : "Пауза в этот день"}</button>
           </div>
           <div class="field cal-day-note"><label>Заметка</label><textarea rows="3" data-cal-note="${esc(pickKey)}" placeholder="Что в этот день">${esc(dayNote(pickKey))}</textarea></div>
           ${pickPaused ? `<div class="cal-pause-note">Выбранный заказ на паузе</div>` : ""}
@@ -5287,7 +5461,7 @@
       const order = findOrder(pauseBar.dataset.calId);
       const lineId = pauseBar.dataset.calLine || "";
       const index = Number(pauseBar.dataset.pauseI);
-      if (e.detail === 2 && e.shiftKey && order && Number.isInteger(index)) {
+      if (e.detail === 2 && e.shiftKey && order && lineId && Number.isInteger(index)) {
         calendarState().selected = order.id;
         calendarState().selectedLine = lineId;
         applyCalendarOrder(
@@ -5305,6 +5479,11 @@
     if (workBar && e.shiftKey) {
       const order = findOrder(workBar.dataset.calId);
       const lineId = workBar.dataset.calLine || "";
+      if (!lineId) {
+        toast("Паузу ставят на позиции — у заказа она считается сама");
+        calendarSelect(workBar.dataset.calId, "");
+        return;
+      }
       const track = workBar.closest(".gantt-track");
       const day = track ? calDayFromPoint(track, e.clientX, calendarWindow().days) : null;
       if (order && day) {
@@ -5376,6 +5555,10 @@
     }
     if (act === "add-pause") {
       if (!cal.pick) return;
+      if (!cal.selectedLine) {
+        toast("Паузу ставят на позиции — у заказа она считается сама");
+        return;
+      }
       let added = false;
       applyCalendarOrder(
         (order) => {
@@ -5388,6 +5571,10 @@
     }
     if (act === "remove-pause-day") {
       if (!cal.pick) return;
+      if (!cal.selectedLine) {
+        toast("Паузу снимают у позиции");
+        return;
+      }
       applyCalendarOrder(
         (order) => {
           removePauseCovering(order, cal.pick);
@@ -5397,6 +5584,10 @@
       return;
     }
     if (act === "remove-pause") {
+      if (!cal.selectedLine) {
+        toast("Паузу снимают у позиции");
+        return;
+      }
       const index = Number(btn?.dataset.pauseI);
       applyCalendarOrder(
         (order) => {
@@ -5506,11 +5697,15 @@
     if (!order) return;
     const track = handle.closest(".gantt-track");
     if (!track) return;
+    const lineId = bar.dataset.calLine || "";
+    const line = lineId ? findCalendarLine(order, lineId) : null;
+    if (mode.startsWith("pause") && !line) {
+      toast("Паузы заказа считаются из позиций");
+      return;
+    }
     e.preventDefault();
     historyCommit();
     const win = calendarWindow();
-    const lineId = bar.dataset.calLine || "";
-    const line = lineId ? findCalendarLine(order, lineId) : null;
     const target = line ? lineWorkProxy(order, line) : order;
     const pauseIndex = mode.startsWith("pause") ? Number(bar.dataset.pauseI) : -1;
     const pause = pauseIndex >= 0 ? workPauses(target)[pauseIndex] : null;
@@ -5577,6 +5772,7 @@
     bar.style.setProperty("--days", String(n));
     bar.style.left = `${(fromIdx / n) * 100}%`;
     bar.style.width = `${(len / n) * 100}%`;
+    bar.classList.toggle("is-open-end", !dateDay(target.work_end));
   }
 
   function applyPauseDrag(order, day, delta) {
@@ -5652,7 +5848,9 @@
     bar.style.left = `${(fromIdx / n) * 100}%`;
     bar.style.width = `${(len / n) * 100}%`;
     bar.classList.toggle("has-deadline", !!orderDeadline(target));
+    bar.classList.toggle("is-open-end", !dateDay(target.work_end));
     bar.classList.toggle("is-live", workStatus(target) === "now");
+    bar.classList.toggle("is-planned", workStatus(target) === "planned");
     const track = bar.closest(".gantt-track");
     track?.querySelectorAll(".gantt-bar").forEach((el) => {
       if (el !== bar) el.hidden = true;
@@ -5668,6 +5866,8 @@
           navBar.hidden = false;
           navBar.style.setProperty("--from", String(navFrom));
           navBar.style.setProperty("--len", String(navTill - navFrom + 1));
+          navBar.classList.toggle("is-open-end", !dateDay(target.work_end));
+          navBar.classList.toggle("has-deadline", !!orderDeadline(target));
         }
       } else navBar.hidden = true;
     });
@@ -6614,6 +6814,24 @@
       qtyValue,
       lineUnitPrice: (line) => Math.max(0, numExpr(line, "price_expr", "price")),
       statuses: () => (state.doc?.statuses || []).map((s) => s.name),
+      orderTypes: () => typeNames(),
+      products: () => {
+        const seen = new Set();
+        const out = [];
+        const add = (raw) => {
+          const name = String(raw || "").trim().replace(/\s+/g, " ");
+          if (!name) return;
+          const key = catalogNameKey(name);
+          if (seen.has(key)) return;
+          seen.add(key);
+          out.push(name);
+        };
+        catalogProductNames().forEach(add);
+        (state.doc?.orders || []).forEach((order) => {
+          (order.lines || []).forEach((line) => add(line.product));
+        });
+        return out.sort((a, b) => a.localeCompare(b, "ru", { sensitivity: "base" }));
+      },
       customers: () => unique((state.doc?.orders || []).map((o) => o.customer).filter(Boolean)),
       calcStats: (opts) => calcNodeStats(opts || {}),
       presentValue: (blockId, portId) => window.FinCalc?.presentValue?.(blockId, portId) ?? null,
@@ -6637,18 +6855,51 @@
   }
 
   function calcNodeStats(opts) {
-    const customer = String(opts.customer || "").trim().toLowerCase();
-    const orderId = String(opts.orderId || "").trim();
+    const customers = (Array.isArray(opts.customers) ? opts.customers : opts.customer ? [opts.customer] : [])
+      .map((name) => String(name || "").trim().toLowerCase())
+      .filter(Boolean);
+    const orderIds = (Array.isArray(opts.orderIds) ? opts.orderIds : opts.orderId ? [opts.orderId] : [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean);
     const period = opts.period || "all";
-    const payFilter = opts.payFilter || "all";
-    const status = String(opts.status || "").trim();
+    const payFilters = (Array.isArray(opts.payFilters) ? opts.payFilters : opts.payFilter && opts.payFilter !== "all" ? [opts.payFilter] : [])
+      .map((id) => String(id || "").trim())
+      .filter((id) => id && id !== "all");
+    const statuses = (Array.isArray(opts.statuses) ? opts.statuses : opts.status ? [opts.status] : [])
+      .map((name) => String(name || "").trim())
+      .filter(Boolean);
+    const orderTypes = (Array.isArray(opts.orderTypes) ? opts.orderTypes : opts.orderType ? [opts.orderType] : [])
+      .map((name) => String(name || "").trim())
+      .filter(Boolean);
+    const products = (Array.isArray(opts.products) ? opts.products : opts.product ? [opts.product] : [])
+      .map((name) => String(name || "").trim())
+      .filter(Boolean);
     const dateFrom = dateDay(opts.dateFrom);
     const dateTo = dateDay(opts.dateTo);
     let rows = allRows();
-    if (orderId) rows = rows.filter(({ order }) => order.id === orderId);
-    if (customer) rows = rows.filter(({ order }) => String(order.customer || "").toLowerCase().includes(customer));
-    if (status) rows = rows.filter(({ line }) => line.status === status);
-    if (payFilter && payFilter !== "all") rows = rows.filter(({ order }) => orderFilterMatch(order, payFilter));
+    if (orderIds.length) {
+      const idSet = new Set(orderIds);
+      rows = rows.filter(({ order }) => idSet.has(order.id));
+    }
+    if (customers.length) {
+      const set = new Set(customers);
+      rows = rows.filter(({ order }) => set.has(String(order.customer || "").toLowerCase()));
+    }
+    if (statuses.length) {
+      const set = new Set(statuses);
+      rows = rows.filter(({ line }) => set.has(line.status));
+    }
+    if (orderTypes.length) {
+      const set = new Set(orderTypes);
+      rows = rows.filter(({ line }) => set.has(line.order_type));
+    }
+    if (products.length) {
+      const set = new Set(products);
+      rows = rows.filter(({ line }) => set.has(line.product));
+    }
+    if (payFilters.length) {
+      rows = rows.filter(({ order }) => payFilters.some((filter) => orderFilterMatch(order, filter)));
+    }
     if (period === "range") {
       rows = rows.filter(({ line }) => {
         const d = dateDay(line.order_date);
@@ -7490,9 +7741,12 @@
       setMoneyDecimals(chip.dataset.decimals, { refresh: true });
     });
     $("btn-add-order").addEventListener("click", () => {
-      state.doc.orders.push(emptyOrder());
+      const order = emptyOrder();
+      state.doc.orders.push(order);
       markDirty();
+      state.orderFilter = "all";
       setView("orders");
+      requestAnimationFrame(() => flashOrder(order.id));
     });
     $("btn-share-many").addEventListener("click", () => openShare(null));
     $("dash-focus")?.addEventListener("click", (e) => {
@@ -7507,7 +7761,7 @@
       }
     });
     $("order-sort").addEventListener("change", () => renderOrders());
-    $("autosave").addEventListener("change", async (e) => {
+    $("autosave")?.addEventListener("change", async (e) => {
       state.autosave = e.target.checked;
       if (state.desktop) {
         try {
@@ -11355,7 +11609,7 @@
       applyTheme(localStorage.getItem(LS_THEME) || "light", false);
       await renderRecent();
     }
-    $("autosave").checked = state.autosave;
+    $("autosave") && ($("autosave").checked = state.autosave);
   }
 
   window.finmasterNew = createNew;

@@ -269,21 +269,71 @@ CALC_DASH_PORTS = (
 CALC_DASH_DEFAULT = ("orders", "after", "paid", "unpaid")
 
 
+def _clip_text_list(raw: Any, limit: int, max_items: int = 48) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    src = raw if isinstance(raw, list) else []
+    for item in src[: max_items * 2]:
+        text = _clip_text(item, limit)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+        if len(out) >= max_items:
+            break
+    return out
+
+
 def _calc_filter_fields(raw: dict[str, Any]) -> dict[str, Any]:
     period = str(raw.get("period") or "all")
     if period not in CALC_PERIODS:
         period = "all"
-    pay = str(raw.get("payFilter") or "all")
-    if pay not in CALC_PAY_FILTERS:
-        pay = "all"
+    customers = _clip_text_list(raw.get("customers"), 80)
+    if not customers:
+        legacy = _clip_text(raw.get("customer"), 80)
+        if legacy:
+            customers = [legacy]
+    order_ids = _clip_text_list(raw.get("orderIds"), 80)
+    if not order_ids:
+        legacy_id = _clip_text(raw.get("orderId"), 80)
+        if legacy_id:
+            order_ids = [legacy_id]
+    pay_filters = [item for item in _clip_text_list(raw.get("payFilters"), 24) if item in CALC_PAY_FILTERS and item != "all"]
+    if not pay_filters:
+        pay = str(raw.get("payFilter") or "all")
+        if pay in CALC_PAY_FILTERS and pay != "all":
+            pay_filters = [pay]
+    statuses = _clip_text_list(raw.get("statuses"), 48)
+    if not statuses:
+        legacy_status = _clip_text(raw.get("status"), 48)
+        if legacy_status:
+            statuses = [legacy_status]
+    order_types = _clip_text_list(raw.get("orderTypes"), 64)
+    if not order_types:
+        legacy_type = _clip_text(raw.get("orderType"), 64)
+        if legacy_type:
+            order_types = [legacy_type]
+    products = _clip_text_list(raw.get("products"), 80)
+    if not products:
+        legacy_product = _clip_text(raw.get("product"), 80)
+        if legacy_product:
+            products = [legacy_product]
     return {
-        "customer": _clip_text(raw.get("customer"), 80),
-        "orderId": _clip_text(raw.get("orderId"), 80),
+        "customers": customers,
+        "orderIds": order_ids,
         "period": period,
-        "payFilter": pay,
-        "status": _clip_text(raw.get("status"), 48),
+        "payFilters": pay_filters,
+        "statuses": statuses,
+        "orderTypes": order_types,
+        "products": products,
         "dateFrom": _clip_text(raw.get("dateFrom"), 10),
         "dateTo": _clip_text(raw.get("dateTo"), 10),
+        "customer": "",
+        "orderId": "",
+        "payFilter": "all",
+        "status": "",
+        "orderType": "",
+        "product": "",
     }
 
 
