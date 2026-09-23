@@ -10,7 +10,22 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 
+def _hide_console_early() -> None:
+    """Скрыть консоль до импорта Tk — если вдруг стартовали через python.exe."""
+    if sys.platform != "win32" or os.environ.get("FINMASTER_CONSOLE") == "1":
+        return
+    try:
+        import ctypes
+
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)
+    except Exception:
+        pass
+
+
 def start() -> int:
+    _hide_console_early()
     from backend.splash import ensure_packages, hide_console, Splash
 
     hide_console()

@@ -74,6 +74,7 @@
     filterMultiOpen: null,
     filterMultiLock: false,
     filterMultiScroll: 0,
+    orderWritePending: false,
   };
 
   function $(id) {
@@ -311,7 +312,16 @@
   }
 
   function lineFieldOptions(line, order) {
-    const totals = api.lineTotals(line, order);
+    if (!line) {
+      return [
+        { id: "qty", name: "количество" },
+        { id: "price", name: "цена" },
+        { id: "discount", name: "скидка" },
+        { id: "paid", name: "оплачено" },
+        { id: "unpaid", name: "не оплачено" },
+      ];
+    }
+    const totals = api.lineTotals?.(line, order);
     if (totals?.expense) {
       if (totals.kind === "tax" && totals.mode && totals.mode !== "amount") {
         return [{ id: "percent", name: "процент" }];
@@ -330,6 +340,39 @@
     ];
   }
 
+  /** Поля, которые можно подать на вход ноды заказа (запись в строку). */
+  function lineInputFieldOptions(line, order) {
+    if (!line) {
+      return [
+        { id: "qty", name: "количество" },
+        { id: "price", name: "цена" },
+        { id: "discount", name: "скидка" },
+        { id: "paid", name: "оплачено" },
+      ];
+    }
+    const totals = api.lineTotals?.(line, order);
+    if (totals?.expense) {
+      if (totals.kind === "tax" && totals.mode && totals.mode !== "amount") {
+        return [{ id: "percent", name: "процент" }];
+      }
+      return [
+        { id: "qty", name: "количество" },
+        { id: "price", name: "сумма за единицу" },
+      ];
+    }
+    return [
+      { id: "qty", name: "количество" },
+      { id: "price", name: "цена" },
+      { id: "discount", name: "скидка" },
+      { id: "paid", name: "оплачено" },
+    ];
+  }
+
+  function lineFieldLabel(line, order, fieldId) {
+    const all = [...lineInputFieldOptions(line, order), ...lineFieldOptions(line, order)];
+    return all.find((item) => item.id === fieldId)?.name || fieldId;
+  }
+
   function lineFieldValue(line, order, field) {
     const totals = api.lineTotals(line, order) || {};
     if (field === "qty") return Number(api.qtyValue?.(line) ?? line.quantity) || 0;
@@ -341,11 +384,147 @@
     return 0;
   }
 
+  function lineInPortId(lineId, field) {
+    return `in:line:${lineId}:${field}`;
+  }
+
   function parseLinePort(portId) {
     const text = String(portId || "");
+    const inn = text.match(/^in:line:([^:]+):([a-z]+)$/);
+    if (inn) return { lineId: inn[1], field: inn[2] || "", input: true };
     const m = text.match(/^line:([^:]+)(?::([a-z]+))?$/);
     if (!m) return null;
-    return { lineId: m[1], field: m[2] || "" };
+    return { lineId: m[1], field: m[2] || "", input: false };
+  }
+
+  function fieldToExprKey(field) {
+    if (field === "qty") return "qty_expr";
+    if (field === "price") return "price_expr";
+    if (field === "discount") return "discount_expr";
+    if (field === "paid") return "paid_expr";
+    if (field === "percent") return "tax_percent_expr";
+    return "";
+  }
+
+  function formatCalcNumber(value) {
+    if (!Number.isFinite(value)) return "";
+    const rounded = Math.round(value * 1e6) / 1e6;
+    if (Number.isInteger(rounded)) return String(rounded);
+    return String(rounded).replace(/\.?0+$/, "");
+  }
+
+  /** Владелец входа поля заказа (по всем схемам). */
+  function orderFieldOwner(orderId, lineId, field, exceptBpId, exceptNodeId) {
+    const calc = ensureState();
+    if (!calc || !orderId || !lineId || !field) return null;
+    const want = lineInPortId(lineId, field);
+    for (const bp of calc.blueprints || []) {
+      if (exceptBpId && bp.id === exceptBpId) continue;
+      const nodes = bp.nodes || [];
+      for (const link of bp.links || []) {
+        if (link.toPort !== want) continue;
+        const dst = nodes.find((item) => item.id === link.to);
+        if (!dst || dst.type !== "order" || dst.orderId !== orderId) continue;
+        if (exceptNodeId && dst.id === exceptNodeId) continue;
+        const src = nodes.find((item) => item.id === link.from);
+        return { blueprint: bp, node: dst, link, source: src };
+      }
+    }
+    return null;
+  }
+
+  function orderFieldOwnerReason(owner, line, order, field) {
+    if (!owner) return "";
+    const scheme = owner.blueprint?.name || "Схема";
+    const fieldName = lineFieldLabel(line, order, field);
+    const orderLabel = order?.number || order?.name || "заказ";
+    let src = "связь";
+    if (owner.source) {
+      if (owner.source.type === "const") src = "Константа";
+      else if (owner.source.type === "math") src = `Оператор ${owner.source.op || ""}`.trim();
+      else if (owner.source.type === "formula") src = "Формула";
+      else if (owner.source.type === "percent") src = "Процент";
+      else if (owner.source.type === "result") src = owner.source.name || "Результат";
+      else if (owner.source.type === "order") {
+        const other = api.findOrder(owner.source.orderId);
+        src = `Заказ ${other?.number || "—"}`;
+      } else if (owner.source.type === "filter") src = "Фильтр";
+      else if (owner.source.type === "dashboard") src = "Дашборд";
+      else if (owner.source.type === "scheme") src = "Схема";
+      else src = owner.source.type || "нода";
+    }
+    return `Поле «${fieldName}» занято схемой «${scheme}» · ${orderLabel} ← ${src}`;
+  }
+
+  /** Все занятые входы полей заказов — для блокировки ячеек в таблице. */
+  function collectOrderFieldLocks() {
+    const calc = ensureState();
+    if (!calc) return [];
+    const locks = [];
+    for (const bp of calc.blueprints || []) {
+      const nodes = bp.nodes || [];
+      for (const link of bp.links || []) {
+        const parsed = parseLinePort(link.toPort);
+        if (!parsed?.input || !parsed.field) continue;
+        const dst = nodes.find((item) => item.id === link.to);
+        if (!dst || dst.type !== "order" || !dst.orderId) continue;
+        const order = api.findOrder?.(dst.orderId);
+        if (!order) continue;
+        const line = (order.lines || []).find((item) => item.id === parsed.lineId);
+        if (!line) continue;
+        const src = nodes.find((item) => item.id === link.from);
+        const owner = { blueprint: bp, node: dst, link, source: src };
+        locks.push({
+          orderId: dst.orderId,
+          lineId: parsed.lineId,
+          field: parsed.field,
+          exprKey: fieldToExprKey(parsed.field),
+          schemeId: bp.id,
+          schemeName: bp.name || "Схема",
+          reason: orderFieldOwnerReason(owner, line, order, parsed.field),
+        });
+      }
+    }
+    return locks;
+  }
+
+  /** Удалить ноды/связи калькулятора на заказ или одну позицию. */
+  function pruneOrderCalcLinks(orderId, lineId) {
+    const calc = ensureState();
+    if (!calc || !orderId) return false;
+    let changed = false;
+    (calc.blueprints || []).forEach((bp) => {
+      const orderNodeIds = new Set(
+        (bp.nodes || []).filter((node) => node.type === "order" && node.orderId === orderId).map((node) => node.id)
+      );
+      if (!orderNodeIds.size) return;
+      if (!lineId) {
+        const beforeNodes = (bp.nodes || []).length;
+        bp.nodes = (bp.nodes || []).filter((node) => !orderNodeIds.has(node.id));
+        if (bp.nodes.length !== beforeNodes) changed = true;
+        const beforeLinks = (bp.links || []).length;
+        bp.links = (bp.links || []).filter((link) => !orderNodeIds.has(link.from) && !orderNodeIds.has(link.to));
+        if ((bp.links || []).length !== beforeLinks) changed = true;
+        return;
+      }
+      (bp.nodes || []).forEach((node) => {
+        if (!orderNodeIds.has(node.id) || !node.openFields?.[lineId]) return;
+        delete node.openFields[lineId];
+        changed = true;
+      });
+      const beforeLinks = (bp.links || []).length;
+      bp.links = (bp.links || []).filter((link) => {
+        const touchesOrder = orderNodeIds.has(link.from) || orderNodeIds.has(link.to);
+        if (!touchesOrder) return true;
+        const to = parseLinePort(link.toPort);
+        const from = parseLinePort(link.fromPort);
+        if (to?.lineId === lineId || from?.lineId === lineId) return false;
+        return true;
+      });
+      if ((bp.links || []).length !== beforeLinks) changed = true;
+    });
+    if (changed) dirty();
+    return changed;
   }
 
   function typeLabel(name) {
@@ -856,6 +1035,28 @@
     ];
     if (node.type === "formula") return node.inputs || [];
     if (node.type === "present") return presentPorts(node);
+    if (node.type === "order") {
+      const order = api.findOrder(node.orderId);
+      const linkedIn = usedInputPorts(node.id, links || []);
+      const linkedOut = linkedFromPorts(node.id, links || []);
+      const ports = [];
+      orderLines(order).forEach((line) => {
+        const open = new Set(openFieldsFor(node, line.id));
+        lineInputFieldOptions(line, order).forEach((field) => {
+          const inId = lineInPortId(line.id, field.id);
+          const outId = `line:${line.id}:${field.id}`;
+          if (open.has(field.id) || linkedIn.has(inId) || linkedOut.has(outId)) {
+            ports.push({
+              id: inId,
+              name: field.name,
+              lineId: line.id,
+              field: field.id,
+            });
+          }
+        });
+      });
+      return ports;
+    }
     return [];
   }
 
@@ -973,6 +1174,7 @@
       const found = order || api.findOrder(node.orderId);
       const lines = orderLines(found);
       const linked = linkedFromPorts(node.id, links);
+      const linkedIn = usedInputPorts(node.id, links || []);
       const ports = [];
       lines.forEach((line) => {
         const tone = lineTone(line, found);
@@ -984,15 +1186,23 @@
           child: false,
         });
         const fields = new Set(openFieldsFor(node, line.id));
-        lineFieldOptions(line, found).forEach((field) => {
-          if (fields.has(field.id) || linked.has(`line:${line.id}:${field.id}`)) {
+        const shown = new Map();
+        lineFieldOptions(line, found).forEach((field) => shown.set(field.id, field));
+        lineInputFieldOptions(line, found).forEach((field) => {
+          if (!shown.has(field.id)) shown.set(field.id, field);
+        });
+        shown.forEach((field, fieldId) => {
+          const outId = `line:${line.id}:${fieldId}`;
+          const inId = lineInPortId(line.id, fieldId);
+          if (fields.has(fieldId) || linked.has(outId) || linkedIn.has(inId)) {
             ports.push({
-              id: `line:${line.id}:${field.id}`,
+              id: outId,
               name: field.name,
               line,
               tone,
               child: true,
-              field: field.id,
+              field: fieldId,
+              hasInput: lineInputFieldOptions(line, found).some((item) => item.id === fieldId),
             });
           }
         });
@@ -1011,10 +1221,10 @@
           child: false,
           kind: "type",
         });
-        const fields = new Set(openTypeFieldsFor(node, typeName));
+        const typeFields = new Set(openTypeFieldsFor(node, typeName));
         typeFieldOptions(found, typeName).forEach((field) => {
           const fieldId = typePortId(typeName, field.id);
-          if (fields.has(field.id) || linked.has(fieldId)) {
+          if (typeFields.has(field.id) || linked.has(fieldId)) {
             ports.push({
               id: fieldId,
               name: field.name,
@@ -1094,13 +1304,45 @@
         const order = api.findOrder(node.orderId);
         if (!order) errors.add(nodeId);
         else {
+          // Сначала принимаем входы → пишем в строки заказа
+          (incoming[nodeId] || []).forEach((link) => {
+            const parsed = parseLinePort(link.toPort);
+            if (!parsed?.input || !parsed.field) return;
+            walk(link.from);
+            const raw = values[`${link.from}:${link.fromPort}`];
+            if (raw == null || !Number.isFinite(raw)) return;
+            const line = orderLines(order).find((item) => item.id === parsed.lineId);
+            if (!line) return;
+            const inputMeta = lineInputFieldOptions(line, order).find((item) => item.id === parsed.field);
+            if (!inputMeta) return;
+            const exprKey = fieldToExprKey(parsed.field);
+            if (!exprKey) return;
+            const next = formatCalcNumber(raw);
+            if (!next && next !== "0") return;
+            const prev = line[exprKey] != null ? String(line[exprKey]).trim() : "";
+            if (prev === next) return;
+            line[exprKey] = next;
+            if (parsed.field === "qty") line.quantity = Number(raw) || 0;
+            if (parsed.field === "price") line.price = Number(raw) || 0;
+            if (parsed.field === "discount") line.discount = Number(raw) || 0;
+            if (parsed.field === "paid") line.paid = Number(raw) || 0;
+            if (parsed.field === "percent") line.tax_percent = Number(raw) || 0;
+            session.orderWritePending = true;
+          });
+
           let total = 0;
           orderLines(order).forEach((line) => {
             const amount = lineAmount(line, order);
             setVal(nodeId, `line:${line.id}`, amount);
             total += amount;
-            lineFieldOptions(line, order).forEach((field) => {
-              setVal(nodeId, `line:${line.id}:${field.id}`, lineFieldValue(line, order, field.id));
+            const shown = new Map();
+            lineFieldOptions(line, order).forEach((field) => shown.set(field.id, field));
+            lineInputFieldOptions(line, order).forEach((field) => {
+              if (!shown.has(field.id)) shown.set(field.id, field);
+            });
+            shown.forEach((field, fieldId) => {
+              setVal(nodeId, `line:${line.id}:${fieldId}`, lineFieldValue(line, order, fieldId));
+              setVal(nodeId, lineInPortId(line.id, fieldId), lineFieldValue(line, order, fieldId));
             });
           });
           orderTypeNames(order).forEach((typeName) => {
@@ -1793,6 +2035,18 @@
       if (/^in([1-9]|1[0-9]|20)$/.test(requested || "")) return requested;
       return firstFreeMathPort(dst.id, links);
     }
+    if (dst.type === "order") {
+      const parsed = parseLinePort(requested);
+      if (parsed?.input && parsed.field) {
+        const order = api.findOrder(dst.orderId);
+        const line = (order?.lines || []).find((item) => item.id === parsed.lineId);
+        if (lineInputFieldOptions(line, order).some((item) => item.id === parsed.field)) {
+          ensureOpenField(dst, parsed.lineId, parsed.field);
+          return lineInPortId(parsed.lineId, parsed.field);
+        }
+        return "";
+      }
+    }
     const inputs = nodeInputs(dst, links);
     if (requested && inputs.some((port) => port.id === requested)) return requested;
     return inputs[0]?.id || "";
@@ -1808,14 +2062,44 @@
   function healLinks(bp) {
     if (!bp) return false;
     let changed = false;
+    // Убрать устаревшие текстовые порты «за что» / product
+    (bp.nodes || []).forEach((node) => {
+      if (node.type !== "order" || !node.openFields) return;
+      Object.keys(node.openFields).forEach((lineId) => {
+        const list = node.openFields[lineId] || [];
+        const next = list.filter((f) => f !== "product");
+        if (next.length === list.length) return;
+        changed = true;
+        if (next.length) node.openFields[lineId] = next;
+        else delete node.openFields[lineId];
+      });
+    });
+    const beforeLinks = (bp.links || []).length;
+    bp.links = (bp.links || []).filter((link) => {
+      const to = parseLinePort(link.toPort);
+      const from = parseLinePort(link.fromPort);
+      if (to?.field === "product" || from?.field === "product") return false;
+      return true;
+    });
+    if ((bp.links || []).length !== beforeLinks) changed = true;
     (bp.links || []).forEach((link) => {
       const src = (bp.nodes || []).find((node) => node.id === link.from);
-      if (!src || src.type !== "order") return;
-      const ids = nodeOutputs(src, api.findOrder(src.orderId), bp.links).map((port) => port.id);
-      const hit = matchPortId(link.fromPort, ids);
-      if (hit && hit !== link.fromPort) {
-        link.fromPort = hit;
-        changed = true;
+      const dst = (bp.nodes || []).find((node) => node.id === link.to);
+      if (src?.type === "order") {
+        const ids = nodeOutputs(src, api.findOrder(src.orderId), bp.links).map((port) => port.id);
+        const hit = matchPortId(link.fromPort, ids);
+        if (hit && hit !== link.fromPort) {
+          link.fromPort = hit;
+          changed = true;
+        }
+      }
+      if (dst?.type === "order") {
+        const ids = nodeInputs(dst, bp.links).map((port) => port.id);
+        const hit = matchPortId(link.toPort, ids);
+        if (hit && hit !== link.toPort) {
+          link.toPort = hit;
+          changed = true;
+        }
       }
     });
     return changed;
@@ -1839,20 +2123,44 @@
         return false;
       }
     }
+    if (dst.type === "order") {
+      const parsed = parseLinePort(port);
+      if (parsed?.input && parsed.field) {
+        const order = api.findOrder(dst.orderId);
+        const line = (order?.lines || []).find((item) => item.id === parsed.lineId);
+        const allowed = lineInputFieldOptions(line, order).some((item) => item.id === parsed.field);
+        if (!allowed) {
+          api?.toast?.("Это поле нельзя подать на вход этой позиции");
+          return false;
+        }
+        const owner = orderFieldOwner(dst.orderId, parsed.lineId, parsed.field);
+        // Разрешаем только замену связи на том же порту той же ноды
+        if (owner && !(owner.blueprint.id === bp.id && owner.node.id === dst.id && owner.link.toPort === port)) {
+          api?.toast?.(orderFieldOwnerReason(owner, line, order, parsed.field));
+          return false;
+        }
+        ensureOpenField(dst, parsed.lineId, parsed.field);
+      }
+    }
     const replaced = (bp.links || []).filter((link) => link.to === to && link.toPort === port);
     bp.links = bp.links.filter((link) => !(link.to === to && link.toPort === port));
     bp.links.push({ id: uid(), from, fromPort: fromHit, to, toPort: port });
     replaced.forEach((link) => releaseOrderField(bp, link.from, link.fromPort));
     dirty();
     render();
+    if (dst.type === "order") api?.refreshOrders?.();
     return true;
   }
 
   function releaseOrderField(bp, nodeId, fromPort) {
     const parsed = parseLinePort(fromPort);
-    if (parsed?.field) {
+    if (parsed?.field && !parsed.input) {
       const still = (bp.links || []).some((link) => link.from === nodeId && link.fromPort === fromPort);
       if (still) return;
+      const inStill = (bp.links || []).some(
+        (link) => link.to === nodeId && link.toPort === lineInPortId(parsed.lineId, parsed.field)
+      );
+      if (inStill) return;
       const node = (bp.nodes || []).find((item) => item.id === nodeId && item.type === "order");
       if (node) dropOpenField(node, parsed.lineId, parsed.field);
       return;
@@ -1865,6 +2173,22 @@
     if (orderNode) dropOpenTypeField(orderNode, typed.typeName, typed.field);
   }
 
+  function releaseOrderInputField(bp, nodeId, toPort) {
+    const parsed = parseLinePort(toPort);
+    if (!parsed?.input || !parsed.field) return;
+    const stillIn = (bp.links || []).some((link) => link.to === nodeId && link.toPort === toPort);
+    if (stillIn) return;
+    const stillOut = (bp.links || []).some(
+      (link) => link.from === nodeId && link.fromPort === `line:${parsed.lineId}:${parsed.field}`
+    );
+    if (stillOut) return;
+    const node = (bp.nodes || []).find((item) => item.id === nodeId && item.type === "order");
+    if (!node) return;
+    const open = openFieldsFor(node, parsed.lineId);
+    // Не снимаем поле с ноды автоматически при обрыве только входа — оставляем, если явно открыто.
+    if (!open.includes(parsed.field)) return;
+  }
+
   function removeLink(id) {
     const bp = activeBlueprint();
     if (!bp || !id) return;
@@ -1873,9 +2197,13 @@
     bp.links = bp.links.filter((link) => link.id !== id);
     if (bp.links.length !== before) {
       if (session.selectedLink === id) session.selectedLink = "";
-      if (gone) releaseOrderField(bp, gone.from, gone.fromPort);
+      if (gone) {
+        releaseOrderField(bp, gone.from, gone.fromPort);
+        releaseOrderInputField(bp, gone.to, gone.toPort);
+      }
       dirty();
       render();
+      api?.refreshOrders?.();
     }
   }
 
@@ -1892,9 +2220,13 @@
     const before = bp.links.length;
     bp.links = bp.links.filter((link) => !(link.to === nodeId && link.toPort === portId));
     if (bp.links.length !== before) {
-      gone.forEach((link) => releaseOrderField(bp, link.from, link.fromPort));
+      gone.forEach((link) => {
+        releaseOrderField(bp, link.from, link.fromPort);
+        releaseOrderInputField(bp, link.to, link.toPort);
+      });
       dirty();
       render();
+      api?.refreshOrders?.();
     }
   }
 
@@ -2103,33 +2435,61 @@
     const order = api.findOrder(node?.orderId);
     const line = (order?.lines || []).find((item) => item.id === lineId);
     if (!bp || !node || !line) return;
-    const options = lineFieldOptions(line, order);
+    const byId = new Map();
+    lineFieldOptions(line, order).forEach((field) => byId.set(field.id, { ...field, canOut: true, canIn: false }));
+    lineInputFieldOptions(line, order).forEach((field) => {
+      const prev = byId.get(field.id) || { id: field.id, name: field.name, canOut: false, canIn: false };
+      prev.canIn = true;
+      prev.name = field.name;
+      byId.set(field.id, prev);
+    });
+    const options = [...byId.values()];
     if (!options.length) return;
     const open = new Set(openFieldsFor(node, lineId));
-    const linked = linkedFromPorts(node.id, bp.links);
+    const linkedOut = linkedFromPorts(node.id, bp.links);
+    const linkedIn = usedInputPorts(node.id, bp.links);
     const menu = document.createElement("div");
     menu.className = "calc-port-menu";
     menu.style.left = `${clientX}px`;
     menu.style.top = `${clientY}px`;
     options.forEach((field) => {
-      const shown = open.has(field.id) || linked.has(`line:${lineId}:${field.id}`);
+      const outId = `line:${lineId}:${field.id}`;
+      const inId = lineInPortId(lineId, field.id);
+      const shown = open.has(field.id) || linkedOut.has(outId) || linkedIn.has(inId);
+      const lockedElsewhere = field.canIn && !!orderFieldOwner(node.orderId, lineId, field.id, null, node.id);
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.textContent = field.name;
-      if (shown) {
-        btn.className = "is-shown";
-        btn.title = "Убрать с ноды";
+      btn.textContent = field.name + (field.canIn ? " ↔" : " →");
+      if (lockedElsewhere && !shown) {
+        btn.className = "is-locked";
+        btn.title = orderFieldOwnerReason(
+          orderFieldOwner(node.orderId, lineId, field.id),
+          line,
+          order,
+          field.id
+        );
         btn.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
+          api?.toast?.(btn.title);
+        });
+      } else if (shown) {
+        btn.className = "is-shown";
+        btn.title = linkedOut.has(outId) || linkedIn.has(inId) ? "Порт занят связью" : "Убрать с ноды";
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (linkedOut.has(outId) || linkedIn.has(inId)) {
+            api?.toast?.("Сначала удалите связь");
+            return;
+          }
           dropOpenField(node, lineId, field.id);
-          const portId = `line:${lineId}:${field.id}`;
-          bp.links = (bp.links || []).filter((link) => !(link.from === nodeId && link.fromPort === portId));
           hidePortMenu();
           dirty();
           render();
         });
       } else {
+        btn.title = field.canIn ? "Показать вход и выход" : "Показать выход";
         btn.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -2148,6 +2508,61 @@
       document.removeEventListener("pointerdown", onDoc, true);
     };
     setTimeout(() => document.addEventListener("pointerdown", onDoc, true), 0);
+  }
+
+  function freeOrderFieldPort(orderId, lineId, field) {
+    const calc = ensureState();
+    const want = lineInPortId(lineId, field);
+    let changed = false;
+    (calc.blueprints || []).forEach((bp) => {
+      const before = (bp.links || []).length;
+      bp.links = (bp.links || []).filter((link) => {
+        if (link.toPort !== want) return true;
+        const dst = (bp.nodes || []).find((item) => item.id === link.to);
+        if (!dst || dst.type !== "order" || dst.orderId !== orderId) return true;
+        return false;
+      });
+      if (bp.links.length !== before) changed = true;
+    });
+    if (changed) {
+      dirty();
+      render();
+      api?.refreshOrders?.();
+    }
+    return changed;
+  }
+
+  function showOrderInputPortMenu(clientX, clientY, nodeId, portId) {
+    hidePortMenu();
+    const bp = activeBlueprint();
+    const node = bp?.nodes.find((item) => item.id === nodeId && item.type === "order");
+    const parsed = parseLinePort(portId);
+    if (!bp || !node || !parsed?.input || !parsed.field) return;
+    const owner = orderFieldOwner(node.orderId, parsed.lineId, parsed.field);
+    if (!owner || owner.node.id === node.id) return;
+    const order = api.findOrder(node.orderId);
+    const line = (order?.lines || []).find((item) => item.id === parsed.lineId);
+    const menu = document.createElement("div");
+    menu.className = "calc-port-menu";
+    menu.style.left = `${clientX}px`;
+    menu.style.top = `${clientY}px`;
+    const info = document.createElement("div");
+    info.className = "calc-port-menu-empty";
+    info.textContent = orderFieldOwnerReason(owner, line, order, parsed.field);
+    menu.appendChild(info);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Освободить порт";
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      freeOrderFieldPort(node.orderId, parsed.lineId, parsed.field);
+      hidePortMenu();
+    });
+    menu.appendChild(btn);
+    document.body.appendChild(menu);
+    placePortMenu(menu, clientX, clientY);
+    bindPortMenuClose(menu);
   }
 
   function placePortMenu(menu, clientX, clientY) {
@@ -2272,6 +2687,7 @@
   function orderNodeHtml(node, order, graph, bp) {
     const missing = !order;
     const ports = nodeOutputs(node, order, bp?.links);
+    const linkedIn = usedInputPorts(node.id, bp?.links || []);
     return `<article class="calc-node is-order ${missing ? "is-error" : ""} ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
@@ -2288,13 +2704,31 @@
             const child = port.child ? " is-child" : "";
             const fieldCls = port.child && port.field ? ` is-field-${port.field}` : "";
             const isType = port.kind === "type";
+            if (port.child && port.hasInput && port.field && port.line) {
+              const inId = lineInPortId(port.line.id, port.field);
+              const owner = orderFieldOwner(node.orderId, port.line.id, port.field);
+              const locked = !!owner && owner.node.id !== node.id;
+              const linked = linkedIn.has(inId);
+              const tip = locked
+                ? `${orderFieldOwnerReason(owner, port.line, order, port.field)} · ПКМ — освободить`
+                : `${esc(port.name)} · вход задаёт значение в заказе`;
+              return `<div class="calc-row both is-${tone}${child}${fieldCls}${locked ? " is-locked" : ""}" title="${esc(tip)}">
+              <i class="calc-port in ${locked ? "is-locked" : ""}" data-port="${esc(inId)}" data-io="in" data-line="${esc(port.line.id)}" data-field="${esc(port.field)}" data-order-lock="${locked ? "1" : ""}" title="${esc(tip)}"></i>
+              <span class="calc-row-name" title="${esc(tip)}">${esc(port.name)}</span>
+              <b>${esc(fmtShort(value))}</b>
+              ${linked ? `<button type="button" class="calc-mini" data-del-in-link="${esc(inId)}" title="Удалить связь">×</button>` : ""}
+              <i class="calc-port out" data-port="${esc(port.id)}" data-io="out" data-line="${esc(port.line.id)}" data-child="1" title="${esc(port.name)}"></i>
+            </div>`;
+            }
+            const kindTip =
+              tone === "tax" ? "Налог" : tone === "cost" ? "Затрата" : tone === "frozen" ? "Заморожено" : "";
             const tip = port.child
               ? esc(port.name)
               : isType
-                ? `${esc(port.name)} · ПКМ — поля типа`
+                ? `${esc(port.name)}${kindTip ? ` · ${kindTip}` : ""} · ПКМ — поля типа`
                 : port.id === "total"
                   ? esc(port.name)
-                  : `${esc(port.name)} · ПКМ — поля позиции`;
+                  : `${esc(port.name)}${kindTip ? ` · ${kindTip}` : ""} · ПКМ — поля позиции`;
             return `<div class="calc-row out is-${tone}${child}${fieldCls}${isType ? " is-type-sum" : ""}">
               <span class="calc-row-name" title="${tip}">${esc(port.name)}</span>
               <b>${esc(fmtShort(value))}</b>
@@ -2601,6 +3035,7 @@
     if (!bp || session.busy) return;
     rebuildPresentValues();
     const graph = computeGraph(bp);
+    flushOrderWrites();
     const host = nodesRoot();
     if (!host) return;
     host.querySelectorAll(".calc-node").forEach((el) => {
@@ -2611,10 +3046,15 @@
         if (!expr) return;
         box.textContent = fmtShort(graph.values[`${nodeId}:${expr.dataset.outExpr}`]);
       });
-      el.querySelectorAll(".calc-row.out > b:not(.calc-out-val)").forEach((box) => {
-        const port = box.closest(".calc-row")?.querySelector(".calc-port.out");
-        if (!port) return;
-        box.textContent = fmtShort(graph.values[`${nodeId}:${port.dataset.port}`]);
+      el.querySelectorAll(".calc-row.out > b:not(.calc-out-val), .calc-row.both > b:not(.calc-out-val), .calc-row.in > b:not(.calc-out-val)").forEach((box) => {
+        const row = box.closest(".calc-row");
+        if (!row) return;
+        const outPort = row.querySelector(".calc-port.out");
+        const inPort = row.querySelector(".calc-port.in");
+        const portId = outPort?.dataset.port || inPort?.dataset.port;
+        if (!portId) return;
+        const value = graph.values[`${nodeId}:${portId}`];
+        box.textContent = fmtShort(value);
       });
       el.querySelectorAll(".calc-row.out > span").forEach((box) => {
         if (box.classList.contains("calc-row-name")) return;
@@ -3058,6 +3498,7 @@
         console.warn("calc graph", bp?.id, err);
       }
     });
+    flushOrderWrites();
   }
 
   function hidePresentPanel() {
@@ -3069,6 +3510,13 @@
     btn?.setAttribute("aria-pressed", "false");
     const el = $("calc-present-panel");
     if (el) el.hidden = true;
+  }
+
+  function flushOrderWrites() {
+    if (!session.orderWritePending) return;
+    session.orderWritePending = false;
+    api?.markDirty?.("Калькулятор → заказ");
+    api?.refreshOrders?.();
   }
 
   function render() {
@@ -3084,6 +3532,7 @@
     if (session.busy) {
       applyWorld(bp);
       drawWires(bp, computeGraph(bp));
+      flushOrderWrites();
       drawMinimap(bp);
       return;
     }
@@ -3095,6 +3544,7 @@
       console.warn("calc render graph", err);
       graph = { values: {}, errors: new Set() };
     }
+    flushOrderWrites();
     renderTabs(calc);
     renderTitle(bp);
     renderSide(bp);
@@ -3399,11 +3849,24 @@
           const owner = bp?.nodes.find((item) => item.id === nodeId);
           if (owner?.type === "dashboard") showDashPortMenu(e.clientX, e.clientY, nodeId);
           else if (owner?.type === "present" && io === "in") showPresentPortMenu(e.clientX, e.clientY, nodeId, portId);
+          else if (owner?.type === "order" && io === "in") showOrderInputPortMenu(e.clientX, e.clientY, nodeId, portId);
         }
         return;
       }
       if (e.button !== 0) return;
-      if (io === "in" && port.dataset.presentLock === "1") return;
+      if (io === "in" && (port.dataset.presentLock === "1" || port.dataset.orderLock === "1")) {
+        if (port.dataset.orderLock === "1") {
+          const ownerNode = bp?.nodes.find((item) => item.id === nodeId);
+          const locked = parseLinePort(portId);
+          if (ownerNode?.type === "order" && locked?.input) {
+            const why = orderFieldOwner(ownerNode.orderId, locked.lineId, locked.field);
+            const order = api.findOrder(ownerNode.orderId);
+            const line = (order?.lines || []).find((item) => item.id === locked.lineId);
+            api?.toast?.(orderFieldOwnerReason(why, line, order, locked.field) || "Вход занят");
+          }
+        }
+        return;
+      }
 
       if (session.linking) {
         const src = session.linking;
@@ -4395,6 +4858,40 @@
     },
     removePresentBlock(blockId) {
       return removePresentBlockNodes(blockId);
+    },
+    orderFieldLocks() {
+      try {
+        return collectOrderFieldLocks();
+      } catch (err) {
+        console.warn("calc orderFieldLocks", err);
+        return [];
+      }
+    },
+    orderFieldLock(orderId, lineId, fieldOrExpr) {
+      try {
+        const locks = collectOrderFieldLocks();
+        const field =
+          fieldOrExpr === "qty_expr"
+            ? "qty"
+            : fieldOrExpr === "price_expr"
+              ? "price"
+              : fieldOrExpr === "discount_expr"
+                ? "discount"
+                : fieldOrExpr === "paid_expr"
+                  ? "paid"
+                  : fieldOrExpr === "tax_percent_expr"
+                    ? "percent"
+                    : fieldOrExpr;
+        return (
+          locks.find((item) => item.orderId === orderId && item.lineId === lineId && item.field === field) || null
+        );
+      } catch (err) {
+        console.warn("calc orderFieldLock", err);
+        return null;
+      }
+    },
+    pruneOrderLinks(orderId, lineId) {
+      return pruneOrderCalcLinks(orderId, lineId);
     },
   };
 })();

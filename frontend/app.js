@@ -1921,12 +1921,24 @@
     return expr;
   }
 
-  function exprInput(line, exprKey, extra = "") {
+  function exprInput(line, exprKey, extra = "", lockReason = "") {
     const raw = exprRaw(line, exprKey);
     const formula = isFormula(raw);
-    return `<input data-lk="${exprKey}" class="expr-field" inputmode="decimal" placeholder="1+2*6" ${extra}
+    const locked = !!lockReason;
+    const lockAttr = locked
+      ? `readonly disabled data-calc-lock="1" title="${esc(lockReason)}"`
+      : extra;
+    return `<input data-lk="${exprKey}" class="expr-field${locked ? " is-calc-locked" : ""}" inputmode="decimal" placeholder="1+2*6" ${lockAttr}
       value="${esc(shownExpr(line, exprKey))}" data-expr="${esc(raw)}" data-showing="${formula ? "result" : "expr"}"
-      title="Можно формулу. Клик — правка, вне фокуса — результат." />`;
+      title="${locked ? esc(lockReason) : "Можно формулу. Клик — правка, вне фокуса — результат."}" />`;
+  }
+
+  function calcLockFor(orderId, lineId, fieldOrExpr) {
+    try {
+      return window.FinCalc?.orderFieldLock?.(orderId, lineId, fieldOrExpr) || null;
+    } catch {
+      return null;
+    }
   }
 
   function statusColor(name) {
@@ -2118,12 +2130,12 @@
     const statusNames = (state.doc.statuses || []).map((s) => s.name);
     const units = state.doc.units || [];
     const types = typeNames();
-    const ctx = { statusNames, units, types };
     const canExpense = typeNames("expense").length > 0;
     $("orders-list").innerHTML = orders
       .map((order) => {
         const tot = orderTotals(order);
         const { income, expense, frozen } = splitLines(order.lines);
+        const ctx = { statusNames, units, types, order };
         return `<article class="order-card" data-order="${order.id}">
           <div class="order-head">
             <div class="field"><label>Номер заказа</label><input data-k="number" value="${esc(order.number)}" /></div>
@@ -2192,18 +2204,23 @@
     return `${base} · расход <b class="cost">−${esc(money(tot.cost))}</b> · чистыми <b>${esc(money(tot.net))}</b>`;
   }
 
-  function orderLineRow(line, { statusNames, units, types }) {
+  function orderLineRow(line, { statusNames, units, types, order }) {
     const t = lineTotals(line);
+    const oid = order?.id || "";
+    const lockQty = calcLockFor(oid, line.id, "qty");
+    const lockPrice = calcLockFor(oid, line.id, "price");
+    const lockDisc = calcLockFor(oid, line.id, "discount");
+    const lockPaid = calcLockFor(oid, line.id, "paid");
     return `<tr data-line="${line.id}" class="line-row${isFrozenLine(line) ? " is-frozen" : ""}" style="--status-color:${esc(statusColor(line.status))}">
       <td class="line-drag" title="Перетащить строку. Правый клик — заморозить"><span></span></td>
       <td><select data-lk="order_type">${optionList(unique([line.order_type, ...types]), line.order_type)}</select></td>
       <td><input data-lk="product" data-suggest="product" autocomplete="off" spellcheck="false" value="${esc(line.product)}" /></td>
-      <td class="num">${exprInput(line, "qty_expr")}</td>
+      <td class="num">${exprInput(line, "qty_expr", "", lockQty?.reason || "")}</td>
       <td><select data-lk="unit">${optionList(unique([line.unit, ...units]), line.unit)}</select></td>
-      <td class="num">${exprInput(line, "price_expr")}</td>
-      <td class="num">${exprInput(line, "discount_expr")}</td>
+      <td class="num">${exprInput(line, "price_expr", "", lockPrice?.reason || "")}</td>
+      <td class="num">${exprInput(line, "discount_expr", "", lockDisc?.reason || "")}</td>
       <td><input data-lk="order_date" type="date" value="${esc(dateDay(line.order_date))}" /></td>
-      <td class="num">${exprInput(line, "paid_expr")}</td>
+      <td class="num">${exprInput(line, "paid_expr", "", lockPaid?.reason || "")}</td>
       <td><input data-lk="payment_date" type="date" value="${esc(dateDay(line.payment_date))}" /></td>
       <td class="num computed">${esc(money(t.unpaid))}</td>
       <td class="num computed">${esc(money(t.after))}<div style="color:#94a3b8;font-weight:500;font-size:11px">до скидки ${esc(money(t.total))}</div></td>
@@ -2223,6 +2240,10 @@
 
   function orderCostRow(line, { units, types, order }) {
     const t = lineTotals(line, order);
+    const oid = order?.id || "";
+    const lockQty = calcLockFor(oid, line.id, "qty");
+    const lockPrice = calcLockFor(oid, line.id, "price");
+    const lockPercent = calcLockFor(oid, line.id, "percent");
     const calc =
       t.kind === "tax"
         ? `<select data-lk="tax_mode" title="Своя сумма или процент от заказа">${TAX_MODES.map(
@@ -2231,11 +2252,11 @@
         : `<span class="cost-calc">своя сумма</span>`;
     const amount =
       t.mode === "amount"
-        ? `<td class="num">${exprInput(line, "qty_expr")}</td>
+        ? `<td class="num">${exprInput(line, "qty_expr", "", lockQty?.reason || "")}</td>
       <td><select data-lk="unit">${optionList(unique([line.unit, ...units]), line.unit)}</select></td>
-      <td class="num">${exprInput(line, "price_expr")}</td>`
+      <td class="num">${exprInput(line, "price_expr", "", lockPrice?.reason || "")}</td>`
         : `<td class="num" colspan="3">
-        <div class="tax-percent">${exprInput(line, "tax_percent_expr")}<span class="tax-of">% от ${esc(money(t.base))}</span></div>
+        <div class="tax-percent">${exprInput(line, "tax_percent_expr", "", lockPercent?.reason || "")}<span class="tax-of">% от ${esc(money(t.base))}</span></div>
       </td>`;
     return `<tr data-line="${line.id}" class="line-row cost-row${isFrozenLine(line) ? " is-frozen" : ""}">
       <td class="line-drag" title="Перетащить строку. Правый клик — заморозить"><span></span></td>
@@ -6981,6 +7002,10 @@
       customers: () => unique((state.doc?.orders || []).map((o) => o.customer).filter(Boolean)),
       calcStats: (opts) => calcNodeStats(opts || {}),
       presentValue: (blockId, portId) => window.FinCalc?.presentValue?.(blockId, portId) ?? null,
+      refreshOrders: () => {
+        if (state.view === "orders") renderOrders();
+        else updateOrdersSummary?.();
+      },
       copyText: async (text) => {
         if (state.desktop) await apiPost("/api/clipboard-text", { text });
         else if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
@@ -7881,8 +7906,156 @@
     });
   }
 
+  function bindGlobalTooltips() {
+    let tipEl = null;
+    let showTimer = 0;
+    let active = null;
+    let lastText = "";
+    let lastX = 0;
+    let lastY = 0;
+
+    function ensureTip() {
+      if (tipEl) return tipEl;
+      tipEl = document.createElement("div");
+      tipEl.className = "ui-tip";
+      tipEl.id = "ui-tip";
+      tipEl.setAttribute("role", "tooltip");
+      tipEl.hidden = true;
+      document.body.appendChild(tipEl);
+      return tipEl;
+    }
+
+    function isTipChrome(el) {
+      return !!el?.closest?.(".ui-tip, .fin-tip, .hint-i-pop, .cloud-tooltip, .calc-port-menu, .suggest");
+    }
+
+    function migrateTitle(el) {
+      if (!el || el.nodeType !== 1) return "";
+      const existing = String(el.getAttribute("data-tip") || "").trim();
+      const title = el.getAttribute("title");
+      if (title != null && String(title).trim()) {
+        const text = String(title).trim();
+        if (!existing) el.setAttribute("data-tip", text);
+        el.removeAttribute("title");
+        return existing || text;
+      }
+      return existing;
+    }
+
+    function findTipTarget(start) {
+      let el = start;
+      for (let i = 0; i < 8 && el && el !== document.body; i += 1) {
+        if (isTipChrome(el)) return null;
+        if (el.getAttribute?.("data-no-tip") === "1") return null;
+        const text = migrateTitle(el) || String(el.getAttribute?.("data-tip") || "").trim();
+        if (text) return el;
+        el = el.parentElement;
+      }
+      return null;
+    }
+
+    function tipText(el) {
+      return migrateTitle(el) || String(el?.getAttribute?.("data-tip") || "").trim();
+    }
+
+    function hide() {
+      clearTimeout(showTimer);
+      showTimer = 0;
+      active = null;
+      lastText = "";
+      if (!tipEl) return;
+      tipEl.classList.remove("is-on");
+      tipEl.hidden = true;
+    }
+
+    function place(clientX, clientY) {
+      const tip = ensureTip();
+      const pad = 10;
+      const rect = tip.getBoundingClientRect();
+      let x = clientX + 14;
+      let y = clientY + 18;
+      if (x + rect.width > window.innerWidth - pad) x = clientX - rect.width - 12;
+      if (y + rect.height > window.innerHeight - pad) y = clientY - rect.height - 14;
+      if (x < pad) x = pad;
+      if (y < pad) y = pad;
+      tip.style.left = `${Math.round(x)}px`;
+      tip.style.top = `${Math.round(y)}px`;
+    }
+
+    function show(el, clientX, clientY) {
+      const text = tipText(el);
+      if (!text) {
+        hide();
+        return;
+      }
+      active = el;
+      lastX = clientX;
+      lastY = clientY;
+      const tip = ensureTip();
+      if (text !== lastText) {
+        tip.textContent = text;
+        lastText = text;
+      }
+      tip.hidden = false;
+      tip.classList.add("is-on");
+      place(clientX, clientY);
+    }
+
+    document.addEventListener(
+      "pointerover",
+      (e) => {
+        if (e.pointerType === "touch") return;
+        const target = findTipTarget(e.target);
+        if (!target) return;
+        if (target === active) return;
+        clearTimeout(showTimer);
+        const x = e.clientX;
+        const y = e.clientY;
+        showTimer = setTimeout(() => show(target, x, y), 260);
+      },
+      true
+    );
+
+    document.addEventListener(
+      "pointermove",
+      (e) => {
+        if (!active || !tipEl || tipEl.hidden) return;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        place(e.clientX, e.clientY);
+      },
+      true
+    );
+
+    document.addEventListener(
+      "pointerout",
+      (e) => {
+        if (!active) {
+          clearTimeout(showTimer);
+          return;
+        }
+        const related = e.relatedTarget;
+        if (related && (active === related || active.contains?.(related))) return;
+        if (related && findTipTarget(related) === active) return;
+        hide();
+      },
+      true
+    );
+
+    document.addEventListener("scroll", hide, true);
+    document.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key === "Escape") hide();
+      },
+      true
+    );
+    window.addEventListener("blur", hide);
+  }
+
   function bind() {
     applyTheme(localStorage.getItem(LS_THEME) || currentTheme(), false);
+    bindGlobalTooltips();
     $("nav").addEventListener("click", (e) => {
       const btn = e.target.closest("button[data-view]");
       if (btn) setView(btn.dataset.view);
@@ -9174,6 +9347,11 @@
     if (!tr) return;
     const line = order.lines.find((l) => l.id === tr.dataset.line);
     if (!line || !e.target.dataset.lk) return;
+    if (e.target.dataset.calcLock === "1" || e.target.classList.contains("is-calc-locked")) {
+      const lock = calcLockFor(order.id, line.id, e.target.dataset.lk);
+      if (lock?.reason) toast(lock.reason);
+      return;
+    }
     const key = e.target.dataset.lk;
     if (EXPR_MAP[key]) {
       if (e.target.dataset.showing === "result") return;
@@ -10776,7 +10954,9 @@
     const act = e.target.dataset.act || e.target.closest("button")?.dataset.act;
     if (!act) return;
     const card = e.target.closest("[data-order]");
+    if (!card) return;
     const order = findOrder(card.dataset.order);
+    if (!order) return;
     if (act === "notes") {
       const panel = card.querySelector(".order-notes");
       const btn = card.querySelector(".note-btn");
@@ -10810,10 +10990,12 @@
     }
     if (act === "del") {
       historyCommit();
+      window.FinCalc?.pruneOrderLinks?.(order.id);
       state.doc.orders = state.doc.orders.filter((o) => o.id !== order.id);
       markDirty();
       renderOrders();
       undoToast(`Заказ ${order.number || ""} удалён`.trim());
+      return;
     }
     if (act === "dupline") {
       const tr = e.target.closest("[data-line]");
@@ -10836,21 +11018,25 @@
       state.doc.orders.push(copy);
       markDirty();
       renderOrders();
+      return;
     }
     if (act === "addline") {
       addOrderLine(order);
+      return;
     }
     if (act === "addcost") {
       addExpenseLine(order);
       return;
     }
     if (act === "delline") {
-      const id = e.target.closest("[data-line]").dataset.line;
+      const id = e.target.closest("[data-line]")?.dataset.line;
+      if (!id) return;
       if (order.lines.length <= 1) {
         toast("У заказа должна остаться хотя бы одна позиция. Удалите заказ целиком, если он не нужен.");
         return;
       }
       historyCommit();
+      window.FinCalc?.pruneOrderLinks?.(order.id, id);
       order.lines = order.lines.filter((l) => l.id !== id);
       markDirty();
       renderOrders();
