@@ -16,9 +16,9 @@ def start() -> int:
     hide_console()
     splash = Splash(os.path.join(ROOT, "frontend", "favicon.png"))
     try:
-        splash.step("Запуск FinMaster…", 5)
+        splash.step("Запуск FinMaster…", 6)
         ensure_packages(splash, os.path.join(ROOT, "requirements.txt"))
-        splash.step("Загрузка программы…", 34)
+        splash.step("Загрузка программы…", 36)
         import app
 
         app.main(splash)

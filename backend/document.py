@@ -833,13 +833,19 @@ def _product_entry(item: Any, default_unit: str) -> dict[str, Any] | None:
         name = str(item.get("name") or "").strip()
         unit = str(item.get("unit") or "").strip() or default_unit
         price = _product_price(item.get("price"))
+        kind = str(item.get("kind") or "order").strip().lower()
+        if kind not in {"order", "cost", "tax"}:
+            kind = "order"
+        tax_percent = _product_price(item.get("tax_percent")) if kind == "tax" else 0.0
     else:
         name = str(item or "").strip()
         unit = default_unit
         price = 0.0
+        kind = "order"
+        tax_percent = 0.0
     if not name:
         return None
-    return {"name": name, "unit": unit, "price": price}
+    return {"name": name, "unit": unit, "price": price, "kind": kind, "tax_percent": tax_percent}
 
 
 def now_iso() -> str:
@@ -948,9 +954,12 @@ def normalize_document(raw: Any) -> dict[str, Any]:
         cleaned_products = []
         for item in products:
             entry = _product_entry(item, default_unit)
-            if not entry or entry["name"] in seen:
+            if not entry:
                 continue
-            seen.add(entry["name"])
+            key = (entry["kind"], entry["name"].casefold())
+            if key in seen:
+                continue
+            seen.add(key)
             cleaned_products.append(entry)
         if cleaned_products:
             base["products"] = cleaned_products
@@ -1011,7 +1020,7 @@ def normalize_document(raw: Any) -> dict[str, Any]:
                     seen.add(name)
                     unit = str(line.get("unit") or "").strip() or default_unit
                     price = _product_price(line.get("price"))
-                    harvested.append({"name": name, "unit": unit, "price": price})
+                    harvested.append({"name": name, "unit": unit, "price": price, "kind": "order", "tax_percent": 0.0})
         if harvested:
             base["products"] = harvested
 

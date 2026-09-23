@@ -36,6 +36,7 @@
     cash: { filter: "all", day: "", bucket: "", customer: "" },
     calendar: null,
     cloud: null,
+    productCatalogTab: "order",
   };
 
   const LS_NET_CONSOLE = "finmaster.netconsole";
@@ -1296,6 +1297,17 @@
     return orders;
   }
 
+  function updateOrdersSummary() {
+    const el = $("orders-summary");
+    if (!el || !state.doc) return;
+    if (state.view && state.view !== "orders") return;
+    const orders = filteredOrders();
+    const summary = summarize(
+      orders.flatMap((o) => (o.lines || []).map((line) => ({ order: o, line, totals: lineTotals(line) })))
+    );
+    el.innerHTML = `<span>${orders.length} зак. · ${money(summary.after)} · долг ${money(summary.unpaid)}</span>`;
+  }
+
   function analyticsRows() {
     const q = state.search.trim().toLowerCase();
     const from = $("f-from").value;
@@ -2095,8 +2107,7 @@
     closeProductSuggest();
     const orders = filteredOrders();
     renderOrderChips();
-    const summary = summarize(orders.flatMap((o) => (o.lines || []).map((line) => ({ order: o, line, totals: lineTotals(line) }))));
-    $("orders-summary").innerHTML = `<span>${orders.length} зак. · ${money(summary.after)} · долг ${money(summary.unpaid)}</span>`;
+    updateOrdersSummary();
     if (!orders.length) {
       const filtered = state.orderFilter !== "all" || state.search.trim();
       $("orders-list").innerHTML = filtered
@@ -2295,15 +2306,30 @@
     </div>`;
   }
 
+  function productKind(item) {
+    const k = String(item?.kind || "order").toLowerCase();
+    return k === "cost" || k === "tax" ? k : "order";
+  }
+
+  function productKindOfLine(line) {
+    const k = typeKind(line?.order_type);
+    if (k === "tax") return "tax";
+    if (k === "cost") return "cost";
+    return "order";
+  }
+
   function productEntry(item) {
     if (item && typeof item === "object" && !Array.isArray(item)) {
+      const kind = productKind(item);
       return {
         name: String(item.name || "").trim(),
         unit: String(item.unit || "").trim(),
         price: Math.max(0, round2(item.price)),
+        kind,
+        tax_percent: kind === "tax" ? Math.max(0, round2(item.tax_percent)) : 0,
       };
     }
-    return { name: String(item || "").trim(), unit: "", price: 0 };
+    return { name: String(item || "").trim(), unit: "", price: 0, kind: "order", tax_percent: 0 };
   }
 
   function catalogNameKey(name) {
@@ -2369,17 +2395,29 @@
     const seen = new Set();
     const next = [];
     for (const item of state.doc.products || []) {
-      const { name, unit, price } = productEntry(item);
-      const key = catalogNameKey(name);
-      if (!key || seen.has(key)) continue;
+      const entry = productEntry(item);
+      const key = `${entry.kind}:${catalogNameKey(entry.name)}`;
+      if (!entry.name || !catalogNameKey(entry.name) || seen.has(key)) continue;
       seen.add(key);
-      next.push({ name, unit: unit || fallback, price });
+      next.push({
+        name: entry.name,
+        unit: entry.unit || fallback,
+        price: entry.price,
+        kind: entry.kind,
+        tax_percent: entry.tax_percent,
+      });
     }
     state.doc.products = next;
   }
 
-  function catalogProductNames() {
-    return (state.doc.products || []).map((p) => productEntry(p).name).filter(Boolean);
+  function productsOfKind(kind) {
+    const want = productKind({ kind });
+    return (state.doc.products || []).filter((p) => productKind(p) === want);
+  }
+
+  function catalogProductNames(kind = "all") {
+    const list = kind === "all" ? state.doc.products || [] : productsOfKind(kind);
+    return list.map((p) => productEntry(p).name).filter(Boolean);
   }
 
   const textSuggest = { input: null, items: [], index: -1, picking: false, kind: "", mode: "browse", selectEl: null };
@@ -2398,11 +2436,33 @@
     return unique(names).sort((a, b) => a.localeCompare(b, "ru", { sensitivity: "base" }));
   }
 
-  function productSuggestNames() {
-    const catalog = catalogProductNames();
+  function productCatalogKindOf(input) {
+    if (!input) return "all";
+    if (input.id === "f-product" || input.dataset?.filterField === "product") return "all";
+    const tr = input.closest?.("tr[data-line]");
+    if (!tr) return "all";
+    const typeSel = tr.querySelector?.('[data-lk="order_type"]');
+    let typeName = typeSel?.value || "";
+    if (!typeName) {
+      const id = tr.dataset.line;
+      for (const order of state.doc?.orders || []) {
+        const line = (order.lines || []).find((l) => l.id === id);
+        if (line) {
+          typeName = line.order_type;
+          break;
+        }
+      }
+    }
+    return productKindOfLine({ order_type: typeName });
+  }
+
+  function productSuggestNames(forInput) {
+    const scope = productCatalogKindOf(forInput);
+    const catalog = catalogProductNames(scope);
     const seen = new Set(catalog.map(catalogNameKey));
     const extra = [];
     for (const { line } of allRows()) {
+      if (scope !== "all" && productKindOfLine(line) !== scope) continue;
       const name = String(line.product || "").trim();
       const key = catalogNameKey(name);
       if (!name || seen.has(key)) continue;
@@ -2412,9 +2472,9 @@
     return catalog.concat(extra);
   }
 
-  function suggestNames(kind) {
+  function suggestNames(kind, input) {
     if (kind === "customer") return customerSuggestNames();
-    if (kind === "product") return productSuggestNames();
+    if (kind === "product") return productSuggestNames(input || textSuggest.input);
     return [];
   }
 
@@ -2435,7 +2495,7 @@
   }
 
   function filterProductSuggest(query) {
-    return filterSuggestNames(productSuggestNames(), query, "filter");
+    return filterSuggestNames(productSuggestNames(textSuggest.input), query, "filter");
   }
 
   function suggestBoxEl() {
@@ -2529,7 +2589,7 @@
     textSuggest.selectEl?.classList.remove("is-suggest-open");
     textSuggest.selectEl = null;
     const openMode = mode === "filter" ? "filter" : "browse";
-    const all = suggestNames(kind);
+    const all = suggestNames(kind, input);
     const items = filterSuggestNames(all, input.value, openMode);
     const q = String(input.value || "").trim();
     const exact = items.findIndex((name) => catalogNameKey(suggestItemLabel(name)) === catalogNameKey(q));
@@ -2683,10 +2743,11 @@
     return false;
   }
 
-  function catalogProduct(name) {
+  function catalogProduct(name, kind = "order") {
     const key = catalogNameKey(name);
     if (!key) return null;
-    return (state.doc.products || []).find((x) => catalogNameKey(productEntry(x).name) === key) || null;
+    const want = productKind({ kind });
+    return (state.doc.products || []).find((x) => productKind(x) === want && catalogNameKey(productEntry(x).name) === key) || null;
   }
 
   function applyLineUnit(tr, line, unit) {
@@ -2713,20 +2774,42 @@
     inp.classList.remove("invalid");
   }
 
+  function applyLineTaxPercent(tr, line, percent) {
+    const n = Math.max(0, round2(percent));
+    if (!n) return;
+    line.tax_percent = n;
+    line.tax_percent_expr = String(n);
+    const inp = tr.querySelector('[data-lk="tax_percent_expr"]');
+    if (!inp) return;
+    inp.value = String(n);
+    inp.dataset.expr = String(n);
+    inp.dataset.showing = "expr";
+    inp.classList.remove("invalid");
+  }
+
   function applyLineProductDefaults(tr, line) {
-    const p = catalogProduct(line.product);
+    const want = productKindOfLine(line);
+    const p = catalogProduct(line.product, want);
     if (!p) return;
     applyLineUnit(tr, line, p.unit);
     applyLinePrice(tr, line, p.price);
+    if (want === "tax" && p.tax_percent > 0) applyLineTaxPercent(tr, line, p.tax_percent);
   }
 
-  function ensureProduct(name, unitHint, priceHint) {
+  function ensureProduct(name, unitHint, priceHint, kind = "order", taxPercentHint = 0) {
     const n = String(name || "").trim();
     if (!n) return;
+    const want = productKind({ kind });
     const list = state.doc.products || (state.doc.products = []);
-    if (list.some((p) => catalogNameKey(p.name) === catalogNameKey(n))) return;
+    if (list.some((p) => productKind(p) === want && catalogNameKey(p.name) === catalogNameKey(n))) return;
     const fallback = String(unitHint || "").trim() || (state.doc.units || [])[0] || "шт.";
-    list.push({ name: n, unit: fallback, price: Math.max(0, round2(priceHint)) });
+    list.push({
+      name: n,
+      unit: fallback,
+      price: Math.max(0, round2(priceHint)),
+      kind: want,
+      tax_percent: want === "tax" ? Math.max(0, round2(taxPercentHint)) : 0,
+    });
   }
 
   /** Убрать обрывки вроде «т», «то», «тор», если в заказах уже есть полное имя. */
@@ -2737,15 +2820,22 @@
     for (const order of state.doc.orders || []) {
       for (const line of order.lines || []) {
         const key = catalogNameKey(line.product);
-        if (key) used.add(key);
+        if (key) used.add(`${productKindOfLine(line)}:${key}`);
       }
     }
-    const keys = list.map((p) => catalogNameKey(p.name));
+    const keys = list.map((p) => `${productKind(p)}:${catalogNameKey(p.name)}`);
     const next = list.filter((p, i) => {
       const key = keys[i];
-      if (!key) return false;
+      if (!key.endsWith(":") && !catalogNameKey(p.name)) return false;
+      if (!catalogNameKey(p.name)) return false;
       if (used.has(key)) return true;
-      return !keys.some((other, j) => j !== i && other.startsWith(key) && other.length > key.length);
+      const kind = productKind(p);
+      const nameKey = catalogNameKey(p.name);
+      return !keys.some((other, j) => {
+        if (j === i) return false;
+        const [ok, on] = other.split(":");
+        return ok === kind && on.startsWith(nameKey) && on.length > nameKey.length;
+      });
     });
     if (next.length !== list.length) state.doc.products = next;
   }
@@ -2753,7 +2843,9 @@
   function syncProductsFromOrders() {
     const list = state.doc.products || (state.doc.products = []);
     (state.doc.orders || []).forEach((order) => {
-      (order.lines || []).forEach((line) => ensureProduct(line.product, line.unit, line.price));
+      (order.lines || []).forEach((line) => {
+        ensureProduct(line.product, line.unit, line.price, productKindOfLine(line), line.tax_percent);
+      });
     });
     pruneDraftProducts();
   }
@@ -2769,8 +2861,62 @@
     }
   }
 
-  function renameProduct(oldName, nextName) {
-    renameCatalogValue("product", oldName, nextName);
+  function catalogFieldUsage(field, name) {
+    const key = catalogNameKey(name);
+    if (!key) return 0;
+    let count = 0;
+    for (const order of state.doc?.orders || []) {
+      for (const line of order.lines || []) {
+        if (catalogNameKey(line[field]) === key) count += 1;
+      }
+    }
+    return count;
+  }
+
+  function statusUsage(name) {
+    return catalogFieldUsage("status", name);
+  }
+
+  function unitUsage(name) {
+    let count = catalogFieldUsage("unit", name);
+    for (const p of state.doc?.products || []) {
+      if (catalogNameKey(p.unit) === catalogNameKey(name)) count += 1;
+    }
+    return count;
+  }
+
+  function orderTypeUsage(name) {
+    return catalogFieldUsage("order_type", name);
+  }
+
+  function catalogDelBtn(attr, used, label = "поз.") {
+    if (used > 0) {
+      return `<button class="btn small danger" ${attr} disabled title="Нельзя удалить: используется в ${used} ${label}">Удалить</button>`;
+    }
+    return `<button class="btn small danger" ${attr} title="Удалить">Удалить</button>`;
+  }
+
+  function productTemplateUsage(name, kind = "order") {
+    const key = catalogNameKey(name);
+    if (!key) return 0;
+    const want = productKind({ kind });
+    let count = 0;
+    for (const order of state.doc?.orders || []) {
+      for (const line of order.lines || []) {
+        if (productKindOfLine(line) === want && catalogNameKey(line.product) === key) count += 1;
+      }
+    }
+    return count;
+  }
+
+  function renameProduct(oldName, nextName, kind = "order") {
+    if (!oldName || oldName === nextName) return;
+    const want = productKind({ kind });
+    for (const order of state.doc.orders || []) {
+      for (const line of order.lines || []) {
+        if (line.product === oldName && productKindOfLine(line) === want) line.product = nextName;
+      }
+    }
   }
 
   function orderNewestStamp(order) {
@@ -6826,7 +6972,7 @@
           seen.add(key);
           out.push(name);
         };
-        catalogProductNames().forEach(add);
+        catalogProductNames("all").forEach(add);
         (state.doc?.orders || []).forEach((order) => {
           (order.lines || []).forEach((line) => add(line.product));
         });
@@ -7014,8 +7160,9 @@
   function renderCatalogs() {
     const statusNames = (state.doc.statuses || []).map((s) => s.name);
     $("status-list").innerHTML = (state.doc.statuses || [])
-      .map(
-        (s, i) => `<div class="list-item" data-i="${i}">
+      .map((s, i) => {
+        const used = statusUsage(s.name);
+        return `<div class="list-item" data-i="${i}">
         <button type="button" class="item-drag" title="Перетащить"><span></span></button>
         <input type="color" data-ck="color" value="${esc(toHex(s.color))}" />
         <input data-ck="name" value="${esc(s.name)}"${catalogNameAttrs(statusNames, s.name, i)} />
@@ -7026,29 +7173,30 @@
             <path d="${s.locked ? "M8 11V8a4 4 0 0 1 8 0v3" : "M8 11V8a4 4 0 0 1 7.5-2"}" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
           </svg>
         </button>
-        <button class="btn small danger" data-cact="del">Удалить</button>
-      </div>`
-      )
+        ${catalogDelBtn("data-cact=\"del\"", used)}
+      </div>`;
+      })
       .join("");
     const unitNames = state.doc.units || [];
     $("unit-list").innerHTML = unitNames
-      .map(
-        (u, i) =>
-          `<div class="list-item" data-i="${i}"><button type="button" class="item-drag" title="Перетащить"><span></span></button><input data-uk value="${esc(u)}"${catalogNameAttrs(
-            unitNames,
-            u,
-            i
-          )} /><button class="btn small danger" data-uact="del">Удалить</button></div>`
-      )
+      .map((u, i) => {
+        const used = unitUsage(u);
+        return `<div class="list-item" data-i="${i}"><button type="button" class="item-drag" title="Перетащить"><span></span></button><input data-uk value="${esc(u)}"${catalogNameAttrs(
+          unitNames,
+          u,
+          i
+        )} />${catalogDelBtn("data-uact=\"del\"", used, "поз./шабл.")}</div>`;
+      })
       .join("");
     const typeNamesList = (state.doc.order_types || []).map((t) => typeEntry(t).name);
     $("type-list").innerHTML = (state.doc.order_types || [])
       .map(typeEntry)
-      .map(
-        (t, i) => `<div class="list-item type-item ${t.is_tax || t.is_cost ? "is-expense" : ""}" data-i="${i}">
+      .map((t, i) => {
+        const used = orderTypeUsage(t.name);
+        return `<div class="list-item type-item ${t.is_tax || t.is_cost ? "is-expense" : ""}" data-i="${i}">
         <button type="button" class="item-drag" title="Перетащить"><span></span></button>
         <input data-tk value="${esc(t.name)}"${catalogNameAttrs(typeNamesList, t.name, i)} />
-        <button class="btn small danger" data-tact="del">Удалить</button>
+        ${catalogDelBtn("data-tact=\"del\"", used)}
         <div class="type-flags">
           <label class="type-flag tax ${t.is_tax ? "on" : ""}" title="Строки этого типа вычитаются из суммы заказа как налог">
             <input type="checkbox" data-ck="is_tax" ${t.is_tax ? "checked" : ""} /><span>Налог</span>
@@ -7060,22 +7208,59 @@
             t.is_tax ? "процент можно задать в строке заказа" : t.is_cost ? "вычитается из заказа" : "обычная выручка"
           }</span>
         </div>
-      </div>`
-      )
+      </div>`;
+      })
       .join("");
     syncProductsFromOrders();
     const units = state.doc.units || [];
-    const productNames = (state.doc.products || []).map((p) => p.name);
-    $("product-catalog").innerHTML = (state.doc.products || [])
-      .map((p, i) => {
+    const tab = productKind({ kind: state.productCatalogTab || "order" });
+    state.productCatalogTab = tab;
+    const tabMeta = {
+      order: {
+        hint: "Шаблоны доходных позиций: ед. и цена подставляются при выборе. Удалить можно только шаблон, который нигде не используется.",
+        add: "+ Продукт",
+      },
+      cost: {
+        hint: "Шаблоны затрат для расходных строк. Удалить можно только шаблон, который нигде не используется.",
+        add: "+ Затрата",
+      },
+      tax: {
+        hint: "Шаблоны налогов: ед., сумма и % по умолчанию. Удалить можно только шаблон, который нигде не используется.",
+        add: "+ Налог",
+      },
+    };
+    const hintEl = $("product-catalog-hint");
+    if (hintEl) hintEl.textContent = tabMeta[tab].hint;
+    const addBtn = $("btn-add-product");
+    if (addBtn) addBtn.textContent = tabMeta[tab].add;
+    document.querySelectorAll("[data-product-tab]").forEach((btn) => {
+      btn.classList.toggle("is-on", btn.dataset.productTab === tab);
+      btn.setAttribute("aria-selected", btn.dataset.productTab === tab ? "true" : "false");
+    });
+    const filtered = (state.doc.products || [])
+      .map((p, i) => ({ p: productEntry(p), i }))
+      .filter(({ p }) => p.kind === tab);
+    const productNames = filtered.map(({ p }) => p.name);
+    $("product-catalog").innerHTML = filtered
+      .map(({ p, i }, row) => {
         const unitOpts = unique([p.unit, ...units]);
-        return `<div class="list-item" data-i="${i}"><button type="button" class="item-drag" title="Перетащить"><span></span></button><input data-pk value="${esc(p.name)}"${catalogNameAttrs(
+        const used = productTemplateUsage(p.name, tab);
+        const taxField =
+          tab === "tax"
+            ? `<input data-pt inputmode="decimal" placeholder="%" title="% по умолчанию" value="${
+                p.tax_percent ? esc(formatQty(p.tax_percent)) : ""
+              }" />`
+            : "";
+        const delBtn = catalogDelBtn('data-pact="del"', used);
+        return `<div class="list-item" data-i="${i}" data-kind="${esc(tab)}"><button type="button" class="item-drag" title="Перетащить"><span></span></button><input data-pk value="${esc(p.name)}"${catalogNameAttrs(
           productNames,
           p.name,
-          i
-        )} /><select data-pu title="Ед. по умолчанию">${optionList(unitOpts, p.unit)}</select><input data-pp inputmode="decimal" placeholder="Цена" title="Цена по умолчанию" value="${
+          row
+        )} /><select data-pu title="Ед. по умолчанию">${optionList(unitOpts, p.unit)}</select><input data-pp inputmode="decimal" placeholder="${
+          tab === "tax" ? "Сумма" : "Цена"
+        }" title="${tab === "order" ? "Цена по умолчанию" : "Сумма за ед. по умолчанию"}" value="${
           p.price ? esc(formatQty(p.price)) : ""
-        }" /><button class="btn small danger" data-pact="del">Удалить</button></div>`;
+        }" />${taxField}${delBtn}</div>`;
       })
       .join("");
   }
@@ -8027,12 +8212,29 @@
       handle: ".item-drag",
       item: ".list-item",
       onCommit: () => {
-        const list = $("product-catalog");
-        const next = reorderByDom(state.doc.products, list.querySelectorAll(".list-item"));
-        if (next.length === (state.doc.products || []).length) state.doc.products = next;
+        const tab = productKind({ kind: state.productCatalogTab || "order" });
+        const list = state.doc.products || [];
+        const host = $("product-catalog");
+        const ordered = [...host.querySelectorAll(".list-item")]
+          .map((el) => list[Number(el.dataset.i)])
+          .filter(Boolean)
+          .map((p) => ({ ...productEntry(p), kind: tab }));
+        const order = list.filter((p) => productKind(p) === "order");
+        const cost = list.filter((p) => productKind(p) === "cost");
+        const tax = list.filter((p) => productKind(p) === "tax");
+        const pack = { order, cost, tax };
+        pack[tab] = ordered;
+        state.doc.products = [...pack.order, ...pack.cost, ...pack.tax];
         markDirty();
         renderCatalogs();
       },
+    });
+
+    document.querySelector(".product-tabs")?.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-product-tab]");
+      if (!btn) return;
+      state.productCatalogTab = productKind({ kind: btn.dataset.productTab });
+      renderCatalogs();
     });
 
     $("status-list").addEventListener("input", (e) => {
@@ -8087,7 +8289,17 @@
         return;
       }
       if (e.target.closest("[data-cact='del']")) {
-        const i = Number(e.target.closest(".list-item").dataset.i);
+        const btn = e.target.closest("[data-cact='del']");
+        if (btn.disabled) return;
+        const i = Number(btn.closest(".list-item").dataset.i);
+        const s = state.doc.statuses[i];
+        if (!s) return;
+        const used = statusUsage(s.name);
+        if (used > 0) {
+          toast(`Нельзя удалить: статус используется в ${used} поз.`);
+          renderCatalogs();
+          return;
+        }
         historyCommit();
         state.doc.statuses.splice(i, 1);
         markDirty();
@@ -8136,13 +8348,22 @@
       markDirty();
     });
     $("unit-list").addEventListener("click", (e) => {
-      if (e.target.dataset.uact === "del") {
-        historyCommit();
-        state.doc.units.splice(Number(e.target.closest(".list-item").dataset.i), 1);
-        markDirty();
+      const btn = e.target.closest("[data-uact='del']");
+      if (!btn || btn.disabled) return;
+      const i = Number(btn.closest(".list-item").dataset.i);
+      const name = state.doc.units[i];
+      if (name == null) return;
+      const used = unitUsage(name);
+      if (used > 0) {
+        toast(`Нельзя удалить: единица используется в ${used} поз./шабл.`);
         renderCatalogs();
-        undoToast("Единица измерения удалена");
+        return;
       }
+      historyCommit();
+      state.doc.units.splice(i, 1);
+      markDirty();
+      renderCatalogs();
+      undoToast("Единица измерения удалена");
     });
     $("btn-add-unit").addEventListener("click", () => {
       state.doc.units.push(uniqueCatalogName(state.doc.units || [], "ед."));
@@ -8209,13 +8430,21 @@
       renderAll();
     });
     $("type-list").addEventListener("click", (e) => {
-      if (e.target.dataset.tact === "del") {
-        historyCommit();
-        state.doc.order_types.splice(Number(e.target.closest(".list-item").dataset.i), 1);
-        markDirty();
+      const btn = e.target.closest("[data-tact='del']");
+      if (!btn || btn.disabled) return;
+      const i = Number(btn.closest(".list-item").dataset.i);
+      const entry = typeEntry(state.doc.order_types[i]);
+      const used = orderTypeUsage(entry.name);
+      if (used > 0) {
+        toast(`Нельзя удалить: тип используется в ${used} поз.`);
         renderCatalogs();
-        undoToast("Тип заказа удалён");
+        return;
       }
+      historyCommit();
+      state.doc.order_types.splice(i, 1);
+      markDirty();
+      renderCatalogs();
+      undoToast("Тип заказа удалён");
     });
     $("btn-add-type").addEventListener("click", () => {
       const names = (state.doc.order_types || []).map((t) => typeEntry(t).name);
@@ -8232,13 +8461,16 @@
       const i = Number(row.dataset.i);
       const item = state.doc.products[i];
       if (!item) return;
+      const tab = productKind(item);
       if (e.target.hasAttribute("data-pk")) {
-        const names = (state.doc.products || []).map((p) => p.name);
-        const accepted = tryCatalogName(e.target, names, i);
+        const names = productsOfKind(tab).map((p) => p.name);
+        const rowIndex = productsOfKind(tab).findIndex((p) => p === item);
+        const accepted = tryCatalogName(e.target, names, rowIndex >= 0 ? rowIndex : -1);
         if (accepted == null) return;
         const old = e.target.dataset.old || item.name;
         item.name = accepted;
-        renameProduct(old, accepted);
+        item.kind = tab;
+        renameProduct(old, accepted, tab);
         e.target.dataset.old = accepted;
         markDirty();
         return;
@@ -8248,12 +8480,15 @@
         markDirty();
         return;
       }
-      if (e.target.hasAttribute("data-pp")) {
+      if (e.target.hasAttribute("data-pp") || e.target.hasAttribute("data-pt")) {
         const raw = String(e.target.value || "").replaceAll(",", ".");
         if (raw !== e.target.value) e.target.value = raw;
         const v = evalExpr(raw);
         e.target.classList.toggle("invalid", raw.trim() !== "" && !Number.isFinite(v));
-        item.price = Number.isFinite(v) ? Math.max(0, round2(v)) : 0;
+        const n = Number.isFinite(v) ? Math.max(0, round2(v)) : 0;
+        if (e.target.hasAttribute("data-pt")) item.tax_percent = n;
+        else item.price = n;
+        item.kind = tab;
         markDirty();
       }
     });
@@ -8262,12 +8497,15 @@
       const i = Number(e.target.closest(".list-item")?.dataset.i);
       const item = state.doc.products?.[i];
       if (!item) return;
-      const names = (state.doc.products || []).map((p) => p.name);
-      const next = finishCatalogName(e.target, names, i, item.name);
+      const tab = productKind(item);
+      const names = productsOfKind(tab).map((p) => p.name);
+      const rowIndex = productsOfKind(tab).findIndex((p) => p === item);
+      const next = finishCatalogName(e.target, names, rowIndex >= 0 ? rowIndex : -1, item.name);
       if (next == null || next === item.name) return;
       const old = item.name;
       item.name = next;
-      renameProduct(old, next);
+      item.kind = tab;
+      renameProduct(old, next, tab);
       e.target.dataset.old = next;
       markDirty();
     });
@@ -8279,30 +8517,51 @@
         item.unit = e.target.value;
         markDirty();
       }
-      if (e.target.hasAttribute("data-pp")) {
+      if (e.target.hasAttribute("data-pp") || e.target.hasAttribute("data-pt")) {
         const raw = String(e.target.value || "").replaceAll(",", ".").trim();
         const v = evalExpr(raw);
-        item.price = Number.isFinite(v) ? Math.max(0, round2(v)) : 0;
-        e.target.value = item.price ? formatQty(item.price) : "";
+        const n = Number.isFinite(v) ? Math.max(0, round2(v)) : 0;
+        if (e.target.hasAttribute("data-pt")) {
+          item.tax_percent = n;
+          e.target.value = item.tax_percent ? formatQty(item.tax_percent) : "";
+        } else {
+          item.price = n;
+          e.target.value = item.price ? formatQty(item.price) : "";
+        }
         e.target.classList.remove("invalid");
         markDirty();
       }
     });
     $("product-catalog").addEventListener("click", (e) => {
-      if (e.target.closest("[data-pact='del']")) {
-        historyCommit();
-        state.doc.products.splice(Number(e.target.closest(".list-item").dataset.i), 1);
-        markDirty();
+      const del = e.target.closest("[data-pact='del']");
+      if (!del || del.disabled) return;
+      const row = del.closest(".list-item");
+      const i = Number(row?.dataset.i);
+      const item = state.doc.products?.[i];
+      if (!item) return;
+      const used = productTemplateUsage(item.name, productKind(item));
+      if (used > 0) {
+        toast(`Нельзя удалить: шаблон используется в ${used} поз.`);
         renderCatalogs();
-        undoToast("Продукт удалён из справочника");
+        return;
       }
+      historyCommit();
+      state.doc.products.splice(i, 1);
+      markDirty();
+      renderCatalogs();
+      undoToast("Шаблон удалён из справочника");
     });
     $("btn-add-product").addEventListener("click", () => {
+      const tab = productKind({ kind: state.productCatalogTab || "order" });
       const list = state.doc.products || (state.doc.products = []);
+      const names = productsOfKind(tab).map((p) => p.name);
+      const base = tab === "cost" ? "Новая затрата" : tab === "tax" ? "Новый налог" : "Новый продукт";
       list.push({
-        name: uniqueCatalogName(list.map((p) => p.name), "Новый продукт"),
+        name: uniqueCatalogName(names, base),
         unit: (state.doc.units || [])[0] || "шт.",
         price: 0,
+        kind: tab,
+        tax_percent: 0,
       });
       markDirty();
       renderCatalogs();
@@ -8947,7 +9206,7 @@
       const prevKind = key === "order_type" ? typeKind(line.order_type) : "";
       line[key] = e.target.type === "number" ? num(e.target.value) : e.target.value;
       if (key === "product") {
-        if (e.type === "change") ensureProduct(line.product, line.unit, line.price);
+        if (e.type === "change") ensureProduct(line.product, line.unit, line.price, productKindOfLine(line), line.tax_percent);
         applyLineProductDefaults(tr, line);
         if (e.type === "input" && !productSuggest.picking) openProductSuggest(e.target, "filter");
       }
@@ -8994,6 +9253,7 @@
     if (foot) foot.innerHTML = orderTotalsHtml(tot);
     const oeSum = card.querySelector(".oe-sum");
     if (oeSum) oeSum.textContent = `−${money(tot.cost)} · чистыми ${money(tot.net)}`;
+    updateOrdersSummary();
   }
 
   /** Налог в процентах зависит от других строк — обновляем его при любой правке заказа. */
@@ -10319,15 +10579,17 @@
       });
     });
     (state.doc.products || []).forEach((p) => {
+      const entry = productEntry(p);
+      const kindLabel = entry.kind === "tax" ? "налог" : entry.kind === "cost" ? "затрата" : "заказ";
       items.push({
         group: "Продукты",
         ico: "✦",
-        title: p.name,
-        sub: `ед. по умолчанию: ${p.unit}`,
+        title: entry.name,
+        sub: `${kindLabel} · ед. ${entry.unit}${entry.kind === "tax" && entry.tax_percent ? ` · ${entry.tax_percent}%` : ""}`,
         run: () => {
-          setView("analytics");
-          $("f-product").value = p.name;
-          renderAnalytics();
+          setView("catalogs");
+          state.productCatalogTab = entry.kind;
+          renderCatalogs();
         },
       });
     });

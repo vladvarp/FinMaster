@@ -615,24 +615,30 @@
           <div class="catalog-grid">
             <div class="card">
               <h3>Статусы заказа</h3>
-              <p class="hint" style="margin-top:0">Замок защищает статус от массовой смены в заказе. «Оплачено» — статус полной оплаты. Имена в справочнике не повторяются.</p>
+              <p class="hint" style="margin-top:0">Замок защищает статус от массовой смены в заказе. «Оплачено» — статус полной оплаты. Имена не повторяются. Удалить нельзя, пока статус есть хотя бы в одной позиции.</p>
               <div class="list-edit" id="status-list"></div>
               <button class="btn small" id="btn-add-status" style="margin-top:10px">+ Статус</button>
             </div>
             <div class="card">
               <h3>Единицы измерения</h3>
+              <p class="hint" style="margin-top:0">Удалить нельзя, пока единица используется в позициях или шаблонах продуктов.</p>
               <div class="list-edit" id="unit-list"></div>
               <button class="btn small" id="btn-add-unit" style="margin-top:10px">+ Единица</button>
             </div>
             <div class="card">
               <h3>Типы заказа</h3>
-              <p class="hint" style="margin-top:0">Галочка «Налог» или «Затрата» превращает тип в расход: такие строки уходят в отдельный блок заказа и вычитаются из суммы.</p>
+              <p class="hint" style="margin-top:0">Галочка «Налог» или «Затрата» превращает тип в расход. Удалить нельзя, пока тип есть хотя бы в одной позиции.</p>
               <div class="list-edit" id="type-list"></div>
               <button class="btn small" id="btn-add-type" style="margin-top:10px">+ Тип</button>
             </div>
             <div class="card">
               <h3>Продукты</h3>
-              <p class="hint" style="margin-top:0">Ед. и цена по умолчанию подставляются в строку заказа при выборе продукта.</p>
+              <p class="hint" id="product-catalog-hint" style="margin-top:0">Шаблоны доходных позиций: ед. и цена подставляются в строку заказа при выборе продукта.</p>
+              <div class="product-tabs" role="tablist" aria-label="Вид шаблонов продуктов">
+                <button type="button" class="pres-seg is-on" data-product-tab="order" role="tab" aria-selected="true">Заказы</button>
+                <button type="button" class="pres-seg" data-product-tab="cost" role="tab" aria-selected="false">Затраты</button>
+                <button type="button" class="pres-seg" data-product-tab="tax" role="tab" aria-selected="false">Налоги</button>
+              </div>
               <div class="list-edit" id="product-catalog"></div>
               <button class="btn small" id="btn-add-product" style="margin-top:10px">+ Продукт</button>
             </div>

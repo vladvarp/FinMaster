@@ -1,10 +1,9 @@
-"""Заставка запуска: анимированный tech-экран вместо окна консоли."""
+"""Заставка запуска FinMaster: светлая карточка в стиле приложения."""
 
 from __future__ import annotations
 
 import math
 import os
-import random
 import subprocess
 import sys
 import time
@@ -14,20 +13,21 @@ from typing import Any, Callable
 
 CREATE_NO_WINDOW = 0x08000000
 
-# Палитра FinMaster
-BG = "#05070f"
-PANEL = "#0a101c"
-PANEL_EDGE = "#152033"
-TEAL = "#14b8a6"
-TEAL_DIM = "#0f766e"
-TEAL_GLOW = "#2dd4bf"
-CYAN = "#22d3ee"
-INK = "#f1f5f9"
+# Совпадает с frontend/styles.css — светлый продукт, не «тёмный неон»
+CHROMA = "#01fe03"  # ключ прозрачности углов (не используется в UI)
+BG = "#e8eef4"
+CARD = "#ffffff"
+INK = "#0f172a"
 MUTED = "#64748b"
-MUTED_2 = "#94a3b8"
-DANGER = "#f87171"
-GRID = "#10182a"
-STAR = "#1e293b"
+SOFT = "#94a3b8"
+LINE = "#dbe3ec"
+TRACK = "#e8eef4"
+ACCENT = "#0f766e"
+ACCENT_2 = "#14b8a6"
+ACCENT_SOFT = "#99f6e4"
+ACCENT_WASH = "#ccfbf1"
+GOLD = "#c9a227"
+DANGER = "#dc2626"
 
 
 def hide_console() -> None:
@@ -60,10 +60,10 @@ def ensure_packages(splash: "Splash", requirements: str) -> None:
         except ImportError:
             missing.append(package)
     if not missing:
-        splash.step("Библиотеки на месте", 24)
+        splash.step("Библиотеки на месте", 22)
         return
 
-    splash.step("Устанавливаю " + ", ".join(missing) + "…", 16)
+    splash.step("Устанавливаю " + ", ".join(missing) + "…", 14)
     cmd = [_python_for_pip(), "-m", "pip", "install", "-r", requirements]
     kwargs: dict = {
         "stdout": subprocess.PIPE,
@@ -82,11 +82,11 @@ def ensure_packages(splash: "Splash", requirements: str) -> None:
             continue
         seen += 1
         splash.log(line)
-        splash.set_progress(min(16 + seen, 30))
+        splash.set_progress(min(14 + seen * 0.35, 28))
     code = proc.wait()
     if code != 0:
         raise RuntimeError("Не удалось установить библиотеки. Проверьте интернет и Python.")
-    splash.step("Библиотеки установлены", 32)
+    splash.step("Библиотеки установлены", 30)
 
 
 def _round_rect(canvas: tk.Canvas, x1: float, y1: float, x2: float, y2: float, r: float, **kwargs: Any) -> int:
@@ -96,16 +96,72 @@ def _round_rect(canvas: tk.Canvas, x1: float, y1: float, x2: float, y2: float, r
         x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
         x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
     ]
-    return canvas.create_polygon(pts, smooth=True, splinesteps=36, **kwargs)
+    return canvas.create_polygon(pts, smooth=True, splinesteps=48, **kwargs)
 
 
-def _lerp(a: float, b: float, t: float) -> float:
-    return a + (b - a) * t
+def _rounded_rect_perimeter(x1: float, y1: float, x2: float, y2: float, r: float, n: int = 128) -> list[tuple[float, float]]:
+    r = max(0.0, min(r, (x2 - x1) / 2, (y2 - y1) / 2))
+    w = x2 - x1 - 2 * r
+    h = y2 - y1 - 2 * r
+    straight = 2 * (w + h)
+    arc = math.pi * r / 2
+    total = straight + 4 * arc
+    if total <= 0:
+        return [(x1, y1)]
+
+    def point_at(dist: float) -> tuple[float, float]:
+        d = dist % total
+        if d <= w:
+            return x1 + r + d, y1
+        d -= w
+        if d <= arc:
+            a = -math.pi / 2 + d / max(r, 0.001)
+            return x2 - r + math.cos(a) * r, y1 + r + math.sin(a) * r
+        d -= arc
+        if d <= h:
+            return x2, y1 + r + d
+        d -= h
+        if d <= arc:
+            a = d / max(r, 0.001)
+            return x2 - r + math.cos(a) * r, y2 - r + math.sin(a) * r
+        d -= arc
+        if d <= w:
+            return x2 - r - d, y2
+        d -= w
+        if d <= arc:
+            a = math.pi / 2 + d / max(r, 0.001)
+            return x1 + r + math.cos(a) * r, y2 - r + math.sin(a) * r
+        d -= arc
+        if d <= h:
+            return x1, y2 - r - d
+        d -= h
+        a = math.pi + d / max(r, 0.001)
+        return x1 + r + math.cos(a) * r, y1 + r + math.sin(a) * r
+
+    return [point_at(total * i / n) for i in range(n)]
+
+
+def _lerp_hex(a: str, b: str, t: float) -> str:
+    t = max(0.0, min(1.0, t))
+
+    def ch(s: str, i: int) -> int:
+        return int(s[i : i + 2], 16)
+
+    ar, ag, ab = ch(a, 1), ch(a, 3), ch(a, 5)
+    br, bg, bb = ch(b, 1), ch(b, 3), ch(b, 5)
+    return "#{:02x}{:02x}{:02x}".format(
+        int(ar + (br - ar) * t),
+        int(ag + (bg - ag) * t),
+        int(ab + (bb - ab) * t),
+    )
 
 
 class Splash:
-    W = 680
+    # Окно чуть больше карточки — место под тень и свечение
+    W = 720
     H = 420
+    MARGIN = 28
+    CORNER = 26
 
     def __init__(self, icon_png: str = "") -> None:
         self._closed = False
@@ -117,14 +173,17 @@ class Splash:
         self._failed = False
         self._icon_png = icon_png
         self._photo: tk.PhotoImage | None = None
-        self._particles: list[dict[str, float]] = []
         self._ring_ids: list[int] = []
         self._orbit_ids: list[int] = []
+        self._shadow_ids: list[int] = []
+        self._glow_ids: list[int] = []
+        self._border_id = 0
+        self._trail_ids: list[int] = []
+        self._perimeter: list[tuple[float, float]] = []
         self._shimmer_id = 0
         self._pct_id = 0
-        self._pulse_id = 0
-        self._grid_ids: list[int] = []
-        self._scan_id = 0
+        self._accent_line = 0
+        self._last_pct = -1
 
         if sys.platform == "win32":
             try:
@@ -137,19 +196,18 @@ class Splash:
         self.root = tk.Tk()
         self.root.title("FinMaster")
         self.root.overrideredirect(True)
-        self.root.configure(bg=BG)
+        self.root.configure(bg=CHROMA)
         try:
             self.root.attributes("-topmost", True)
         except tk.TclError:
             pass
+        # Прозрачные углы — реальное скругление окна
         try:
-            # Лёгкая прозрачность окна на Windows (если поддерживается)
-            self.root.attributes("-alpha", 0.985)
+            self.root.wm_attributes("-transparentcolor", CHROMA)
         except tk.TclError:
             pass
         self.root.geometry(self._centered())
         self._build()
-        self._seed_particles()
         self.pump()
         self._schedule_tick()
 
@@ -161,137 +219,111 @@ class Splash:
         y = max(0, (sh - self.H) // 3)
         return f"{self.W}x{self.H}+{x}+{y}"
 
-    def _seed_particles(self) -> None:
-        rnd = random.Random(42)
-        self._particles = []
-        for _ in range(48):
-            self._particles.append(
-                {
-                    "x": rnd.uniform(24, self.W - 24),
-                    "y": rnd.uniform(24, self.H - 24),
-                    "r": rnd.uniform(0.8, 2.4),
-                    "vx": rnd.uniform(-12, 12),
-                    "vy": rnd.uniform(-8, 8),
-                    "phase": rnd.uniform(0, math.tau),
-                    "id": 0,
-                }
-            )
+    def _card_box(self) -> tuple[float, float, float, float, float]:
+        m = float(self.MARGIN)
+        return m, m, float(self.W - self.MARGIN), float(self.H - self.MARGIN), float(self.CORNER)
 
     def _build(self) -> None:
-        c = tk.Canvas(self.root, width=self.W, height=self.H, highlightthickness=0, bd=0, bg=BG)
+        c = tk.Canvas(self.root, width=self.W, height=self.H, highlightthickness=0, bd=0, bg=CHROMA)
         c.pack(fill="both", expand=True)
         self._canvas = c
 
-        # Глубинный фон — мягкие световые пятна
-        c.create_oval(-160, -180, 280, 220, fill="#07131a", outline="")
-        c.create_oval(380, 180, 860, 560, fill="#0a0c18", outline="")
-        c.create_oval(420, -120, 760, 140, fill="#0b1c1a", outline="")
-        c.create_oval(120, 260, 360, 520, fill="#080f1c", outline="")
+        x1, y1, x2, y2, r = self._card_box()
 
-        # Техно-сетка
-        for x in range(40, self.W, 28):
-            self._grid_ids.append(c.create_line(x, 28, x, self.H - 28, fill=GRID, width=1))
-        for y in range(40, self.H, 28):
-            self._grid_ids.append(c.create_line(28, y, self.W - 28, y, fill=GRID, width=1))
+        # Soft drop shadow (layered, no harsh outline)
+        for i, (off, col) in enumerate(
+            (
+                (10, "#c5d0dc"),
+                (7, "#d2dbe6"),
+                (4, "#dde5ee"),
+                (2, "#e4ebf2"),
+            )
+        ):
+            self._shadow_ids.append(
+                _round_rect(c, x1 + 2, y1 + off, x2 + 2, y2 + off, r, fill=col, outline="")
+            )
 
-        # Внешняя рамка с уголками
-        pad = 16
-        _round_rect(c, pad, pad, self.W - pad, self.H - pad, 26, fill=PANEL, outline="")
-        self._draw_corners(c, pad + 10, pad + 10, self.W - pad - 10, self.H - pad - 10)
+        # Card
+        _round_rect(c, x1, y1, x2, y2, r, fill=CARD, outline="")
 
-        # Верхняя accent-линия
-        c.create_line(56, pad + 2, self.W - 56, pad + 2, fill=TEAL, width=2)
-        c.create_line(56, pad + 5, 180, pad + 5, fill=TEAL_GLOW, width=1)
+        # Soft inner wash — строго внутри карточки
+        c.create_oval(x1 + 70, y1 + 24, x1 + 290, y1 + 170, fill="#f3faf9", outline="")
+        c.create_oval(x2 - 250, y2 - 150, x2 - 50, y2 - 30, fill="#f5f8fc", outline="")
 
-        # Скан-линия (анимируется)
-        self._scan_id = c.create_line(40, 80, self.W - 40, 80, fill="#0f766e", width=1)
+        # Animated glow border (outer soft → inner crisp)
+        for inset, width, color in (
+            (0.0, 5, ACCENT_WASH),
+            (1.5, 3, ACCENT_SOFT),
+            (3.0, 2, ACCENT_2),
+        ):
+            self._glow_ids.append(
+                _round_rect(
+                    c,
+                    x1 + inset,
+                    y1 + inset,
+                    x2 - inset,
+                    y2 - inset,
+                    max(8.0, r - inset * 0.6),
+                    fill="",
+                    outline=color,
+                    width=width,
+                )
+            )
+        self._border_id = _round_rect(
+            c, x1 + 4.5, y1 + 4.5, x2 - 4.5, y2 - 4.5, max(6.0, r - 4), fill="", outline=ACCENT, width=1
+        )
 
-        # Логотип / орбиты
-        cx, cy = 88, 96
+        # Traveling highlight along border
+        self._perimeter = _rounded_rect_perimeter(x1 + 3, y1 + 3, x2 - 3, y2 - 3, r - 2, n=140)
+        for _ in range(22):
+            self._trail_ids.append(c.create_oval(0, 0, 3, 3, fill=ACCENT_2, outline=""))
+
+        # Brand block
+        cx, cy = x1 + 78, y1 + 88
         self._logo_cx, self._logo_cy = cx, cy
-        for i, rad in enumerate((46, 58, 70)):
-            ring = c.create_oval(cx - rad, cy - rad, cx + rad, cy + rad, outline=TEAL_DIM if i else TEAL, width=1)
-            self._ring_ids.append(ring)
-        # Орбитальные точки
-        for _ in range(3):
-            self._orbit_ids.append(c.create_oval(0, 0, 6, 6, fill=CYAN, outline=""))
+        for i, rad in enumerate((30, 42, 54)):
+            col = ACCENT_SOFT if i == 0 else LINE
+            self._ring_ids.append(
+                c.create_oval(cx - rad, cy - rad, cx + rad, cy + rad, outline=col, width=1)
+            )
+        for _ in range(2):
+            self._orbit_ids.append(c.create_oval(0, 0, 5, 5, fill=ACCENT_2, outline=""))
 
         if not self._try_draw_icon(c, cx, cy):
-            self._draw_mark(c, cx - 27, cy - 27)
+            self._draw_mark(c, cx - 22, cy - 22)
 
-        # Бренд
-        c.create_text(150, 78, text="FinMaster", fill=INK, font=("Segoe UI Semibold", 32, "bold"), anchor="w")
-        c.create_text(
-            152,
-            118,
-            text="FINANCE  ·  ORDERS  ·  SYSTEMS",
-            fill=MUTED,
-            font=("Segoe UI", 9),
-            anchor="w",
-        )
-        c.create_text(
-            152,
-            138,
-            text="локальный контур учёта",
-            fill=MUTED_2,
-            font=("Segoe UI", 11),
-            anchor="w",
-        )
+        tx = cx + 72
+        c.create_text(tx, cy - 18, text="FinMaster", fill=INK, font=("Segoe UI Semibold", 32, "bold"), anchor="w")
+        c.create_text(tx, cy + 18, text="Учёт заказов · локально", fill=MUTED, font=("Segoe UI", 12), anchor="w")
+        self._accent_line = c.create_line(tx, cy + 36, tx + 48, cy + 36, fill=GOLD, width=2)
 
-        # Статус
-        self._status_id = c.create_text(48, 214, text="Инициализация ядра…", fill=INK, font=("Segoe UI", 12), anchor="w")
-        self._pulse_id = c.create_oval(self.W - 64, 208, self.W - 52, 220, fill=TEAL, outline="")
+        # Status + progress
+        left = x1 + 36
+        right = x2 - 36
+        self._status_id = c.create_text(left, y1 + 198, text="Запуск…", fill=INK, font=("Segoe UI", 12), anchor="w")
+        self._pct_id = c.create_text(right, y1 + 198, text="0%", fill=ACCENT, font=("Segoe UI Semibold", 12), anchor="e")
 
-        # Прогресс-трек
-        self._bar = (48.0, 242.0, float(self.W - 48), 254.0)
-        x1, y1, x2, y2 = self._bar
-        _round_rect(c, x1 - 1, y1 - 1, x2 + 1, y2 + 1, 7, fill="#0c1524", outline="")
-        _round_rect(c, x1, y1, x2, y2, 6, fill="#152033", outline="")
-        self._bar_fill = _round_rect(c, x1, y1, x1, y2, 6, fill=TEAL, outline="")
-        self._shimmer_id = c.create_rectangle(x1, y1, x1, y2, fill=TEAL_GLOW, outline="")
-        self._pct_id = c.create_text(self.W - 48, 228, text="0%", fill=TEAL_GLOW, font=("Segoe UI", 10, "bold"), anchor="e")
+        by = y1 + 226
+        self._bar = (left, by, right, by + 8)
+        bx1, by1, bx2, by2 = self._bar
+        _round_rect(c, bx1, by1, bx2, by2, 4, fill=TRACK, outline="")
+        self._bar_fill = c.create_rectangle(bx1, by1, bx1, by2, fill=ACCENT, outline="")
+        self._shimmer_id = c.create_rectangle(bx1, by1, bx1, by2, fill=ACCENT_SOFT, outline="")
 
-        # Журнал
-        self._log_id = c.create_text(
-            48,
-            292,
-            text="ожидание модулей",
-            fill=MUTED,
-            font=("Consolas", 9),
-            anchor="w",
-        )
+        self._log_id = c.create_text(left, by + 36, text="", fill=SOFT, font=("Segoe UI", 9), anchor="w")
 
-        # Низ
-        c.create_text(48, self.H - 40, text="SECURE  ·  OFFLINE-FIRST", fill="#3d4f66", font=("Segoe UI", 8), anchor="w")
+        c.create_text(left, y2 - 28, text="OFFLINE-FIRST", fill=SOFT, font=("Segoe UI", 8), anchor="w")
         self._foot_id = c.create_text(
-            self.W - 48,
-            self.H - 40,
-            text="без облака · данные у вас",
-            fill="#3d4f66",
-            font=("Segoe UI", 9),
-            anchor="e",
+            right, y2 - 28, text="данные остаются у вас", fill=SOFT, font=("Segoe UI", 9), anchor="e"
         )
 
-        # Частицы поверх
-        for p in self._particles:
-            p["id"] = c.create_oval(0, 0, 2, 2, fill=STAR, outline="")
+        for gid in self._glow_ids:
+            c.tag_raise(gid)
+        c.tag_raise(self._border_id)
+        for tid in self._trail_ids:
+            c.tag_raise(tid)
 
         self._draw_bar(0)
-
-    def _draw_corners(self, c: tk.Canvas, x1: float, y1: float, x2: float, y2: float) -> None:
-        L = 18
-        color = TEAL_DIM
-        # TL
-        c.create_line(x1, y1 + L, x1, y1, x1 + L, y1, fill=color, width=2)
-        # TR
-        c.create_line(x2 - L, y1, x2, y1, x2, y1 + L, fill=color, width=2)
-        # BL
-        c.create_line(x1, y2 - L, x1, y2, x1 + L, y2, fill=color, width=2)
-        # BR
-        c.create_line(x2 - L, y2, x2, y2, x2, y2 - L, fill=color, width=2)
-        # Точки на углах
-        for x, y in ((x1, y1), (x2, y1), (x1, y2), (x2, y2)):
-            c.create_oval(x - 2, y - 2, x + 2, y + 2, fill=TEAL, outline="")
 
     def _try_draw_icon(self, canvas: tk.Canvas, cx: float, cy: float) -> bool:
         path = self._icon_png
@@ -299,9 +331,8 @@ class Splash:
             return False
         try:
             img = tk.PhotoImage(file=path)
-            # Подгоняем к ~48px через subsample / zoom
             w, h = img.width(), img.height()
-            target = 48
+            target = 44
             if w > target * 2 and h > target * 2:
                 factor = max(1, min(w, h) // target)
                 img = img.subsample(factor, factor)
@@ -309,7 +340,7 @@ class Splash:
                 factor = max(1, target // max(w, h))
                 img = img.zoom(factor, factor)
             self._photo = img
-            canvas.create_oval(cx - 34, cy - 34, cx + 34, cy + 34, fill="#0b2a28", outline="")
+            canvas.create_oval(cx - 28, cy - 28, cx + 28, cy + 28, fill=ACCENT_WASH, outline="")
             canvas.create_image(cx, cy, image=img)
             return True
         except Exception:
@@ -317,24 +348,23 @@ class Splash:
             return False
 
     def _draw_mark(self, canvas: tk.Canvas, x: float, y: float) -> None:
-        size = 54
-        # Свечение под знаком
-        canvas.create_oval(x - 8, y - 8, x + size + 8, y + size + 8, fill="#0b2a28", outline="")
-        _round_rect(canvas, x, y, x + size, y + size, 16, fill=TEAL_DIM, outline="")
-        _round_rect(canvas, x + 2, y + 2, x + size - 2, y + size - 2, 14, fill="#0d9488", outline="")
-        pad = 12
-        bar_h = 5
-        gap = 7
-        canvas.create_rectangle(x + pad, y + 14, x + size - pad, y + 14 + bar_h, fill="#ecfeff", outline="")
+        size = 44
+        canvas.create_oval(x - 4, y - 4, x + size + 4, y + size + 4, fill=ACCENT_WASH, outline="")
+        _round_rect(canvas, x, y, x + size, y + size, 13, fill=ACCENT, outline="")
+        _round_rect(canvas, x + 2, y + 2, x + size - 2, y + size - 2, 11, fill=ACCENT_2, outline="")
+        pad = 10
+        bar_h = 3
+        gap = 5
+        canvas.create_rectangle(x + pad, y + 12, x + size - pad, y + 12 + bar_h, fill="#ffffff", outline="")
         canvas.create_rectangle(
-            x + pad, y + 14 + bar_h + gap, x + size - pad, y + 14 + 2 * bar_h + gap, fill="#99f6e4", outline=""
+            x + pad, y + 12 + bar_h + gap, x + size - pad, y + 12 + 2 * bar_h + gap, fill="#ecfeff", outline=""
         )
         canvas.create_rectangle(
             x + pad,
-            y + 14 + 2 * (bar_h + gap),
-            x + size - pad - 10,
-            y + 14 + 3 * bar_h + 2 * gap,
-            fill="#ecfeff",
+            y + 12 + 2 * (bar_h + gap),
+            x + size - pad - 8,
+            y + 12 + 3 * bar_h + 2 * gap,
+            fill="#ffffff",
             outline="",
         )
 
@@ -342,16 +372,20 @@ class Splash:
         x1, y1, x2, y2 = self._bar
         t = max(0.0, min(1.0, value / 100.0))
         right = x1 + max(0.0, (x2 - x1) * t)
-        self._canvas.delete(self._bar_fill)
-        if right <= x1 + 0.5:
-            self._bar_fill = self._canvas.create_rectangle(x1, y1, x1, y2, outline="")
-        else:
-            r = 6 if right - x1 > 14 else max(0.0, (right - x1) / 2)
-            self._bar_fill = _round_rect(self._canvas, x1, y1, right, y2, r, fill=TEAL, outline="")
-        self._canvas.tag_raise(self._bar_fill)
-        if self._shimmer_id:
-            self._canvas.tag_raise(self._shimmer_id)
-        self._canvas.itemconfigure(self._pct_id, text=f"{int(round(t * 100))}%")
+        try:
+            if right <= x1 + 0.5:
+                self._canvas.coords(self._bar_fill, x1, y1, x1, y2)
+            else:
+                self._canvas.coords(self._bar_fill, x1, y1, right, y2)
+            self._canvas.tag_raise(self._bar_fill)
+            if self._shimmer_id:
+                self._canvas.tag_raise(self._shimmer_id)
+            pct = int(round(t * 100))
+            if pct != self._last_pct:
+                self._last_pct = pct
+                self._canvas.itemconfigure(self._pct_id, text=f"{pct}%")
+        except tk.TclError:
+            pass
 
     def _schedule_tick(self) -> None:
         if self._closed:
@@ -371,78 +405,99 @@ class Splash:
         t = self._anim_t
         c = self._canvas
 
-        # Плавный прогресс
-        self._display = _lerp(self._display, self._progress, min(1.0, dt * 6.5))
-        if abs(self._display - self._progress) > 0.05 or self._progress >= 99.5:
-            self._draw_bar(self._display)
+        gap = self._progress - self._display
+        if abs(gap) > 0.02:
+            alpha = 1.0 - math.exp(-dt * 3.2)
+            step = gap * alpha
+            max_step = 55.0 * dt
+            if step > max_step:
+                step = max_step
+            elif step < -max_step:
+                step = -max_step
+            self._display += step
+            if (gap > 0 and self._display > self._progress) or (gap < 0 and self._display < self._progress):
+                self._display = self._progress
+        else:
+            self._display = self._progress
+        self._draw_bar(self._display)
 
-        # Скан-линия
-        scan_y = 40 + ((t * 55) % (self.H - 80))
-        try:
-            c.coords(self._scan_id, 36, scan_y, self.W - 36, scan_y)
-            alpha_proxy = 0.25 + 0.25 * math.sin(t * 3)
-            # Tk не умеет alpha у линий — мигаем цветом
-            c.itemconfigure(self._scan_id, fill="#0f766e" if alpha_proxy > 0.3 else "#0a3d38")
-        except tk.TclError:
-            pass
-
-        # Орбитальные точки вокруг логотипа
         cx, cy = self._logo_cx, self._logo_cy
         for i, oid in enumerate(self._orbit_ids):
-            ang = t * (1.1 + i * 0.35) + i * 2.1
-            rad = 46 + i * 12
+            ang = t * (0.5 + i * 0.16) + i * 2.2
+            rad = 30 + i * 12
             x = cx + math.cos(ang) * rad
-            y = cy + math.sin(ang) * rad * 0.72
+            y = cy + math.sin(ang) * rad * 0.7
             try:
-                c.coords(oid, x - 3, y - 3, x + 3, y + 3)
-                c.itemconfigure(oid, fill=CYAN if i % 2 == 0 else TEAL_GLOW)
+                c.coords(oid, x - 2.2, y - 2.2, x + 2.2, y + 2.2)
+                c.itemconfigure(oid, fill=ACCENT_2 if i == 0 else ACCENT)
             except tk.TclError:
                 pass
 
-        # Пульс колец
         for i, rid in enumerate(self._ring_ids):
-            pulse = 0.5 + 0.5 * math.sin(t * 2.2 + i)
+            pulse = 0.5 + 0.5 * math.sin(t * 1.3 + i)
             try:
-                c.itemconfigure(rid, outline=TEAL_GLOW if pulse > 0.65 else TEAL_DIM)
+                if i == 0:
+                    c.itemconfigure(rid, outline=_lerp_hex(ACCENT_SOFT, ACCENT_2, pulse))
+                else:
+                    c.itemconfigure(rid, outline=LINE)
             except tk.TclError:
                 pass
 
-        # Пульс индикатора статуса
+        # Soft breathing glow on frame
+        pulse = 0.5 + 0.5 * math.sin(t * 1.5)
+        pulse2 = 0.5 + 0.5 * math.sin(t * 1.5 + 0.9)
         try:
-            pr = 5 + 2 * (0.5 + 0.5 * math.sin(t * 4))
-            c.coords(self._pulse_id, self.W - 58 - pr, 214 - pr, self.W - 58 + pr, 214 + pr)
-            c.itemconfigure(self._pulse_id, fill=TEAL_GLOW if not self._failed else DANGER)
+            palette = (
+                (_lerp_hex("#e6f7f5", ACCENT_WASH, pulse), 4 + int(pulse > 0.55)),
+                (_lerp_hex(ACCENT_WASH, ACCENT_SOFT, pulse2), 3),
+                (_lerp_hex(ACCENT_SOFT, ACCENT_2, pulse), 2),
+            )
+            for gid, (col, w) in zip(self._glow_ids, palette):
+                c.itemconfigure(gid, outline=col, width=w)
+            if self._border_id:
+                c.itemconfigure(self._border_id, outline=_lerp_hex(ACCENT, ACCENT_2, pulse2))
+                c.tag_raise(self._border_id)
+            if self._accent_line:
+                c.itemconfigure(self._accent_line, fill=_lerp_hex(GOLD, "#e8c547", pulse))
         except tk.TclError:
             pass
 
-        # Частицы
-        for p in self._particles:
-            p["x"] = (p["x"] + p["vx"] * dt) % (self.W - 48) + 24
-            p["y"] = (p["y"] + p["vy"] * dt) % (self.H - 48) + 24
-            tw = 0.45 + 0.55 * (0.5 + 0.5 * math.sin(t * 2.5 + p["phase"]))
-            r = p["r"] * tw
-            try:
-                c.coords(p["id"], p["x"] - r, p["y"] - r, p["x"] + r, p["y"] + r)
-                c.itemconfigure(p["id"], fill=TEAL_GLOW if tw > 0.85 else STAR)
-            except tk.TclError:
-                pass
+        n = len(self._perimeter)
+        trail_n = len(self._trail_ids)
+        if n > 0 and trail_n > 0:
+            head = int((t * 32) % n)
+            for i, tid in enumerate(self._trail_ids):
+                idx = (head - i) % n
+                px, py = self._perimeter[idx]
+                fade = 1.0 - i / max(1, trail_n)
+                rad = 1.0 + 3.2 * fade * fade
+                col = _lerp_hex(ACCENT_WASH, ACCENT_2 if i < 4 else ACCENT, fade)
+                try:
+                    c.coords(tid, px - rad, py - rad, px + rad, py + rad)
+                    c.itemconfigure(tid, fill=col, state="normal")
+                    c.tag_raise(tid)
+                except tk.TclError:
+                    pass
 
-        # Блик на прогресс-баре
         x1, y1, x2, y2 = self._bar
-        span = x2 - x1
-        fill_w = span * (self._display / 100.0)
-        if fill_w > 8:
-            sh = 18
-            sx = x1 + ((t * 90) % max(1.0, fill_w + sh)) - sh
+        fill_w = (x2 - x1) * (self._display / 100.0)
+        if fill_w > 14:
+            sh = 26
+            sx = x1 + ((t * 50) % max(1.0, fill_w + sh)) - sh
             left = max(x1, sx)
             right = min(x1 + fill_w, sx + sh)
             try:
-                if right > left:
+                if right > left + 1:
                     c.coords(self._shimmer_id, left, y1 + 1, right, y2 - 1)
                     c.itemconfigure(self._shimmer_id, state="normal")
                     c.tag_raise(self._shimmer_id)
                 else:
                     c.itemconfigure(self._shimmer_id, state="hidden")
+            except tk.TclError:
+                pass
+        else:
+            try:
+                c.itemconfigure(self._shimmer_id, state="hidden")
             except tk.TclError:
                 pass
 
@@ -452,7 +507,9 @@ class Splash:
     def set_progress(self, value: float) -> None:
         if self._closed:
             return
-        self._progress = max(0.0, min(100.0, float(value)))
+        nxt = max(0.0, min(100.0, float(value)))
+        if nxt >= self._progress - 0.01:
+            self._progress = nxt
         self.pump()
 
     def log(self, text: str) -> None:
@@ -462,7 +519,7 @@ class Splash:
         if len(line) > 78:
             line = line[:77] + "…"
         self.lines.append(line)
-        self.lines = self.lines[-5:]
+        self.lines = self.lines[-3:]
         shown = "  ·  ".join(self.lines[-2:])
         try:
             self._canvas.itemconfigure(self._log_id, text=shown)
@@ -482,22 +539,40 @@ class Splash:
         else:
             self.pump()
 
+    def finish(self, hold: float = 2.0) -> None:
+        if self._closed:
+            return
+        self.step("Готово", 100)
+        deadline = time.perf_counter() + 8.0
+        while not self._closed and self._display < 99.4 and time.perf_counter() < deadline:
+            self.pump()
+            time.sleep(0.016)
+        self._display = 100.0
+        self._progress = 100.0
+        self._draw_bar(100.0)
+        self.pump()
+        end = time.perf_counter() + max(0.0, hold)
+        while not self._closed and time.perf_counter() < end:
+            self.pump()
+            time.sleep(0.016)
+        self.close()
+
     def fail(self, text: str) -> None:
         self._failed = True
         try:
             self._canvas.itemconfigure(self._status_id, text="Сбой запуска", fill=DANGER)
             self._canvas.itemconfigure(self._foot_id, text="")
-            self._canvas.itemconfigure(self._pulse_id, fill=DANGER)
+            self._canvas.itemconfigure(self._pct_id, fill=DANGER)
         except tk.TclError:
             pass
         self.log(text)
         self.set_progress(100)
         if self._closed:
             return
-        x1, y1, x2, y2 = self.W / 2 - 70, self.H - 88, self.W / 2 + 70, self.H - 54
-        btn = _round_rect(self._canvas, x1, y1, x2, y2, 12, fill=TEAL_DIM, outline="")
+        x1, y1, x2, y2 = self.W / 2 - 72, self.H - 78, self.W / 2 + 72, self.H - 44
+        btn = _round_rect(self._canvas, x1, y1, x2, y2, 12, fill=ACCENT, outline="")
         label = self._canvas.create_text(
-            (x1 + x2) / 2, (y1 + y2) / 2, text="Закрыть", fill="#ffffff", font=("Segoe UI", 11, "bold")
+            (x1 + x2) / 2, (y1 + y2) / 2, text="Закрыть", fill="#ffffff", font=("Segoe UI Semibold", 11)
         )
 
         def _hover(_e: object, color: str) -> None:
@@ -508,8 +583,8 @@ class Splash:
 
         for item in (btn, label):
             self._canvas.tag_bind(item, "<Button-1>", lambda _e: self.close())
-            self._canvas.tag_bind(item, "<Enter>", lambda e: _hover(e, TEAL))
-            self._canvas.tag_bind(item, "<Leave>", lambda e: _hover(e, TEAL_DIM))
+            self._canvas.tag_bind(item, "<Enter>", lambda e: _hover(e, ACCENT_2))
+            self._canvas.tag_bind(item, "<Leave>", lambda e: _hover(e, ACCENT))
         try:
             self.root.mainloop()
         except tk.TclError:

@@ -1134,21 +1134,21 @@ def main(splash=None) -> None:
         if splash is not None:
             splash.step(text, progress)
 
-    report("Чтение настроек…", 38)
+    report("Чтение настроек…", 40)
     cfg = storage.load_config()
     recent = cfg.get("recent") or []
-    report(f"Недавних отчётов: {len(recent)}", 42)
+    report(f"Недавних отчётов: {len(recent)}", 46)
     _ensure_library_watch()
 
     port = pick_port()
     SERVER_PORT = port
-    report(f"Свободный порт {port}", 48)
+    report(f"Свободный порт {port}", 52)
     settings = storage.remote_settings()
     if settings.get("autostart"):
-        report("Включаю доступ с телефона…", 52)
+        report("Включаю доступ с телефона…", 56)
         REMOTE.start(settings["token"])
     url = f"http://127.0.0.1:{port}/"
-    report("Запуск локального сервера…", 58)
+    report("Запуск локального сервера…", 60)
     thread = threading.Thread(target=run_server, args=(port,), daemon=True)
     thread.start()
 
@@ -1161,12 +1161,13 @@ def main(splash=None) -> None:
             ready = True
             break
         except Exception:
-            report("Ожидание ответа сервера…", min(58 + i, 86))
+            # Soft climb 60→82 while waiting — display eases, so no hard jumps
+            report("Ожидание ответа сервера…", min(60 + i * 0.45, 82))
             time.sleep(0.1)
     if ready:
-        report("Сервер готов", 88)
+        report("Сервер готов", 86)
     else:
-        report("Сервер ещё поднимается…", 88)
+        report("Сервер ещё поднимается…", 86)
 
     if settings.get("autostart") and settings.get("ngrok"):
         report("Подключение интернет-туннеля…", 90)
@@ -1179,7 +1180,10 @@ def main(splash=None) -> None:
         import webview
     except ImportError:
         if splash is not None:
-            splash.close()
+            if hasattr(splash, "finish"):
+                splash.finish(1.0)
+            else:
+                splash.close()
         print("pywebview не установлен — открываю системный браузер.")
         print("Для отдельного окна выполните: pip install -r requirements.txt")
         webbrowser.open(url)
@@ -1263,8 +1267,11 @@ def main(splash=None) -> None:
         start_opts["icon"] = ICON_PATH
     report("Готово", 100)
     if splash is not None:
-        time.sleep(0.2)
-        splash.close()
+        if hasattr(splash, "finish"):
+            splash.finish(2.0)
+        else:
+            time.sleep(2.0)
+            splash.close()
     webview.start(**start_opts)
 
 

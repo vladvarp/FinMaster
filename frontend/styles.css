@@ -1071,12 +1071,13 @@ html[data-theme="dark"] .line-menu { background: #1b2538; border-color: var(--li
   gap: 8px;
   align-items: center;
 }
-.list-item input:not([type="color"]):not([type="radio"]):not([data-pp]) {
+.list-item input:not([type="color"]):not([type="radio"]):not([data-pp]):not([data-pt]) {
   flex: 1;
   min-width: 0;
 }
 .list-item input:not([type="color"]):not([type="radio"]),
-.list-item input[data-pp] {
+.list-item input[data-pp],
+.list-item input[data-pt] {
   border-radius: var(--control-radius);
   padding: 8px 10px;
 }
@@ -1084,6 +1085,19 @@ html[data-theme="dark"] .line-menu { background: #1b2538; border-color: var(--li
   width: 84px;
   flex: 0 0 84px;
   text-align: right;
+}
+.list-item input[data-pt] {
+  width: 64px;
+  flex: 0 0 64px;
+  text-align: right;
+  border-radius: var(--control-radius);
+  padding: 8px 10px;
+}
+.product-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 10px;
 }
 .list-item input[type="color"] {
   width: 42px;
@@ -2116,7 +2130,8 @@ html[data-theme="dark"] .filter-check,
 html[data-theme="dark"] .paid-toggle { color: var(--ink); }
 html[data-theme="dark"] .list-item input:not([type="color"]):not([type="radio"]):not([type="checkbox"]),
 html[data-theme="dark"] .list-item select[data-pu],
-html[data-theme="dark"] .list-item input[data-pp] {
+html[data-theme="dark"] .list-item input[data-pp],
+html[data-theme="dark"] .list-item input[data-pt] {
   background-color: var(--control-bg);
   color: var(--ink);
   border-color: var(--line);

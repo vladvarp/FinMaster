@@ -1942,8 +1942,28 @@
     navReport();
   }
 
-  function catalogProductNames() {
-    return (state.doc.products || []).map((p) => String(p.name || p || "").trim()).filter(Boolean);
+  function productKind(item) {
+    const k = String(item?.kind || "order").toLowerCase();
+    return k === "cost" || k === "tax" ? k : "order";
+  }
+
+  function productKindOfLine(line) {
+    const k = typeKind(line?.order_type);
+    if (k === "tax") return "tax";
+    if (k === "cost") return "cost";
+    return "order";
+  }
+
+  function catalogNameKey(name) {
+    return String(name || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("ru");
+  }
+
+  function catalogProductNames(kind = "all") {
+    const list = state.doc?.products || [];
+    return list
+      .filter((p) => kind === "all" || productKind(p) === kind)
+      .map((p) => String(p.name || p || "").trim())
+      .filter(Boolean);
   }
 
   function closeEdProductSuggest() {
@@ -1951,9 +1971,10 @@
     if (box) box.innerHTML = "";
   }
 
-  function edProductSuggestHtml(query) {
+  function edProductSuggestHtml(query, line) {
     const q = String(query || "").trim().toLocaleLowerCase("ru");
-    const items = catalogProductNames().filter((name) => !q || name.toLocaleLowerCase("ru").includes(q));
+    const scope = productKindOfLine(line);
+    const items = catalogProductNames(scope).filter((name) => !q || name.toLocaleLowerCase("ru").includes(q));
     if (!items.length) return "";
     return items
       .map((name) => {
@@ -1971,7 +1992,9 @@
       box.innerHTML = "";
       return;
     }
-    box.innerHTML = edProductSuggestHtml(query);
+    const order = currentOrder();
+    const line = findLine(order, state.editLineId);
+    box.innerHTML = edProductSuggestHtml(query, line);
   }
 
   function renderEditor() {
@@ -4013,7 +4036,10 @@
       }
       if (field === "product") {
         fillEdProductSuggest(value);
-        const found = (state.doc.products || []).find((p) => (p.name || p) === value);
+        const want = productKindOfLine(line);
+        const found = (state.doc.products || []).find(
+          (p) => productKind(p) === want && catalogNameKey(p.name || p) === catalogNameKey(value)
+        );
         if (found?.unit) {
           line.unit = found.unit;
           const sel = document.querySelector(`select[data-l="${CSS.escape(line.id)}"][data-f="unit"]`);
@@ -4025,6 +4051,16 @@
           if (inp) {
             inp.value = String(found.price);
             inp.dataset.expr = String(found.price);
+            inp.dataset.showing = "expr";
+            inp.classList.remove("is-result");
+          }
+        }
+        if (want === "tax" && found?.tax_percent != null && num(found.tax_percent) > 0) {
+          setLineNumber(line, "tax_percent_expr", found.tax_percent);
+          const inp = document.querySelector(`input[data-l="${CSS.escape(line.id)}"][data-f="tax_percent_expr"]`);
+          if (inp) {
+            inp.value = String(found.tax_percent);
+            inp.dataset.expr = String(found.tax_percent);
             inp.dataset.showing = "expr";
             inp.classList.remove("is-result");
           }
