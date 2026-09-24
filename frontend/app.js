@@ -1320,9 +1320,29 @@
     if (state.view && state.view !== "orders") return;
     const orders = filteredOrders();
     const summary = summarize(
-      orders.flatMap((o) => (o.lines || []).map((line) => ({ order: o, line, totals: lineTotals(line) })))
+      orders.flatMap((o) =>
+        (o.lines || []).filter((line) => !isFrozenLine(line)).map((line) => ({ order: o, line, totals: lineTotals(line, o) }))
+      )
     );
-    el.innerHTML = `<span>${orders.length} зак. · ${money(summary.after)} · долг ${money(summary.unpaid)}</span>`;
+    const hasCost = summary.cost > 0.005;
+    const hasDebt = summary.unpaid > 0.005;
+    const tip = [
+      `Заказов: ${orders.length}`,
+      `Выручка: ${money(summary.after)}`,
+      hasCost ? `Расходы (налоги и затраты): −${money(summary.cost)}` : "",
+      hasCost ? `Чистыми: ${money(summary.net)}` : "",
+      `Долг: ${money(summary.unpaid)}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    el.innerHTML = `<div class="os-line" data-tip="${esc(tip)}">
+      <span class="os-count">${orders.length} зак.</span>
+      <b>${esc(money(summary.after))}</b>${
+        hasCost
+          ? `<span class="os-op">−</span><b class="cost">${esc(money(summary.cost))}</b><span class="os-op">=</span><b class="os-net">${esc(money(summary.net))}</b>`
+          : ""
+      }${hasDebt ? `<span class="os-debt">долг ${esc(money(summary.unpaid))}</span>` : ""}
+    </div>`;
   }
 
   function analyticsRows() {

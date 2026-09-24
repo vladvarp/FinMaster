@@ -966,7 +966,30 @@ table.data .num { font-variant-numeric: tabular-nums; font-family: var(--mono); 
 }
 .totals { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--muted); }
 .totals b { color: var(--ink); }
-.totals b.cost { color: #b45309; }
+.totals b.cost,
+#orders-summary b.cost { color: #b45309; }
+#orders-summary b { font-variant-numeric: tabular-nums; }
+.os-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--muted);
+}
+.os-line b { color: var(--ink); font-weight: 700; }
+.os-count { margin-right: 4px; }
+.os-op { opacity: 0.7; }
+.os-net { color: var(--accent) !important; }
+.os-debt {
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
 
 .order-expenses {
   border-top: 1px dashed var(--line);
@@ -1040,6 +1063,7 @@ html[data-theme="dark"] tr.cost-row td { background: rgba(217, 119, 6, 0.08); }
 html[data-theme="dark"] .oe-title,
 html[data-theme="dark"] tr.cost-row .computed,
 html[data-theme="dark"] .totals b.cost,
+html[data-theme="dark"] #orders-summary b.cost,
 html[data-theme="dark"] .kpi.cost .value { color: #fbbf24; }
 html[data-theme="dark"] .cost-kind { color: #fde68a; background: #4a3411; }
 html[data-theme="dark"] .cost-kind.tax { color: #ddd6fe; background: #3b2a63; }
