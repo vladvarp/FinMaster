@@ -1045,7 +1045,15 @@ html[data-theme="dark"] .expr-input.invalid { background: rgba(220, 38, 38, 0.12
 
 /* ===== Расходы: налог и затрата ===== */
 .costs-sum { font-size: 14px; font-weight: 700; color: var(--warn); font-variant-numeric: tabular-nums; }
-.line-row.is-frozen { opacity: 0.72; filter: grayscale(0.25); }
+.line-row.is-frozen {
+  opacity: 0.72;
+  filter: grayscale(0.25);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(100, 116, 139, 0.18) 0 7px,
+    rgba(100, 116, 139, 0.05) 7px 14px
+  );
+}
 .frozen-banner {
   margin: 0 0 10px;
   padding: 8px 12px;

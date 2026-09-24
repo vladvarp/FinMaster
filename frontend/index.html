@@ -149,6 +149,40 @@
           </button>
         </div>
         <div class="top-right">
+          <div class="file-quick" role="group" aria-label="Файл">
+            <button class="btn icon" type="button" id="btn-home" title="К списку отчётов" aria-label="К списку отчётов">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M4 11.5L12 4l8 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M6.5 10.5V20h11V10.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button class="btn icon" type="button" id="btn-q-new" title="Новый отчёт" aria-label="Новый отчёт">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M13.5 3.5H7A2.5 2.5 0 0 0 4.5 6v12A2.5 2.5 0 0 0 7 20.5h10a2.5 2.5 0 0 0 2.5-2.5V9.5l-6-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                <path d="M13.5 3.5v6h6M12 12.5v5M9.5 15h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button class="btn icon" type="button" id="btn-q-open" title="Открыть отчёт" aria-label="Открыть отчёт">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2h7a2 2 0 0 1 2 2v1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M3.5 7.5v10a1.5 1.5 0 0 0 1.5 1.5h12.3a1.5 1.5 0 0 0 1.4-1l2.1-6a1.5 1.5 0 0 0-1.4-2H7.6a1.5 1.5 0 0 0-1.4 1L3.5 18.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button class="btn icon save-state" type="button" id="btn-q-save" title="Сохранить (Ctrl+S)" aria-label="Сохранить">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M5.5 3.5h10.8l4.2 4.2v10.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                <path d="M7.5 3.5v5h8v-5M7.5 20.5v-6.5h9v6.5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+              </svg>
+              <span class="save-state-dot" aria-hidden="true"></span>
+            </button>
+            <button class="btn icon" type="button" id="btn-q-save-as" title="Сохранить как…" aria-label="Сохранить как">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M11 20.5H5.5a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h10.8l4.2 4.2V11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M7.5 3.5v5h8v-5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                <path d="m14 20.5.6-2.6 4.9-4.9a1.4 1.4 0 0 1 2 2l-4.9 4.9-2.6.6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
           <div class="history-group">
             <button class="btn icon" type="button" id="btn-undo" title="Отменить (Ctrl+Z)" disabled>↶</button>
             <div class="history-pop" id="history-pop">
@@ -161,12 +195,6 @@
             </div>
             <button class="btn icon" type="button" id="btn-redo" title="Повторить (Ctrl+Y)" disabled>↷</button>
           </div>
-          <button class="btn icon" type="button" id="btn-home" title="К списку отчётов" aria-label="К списку отчётов">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M4 11.5L12 4l8 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M6.5 10.5V20h11V10.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
           <button class="btn icon" type="button" id="btn-export" title="Экспорт CSV" aria-label="Экспорт CSV">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 4v10.5M8.5 11.5 12 15l3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>

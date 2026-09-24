@@ -1067,6 +1067,17 @@
     const pathEl = $("file-path");
     if (pathEl) pathEl.textContent = state.path || "Файл ещё не сохранён";
     $("dirty-dot")?.classList.toggle("hidden", !state.dirty);
+    const saveBtn = $("btn-q-save");
+    if (saveBtn) {
+      saveBtn.classList.toggle("is-dirty", !!state.dirty);
+      const tip = state.dirty
+        ? "Сохранить (Ctrl+S) · есть несохранённые изменения"
+        : state.path
+          ? "Сохранить (Ctrl+S) · всё сохранено"
+          : "Сохранить (Ctrl+S) · файл ещё не сохранён";
+      saveBtn.setAttribute("data-tip", tip);
+      saveBtn.setAttribute("aria-label", tip);
+    }
     const autosaveEl = $("autosave");
     if (autosaveEl) autosaveEl.checked = !!state.autosave;
     document.title = `${state.dirty ? "• " : ""}${state.doc?.title || "FinMaster"} — FinMaster`;
@@ -1147,7 +1158,13 @@
 
   async function deleteLibraryFile(path) {
     const name = String(path || "").split(/[\\/]/).pop() || "отчёт";
-    if (!confirm(`Удалить «${name}» из папки FinMaster? Файл попадёт в корзину.`)) return;
+    const ok = await askConfirm({
+      title: "Удалить отчёт?",
+      text: `«${name}» будет удалён из папки FinMaster. Файл попадёт в корзину — его можно будет восстановить оттуда.`,
+      ok: "Удалить",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       const res = await apiPost("/api/library/delete", { path });
       if (res.library) renderLibrary(res.library);
@@ -1821,7 +1838,8 @@
                 .map((line) => {
                   const lt = lineTotals(line);
                   const label = lt.expense ? `${line.order_type || "—"} · ${kindLabel(lt.kind)}` : line.order_type || "—";
-                  return `<tr class="${lt.expense ? "is-expense" : ""}"><td>${esc(label)}</td><td>${esc(line.product || "—")}</td>
+                  const rowCls = [lt.expense ? "is-expense" : "", isFrozenLine(line) ? "is-frozen" : ""].filter(Boolean).join(" ");
+                  return `<tr class="${rowCls}"><td>${esc(label)}</td><td>${esc(line.product || "—")}</td>
                   <td class="num">${esc(`${qtyValue(line)} ${line.unit || ""}`.trim())}</td>
                   <td class="num">${esc(money(numExpr(line, "price_expr", "price")))}</td>
                   <td class="num">${lt.expense ? `−${esc(money(lt.cost))}` : esc(money(lt.after))}</td>
@@ -8873,6 +8891,10 @@
     $("btn-save-as").addEventListener("click", () => save({ as: true }));
     $("btn-open").addEventListener("click", () => maybeOpen(openFromDialog));
     $("btn-new").addEventListener("click", onNew);
+    $("btn-q-new")?.addEventListener("click", onNew);
+    $("btn-q-open")?.addEventListener("click", () => maybeOpen(openFromDialog));
+    $("btn-q-save")?.addEventListener("click", () => save());
+    $("btn-q-save-as")?.addEventListener("click", () => save({ as: true }));
     $("btn-home").addEventListener("click", () => {
       if (state.dirty) {
         state._home = true;
@@ -9265,7 +9287,12 @@
 
   async function maybeOpen(fn) {
     if (state.dirty) {
-      const ok = confirm("Есть несохранённые изменения. Открыть другой файл без сохранения текущих?");
+      const ok = await askConfirm({
+        title: "Открыть другой отчёт?",
+        text: "В текущем отчёте есть несохранённые изменения. Если открыть другой файл, они пропадут.",
+        ok: "Открыть без сохранения",
+        danger: true,
+      });
       if (!ok) return;
     }
     await fn();
