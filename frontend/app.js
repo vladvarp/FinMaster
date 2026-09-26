@@ -4385,6 +4385,17 @@
     return !!calendarState().openLines?.[orderId];
   }
 
+  /** Правый клик по строке заказа (или его позиции) на таймлайне раскрывает / сворачивает позиции. */
+  function onCalContextMenu(e) {
+    if (calendarState().mode !== "timeline") return;
+    const row = e.target.closest(".gantt-row[data-cal-id]");
+    if (!row) return;
+    const order = findOrder(row.dataset.calId);
+    if (!order || !calendarWorkLines(order).length) return;
+    e.preventDefault();
+    toggleCalendarLines(order.id);
+  }
+
   function toggleCalendarLines(orderId) {
     const cal = calendarState();
     if (!cal.openLines) cal.openLines = {};
@@ -5257,7 +5268,7 @@
         const workLines = calendarWorkLines(order);
         const open = calendarLinesOpen(order.id);
         const expand = workLines.length
-          ? `<button type="button" class="gantt-expand ${open ? "is-open" : ""}" data-cal-expand="${esc(order.id)}" title="${open ? "Скрыть позиции" : "Показать позиции"}" aria-label="${open ? "Скрыть позиции" : "Показать позиции"}" aria-expanded="${open}">${ganttExpandIcon()}</button>`
+          ? `<button type="button" class="gantt-expand ${open ? "is-open" : ""}" data-cal-expand="${esc(order.id)}" title="${open ? "Скрыть позиции" : "Показать позиции"} · или правый клик по строке заказа" aria-label="${open ? "Скрыть позиции" : "Показать позиции"}" aria-expanded="${open}">${ganttExpandIcon()}</button>`
           : `<span class="gantt-expand is-empty" aria-hidden="true"></span>`;
         const lineRows = open
           ? workLines
@@ -5600,13 +5611,18 @@
     cal.selected = id;
     cal.selectedLine = lineId || "";
     const order = findOrder(id);
-    if (order) revealOrderOnCalendar(order);
-    else renderCalendar();
+    if (!order) {
+      renderCalendar();
+      return;
+    }
+    const line = findCalendarLine(order, lineId);
+    revealOrderOnCalendar(line ? lineWorkProxy(order, line) : order);
   }
 
-  function revealOrderOnCalendar(order) {
+  /** target — заказ или прокси позиции ({work_start, work_end}). */
+  function revealOrderOnCalendar(target) {
     const cal = calendarState();
-    const start = parseDay(order.work_start) || parseDay(order.work_end);
+    const start = parseDay(target.work_start) || parseDay(target.work_end);
     if (start) {
       if (cal.mode === "timeline") {
         clampTimelineView();
@@ -5649,7 +5665,7 @@
     historyCommit();
     markDirty();
     if (stay) renderCalendar();
-    else revealOrderOnCalendar(order);
+    else revealOrderOnCalendar(line ? lineWorkProxy(order, line) : order);
     if (toastText) toast(toastText);
   }
 
@@ -6387,6 +6403,7 @@
 
   function bindCalendar() {
     $("view-calendar")?.addEventListener("click", onCalClick);
+    $("view-calendar")?.addEventListener("contextmenu", onCalContextMenu);
     $("view-calendar")?.addEventListener("change", onCalChange);
     $("cal-board")?.addEventListener("pointerdown", onCalPointerDown);
     $("cal-board")?.addEventListener("pointermove", onGanttDayHover);
