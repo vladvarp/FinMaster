@@ -3,7 +3,7 @@
   "use strict";
 
   let api = null;
-  const session = { bound: false, filter: "all", draftType: "in" };
+  const session = { bound: false, filter: "all", draftType: "in", draftDate: "" };
 
   const TYPES = {
     in: { label: "Пополнение", plural: "Пополнения", hint: "Пополнение — деньги пришли (карманные, зарплата). Плюс к деньгам на руках." },
@@ -176,7 +176,7 @@
         </div>
         <input id="vault-new-name" class="vault-in-name" maxlength="120" placeholder="Название строки" autocomplete="off" spellcheck="false" />
         <input id="vault-new-amount" class="vault-in-amount" inputmode="decimal" placeholder="Сумма" autocomplete="off" />
-        <input id="vault-new-date" class="vault-in-date" type="date" value="${today()}" />
+        <input id="vault-new-date" class="vault-in-date" type="date" value="${session.draftDate || today()}" title="Дата запоминается для следующих строк" />
         <button type="button" class="btn primary" id="vault-add-btn">Добавить</button>
       </div>
       <div class="vault-type-hint" id="vault-type-hint">${esc(TYPES[type].hint)}</div>`;
@@ -306,6 +306,7 @@
       return;
     }
     const type = session.draftType;
+    session.draftDate = dateEl?.value || session.draftDate;
     page.rows.push({
       id: uid(),
       type,
@@ -425,6 +426,10 @@
 
     body?.addEventListener("change", (e) => {
       const el = e.target;
+      if (el.id === "vault-new-date") {
+        session.draftDate = el.value || "";
+        return;
+      }
       if (el.id === "vault-page-name") {
         const page = activePage();
         if (page && !page.name.trim()) {

@@ -6375,6 +6375,34 @@ html[data-theme="dark"] .calc-const-val {
   background: #020617;
   color: #5eead4;
 }
+.calc-const-note {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 172px;
+  max-width: 260px;
+  min-height: 30px;
+  max-height: 140px;
+  field-sizing: content;
+  resize: none;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--ink);
+  font: 500 12px/1.35 var(--sans);
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin: -2px 0 8px;
+  outline: none;
+  overflow-y: auto;
+}
+.calc-const-note::placeholder { color: var(--muted); font-style: italic; }
+.calc-const-note:hover { border-color: color-mix(in srgb, var(--accent-2) 45%, var(--line)); }
+.calc-const-note:focus {
+  border-style: solid;
+  border-color: var(--accent-2);
+  background: var(--control-bg);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
+}
 .calc-node.is-scheme .calc-port.out { background: #eab308; box-shadow: 0 0 0 1px #a16207; }
 .calc-board.is-link-out .calc-port.in,
 .calc-board.is-link-in .calc-port.out {

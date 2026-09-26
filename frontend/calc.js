@@ -440,7 +440,7 @@
     const orderLabel = order?.number || order?.name || "заказ";
     let src = "связь";
     if (owner.source) {
-      if (owner.source.type === "const") src = "Константа";
+      if (owner.source.type === "const") src = owner.source.note ? `Константа «${String(owner.source.note).split("\n")[0].slice(0, 40)}»` : "Константа";
       else if (owner.source.type === "math") src = `Оператор ${owner.source.op || ""}`.trim();
       else if (owner.source.type === "formula") src = "Формула";
       else if (owner.source.type === "percent") src = "Процент";
@@ -2824,6 +2824,7 @@
         <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
       </header>
       <input class="calc-const-val" data-const-value="${esc(node.id)}" value="${esc(raw)}" inputmode="decimal" spellcheck="false" title="Число" />
+      <textarea class="calc-const-note" data-const-note="${esc(node.id)}" rows="1" maxlength="500" placeholder="Комментарий…" title="Комментарий: что это за число и откуда оно">${esc(node.note || "")}</textarea>
       <div class="calc-ports">
         <div class="calc-row out">
           <span>${esc(fmtShort(value))}</span>
@@ -4372,8 +4373,25 @@
     $("calc-side")?.addEventListener("input", (e) => {
       if (e.target.id !== "calc-order-search") return;
       session.search = e.target.value;
-      e.target.closest(".calc-search")?.classList.toggle("has-value", !!String(e.target.value || "").length);
+      const start = e.target.selectionStart;
+      const end = e.target.selectionEnd;
+      const list = document.querySelector("#calc-side .calc-order-list");
+      const listScroll = list?.scrollTop || 0;
+      const sideScroll = $("calc-side")?.scrollTop || 0;
       renderSide(activeBlueprint());
+      const input = $("calc-order-search");
+      if (input) {
+        input.focus({ preventScroll: true });
+        try {
+          input.setSelectionRange(start ?? input.value.length, end ?? input.value.length);
+        } catch {
+          /* ignore */
+        }
+      }
+      const side = $("calc-side");
+      if (side) side.scrollTop = sideScroll;
+      const nextList = document.querySelector("#calc-side .calc-order-list");
+      if (nextList) nextList.scrollTop = listScroll;
     });
     $("calc-side")?.addEventListener("click", (e) => {
       const clear = e.target.closest("[data-search-clear]");
@@ -4628,6 +4646,11 @@
         }
         dirty();
         patchGraphLive();
+        return;
+      }
+      if (e.target.dataset?.constNote && node.type === "const") {
+        node.note = String(e.target.value || "").slice(0, 500);
+        dirty();
         return;
       }
       if (e.target.dataset?.outExpr && node.type === "formula") {

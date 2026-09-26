@@ -474,6 +474,9 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         if value != value:
             value = 0.0
         node["value"] = value
+        note = _clip_text(raw.get("note"), 500)
+        if note:
+            node["note"] = note
     elif kind == "scheme":
         node["blueprintId"] = _clip_text(raw.get("blueprintId"), 80)
     elif kind == "filter":
