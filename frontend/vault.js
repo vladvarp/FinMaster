@@ -446,7 +446,7 @@
       series.datasets = series.datasets.filter((_, i) => keep[i]);
       if (series.legend) series.legend = series.legend.filter((_, i) => keep[i]);
     }
-    if (session.chartMode === "months") charts.bar(canvas, series);
+    if (session.chartMode === "months") charts.bar(canvas, { ...series, tinyLabels: true });
     else charts.line(canvas, { ...series, instant });
   }
 

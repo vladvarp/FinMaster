@@ -40,6 +40,10 @@ const FinCharts = (() => {
     return nfInt.format(n);
   }
 
+  function fmtTiny(v) {
+    return fmtCompact(v).replace(/ млн$/, "м").replace(/ тыс$/, "к");
+  }
+
   const fmtValue = (v, kind) => (kind === "count" ? fmtCount(v) : fmtMoney(v));
   const fmtAxis = (v, kind) => (kind === "count" ? fmtCount(v) : fmtCompact(v));
 
@@ -433,14 +437,14 @@ const FinCharts = (() => {
 
   /* ============ bar ============ */
 
-  function bar(canvas, { labels = [], datasets = [], scale = "shared", formats = [], legend = [] } = {}) {
+  function bar(canvas, { labels = [], datasets = [], scale = "shared", formats = [], legend = [], tinyLabels = false } = {}) {
     const inst = getInst(canvas, "bar");
-    update(inst, datasets.map((d) => (d.values || []).map((v) => Number(v) || 0)), { labels, datasets, scale, formats, legend });
+    update(inst, datasets.map((d) => (d.values || []).map((v) => Number(v) || 0)), { labels, datasets, scale, formats, legend, tinyLabels });
   }
 
   function drawBar(inst) {
     const { ctx, w, h } = size(inst.canvas);
-    const { labels, datasets, scale, formats, legend } = inst.opts;
+    const { labels, datasets, scale, formats, legend, tinyLabels } = inst.opts;
     const values = inst.current;
     if (!labels.length || !datasets.length) {
       inst.geom = null;
@@ -534,7 +538,8 @@ const FinCharts = (() => {
         ctx.shadowBlur = 0;
         ctx.shadowOffsetY = 0;
 
-        const text = kind === "count" ? fmtCount(inst.target[di]?.[i] ?? 0) : fmtCompact(inst.target[di]?.[i] ?? 0);
+        const raw = inst.target[di]?.[i] ?? 0;
+        const text = kind === "count" ? fmtCount(raw) : tinyLabels ? fmtTiny(raw) : fmtCompact(raw);
         ctx.font = "650 11px Segoe UI, sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "bottom";
