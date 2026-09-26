@@ -220,6 +220,14 @@ const FinCharts = (() => {
   function update(inst, targets, opts) {
     inst.opts = opts;
     inst.target = targets.map((row) => row.slice());
+    if (opts.instant) {
+      cancelAnimationFrame(inst.raf);
+      inst.current = inst.target.map((row) => row.slice());
+      inst.from = inst.target.map((row) => row.slice());
+      draw(inst);
+      if (inst.pointer) hitTest(inst);
+      return;
+    }
     if (!inst.from.length || reduceMotion()) {
       inst.from = targets.map((row) => row.map(() => 0));
       if (reduceMotion()) inst.from = targets.map((row) => row.slice());
@@ -261,9 +269,9 @@ const FinCharts = (() => {
 
   /* ============ line ============ */
 
-  function line(canvas, { labels = [], datasets = [], kind = "money" } = {}) {
+  function line(canvas, { labels = [], datasets = [], kind = "money", instant = false } = {}) {
     const inst = getInst(canvas, "line");
-    update(inst, datasets.map((d) => (d.values || []).map((v) => Number(v) || 0)), { labels, datasets, kind });
+    update(inst, datasets.map((d) => (d.values || []).map((v) => Number(v) || 0)), { labels, datasets, kind, instant });
   }
 
   function drawLine(inst) {
