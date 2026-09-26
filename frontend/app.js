@@ -42,6 +42,14 @@
   const LS_NET_CONSOLE = "finmaster.netconsole";
   const LS_START_VIEW = "finmaster.startView";
   const LS_CHARTS = "finmaster.charts";
+  /** localStorage окна программы не переживает перезапуск — эти ключи дублируются в config.json. */
+  const SYNCED_PREFS = {
+    "finmaster.shareProfiles": "share_profiles",
+    "finmaster.pdfProfiles": "pdf_profiles",
+    "finmaster.sharePdf": "share_pdf",
+    "finmaster.shareGrand": "share_grand",
+  };
+  const prefTimers = {};
   const CLOUD_LAYOUTS = ["galaxy", "orbit", "timeline", "constellation"];
   const CLOUD_COLOR_MODES = ["status", "customer", "debt", "type"];
   const CLOUD_SIZE_MODES = ["amount", "debt", "quantity", "equal"];
@@ -160,6 +168,7 @@
       if (JSON.stringify(a.ui?.calendar || {}) !== JSON.stringify(b.ui?.calendar || {})) return "Календарь";
       if (JSON.stringify(a.ui?.calculator || {}) !== JSON.stringify(b.ui?.calculator || {})) return "Калькулятор";
       if (JSON.stringify(a.ui?.presentation || {}) !== JSON.stringify(b.ui?.presentation || {})) return "Презентация";
+      if (JSON.stringify(a.ui?.vault || {}) !== JSON.stringify(b.ui?.vault || {})) return "Хранилище";
       if (a.title !== b.title) return "Название отчёта";
     } catch {
       /* ignore */
@@ -815,7 +824,7 @@
       products: [],
       customers: [],
       orders: [],
-      ui: { sidebar_collapsed: false, column_widths: {}, share_fields: [], share_theme: "teal", cloud: {}, line_series: {}, calculator: { active: "", blueprints: [] }, presentation: { active: "", pages: [] } },
+      ui: { sidebar_collapsed: false, column_widths: {}, share_fields: [], share_theme: "teal", cloud: {}, line_series: {}, calculator: { active: "", blueprints: [] }, presentation: { active: "", pages: [] }, vault: { active: "", pages: [] } },
     };
   }
 
@@ -879,6 +888,66 @@
     return data;
   }
 
+  function prefValueFromRaw(raw) {
+    if (raw == null) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return raw;
+    }
+  }
+
+  let prefChain = Promise.resolve();
+
+  function sendPref(lsKey) {
+    clearTimeout(prefTimers[lsKey]);
+    delete prefTimers[lsKey];
+    prefChain = prefChain.then(() => {
+      let raw = null;
+      try {
+        raw = localStorage.getItem(lsKey);
+      } catch {
+        raw = null;
+      }
+      return apiPost("/api/ui-pref", { key: SYNCED_PREFS[lsKey], value: prefValueFromRaw(raw) }).catch(() => {});
+    });
+    return prefChain;
+  }
+
+  /** Пишет настройку в localStorage и (на компьютере) в config.json программы. */
+  function persistPref(lsKey, raw, { now = false } = {}) {
+    try {
+      localStorage.setItem(lsKey, raw);
+    } catch {
+      /* ignore */
+    }
+    if (!state.desktop || !SYNCED_PREFS[lsKey]) return;
+    clearTimeout(prefTimers[lsKey]);
+    if (now) sendPref(lsKey);
+    else prefTimers[lsKey] = setTimeout(() => sendPref(lsKey), 400);
+  }
+
+  function flushPrefs() {
+    return Promise.all(Object.keys(prefTimers).map((lsKey) => sendPref(lsKey)));
+  }
+
+  /** При запуске: значения из config.json главнее; то, чего там нет, переносится из localStorage. */
+  function hydratePrefs(serverPrefs) {
+    const prefs = serverPrefs && typeof serverPrefs === "object" ? serverPrefs : {};
+    Object.entries(SYNCED_PREFS).forEach(([lsKey, key]) => {
+      try {
+        if (key in prefs && prefs[key] != null) {
+          const value = prefs[key];
+          localStorage.setItem(lsKey, typeof value === "string" ? value : JSON.stringify(value));
+        } else if (localStorage.getItem(lsKey) != null) {
+          sendPref(lsKey);
+        }
+      } catch {
+        /* ignore */
+      }
+    });
+  }
+
   let dirtySyncChain = Promise.resolve();
 
   function syncDirty() {
@@ -890,6 +959,7 @@
   }
 
   async function flushPendingSaves() {
+    await flushPrefs();
     clearTimeout(state.autosaveTimer);
     clearTimeout(history.persistTimer);
     try {
@@ -1984,7 +2054,7 @@
   }
 
   function applyRowStatus(tr, statusName) {
-    if (!tr) return;
+    if (!tr || tr.classList.contains("cost-row")) return;
     tr.style.setProperty("--status-color", statusColor(statusName));
   }
 
@@ -7182,6 +7252,26 @@
     window.FinPresent?.bind(presentationApi());
   }
 
+  function vaultApi() {
+    return {
+      doc: () => state.doc,
+      view: () => state.view,
+      uid,
+      money,
+      markDirty,
+      toast,
+      confirm: askConfirm,
+    };
+  }
+
+  function renderVault() {
+    window.FinVault?.render(vaultApi());
+  }
+
+  function bindVault() {
+    window.FinVault?.bind(vaultApi());
+  }
+
   function cloudFullscreenElement() {
     return document.fullscreenElement || document.webkitFullscreenElement || null;
   }
@@ -7365,6 +7455,7 @@
     if (state.view === "calculator") renderCalculator();
     if (state.view === "presentation") renderPresentation();
     if (state.view === "cloud") renderCloud();
+    if (state.view === "vault") renderVault();
     if (state.view === "catalogs") renderCatalogs();
     if (state.view === "customers") renderCustomers();
     else {
@@ -8104,6 +8195,7 @@
     bindCloud();
     bindCalculator();
     bindPresentation();
+    bindVault();
     bindSearchClears();
     $("global-search").addEventListener("input", (e) => {
       state.search = e.target.value;
@@ -8947,6 +9039,7 @@
       const open = fold.classList.toggle("collapsed") === false;
       const ico = fold.querySelector(".share-fold-ico");
       if (ico) ico.textContent = open ? "▾" : "▸";
+      rememberShareState();
     });
     $("share-hide-labels").addEventListener("change", renderSharePreview);
     $("share-hide-stamp").addEventListener("change", renderSharePreview);
@@ -8958,12 +9051,13 @@
       const open = block.classList.toggle("collapsed") === false;
       tog.setAttribute("aria-expanded", open ? "true" : "false");
       tog.textContent = open ? "▾" : "▸";
+      rememberShareState();
     });
     $("share-orders").addEventListener("change", (e) => {
       const block = e.target.closest(".share-order");
       if (block && e.target.hasAttribute("data-share-order")) {
         block.querySelectorAll("[data-share-line]").forEach((el) => {
-          el.checked = e.target.checked;
+          if (!el.closest(".is-search-hidden")) el.checked = e.target.checked;
         });
         if (e.target.checked) {
           block.classList.remove("collapsed");
@@ -8987,6 +9081,101 @@
     $("share-copy-text").addEventListener("click", copyShareText);
     $("share-copy").addEventListener("click", copySharePng);
     $("share-save").addEventListener("click", saveSharePng);
+    $("share-grand")?.addEventListener("change", (e) => {
+      persistPref(LS_SHARE_GRAND, e.target.checked ? "1" : "0");
+      renderSharePreview();
+    });
+    $("share-orders-search")?.addEventListener("input", applyShareSearch);
+    $("share-orders-search")?.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && e.target.value) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.target.value = "";
+        applyShareSearch();
+      }
+    });
+    $("share-check-all")?.addEventListener("click", () => setAllShareChecks(true));
+    $("share-check-none")?.addEventListener("click", () => setAllShareChecks(false));
+    $("share-profile-save")?.addEventListener("click", saveShareProfile);
+    $("share-profile-name")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        saveShareProfile();
+      }
+    });
+    $("share-profile-list")?.addEventListener("click", (e) => {
+      const del = e.target.closest("[data-profile-del]");
+      if (del) {
+        deleteShareProfile(Number(del.dataset.profileDel));
+        return;
+      }
+      const apply = e.target.closest("[data-profile-apply]");
+      if (!apply) return;
+      const p = loadShareProfiles()[Number(apply.dataset.profileApply)];
+      if (p) applyShareProfile(p);
+    });
+    $("share-pdf")?.addEventListener("click", openSharePdf);
+    $("pdf-back")?.addEventListener("click", () => $("pdf-modal").classList.remove("open"));
+    $("pdf-save")?.addEventListener("click", saveSharePdf);
+    $("pdf-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("pdf-modal")) $("pdf-modal").classList.remove("open");
+    });
+    $("pdf-tools")?.addEventListener("click", (e) => {
+      const applyBtn = e.target.closest("[data-pdf-profile-apply]");
+      if (applyBtn) {
+        const p = loadPdfProfiles()[Number(applyBtn.dataset.pdfProfileApply)];
+        if (p) applyPdfProfile(p);
+        return;
+      }
+      const delBtn = e.target.closest("[data-pdf-profile-del]");
+      if (delBtn) {
+        deletePdfProfile(Number(delBtn.dataset.pdfProfileDel));
+        return;
+      }
+      if (e.target.closest("#pdf-profile-save")) {
+        savePdfProfile();
+        return;
+      }
+      const btn = e.target.closest("[data-pdf-opt] button[data-v]");
+      if (btn) {
+        pdfOpts[btn.closest("[data-pdf-opt]").dataset.pdfOpt] = btn.dataset.v;
+        savePdfOpts();
+        syncPdfTools();
+        schedulePdfPreview();
+        return;
+      }
+      if (e.target.closest("#pdf-reset")) {
+        pdfOpts = { ...PDF_DEFAULTS };
+        savePdfOpts();
+        syncPdfTools();
+        schedulePdfPreview();
+      }
+    });
+    $("pdf-tools")?.addEventListener("change", (e) => {
+      const el = e.target;
+      if (el.dataset.pdfCheck) pdfOpts[el.dataset.pdfCheck] = el.checked;
+      else if (el.dataset.pdfSelect) pdfOpts[el.dataset.pdfSelect] = el.value;
+      else return;
+      savePdfOpts();
+      renderPdfProfiles();
+      schedulePdfPreview();
+    });
+    $("pdf-tools")?.addEventListener("input", (e) => {
+      const key = e.target.dataset.pdfRange;
+      if (!key) return;
+      pdfOpts[key] = Number(e.target.value);
+      const val = $("pdf-scale-val");
+      if (val) val.textContent = `${pdfOpts.scale}%`;
+      savePdfOpts();
+      renderPdfProfiles();
+      schedulePdfPreview();
+    });
+    $("pdf-profile-name")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        savePdfProfile();
+      }
+    });
     $("btn-open-library")?.addEventListener("click", async () => {
       try {
         await apiPost("/api/open-folder", {});
@@ -9171,6 +9360,11 @@
         if ($("confirm-modal")?.classList.contains("open")) {
           e.preventDefault();
           closeConfirm(false);
+          return;
+        }
+        if ($("pdf-modal")?.classList.contains("open")) {
+          e.preventDefault();
+          $("pdf-modal").classList.remove("open");
           return;
         }
         if ($("help-modal").classList.contains("open")) $("help-modal").classList.remove("open");
@@ -9901,24 +10095,129 @@
     return xs;
   }
 
+  /** Одинаковые ширины колонок для всех таблиц снимка. */
+  function shareSharedColWidths(cols, blocks) {
+    if (!cols.length || !blocks.length) return [];
+    const per = blocks.map((b) => shareColWidths(cols, b.lines));
+    return cols.map((_, i) => Math.max(...per.map((w) => w[i])));
+  }
+
+  const LS_SHARE_GRAND = "finmaster.shareGrand";
+
+  function shareGrandOn(blocks) {
+    return (blocks?.length || 0) > 1 && !!$("share-grand")?.checked;
+  }
+
+  function shareGrandData(blocks) {
+    const rows = blocks.map(({ order, lines }) => ({ order, lines, tot: linesTotals(lines) }));
+    const sum = rows.reduce(
+      (acc, r) => {
+        acc.total += r.tot.total;
+        acc.after += r.tot.after;
+        acc.paid += r.tot.paid;
+        acc.unpaid += r.tot.unpaid;
+        acc.cost += r.tot.cost;
+        acc.lines += r.lines.filter((l) => !isExpenseLine(l)).length;
+        return acc;
+      },
+      { total: 0, after: 0, paid: 0, unpaid: 0, cost: 0, lines: 0 }
+    );
+    ["total", "after", "paid", "unpaid", "cost"].forEach((k) => (sum[k] = round2(sum[k])));
+    sum.net = round2(sum.after - sum.cost);
+    sum.orders = rows.length;
+    return { rows, sum };
+  }
+
+  function shareGrandCols(fields, grand) {
+    const cols = [{ id: "order", label: "Заказ" }];
+    if (fields.includes("customer")) cols.push({ id: "customer", label: "Заказчик" });
+    cols.push({ id: "after", label: "Итого", money: true });
+    if (grand.sum.cost > 0.005) {
+      cols.push({ id: "cost", label: "Расходы", money: true });
+      cols.push({ id: "net", label: "К оплате", money: true });
+    }
+    if (fields.includes("paid")) cols.push({ id: "paid", label: "Оплачено", money: true });
+    if (fields.includes("unpaid")) cols.push({ id: "unpaid", label: "Остаток", money: true });
+    return cols;
+  }
+
+  function shareGrandCell(row, colId) {
+    const { order, tot } = row;
+    if (colId === "order") return [order.number ? `№ ${order.number}` : "", order.name].filter(Boolean).join(" · ") || "—";
+    if (colId === "customer") return order.customer || "—";
+    if (colId === "cost") return tot.cost > 0.005 ? `−${money(tot.cost)}` : "—";
+    return money(tot[colId] || 0);
+  }
+
+  function shareGrandFootCell(sum, colId) {
+    if (colId === "order") return `Всего · ${sum.orders} зак.`;
+    if (colId === "customer") return "";
+    if (colId === "cost") return sum.cost > 0.005 ? `−${money(sum.cost)}` : "—";
+    return money(sum[colId] || 0);
+  }
+
+  function shareGrandWidths(cols, grand) {
+    const ctx = document.createElement("canvas").getContext("2d");
+    return cols.map((col) => {
+      ctx.font = "600 11px Segoe UI, sans-serif";
+      let w = ctx.measureText(col.label.toUpperCase()).width;
+      ctx.font = "13px Segoe UI, sans-serif";
+      grand.rows.forEach((row) => {
+        w = Math.max(w, ctx.measureText(shareGrandCell(row, col.id)).width);
+      });
+      ctx.font = "700 13px Segoe UI, sans-serif";
+      w = Math.max(w, ctx.measureText(shareGrandFootCell(grand.sum, col.id)).width);
+      return Math.max(52, Math.ceil(w + 24));
+    });
+  }
+
+  /** Выбор в окне снимка живёт между открытиями окна. */
+  let shareMemory = null;
+
+  function rememberShareState() {
+    const box = $("share-orders");
+    if (!box || !$("share-modal")?.classList.contains("open")) return;
+    const blocks = [...box.querySelectorAll(".share-order")];
+    shareMemory = {
+      orders: new Set(blocks.filter((b) => b.querySelector("[data-share-order]")?.checked).map((b) => b.dataset.order)),
+      lines: new Set([...box.querySelectorAll("[data-share-line]:checked")].map((el) => el.dataset.shareLine)),
+      known: new Set([...box.querySelectorAll("[data-share-line]")].map((el) => el.dataset.shareLine)),
+      open: new Set(blocks.filter((b) => !b.classList.contains("collapsed")).map((b) => b.dataset.order)),
+      title: $("share-title")?.value || "",
+      folds: Object.fromEntries([...document.querySelectorAll("#share-modal .share-fold")].map((f) => [f.id, !f.classList.contains("collapsed")])),
+    };
+  }
+
   function renderShareOrdersPicker(focusOrderId) {
     const box = $("share-orders");
     const orders = [...(state.doc.orders || [])].sort((a, b) => orderNewestStamp(b).localeCompare(orderNewestStamp(a)));
+    const mem = shareMemory;
+    const focusNew = !!(focusOrderId && (!mem || !mem.orders.has(focusOrderId)));
     box.innerHTML = orders.length
       ? orders
           .map((order) => {
-            const on = !!(focusOrderId && focusOrderId === order.id);
-            return `<div class="share-order ${on ? "" : "collapsed"}" data-order="${esc(order.id)}">
+            const forced = focusNew && focusOrderId === order.id;
+            const on = forced || (mem ? mem.orders.has(order.id) : false);
+            const open = forced || focusOrderId === order.id || (mem ? mem.open.has(order.id) : false);
+            const lineOn = (line) => {
+              if (forced || !mem) return on;
+              return mem.known.has(line.id) ? mem.lines.has(line.id) : on;
+            };
+            return `<div class="share-order ${open ? "" : "collapsed"}" data-order="${esc(order.id)}" data-q="${esc(
+              shareSearchText(order.number, order.name, order.customer, order.organization)
+            )}">
           <div class="share-order-head">
-            <button type="button" class="share-toggle" data-share-toggle title="Строки заказа" aria-expanded="${on ? "true" : "false"}">${on ? "▾" : "▸"}</button>
+            <button type="button" class="share-toggle" data-share-toggle title="Строки заказа" aria-expanded="${open ? "true" : "false"}">${open ? "▾" : "▸"}</button>
             <label><input type="checkbox" data-share-order ${on ? "checked" : ""} /> ${esc(order.number || "—")} · ${esc(order.name || "без названия")}</label>
           </div>
           <div class="share-lines">${(order.lines || [])
             .filter((line) => !isFrozenLine(line))
             .map((line) => {
               const kind = typeKind(line.order_type);
-              return `<label class="${kind ? "share-cost" : ""}"><input type="checkbox" data-share-line="${esc(line.id)}" ${
-                on ? "checked" : ""
+              return `<label class="${kind ? "share-cost" : ""}" data-q="${esc(
+                shareSearchText(line.order_type, line.product, line.status, kind ? kindLabel(kind) : "")
+              )}"><input type="checkbox" data-share-line="${esc(line.id)}" ${
+                lineOn(line) ? "checked" : ""
               } /> ${esc(line.order_type || "тип")} · ${esc(line.product || "—")}${kind ? ` · ${esc(kindLabel(kind))}` : ""}</label>`;
             })
             .join("")}</div>
@@ -9926,9 +10225,55 @@
           })
           .join("")
       : `<div class="hint">Нет заказов</div>`;
+    applyShareSearch();
     if (focusOrderId) {
       [...box.querySelectorAll(".share-order")].find((el) => el.dataset.order === focusOrderId)?.scrollIntoView({ block: "nearest" });
     }
+  }
+
+  function shareSearchText(...parts) {
+    return parts
+      .map((p) => String(p ?? "").trim())
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .replace(/ё/g, "е");
+  }
+
+  /** Фильтр списка «Заказы и строки»: скрывает лишнее, галочки не трогает. */
+  function applyShareSearch() {
+    const box = $("share-orders");
+    if (!box) return;
+    syncSearchClear($("share-orders-search"));
+    const words = shareSearchText($("share-orders-search")?.value).split(/\s+/).filter(Boolean);
+    const hit = (text) => words.every((w) => text.includes(w));
+    let shownOrders = 0;
+    let shownLines = 0;
+    box.querySelectorAll(".share-order").forEach((block) => {
+      const labels = [...block.querySelectorAll(".share-lines > label")];
+      const orderText = block.dataset.q || "";
+      const orderHit = !words.length || hit(orderText);
+      let lineHits = 0;
+      labels.forEach((label) => {
+        const show = orderHit || hit(`${orderText} ${label.dataset.q || ""}`);
+        label.classList.toggle("is-search-hidden", !show);
+        if (show) lineHits += 1;
+      });
+      const visible = orderHit || lineHits > 0;
+      block.classList.toggle("is-search-hidden", !visible);
+      block.classList.toggle("is-search-open", !!words.length && visible && !orderHit);
+      if (visible) {
+        shownOrders += 1;
+        shownLines += lineHits;
+      }
+    });
+    box.classList.toggle("is-searching", words.length > 0);
+    const found = $("share-orders-found");
+    if (found) found.textContent = words.length ? (shownOrders ? `${shownOrders} зак. · ${shownLines} стр.` : "ничего") : "";
+    const all = $("share-check-all");
+    const none = $("share-check-none");
+    if (all) all.dataset.tip = words.length ? "Отметить найденные заказы и строки" : "Отметить все заказы и строки";
+    if (none) none.dataset.tip = words.length ? "Снять галочки с найденных заказов и строк" : "Снять все галочки с заказов и строк";
   }
 
   function openShare(orderOrId) {
@@ -9940,14 +10285,146 @@
     ).join("");
     renderShareThemes();
     renderShareOrdersPicker(order?.id || null);
-    $("share-title").value = order ? [order.number, order.name].filter(Boolean).join(" · ") : "";
+    const grandBox = $("share-grand");
+    if (grandBox) {
+      let saved = null;
+      try {
+        saved = localStorage.getItem(LS_SHARE_GRAND);
+      } catch {
+        saved = null;
+      }
+      grandBox.checked = saved !== "0";
+    }
+    $("share-title").value = shareMemory?.title || "";
     document.querySelectorAll("#share-modal .share-fold").forEach((fold) => {
-      fold.classList.add("collapsed");
+      const open = !!shareMemory?.folds?.[fold.id];
+      fold.classList.toggle("collapsed", !open);
       const ico = fold.querySelector(".share-fold-ico");
-      if (ico) ico.textContent = "▸";
+      if (ico) ico.textContent = open ? "▾" : "▸";
+    });
+    $("share-modal").classList.add("open");
+    renderSharePreview();
+    if (order) {
+      requestAnimationFrame(() =>
+        [...document.querySelectorAll("#share-orders .share-order")]
+          .find((el) => el.dataset.order === order.id)
+          ?.scrollIntoView({ block: "nearest" })
+      );
+    }
+  }
+
+  function setAllShareChecks(on) {
+    document.querySelectorAll("#share-orders .share-order:not(.is-search-hidden)").forEach((block) => {
+      const lines = [...block.querySelectorAll("[data-share-line]")];
+      lines.forEach((el) => {
+        if (!el.closest(".is-search-hidden")) el.checked = on;
+      });
+      const orderCb = block.querySelector("[data-share-order]");
+      if (orderCb) orderCb.checked = lines.length ? lines.some((el) => el.checked) : on;
     });
     renderSharePreview();
-    $("share-modal").classList.add("open");
+  }
+
+  /* ---- Профили полей снимка (общие для всех отчётов) ---- */
+
+  const LS_SHARE_PROFILES = "finmaster.shareProfiles";
+
+  function loadShareProfiles() {
+    try {
+      const list = JSON.parse(localStorage.getItem(LS_SHARE_PROFILES) || "[]");
+      return Array.isArray(list) ? list.filter((p) => p && String(p.name || "").trim() && Array.isArray(p.fields)) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function storeShareProfiles(list) {
+    persistPref(LS_SHARE_PROFILES, JSON.stringify(list), { now: true });
+  }
+
+  function shareProfileSnapshot() {
+    return {
+      fields: currentShareFields(),
+      hideLabels: shareHideLabels(),
+      hideStamp: shareHideStamp(),
+      grand: !!$("share-grand")?.checked,
+    };
+  }
+
+  function shareProfileMatches(p, cur) {
+    const a = [...p.fields].sort().join(",");
+    const b = [...cur.fields].sort().join(",");
+    return a === b && !!p.hideLabels === cur.hideLabels && !!p.hideStamp === cur.hideStamp && (p.grand ?? true) === cur.grand;
+  }
+
+  function renderShareProfiles() {
+    const box = $("share-profile-list");
+    if (!box) return;
+    const list = loadShareProfiles();
+    const cur = shareProfileSnapshot();
+    box.innerHTML = list.length
+      ? list
+          .map(
+            (p, i) => `<span class="share-profile ${shareProfileMatches(p, cur) ? "active" : ""}">
+          <button type="button" data-profile-apply="${i}" title="Применить профиль «${esc(p.name)}»">${esc(p.name)}</button>
+          <button type="button" data-profile-del="${i}" title="Удалить профиль" aria-label="Удалить профиль">×</button>
+        </span>`
+          )
+          .join("")
+      : `<span class="hint">Пока нет — отметьте поля и сохраните профиль.</span>`;
+  }
+
+  function applyShareProfile(p) {
+    const ids = new Set(p.fields);
+    document.querySelectorAll("#share-fields input").forEach((el) => {
+      el.checked = ids.has(el.value);
+    });
+    $("share-hide-labels").checked = !!p.hideLabels;
+    $("share-hide-stamp").checked = !!p.hideStamp;
+    const grand = $("share-grand");
+    if (grand) {
+      grand.checked = p.grand ?? true;
+      persistPref(LS_SHARE_GRAND, grand.checked ? "1" : "0");
+    }
+    ensureUi().share_fields = currentShareFields();
+    markDirty();
+    renderSharePreview();
+  }
+
+  function saveShareProfile() {
+    const input = $("share-profile-name");
+    const name = String(input?.value || "").trim().replace(/\s+/g, " ");
+    if (!name) {
+      toast("Введите название профиля");
+      input?.focus();
+      return;
+    }
+    const list = loadShareProfiles();
+    const key = name.toLocaleLowerCase("ru");
+    const idx = list.findIndex((p) => String(p.name).trim().toLocaleLowerCase("ru") === key);
+    const entry = { name, ...shareProfileSnapshot() };
+    if (idx >= 0) list[idx] = entry;
+    else list.push(entry);
+    storeShareProfiles(list);
+    if (input) input.value = "";
+    renderShareProfiles();
+    toast(idx >= 0 ? `Профиль «${name}» обновлён` : `Профиль «${name}» сохранён`);
+  }
+
+  async function deleteShareProfile(index) {
+    const list = loadShareProfiles();
+    const p = list[index];
+    if (!p) return;
+    const ok = await askConfirm({
+      title: "Удалить профиль?",
+      text: `Профиль «${p.name}» будет удалён. Текущие поля снимка не изменятся.`,
+      ok: "Удалить",
+      danger: true,
+    });
+    if (!ok) return;
+    list.splice(index, 1);
+    storeShareProfiles(list);
+    renderShareProfiles();
   }
 
   function applySharePreset(name) {
@@ -9970,13 +10447,14 @@
     const cols = SHARE_FIELDS.filter((f) => f.kind === "col" && fields.includes(f.id));
     const title = shareTitleText(blocks);
     const t = shareTheme();
+    const sharedWidths = shareSharedColWidths(cols, blocks);
     const body = blocks.length
       ? blocks
           .map(({ order, lines }, i) => {
             const meta = shareMetaItems(order, fields, hideLabels);
             const totalsText = shareTotalsText(fields, cols, lines);
             const foot = shareFooterCells(cols, lines);
-            const colWidths = cols.length ? shareColWidths(cols, lines) : [];
+            const colWidths = sharedWidths;
             const table = cols.length
               ? `<table style="width:max-content;border-collapse:collapse;font-size:13px;table-layout:fixed"><colgroup>${colWidths
                   .map((w) => `<col style="width:${w}px">`)
@@ -10013,7 +10491,7 @@
           ${totalsText ? `<div class="sp-foot" style="padding:10px 0 4px;font-size:14px;color:${t.ink}"><b>${esc(totalsText)}</b></div>` : ""}
         </div>`;
           })
-          .join("")
+          .join("") + shareGrandHtml(blocks, fields, t)
       : `<div style="padding:20px;color:${t.note}">Выберите хотя бы один заказ и строку слева.</div>`;
     box.style.background = t.bg;
     box.style.color = t.ink;
@@ -10026,6 +10504,32 @@
       ${body}
       ${hideStamp ? "" : `<div class="sp-note" style="padding:0 20px 16px;font-size:11px;color:${t.note}">Сформировано ${esc(new Date().toLocaleString("ru-RU"))}</div>`}
     `;
+    renderShareProfiles();
+    rememberShareState();
+  }
+
+  function shareGrandHtml(blocks, fields, t) {
+    if (!shareGrandOn(blocks)) return "";
+    const grand = shareGrandData(blocks);
+    const cols = shareGrandCols(fields, grand);
+    const widths = shareGrandWidths(cols, grand);
+    const cell = (text, extra = "") =>
+      `<td style="text-align:left;padding:8px 10px;border-top:1px solid ${t.line};color:${t.ink};white-space:nowrap;${extra}">${esc(text)}</td>`;
+    return `<div class="share-order-block share-grand" style="padding:16px 20px 16px;border-top:2px solid ${t.accent};margin-top:12px">
+      <div style="font-size:15px;font-weight:700;color:${t.accent};margin-bottom:10px">Общий итог</div>
+      <table style="width:max-content;border-collapse:collapse;font-size:13px;table-layout:fixed"><colgroup>${widths
+        .map((w) => `<col style="width:${w}px">`)
+        .join("")}</colgroup><thead><tr>${cols
+        .map(
+          (c) =>
+            `<th style="text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:${t.thInk};background:${t.thBg};border-top:1px solid ${t.line};white-space:nowrap">${esc(c.label)}</th>`
+        )
+        .join("")}</tr></thead><tbody>${grand.rows
+        .map((row, ri) => `<tr style="background:${ri % 2 ? t.zebra : "transparent"}">${cols.map((c) => cell(shareGrandCell(row, c.id))).join("")}</tr>`)
+        .join("")}</tbody><tfoot><tr>${cols
+        .map((c) => cell(shareGrandFootCell(grand.sum, c.id), `border-top:2px solid ${t.accent};font-weight:700;background:${t.footBg}`))
+        .join("")}</tr></tfoot></table>
+    </div>`;
   }
 
   function wrapCanvasText(ctx, text, maxW) {
@@ -10062,13 +10566,15 @@
     const stamp = `Сформировано ${new Date().toLocaleString("ru-RU")}`;
     const pad = 20;
     const rowH = 34;
-    const layouts = blocks.map(({ order, lines }) => {
-      const colWidths = cols.length ? shareColWidths(cols, lines) : [];
-      const tableW = colWidths.reduce((s, w) => s + w, 0);
-      return { order, lines, colWidths, tableW };
-    });
+    const sharedWidths = shareSharedColWidths(cols, blocks);
+    const sharedTableW = sharedWidths.reduce((s, w) => s + w, 0);
+    const layouts = blocks.map(({ order, lines }) => ({ order, lines, colWidths: sharedWidths, tableW: sharedTableW }));
+    const grand = shareGrandOn(blocks) ? shareGrandData(blocks) : null;
+    const grandCols = grand ? shareGrandCols(fields, grand) : [];
+    const grandWidths = grand ? shareGrandWidths(grandCols, grand) : [];
+    const grandTableW = grandWidths.reduce((s, w) => s + w, 0);
     const measure = document.createElement("canvas").getContext("2d");
-    let inner = Math.max(0, ...layouts.map((b) => b.tableW));
+    let inner = Math.max(0, sharedTableW, grandTableW);
     measure.font = "700 20px Segoe UI, sans-serif";
     inner = Math.max(inner, measure.measureText(title).width);
     measure.font = "13px Segoe UI, sans-serif";
@@ -10100,6 +10606,7 @@
         (shareTotalsText(fields, cols, lines) ? 36 : 0) +
         16;
     });
+    if (grand) bodyH += 36 + 30 + 32 + grand.rows.length * rowH + rowH + 16;
     const height = headerH + bodyH + (hideStamp ? 16 : 36);
     const scale = 2;
     const theme = shareTheme();
@@ -10213,6 +10720,58 @@
       }
       y += 16;
     });
+    if (grand) {
+      y += 16;
+      ctx.strokeStyle = theme.accent;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(pad, y);
+      ctx.lineTo(width - pad, y);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      y += 20;
+      ctx.fillStyle = theme.accent;
+      ctx.font = "700 15px Segoe UI, sans-serif";
+      ctx.fillText("Общий итог", pad, y + 14);
+      y += 30;
+      const xs = shareColStarts(grandWidths, pad);
+      ctx.fillStyle = theme.thBg;
+      ctx.fillRect(pad, y, grandTableW, 32);
+      ctx.fillStyle = theme.thInk;
+      ctx.font = "600 11px Segoe UI, sans-serif";
+      grandCols.forEach((col, i) => ctx.fillText(fitCanvasText(ctx, col.label.toUpperCase(), grandWidths[i] - 12), xs[i] + 8, y + 21));
+      y += 32;
+      const drawRow = (cells, bold, bg, lineColor) => {
+        if (bg) {
+          ctx.fillStyle = bg;
+          ctx.fillRect(pad, y, grandTableW, rowH);
+        }
+        ctx.strokeStyle = lineColor;
+        ctx.beginPath();
+        ctx.moveTo(pad, y);
+        ctx.lineTo(pad + grandTableW, y);
+        ctx.stroke();
+        ctx.fillStyle = theme.ink;
+        ctx.font = `${bold ? "700 " : ""}13px Segoe UI, sans-serif`;
+        cells.forEach((text, i) => ctx.fillText(fitCanvasText(ctx, text, grandWidths[i] - 12), xs[i] + 8, y + 22));
+        y += rowH;
+      };
+      grand.rows.forEach((row, ri) =>
+        drawRow(
+          grandCols.map((c) => shareGrandCell(row, c.id)),
+          false,
+          ri % 2 ? theme.zebra : "",
+          theme.line
+        )
+      );
+      drawRow(
+        grandCols.map((c) => shareGrandFootCell(grand.sum, c.id)),
+        true,
+        theme.footBg,
+        theme.accent
+      );
+      y += 16;
+    }
     if (!hideStamp) {
       ctx.fillStyle = theme.note;
       ctx.font = "11px Segoe UI, sans-serif";
@@ -10240,6 +10799,15 @@
     const cols = SHARE_FIELDS.filter((f) => f.kind === "col" && fields.includes(f.id));
     const title = shareTitleText(blocks);
     const out = [title];
+    const textRows = (lines) => {
+      const foot = shareFooterCells(cols, lines);
+      const rows = [cols.map((c) => c.label), ...lines.map((line) => cols.map((c) => String(shareLineValue(line, c.id) || "—")))];
+      if (foot && foot.some(Boolean)) rows.push(foot.map((v) => v || ""));
+      return rows;
+    };
+    const sharedTextWidths = cols.length
+      ? cols.map((_, i) => Math.max(1, ...blocks.flatMap(({ lines }) => textRows(lines).map((row) => visLen(row[i])))))
+      : [];
 
     blocks.forEach(({ order, lines }, bi) => {
       if (bi) out.push("");
@@ -10250,13 +10818,8 @@
       }
 
       if (cols.length) {
-        const foot = shareFooterCells(cols, lines);
-        const rows = [
-          cols.map((c) => c.label),
-          ...lines.map((line) => cols.map((c) => String(shareLineValue(line, c.id) || "—"))),
-        ];
-        if (foot && foot.some(Boolean)) rows.push(foot.map((v) => v || ""));
-        const widths = cols.map((_, i) => Math.max(1, ...rows.map((row) => visLen(row[i]))));
+        const rows = textRows(lines);
+        const widths = sharedTextWidths;
         out.push("");
         rows.forEach((row, ri) => {
           out.push(row.map((cell, i) => padVis(cell, widths[i])).join("  "));
@@ -10270,6 +10833,23 @@
         out.push(totalsText);
       }
     });
+
+    if (shareGrandOn(blocks)) {
+      const grand = shareGrandData(blocks);
+      const gcols = shareGrandCols(fields, grand);
+      const rows = [
+        gcols.map((c) => c.label),
+        ...grand.rows.map((row) => gcols.map((c) => shareGrandCell(row, c.id))),
+        gcols.map((c) => shareGrandFootCell(grand.sum, c.id)),
+      ];
+      const widths = gcols.map((_, i) => Math.max(1, ...rows.map((row) => visLen(row[i]))));
+      out.push("", "━━━ Общий итог ━━━", "");
+      rows.forEach((row, ri) => {
+        if (ri === rows.length - 1) out.push(widths.map((w) => "─".repeat(w)).join("  "));
+        out.push(row.map((cell, i) => padVis(cell, widths[i], gcols[i].money ? "right" : "left")).join("  "));
+        if (ri === 0) out.push(widths.map((w) => "─".repeat(w)).join("  "));
+      });
+    }
 
     if (!hideStamp) {
       out.push("");
@@ -10358,6 +10938,574 @@
       toast("PNG скачан");
     } catch (err) {
       toast(`Не удалось сохранить снимок: ${err.message || err}`);
+    }
+  }
+
+  /* ========== PDF снимка: страница на заказ + страница общего итога ========== */
+
+  const LS_SHARE_PDF = "finmaster.sharePdf";
+  const PDF_DEFAULTS = {
+    orient: "portrait",
+    margin: "normal",
+    headerEach: true,
+    pageNums: true,
+    crop: false,
+    orderTitles: false,
+    tableAlign: "stretch",
+    numAlign: "right",
+    headAlign: "auto",
+    grand: true,
+    font: "segoe",
+    scale: 100,
+    density: "normal",
+    zebra: true,
+    grid: false,
+    bold: true,
+  };
+  const PDF_FONTS = {
+    segoe: '"Segoe UI", sans-serif',
+    arial: "Arial, sans-serif",
+    calibri: "Calibri, sans-serif",
+    georgia: "Georgia, serif",
+    times: '"Times New Roman", serif',
+  };
+  const PDF_NUM_COLS = new Set(["quantity", "price", "discount", "total", "paid", "unpaid"]);
+  const PDF_PREVIEW_SCALE = 1.6;
+  const PDF_EXPORT_SCALE = 2.6;
+  let pdfOpts = { ...PDF_DEFAULTS };
+  let pdfRenderFrame = 0;
+
+  function loadPdfOpts() {
+    let saved = {};
+    try {
+      saved = JSON.parse(localStorage.getItem(LS_SHARE_PDF) || "{}") || {};
+    } catch {
+      saved = {};
+    }
+    return pdfOptsSnapshot(saved);
+  }
+
+  function savePdfOpts() {
+    persistPref(LS_SHARE_PDF, JSON.stringify(pdfOpts));
+  }
+
+  /* ---- Профили настроек PDF (общие для всех отчётов) ---- */
+
+  const LS_PDF_PROFILES = "finmaster.pdfProfiles";
+
+  function pdfOptsSnapshot(src) {
+    return Object.fromEntries(Object.keys(PDF_DEFAULTS).map((k) => [k, src?.[k] ?? PDF_DEFAULTS[k]]));
+  }
+
+  function loadPdfProfiles() {
+    try {
+      const list = JSON.parse(localStorage.getItem(LS_PDF_PROFILES) || "[]");
+      return Array.isArray(list)
+        ? list.filter((p) => p && String(p.name || "").trim() && p.opts && typeof p.opts === "object")
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function storePdfProfiles(list) {
+    persistPref(LS_PDF_PROFILES, JSON.stringify(list), { now: true });
+  }
+
+  function pdfProfileMatches(p) {
+    const saved = pdfOptsSnapshot(p.opts);
+    return Object.keys(PDF_DEFAULTS).every((k) => String(saved[k]) === String(pdfOpts[k]));
+  }
+
+  function renderPdfProfiles() {
+    const box = $("pdf-profile-list");
+    if (!box) return;
+    const list = loadPdfProfiles();
+    box.innerHTML = list.length
+      ? list
+          .map(
+            (p, i) => `<span class="share-profile ${pdfProfileMatches(p) ? "active" : ""}">
+          <button type="button" data-pdf-profile-apply="${i}" title="Применить профиль «${esc(p.name)}»">${esc(p.name)}</button>
+          <button type="button" class="share-profile-del" data-pdf-profile-del="${i}" title="Удалить профиль" aria-label="Удалить профиль">×</button>
+        </span>`
+          )
+          .join("")
+      : `<span class="hint">Пока нет — настройте PDF и сохраните профиль.</span>`;
+  }
+
+  function applyPdfProfile(p) {
+    pdfOpts = pdfOptsSnapshot(p.opts);
+    savePdfOpts();
+    syncPdfTools();
+    schedulePdfPreview();
+  }
+
+  function savePdfProfile() {
+    const input = $("pdf-profile-name");
+    const name = String(input?.value || "").trim().replace(/\s+/g, " ");
+    if (!name) {
+      toast("Введите название профиля");
+      input?.focus();
+      return;
+    }
+    const list = loadPdfProfiles();
+    const key = name.toLocaleLowerCase("ru");
+    const idx = list.findIndex((p) => String(p.name).trim().toLocaleLowerCase("ru") === key);
+    const entry = { name, opts: pdfOptsSnapshot(pdfOpts) };
+    if (idx >= 0) list[idx] = entry;
+    else list.push(entry);
+    storePdfProfiles(list);
+    if (input) input.value = "";
+    renderPdfProfiles();
+    toast(idx >= 0 ? `Профиль PDF «${name}» обновлён` : `Профиль PDF «${name}» сохранён`);
+  }
+
+  async function deletePdfProfile(index) {
+    const list = loadPdfProfiles();
+    const p = list[index];
+    if (!p) return;
+    const ok = await askConfirm({
+      title: "Удалить профиль PDF?",
+      text: `Профиль «${p.name}» будет удалён. Текущие настройки PDF не изменятся.`,
+      ok: "Удалить",
+      danger: true,
+    });
+    if (!ok) return;
+    list.splice(index, 1);
+    storePdfProfiles(list);
+    renderPdfProfiles();
+  }
+
+  /** Раскладка PDF в пунктах (1/72 дюйма): список страниц с командами рисования. */
+  function sharePdfLayout(o) {
+    const blocks = selectedShareBlocks();
+    if (!blocks.length) return null;
+    const fields = currentShareFields();
+    const hideLabels = shareHideLabels();
+    const hideStamp = shareHideStamp();
+    const cols = SHARE_FIELDS.filter((c) => c.kind === "col" && fields.includes(c.id));
+    const title = shareTitleText(blocks);
+    const theme = shareTheme();
+    const portrait = o.orient !== "landscape";
+    const W = portrait ? 595.28 : 841.89;
+    const H = portrait ? 841.89 : 595.28;
+    const M = { narrow: 22, normal: 36, wide: 56 }[o.margin] || 36;
+    const f = Math.min(2, Math.max(0.6, Number(o.scale) / 100 || 1));
+    const fam = PDF_FONTS[o.font] || PDF_FONTS.segoe;
+    const font = (weight, size) => `${weight} ${size.toFixed(2)}px ${fam}`;
+    const availW = W - M * 2;
+    const rowBase = { compact: 16, normal: 20, loose: 25 }[o.density] || 20;
+    const stamp = `Сформировано ${new Date().toLocaleString("ru-RU")}`;
+    const footH = o.pageNums || !hideStamp ? 16 * f : 0;
+    const bottom = H - M - footH;
+    const expenseInk = theme.bg === "#0f172a" ? "#fbbf24" : "#b45309";
+
+    const measure = document.createElement("canvas").getContext("2d");
+    const textW = (str, fnt) => {
+      measure.font = fnt;
+      return measure.measureText(String(str ?? "")).width;
+    };
+    const fitText = (str, fnt, maxW) => {
+      measure.font = fnt;
+      return fitCanvasText(measure, String(str ?? ""), Math.max(4, maxW));
+    };
+
+    const pages = [];
+    let page = null;
+    const opBottom = (item) => {
+      if (item.t === "line") return Math.max(item.y1, item.y2);
+      if (item.t === "text") return item.y + (Number(String(item.font).match(/([\d.]+)px/)?.[1]) || 10) * 0.65;
+      return item.y + (item.h || 0);
+    };
+    const op = (item) => {
+      page.ops.push(item);
+      page.maxY = Math.max(page.maxY, opBottom(item));
+    };
+    const text = (x, y, str, fnt, color, align = "left", extra = {}) => op({ t: "text", x, y, text: str, font: fnt, color, align, ...extra });
+    const rect = (x, y, w, h, fill) => op({ t: "rect", x, y, w, h, fill });
+    const line = (x1, y1, x2, y2, color, width = 0.6) => op({ t: "line", x1, y1, x2, y2, color, width });
+
+    const bandH = 38 * f;
+    let pageTitle = title;
+    let bareHeader = false;
+    function newPage(label, sub) {
+      page = { ops: [], label, maxY: M, h: H };
+      pages.push(page);
+      let y = M;
+      if (bareHeader) return y;
+      if (pages.length === 1 || o.headerEach) {
+        op({ t: "band", x: M, y, w: availW, h: bandH, c0: theme.head[0], c1: theme.head[1], accent: theme.headLine ? theme.accent : "" });
+        const titleFont = font(700, 14 * f);
+        const subFont = font(600, 9 * f);
+        const subW = sub ? textW(sub, subFont) + 24 * f : 0;
+        text(M + 12 * f, y + bandH / 2, fitText(pageTitle, titleFont, availW - 24 * f - subW), titleFont, theme.headInk);
+        if (sub) text(M + availW - 12 * f, y + bandH / 2, sub, subFont, theme.headInk, "right", { alpha: 0.85 });
+        y += bandH + 14 * f;
+      } else if (sub) {
+        text(M + availW, y + 6 * f, sub, font(600, 8 * f), theme.note, "right");
+        y += 18 * f;
+      }
+      return y;
+    }
+
+    function tablePlan(spec, bodyRows, footRows) {
+      const thSize = 7.5 * f;
+      const tdSize = 9.5 * f;
+      const padX = 6 * f;
+      const natural = spec.map((c, i) => {
+        let w = textW(c.label.toUpperCase(), font(600, thSize));
+        bodyRows.forEach((r) => (w = Math.max(w, textW(r[i], font(400, tdSize)))));
+        footRows.forEach((r) => (w = Math.max(w, textW(r[i], font(700, tdSize)))));
+        return Math.max(28 * f, w + padX * 2 + 1);
+      });
+      let total = natural.reduce((s, w) => s + w, 0);
+      const k = total > availW ? availW / total : 1;
+      let widths = natural.map((w) => w * k);
+      total *= k;
+      let x0 = M;
+      if (o.tableAlign === "stretch" && total < availW) {
+        const extra = availW - total;
+        widths = widths.map((w) => w + extra * (w / total));
+        total = availW;
+      } else if (o.tableAlign === "center" && total < availW) {
+        x0 = M + (availW - total) / 2;
+      }
+      const rowH = rowBase * f * Math.max(0.75, k);
+      return { spec, widths, total, x0, thSize: thSize * k, tdSize: tdSize * k, padX: padX * Math.max(0.6, k), rowH, headH: rowH * 1.05 };
+    }
+
+    function drawCell(x, y, w, h, str, fnt, color, align, padX) {
+      const s = fitText(str, fnt, w - padX * 2);
+      const tx = align === "right" ? x + w - padX : align === "center" ? x + w / 2 : x + padX;
+      text(tx, y + h / 2, s, fnt, color, align);
+    }
+
+    function vlines(plan, y, h) {
+      let x = plan.x0;
+      plan.widths.slice(0, -1).forEach((w) => {
+        x += w;
+        line(x, y, x, y + h, theme.line, 0.5);
+      });
+    }
+
+    function drawHead(plan, y) {
+      rect(plan.x0, y, plan.total, plan.headH, theme.thBg);
+      const fnt = font(600, plan.thSize);
+      let x = plan.x0;
+      plan.spec.forEach((c, i) => {
+        const align = o.headAlign === "auto" && c.num ? o.numAlign : "left";
+        drawCell(x, y, plan.widths[i], plan.headH, c.label.toUpperCase(), fnt, theme.thInk, align, plan.padX);
+        x += plan.widths[i];
+      });
+      if (o.grid) vlines(plan, y, plan.headH);
+      return y + plan.headH;
+    }
+
+    function drawRow(plan, y, cells, opts = {}) {
+      if (opts.bg) rect(plan.x0, y, plan.total, plan.rowH, opts.bg);
+      line(plan.x0, y, plan.x0 + plan.total, y, opts.topColor || theme.line, opts.topWidth || 0.6);
+      const fnt = font(opts.bold ? 700 : 400, plan.tdSize);
+      let x = plan.x0;
+      plan.spec.forEach((c, i) => {
+        drawCell(x, y, plan.widths[i], plan.rowH, cells[i], fnt, opts.color || theme.ink, c.num ? o.numAlign : "left", plan.padX);
+        x += plan.widths[i];
+      });
+      if (o.grid) vlines(plan, y, plan.rowH);
+      return y + plan.rowH;
+    }
+
+    function drawTable(plan, y, rows, foot, contLabel, contSub, rowColors) {
+      y = drawHead(plan, y);
+      rows.forEach((cells, ri) => {
+        if (y + plan.rowH > bottom) {
+          y = newPage(contLabel, contSub);
+          y = drawHead(plan, y);
+        }
+        y = drawRow(plan, y, cells, { bg: o.zebra && ri % 2 ? theme.zebra : "", color: rowColors?.[ri] || "" });
+      });
+      if (foot) {
+        if (y + plan.rowH > bottom) {
+          y = newPage(contLabel, contSub);
+          y = drawHead(plan, y);
+        }
+        y = drawRow(plan, y, foot, { bg: theme.footBg, bold: o.bold, topColor: theme.accent, topWidth: 1.2 });
+      }
+      line(plan.x0, y, plan.x0 + plan.total, y, theme.line, 0.6);
+      return y;
+    }
+
+    const spec = cols.map((c) => ({ label: c.label, num: PDF_NUM_COLS.has(c.id) }));
+    const blockRows = blocks.map(({ lines }) => lines.map((l) => cols.map((c) => String(shareLineValue(l, c.id) || "—"))));
+    const blockFoot = blocks.map(({ lines }) => {
+      const cells = shareFooterCells(cols, lines);
+      return cells ? cells.map((v) => v || "") : null;
+    });
+    const plan = cols.length ? tablePlan(spec, blockRows.flat(), blockFoot.filter(Boolean)) : null;
+    const metaFont = font(400, 10 * f);
+    const totalsFont = font(o.bold ? 700 : 600, 11 * f);
+
+    blocks.forEach(({ order, lines }, bi) => {
+      const sub = blocks.length > 1 ? `Заказ ${bi + 1} из ${blocks.length}` : "";
+      const label = `Заказ ${order.number || "—"}`;
+      pageTitle =
+        o.orderTitles && blocks.length > 1
+          ? [String(order.number || "").trim(), String(order.name || "").trim()].filter(Boolean).join(" · ") || title
+          : title;
+      let y = newPage(label, sub);
+      shareMetaItems(order, fields, hideLabels).forEach((m) => {
+        text(M, y + 6 * f, fitText(m, metaFont, availW), metaFont, theme.meta);
+        y += 15 * f;
+      });
+      y += 6 * f;
+      if (plan) {
+        const colors = lines.map((l) => (isExpenseLine(l) ? expenseInk : ""));
+        y = drawTable(plan, y, blockRows[bi], blockFoot[bi], `${label} · продолжение`, sub ? `${sub} · продолжение` : "продолжение", colors);
+      } else {
+        text(M, y + 8 * f, "Таблица работ скрыта — включите колонки в снимке.", font(400, 9.5 * f), theme.note);
+        y += 20 * f;
+      }
+      const totalsText = shareTotalsText(fields, cols, lines);
+      if (totalsText) {
+        if (y + 28 * f > bottom) y = newPage(label, sub);
+        y += 12 * f;
+        const right = plan && o.numAlign === "right";
+        const tx = right ? plan.x0 + plan.total : plan ? plan.x0 : M;
+        text(tx, y + 6 * f, fitText(totalsText, totalsFont, availW), totalsFont, theme.ink, right ? "right" : "left");
+        y += 16 * f;
+      }
+    });
+
+    if (o.grand && blocks.length > 1) {
+      const grand = shareGrandData(blocks);
+      const gcols = shareGrandCols(fields, grand);
+      const s = grand.sum;
+      bareHeader = true;
+      let y = newPage("Общий итог", "");
+      text(M, y + 8 * f, "Общий итог", font(700, 16 * f), theme.accent);
+      y += 26 * f;
+      const cards = [
+        ["Заказов", String(s.orders)],
+        ["Позиций", String(s.lines)],
+        ["Итого", money(s.after)],
+      ];
+      if (s.cost > 0.005) cards.push(["Расходы", `−${money(s.cost)}`], ["К оплате", money(s.net)]);
+      if (fields.includes("paid")) cards.push(["Оплачено", money(s.paid)]);
+      if (fields.includes("unpaid")) cards.push(["Остаток", money(s.unpaid)]);
+      const perRow = Math.min(cards.length, portrait ? 4 : 6);
+      const gap = 8 * f;
+      const cardH = 44 * f;
+      const cw = (availW - gap * (perRow - 1)) / perRow;
+      const valFont = font(700, 13 * f);
+      for (let i = 0; i < cards.length; i += perRow) {
+        cards.slice(i, i + perRow).forEach(([lab, val], j) => {
+          const x = M + j * (cw + gap);
+          op({ t: "card", x, y, w: cw, h: cardH, fill: theme.footBg, stroke: theme.line, accent: theme.accent });
+          text(x + 10 * f, y + 14 * f, lab.toUpperCase(), font(600, 7.5 * f), theme.thInk);
+          text(x + 10 * f, y + 30 * f, fitText(val, valFont, cw - 20 * f), valFont, theme.ink);
+        });
+        y += cardH + gap;
+      }
+      y += 10 * f;
+      const gspec = gcols.map((c) => ({ label: c.label, num: !!c.money }));
+      const grows = grand.rows.map((row) => gcols.map((c) => shareGrandCell(row, c.id)));
+      const gfoot = gcols.map((c) => shareGrandFootCell(s, c.id));
+      drawTable(tablePlan(gspec, grows, [gfoot]), y, grows, gfoot, "Общий итог · продолжение", "Общий итог · продолжение");
+    }
+
+    const total = pages.length;
+    pages.forEach((p, i) => {
+      page = p;
+      if (o.crop) p.h = Math.min(H, Math.ceil(p.maxY + 12 * f + footH + M));
+      if (!footH) return;
+      const fy = p.h - M - 5 * f;
+      const fline = p.h - M - footH + 3 * f;
+      line(M, fline, M + availW, fline, theme.line, 0.5);
+      if (!hideStamp) text(M, fy, stamp, font(400, 7.5 * f), theme.note);
+      if (o.pageNums) text(M + availW, fy, `Стр. ${i + 1} из ${total}`, font(400, 7.5 * f), theme.note, "right");
+    });
+    return { W, H, pages, bg: theme.bg, title };
+  }
+
+  function pdfRoundRect(ctx, x, y, w, h, r) {
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  }
+
+  function renderPdfPageCanvas(layout, page, scale) {
+    const pageH = page.h || layout.H;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(layout.W * scale);
+    canvas.height = Math.round(pageH * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(canvas.width / layout.W, 0, 0, canvas.height / pageH, 0, 0);
+    ctx.fillStyle = layout.bg;
+    ctx.fillRect(0, 0, layout.W, pageH);
+    page.ops.forEach((item) => {
+      if (item.t === "rect") {
+        ctx.fillStyle = item.fill;
+        ctx.fillRect(item.x, item.y, item.w, item.h);
+      } else if (item.t === "line") {
+        ctx.strokeStyle = item.color;
+        ctx.lineWidth = item.width;
+        ctx.beginPath();
+        ctx.moveTo(item.x1, item.y1);
+        ctx.lineTo(item.x2, item.y2);
+        ctx.stroke();
+      } else if (item.t === "band") {
+        const g = ctx.createLinearGradient(item.x, 0, item.x + item.w, 0);
+        g.addColorStop(0, item.c0);
+        g.addColorStop(1, item.c1);
+        ctx.fillStyle = g;
+        pdfRoundRect(ctx, item.x, item.y, item.w, item.h, 6);
+        ctx.fill();
+        if (item.accent) {
+          ctx.strokeStyle = item.accent;
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(item.x, item.y + item.h);
+          ctx.lineTo(item.x + item.w, item.y + item.h);
+          ctx.stroke();
+        }
+      } else if (item.t === "card") {
+        pdfRoundRect(ctx, item.x, item.y, item.w, item.h, 6);
+        ctx.fillStyle = item.fill;
+        ctx.fill();
+        ctx.strokeStyle = item.stroke;
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
+        ctx.fillStyle = item.accent;
+        ctx.fillRect(item.x, item.y + 7, 2.4, item.h - 14);
+      } else if (item.t === "text") {
+        ctx.globalAlpha = item.alpha ?? 1;
+        ctx.font = item.font;
+        ctx.fillStyle = item.color;
+        ctx.textAlign = item.align || "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(item.text, item.x, item.y);
+        ctx.globalAlpha = 1;
+      }
+    });
+    return canvas;
+  }
+
+  function syncPdfTools() {
+    document.querySelectorAll("#pdf-tools [data-pdf-opt]").forEach((seg) => {
+      const key = seg.dataset.pdfOpt;
+      seg.querySelectorAll("button[data-v]").forEach((b) => b.classList.toggle("active", b.dataset.v === String(pdfOpts[key])));
+    });
+    document.querySelectorAll("#pdf-tools [data-pdf-check]").forEach((el) => {
+      el.checked = !!pdfOpts[el.dataset.pdfCheck];
+    });
+    const fontSel = $("pdf-font");
+    if (fontSel) fontSel.value = pdfOpts.font;
+    const scale = $("pdf-scale");
+    if (scale) scale.value = String(pdfOpts.scale);
+    const scaleVal = $("pdf-scale-val");
+    if (scaleVal) scaleVal.textContent = `${pdfOpts.scale}%`;
+    renderPdfProfiles();
+  }
+
+  function schedulePdfPreview() {
+    cancelAnimationFrame(pdfRenderFrame);
+    pdfRenderFrame = requestAnimationFrame(renderPdfPreview);
+  }
+
+  function renderPdfPreview() {
+    const box = $("pdf-pages");
+    if (!box || !$("pdf-modal")?.classList.contains("open")) return;
+    const wrap = $("pdf-preview-wrap");
+    const keepScroll = wrap ? wrap.scrollTop : 0;
+    const layout = sharePdfLayout(pdfOpts);
+    const count = $("pdf-count");
+    if (!layout) {
+      box.innerHTML = `<div class="hint">Выберите заказы и строки в снимке.</div>`;
+      if (count) count.textContent = "";
+      return;
+    }
+    if (count) count.textContent = `Страниц: ${layout.pages.length}`;
+    box.classList.toggle("is-landscape", layout.W > layout.H);
+    const frag = document.createDocumentFragment();
+    layout.pages.forEach((p, i) => {
+      const fig = document.createElement("figure");
+      fig.className = "pdf-page";
+      fig.appendChild(renderPdfPageCanvas(layout, p, PDF_PREVIEW_SCALE));
+      const cap = document.createElement("figcaption");
+      cap.textContent = `${i + 1} · ${p.label}`;
+      fig.appendChild(cap);
+      frag.appendChild(fig);
+    });
+    box.replaceChildren(frag);
+    if (wrap) wrap.scrollTop = keepScroll;
+  }
+
+  function openSharePdf() {
+    if (!selectedShareBlocks().length) {
+      toast("Выберите заказы и строки для PDF");
+      return;
+    }
+    pdfOpts = loadPdfOpts();
+    syncPdfTools();
+    $("pdf-modal").classList.add("open");
+    const wrap = $("pdf-preview-wrap");
+    if (wrap) wrap.scrollTop = 0;
+    renderPdfPreview();
+  }
+
+  function bytesToBase64(bytes) {
+    let bin = "";
+    const step = 0x8000;
+    for (let i = 0; i < bytes.length; i += step) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+    return btoa(bin);
+  }
+
+  async function saveSharePdf() {
+    const btn = $("pdf-save");
+    try {
+      const layout = sharePdfLayout(pdfOpts);
+      if (!layout) throw new Error("Выберите заказы и строки для PDF");
+      if (!window.FinPdf?.build) throw new Error("модуль PDF не загружен");
+      const name = `${(layout.title || "Заказы").slice(0, 80)}.pdf`.replace(/[\\/:*?"<>|]+/g, "_");
+      let path = "";
+      if (state.desktop) {
+        const picked = await apiPost("/api/dialog/pdf", { suggested: name });
+        if (picked.cancelled || !picked.path) return;
+        path = picked.path;
+      }
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Сохраняю…";
+      }
+      const pages = layout.pages.map((p) => ({
+        canvas: renderPdfPageCanvas(layout, p, PDF_EXPORT_SCALE),
+        widthPt: layout.W,
+        heightPt: p.h || layout.H,
+      }));
+      const bytes = await window.FinPdf.build(pages, { title: layout.title });
+      if (state.desktop) {
+        await apiPost("/api/write-bytes", { path, base64: bytesToBase64(bytes) });
+        toast(`PDF сохранён · страниц: ${pages.length}`);
+        return;
+      }
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      toast(`PDF скачан · страниц: ${pages.length}`);
+    } catch (err) {
+      toast(`Не удалось сохранить PDF: ${err.message || err}`);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Сохранить PDF";
+      }
     }
   }
 
@@ -10532,7 +11680,7 @@
 
   function syncSearchClear(input) {
     if (!input) return;
-    const wrap = input.closest(".search, .cloud-search, .calc-search, .palette-input");
+    const wrap = input.closest(".search, .cloud-search, .calc-search, .palette-input, .share-orders-search");
     wrap?.classList.toggle("has-value", !!String(input.value || "").length);
   }
 
@@ -10555,7 +11703,7 @@
         clearSearchInput(input);
       });
     });
-    ["global-search", "cloud-search", "palette-input"].forEach((id) => {
+    ["global-search", "cloud-search", "palette-input", "share-orders-search"].forEach((id) => {
       const input = $(id);
       if (!input || input.dataset.boundClearSync) return;
       input.dataset.boundClearSync = "1";
@@ -10599,6 +11747,7 @@
       { group: "Разделы", ico: "∑", title: "Калькулятор", sub: "схемы из заказов, операторов и формул", run: () => setView("calculator") },
       { group: "Разделы", ico: "▣", title: "Презентация", sub: "инфографика из блоков и схем", run: () => setView("presentation") },
       { group: "Разделы", ico: "✣", title: "Облако заказов", sub: "живая карта заказов и позиций", run: () => setView("cloud") },
+      { group: "Разделы", ico: "◈", title: "Хранилище", sub: "личный учёт денег и копилки", run: () => setView("vault") },
       { group: "Разделы", ico: "◉", title: "Заказчики", sub: "контакты и рейтинг", run: () => setView("customers") },
       { group: "Разделы", ico: "⚙", title: "Справочники", sub: "статусы, единицы, продукты", run: () => setView("catalogs") },
 
@@ -12089,6 +13238,7 @@
       const bootData = await apiGet("/api/bootstrap");
       state.desktop = true;
       state.autosave = !!bootData.autosave;
+      hydratePrefs(bootData.ui_prefs);
       applyTheme(bootData.theme || "light", false);
       await renderStartLists(bootData);
       libraryWatchLoop();

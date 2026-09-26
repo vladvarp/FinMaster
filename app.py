@@ -12,7 +12,7 @@ from typing import Any
 from flask import Flask, g, jsonify, request, send_from_directory
 
 from backend import netlog, qr, storage
-from backend.dialogs import open_report_dialog, save_csv_dialog, save_png_dialog, save_report_dialog
+from backend.dialogs import open_report_dialog, save_csv_dialog, save_pdf_dialog, save_png_dialog, save_report_dialog
 from backend.document import empty_document, normalize_document, now_iso
 from backend.remote import SESSION as REMOTE
 from backend.remote import lan_candidates
@@ -171,7 +171,7 @@ def favicon_svg():
 @app.get("/<path:filename>")
 def static_files(filename: str):
     response = send_from_directory(FRONTEND, filename)
-    if filename in {"mobile.js", "mobile.css", "mobile.html", "app.js", "cloud.js", "calc.js", "presentation.js", "styles.css", "charts.js"}:
+    if filename in {"mobile.js", "mobile.css", "mobile.html", "app.js", "cloud.js", "calc.js", "presentation.js", "pdf.js", "vault.js", "datepicker.js", "styles.css", "charts.js"}:
         return _no_cache(response)
     return response
 
@@ -329,6 +329,7 @@ def api_bootstrap():
             "history_limit": storage.history_limit(),
             "last_dir": cfg.get("last_dir") or "",
             "theme": "dark" if cfg.get("theme") == "dark" else "light",
+            "ui_prefs": storage.ui_prefs(),
             "desktop": True,
             "remote": _remote_public(),
         }
@@ -392,6 +393,16 @@ def api_theme():
     data = request.get_json(silent=True) or {}
     theme = storage.set_theme(data.get("theme") or "light")
     return jsonify({"ok": True, "theme": theme})
+
+
+@app.post("/api/ui-pref")
+def api_ui_pref():
+    data = request.get_json(silent=True) or {}
+    try:
+        prefs = storage.set_ui_pref(str(data.get("key") or ""), data.get("value"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, "ui_prefs": prefs})
 
 
 @app.post("/api/recent/remove")
@@ -582,6 +593,16 @@ def api_dialog_png():
     data = request.get_json(silent=True) or {}
     suggested = data.get("suggested") or "Заказ.png"
     path = save_png_dialog(suggested, storage.load_config().get("last_dir") or "")
+    if not path:
+        return jsonify({"cancelled": True})
+    return jsonify({"path": path, "cancelled": False})
+
+
+@app.post("/api/dialog/pdf")
+def api_dialog_pdf():
+    data = request.get_json(silent=True) or {}
+    suggested = data.get("suggested") or "Заказы.pdf"
+    path = save_pdf_dialog(suggested, storage.load_config().get("last_dir") or "")
     if not path:
         return jsonify({"cancelled": True})
     return jsonify({"path": path, "cancelled": False})

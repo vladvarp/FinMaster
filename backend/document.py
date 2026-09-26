@@ -791,6 +791,76 @@ def _presentation_ui(raw: Any) -> dict[str, Any]:
     }
 
 
+VAULT_MAX_PAGES = 50
+VAULT_MAX_ROWS = 5000
+VAULT_ROW_TYPES = ("in", "out", "save")
+
+
+def _vault_row(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    row_id = _clip_text(raw.get("id"), 80)
+    if not row_id:
+        return None
+    kind = str(raw.get("type") or "in")
+    if kind not in VAULT_ROW_TYPES:
+        kind = "in"
+    amount = round(_float_in_range(raw.get("amount"), 0.0, -1e12, 1e12), 2)
+    if kind != "save":
+        amount = abs(amount)
+    return {
+        "id": row_id,
+        "type": kind,
+        "name": _clip_text(raw.get("name"), 120),
+        "amount": amount,
+        "date": _day_iso(raw.get("date")),
+        "created": _clip_text(raw.get("created"), 40),
+    }
+
+
+def _vault_page(raw: Any, index: int) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    page_id = _clip_text(raw.get("id"), 80)
+    if not page_id:
+        return None
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw.get("rows") if isinstance(raw.get("rows"), list) else []:
+        row = _vault_row(item)
+        if not row or row["id"] in seen:
+            continue
+        seen.add(row["id"])
+        rows.append(row)
+        if len(rows) >= VAULT_MAX_ROWS:
+            break
+    return {
+        "id": page_id,
+        "name": _clip_text(raw.get("name"), 48, f"Копилка {index + 1}"),
+        "goal": round(_float_in_range(raw.get("goal"), 0.0, 0.0, 1e12), 2),
+        "rows": rows,
+    }
+
+
+def _vault_ui(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {"active": "", "pages": []}
+    pages: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, item in enumerate(raw.get("pages") if isinstance(raw.get("pages"), list) else []):
+        page = _vault_page(item, i)
+        if not page or page["id"] in seen:
+            continue
+        seen.add(page["id"])
+        pages.append(page)
+        if len(pages) >= VAULT_MAX_PAGES:
+            break
+    active = _clip_text(raw.get("active"), 80)
+    if active not in seen:
+        active = pages[0]["id"] if pages else ""
+    return {"active": active, "pages": pages}
+
+
 def _int_in_range(value: Any, default: int, low: int, high: int) -> int:
     try:
         number = int(round(float(value)))
@@ -878,6 +948,7 @@ def empty_document(title: str = "Новый отчёт") -> dict[str, Any]:
             "line_series": {},
             "calculator": {"active": "", "blueprints": [], "folds": {"nodes": True, "schemes": True, "orders": True}},
             "presentation": {"active": "", "pages": [], "inspectorOpen": True, "canvasLocked": False},
+            "vault": {"active": "", "pages": []},
         },
     }
 
@@ -1038,6 +1109,7 @@ def normalize_document(raw: Any) -> dict[str, Any]:
             "line_series": _line_series_ui(ui.get("line_series")),
             "calculator": _calculator_ui(ui.get("calculator")),
             "presentation": _presentation_ui(ui.get("presentation")),
+            "vault": _vault_ui(ui.get("vault")),
         }
         if base["ui"]["cash_horizon"] not in CASH_HORIZONS:
             base["ui"]["cash_horizon"] = DEFAULT_CASH_HORIZON

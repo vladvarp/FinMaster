@@ -129,6 +129,7 @@
           <button data-view="calculator" title="Калькулятор: схемы из заказов, операторов и формул"><span class="nav-ico">∑</span><span class="nav-label">Калькулятор</span></button>
           <button data-view="presentation" title="Презентация: инфографика из блоков и схем"><span class="nav-ico">▣</span><span class="nav-label">Презентация</span></button>
           <button data-view="cloud" title="Облако заказов: интерактивная карта связей"><span class="nav-ico">✣</span><span class="nav-label">Облако</span></button>
+          <button data-view="vault" title="Хранилище: личный учёт денег и копилки"><span class="nav-ico">◈</span><span class="nav-label">Хранилище</span></button>
           <button data-view="customers" title="Заказчики"><span class="nav-ico">◉</span><span class="nav-label">Заказчики</span></button>
           <button data-view="catalogs" title="Справочники"><span class="nav-ico">⚙</span><span class="nav-label">Справочники</span></button>
         
@@ -639,6 +640,14 @@
           </div>
         </div>
 
+        <div class="view vault-view" id="view-vault">
+          <div class="calc-tabbar">
+            <div class="calc-tabs" id="vault-tabs" role="tablist" aria-label="Страницы хранилища"></div>
+            <button type="button" class="calc-tab add" data-add-vault-page="1" title="Новая страница-копилка">+</button>
+          </div>
+          <div class="vault-body" id="vault-body"></div>
+        </div>
+
         <div class="view" id="view-catalogs">
           <div class="catalog-grid">
             <div class="card">
@@ -729,7 +738,14 @@
 
   <div class="modal" id="share-modal">
     <div class="modal-card share-modal">
-      <h3>Снимок для заказчика</h3>
+      <div class="modal-title-row">
+        <h3>Снимок для заказчика</h3>
+        <button class="btn icon" type="button" id="share-cancel" title="Закрыть" aria-label="Закрыть">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
       <p>Выберите поля, заказы и строки. Заголовок снимка задаёте сами.</p>
       <div class="share-layout">
         <div class="share-side">
@@ -754,15 +770,35 @@
             <div class="share-fold-body">
               <label class="share-opt"><input type="checkbox" id="share-hide-labels" /> Скрыть подписи полей</label>
               <label class="share-opt"><input type="checkbox" id="share-hide-stamp" /> Скрыть дату формирования</label>
+              <label class="share-opt" title="Показывается, когда в снимке больше одного заказа"><input type="checkbox" id="share-grand" checked /> Общий итог по всем заказам</label>
               <div class="share-presets">
                 <button class="btn small" type="button" data-share-preset="work">Только работы</button>
                 <button class="btn small" type="button" data-share-preset="invoice">Счёт</button>
                 <button class="btn small" type="button" data-share-preset="full">Все поля</button>
               </div>
+              <div class="share-profiles">
+                <div class="share-profiles-title">Мои профили</div>
+                <div class="share-profile-list" id="share-profile-list"></div>
+                <div class="share-profile-new">
+                  <input id="share-profile-name" maxlength="40" placeholder="Название профиля" autocomplete="off" spellcheck="false" />
+                  <button class="btn small" type="button" id="share-profile-save" title="Запомнить текущие поля и галочки скрытия как профиль. Если профиль с таким именем есть — он обновится.">Сохранить</button>
+                </div>
+              </div>
               <div class="share-fields" id="share-fields"></div>
             </div>
           </div>
-          <div class="share-preview-label">Заказы и строки</div>
+          <div class="share-orders-head">
+            <div class="share-preview-label">Заказы и строки</div>
+            <div class="share-orders-acts">
+              <button class="btn small" type="button" id="share-check-all" title="Отметить все заказы и строки">Все</button>
+              <button class="btn small" type="button" id="share-check-none" title="Снять все галочки с заказов и строк">Снять все</button>
+            </div>
+          </div>
+          <div class="share-orders-search">
+            <input type="search" id="share-orders-search" placeholder="Поиск: номер, название, заказчик, позиция…" autocomplete="off" spellcheck="false" />
+            <span class="share-orders-found" id="share-orders-found"></span>
+            <button type="button" class="search-clear" data-search-clear="share-orders-search" title="Очистить" aria-label="Очистить поиск">×</button>
+          </div>
           <div class="share-orders" id="share-orders"></div>
         </div>
         <div>
@@ -770,11 +806,124 @@
           <div class="share-preview-wrap"><div id="share-preview" class="share-preview"></div></div>
         </div>
       </div>
+      <div class="modal-actions share-actions">
+        <button class="btn fmt-btn" type="button" id="share-copy-text" title="Копировать текстом — вставить в чат" aria-label="Копировать текст">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="8.5" y="8.5" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M15.5 8.5V6.7A2.2 2.2 0 0 0 13.3 4.5H6.7A2.2 2.2 0 0 0 4.5 6.7v6.6a2.2 2.2 0 0 0 2.2 2.2h1.8" stroke="currentColor" stroke-width="1.8"/>
+          </svg>
+          <span class="fmt-tag">TXT</span>
+        </button>
+        <button class="btn fmt-btn" type="button" id="share-copy" title="Копировать картинку PNG в буфер обмена" aria-label="Копировать PNG">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="8.5" y="8.5" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M15.5 8.5V6.7A2.2 2.2 0 0 0 13.3 4.5H6.7A2.2 2.2 0 0 0 4.5 6.7v6.6a2.2 2.2 0 0 0 2.2 2.2h1.8" stroke="currentColor" stroke-width="1.8"/>
+          </svg>
+          <span class="fmt-tag">PNG</span>
+        </button>
+        <button class="btn fmt-btn" type="button" id="share-save" title="Сохранить картинку PNG в файл" aria-label="Сохранить PNG">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 4v10.5M8 10.5l4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M5 16.5v1.8A1.7 1.7 0 0 0 6.7 20h10.6a1.7 1.7 0 0 0 1.7-1.7v-1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+          <span class="fmt-tag">PNG</span>
+        </button>
+        <button class="btn fmt-btn primary" type="button" id="share-pdf" title="PDF: предпросмотр страниц, выравнивание и сохранение" aria-label="PDF">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M13.5 3.5H7A2.5 2.5 0 0 0 4.5 6v12A2.5 2.5 0 0 0 7 20.5h10a2.5 2.5 0 0 0 2.5-2.5V9.5l-6-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            <path d="M13.5 3.5v6h6M8.5 13.5h7M8.5 16.5h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="fmt-tag">PDF</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="pdf-modal">
+    <div class="modal-card pdf-modal">
+      <div class="modal-title-row">
+        <h3>PDF для заказчика</h3>
+        <span class="pdf-count" id="pdf-count"></span>
+      </div>
+      <div class="pdf-layout">
+        <div class="pdf-tools" id="pdf-tools">
+          <div class="pdf-group pdf-profiles">
+            <div class="pdf-group-title">Мои профили</div>
+            <div class="share-profile-list" id="pdf-profile-list"></div>
+            <div class="share-profile-new">
+              <input id="pdf-profile-name" maxlength="40" placeholder="Название профиля" autocomplete="off" spellcheck="false" />
+              <button class="btn small" type="button" id="pdf-profile-save" title="Запомнить все текущие настройки PDF как профиль. Если профиль с таким именем есть — он обновится.">Сохранить</button>
+            </div>
+          </div>
+          <div class="pdf-group">
+            <div class="pdf-group-title">Страница</div>
+            <div class="pdf-seg" data-pdf-opt="orient">
+              <button type="button" data-v="portrait">Книжная</button>
+              <button type="button" data-v="landscape">Альбомная</button>
+            </div>
+            <div class="pdf-label">Поля</div>
+            <div class="pdf-seg" data-pdf-opt="margin">
+              <button type="button" data-v="narrow">Узкие</button>
+              <button type="button" data-v="normal">Обычные</button>
+              <button type="button" data-v="wide">Широкие</button>
+            </div>
+            <label class="share-opt"><input type="checkbox" data-pdf-check="headerEach" /> Шапка на каждой странице</label>
+            <label class="share-opt"><input type="checkbox" data-pdf-check="pageNums" /> Номера страниц</label>
+            <label class="share-opt" title="Если заказов несколько, в шапке страницы каждого заказа — его номер и название вместо общего заголовка «Заказы (N)»"><input type="checkbox" data-pdf-check="orderTitles" /> В шапке — номер и название заказа</label>
+            <label class="share-opt" title="Высота страницы подгоняется под таблицу — без пустого места внизу. Длинные таблицы по-прежнему переносятся на следующую страницу по высоте A4."><input type="checkbox" data-pdf-check="crop" /> Обрезать страницы по высоте таблицы</label>
+          </div>
+          <div class="pdf-group">
+            <div class="pdf-group-title">Выравнивание</div>
+            <div class="pdf-label">Таблица</div>
+            <div class="pdf-seg" data-pdf-opt="tableAlign">
+              <button type="button" data-v="left" title="По левому краю">Слева</button>
+              <button type="button" data-v="center" title="По центру страницы">По центру</button>
+              <button type="button" data-v="stretch" title="Растянуть на всю ширину">Во всю ширину</button>
+            </div>
+            <div class="pdf-label">Числа и суммы</div>
+            <div class="pdf-seg" data-pdf-opt="numAlign">
+              <button type="button" data-v="left">Слева</button>
+              <button type="button" data-v="center">По центру</button>
+              <button type="button" data-v="right">Справа</button>
+            </div>
+            <div class="pdf-label">Заголовки колонок</div>
+            <div class="pdf-seg" data-pdf-opt="headAlign">
+              <button type="button" data-v="left">Слева</button>
+              <button type="button" data-v="auto" title="Как у значений в колонке">Как данные</button>
+            </div>
+            <label class="share-opt" title="Отдельная последняя страница со сводкой по всем заказам. Появляется, если выбрано больше одного заказа."><input type="checkbox" data-pdf-check="grand" /> Лист «Общий итог»</label>
+          </div>
+          <div class="pdf-group">
+            <div class="pdf-group-title">Форматирование</div>
+            <div class="pdf-label">Шрифт</div>
+            <select id="pdf-font" data-pdf-select="font">
+              <option value="segoe">Segoe UI</option>
+              <option value="arial">Arial</option>
+              <option value="calibri">Calibri</option>
+              <option value="georgia">Georgia</option>
+              <option value="times">Times New Roman</option>
+            </select>
+            <div class="pdf-label">Размер текста <b id="pdf-scale-val">100%</b></div>
+            <input type="range" id="pdf-scale" data-pdf-range="scale" min="70" max="200" step="5" />
+            <div class="pdf-label">Высота строк</div>
+            <div class="pdf-seg" data-pdf-opt="density">
+              <button type="button" data-v="compact">Плотно</button>
+              <button type="button" data-v="normal">Обычно</button>
+              <button type="button" data-v="loose">Свободно</button>
+            </div>
+            <label class="share-opt"><input type="checkbox" data-pdf-check="zebra" /> Полосы через строку</label>
+            <label class="share-opt"><input type="checkbox" data-pdf-check="grid" /> Вертикальные линии</label>
+            <label class="share-opt"><input type="checkbox" data-pdf-check="bold" /> Жирные суммы в итогах</label>
+          </div>
+          <button type="button" class="btn small" id="pdf-reset">Сбросить настройки</button>
+        </div>
+        <div class="pdf-preview-wrap" id="pdf-preview-wrap">
+          <div class="pdf-pages" id="pdf-pages"></div>
+        </div>
+      </div>
       <div class="modal-actions">
-        <button class="btn" type="button" id="share-cancel">Закрыть</button>
-        <button class="btn" type="button" id="share-copy-text">Копировать текст</button>
-        <button class="btn" type="button" id="share-copy">Копировать PNG</button>
-        <button class="btn primary" type="button" id="share-save">Сохранить PNG</button>
+        <button class="btn" type="button" id="pdf-back">Назад к снимку</button>
+        <button class="btn primary" type="button" id="pdf-save">Сохранить PDF</button>
       </div>
     </div>
   </div>
@@ -1088,6 +1237,9 @@
   <script src="/cloud.js"></script>
   <script src="/calc.js"></script>
   <script src="/presentation.js"></script>
+  <script src="/pdf.js"></script>
+  <script src="/vault.js"></script>
+  <script src="/datepicker.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

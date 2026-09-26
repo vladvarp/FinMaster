@@ -173,6 +173,33 @@ def set_theme(theme: str) -> str:
     return value
 
 
+UI_PREF_KEYS = ("share_profiles", "pdf_profiles", "share_pdf", "share_grand")
+UI_PREF_MAX_BYTES = 256 * 1024
+
+
+def ui_prefs() -> dict[str, Any]:
+    raw = load_config().get("ui_prefs")
+    if not isinstance(raw, dict):
+        return {}
+    return {key: raw[key] for key in UI_PREF_KEYS if key in raw}
+
+
+def set_ui_pref(key: str, value: Any) -> dict[str, Any]:
+    if key not in UI_PREF_KEYS:
+        raise ValueError("Неизвестная настройка интерфейса.")
+    if len(json.dumps(value, ensure_ascii=False)) > UI_PREF_MAX_BYTES:
+        raise ValueError("Слишком большое значение настройки.")
+    cfg = load_config()
+    prefs = cfg.get("ui_prefs") if isinstance(cfg.get("ui_prefs"), dict) else {}
+    if value is None:
+        prefs.pop(key, None)
+    else:
+        prefs[key] = value
+    cfg["ui_prefs"] = prefs
+    save_config(cfg)
+    return {k: prefs[k] for k in UI_PREF_KEYS if k in prefs}
+
+
 def window_maximized() -> bool:
     return bool(load_config().get("window_maximized"))
 
