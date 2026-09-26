@@ -1816,7 +1816,166 @@
     renderLineLegend(chart);
     if (!canvas) return;
     const { labels, datasets } = trendDatasets(rows, group, dateField, lastN, chart);
-    FinCharts.line(canvas, { labels, datasets });
+    lineZoomData[chart] = { canvas, labels, datasets };
+    bindLineZoom(canvas, chart);
+    paintLineZoomed(chart);
+  }
+
+  /* ---- Масштаб линейных графиков дашборда и аналитики ---- */
+
+  const LINE_ZOOM_ID = { dash: "dash-line-zoom", analytics: "an-line-zoom" };
+  const LINE_ZOOM_PRESETS = {
+    dash: [
+      ["all", "Всё"],
+      ["90", "3 мес"],
+      ["30", "Месяц"],
+      ["14", "2 нед"],
+    ],
+    analytics: [
+      ["all", "Всё"],
+      ["365", "Год"],
+      ["90", "3 мес"],
+      ["30", "Месяц"],
+    ],
+  };
+  const lineZoom = {
+    dash: { preset: "14", fromKey: "", toKey: "" },
+    analytics: { preset: "all", fromKey: "", toKey: "" },
+  };
+  const lineZoomData = {};
+
+  function zoomKeyDate(key) {
+    const m = /(\d{4})-(\d{2})(?:-(\d{2}))?/.exec(String(key || ""));
+    return m ? `${m[1]}-${m[2]}-${m[3] || "01"}` : "";
+  }
+
+  /** Видимый отрезок: индексы from..to включительно (минимум 3 точки). */
+  function lineZoomRange(chart, labels) {
+    const n = labels.length;
+    const all = { from: 0, to: Math.max(0, n - 1) };
+    const z = lineZoom[chart];
+    if (n < 4 || !z) return all;
+    if (z.preset) {
+      const days = Number(z.preset);
+      const dated = labels.map(zoomKeyDate);
+      const last = [...dated].reverse().find(Boolean);
+      if (!days || !last) return all;
+      const d = new Date(`${last}T00:00:00`);
+      d.setDate(d.getDate() - days);
+      const edge = dayKey(d);
+      let from = dated.findIndex((iso) => iso && iso > edge);
+      if (from < 0) from = n - 3;
+      return { from: Math.min(from, n - 3), to: n - 1 };
+    }
+    let from = labels.findIndex((k) => k >= z.fromKey);
+    let to = labels.findLastIndex((k) => k <= z.toKey);
+    if (from < 0) from = Math.max(0, n - 3);
+    if (to < 0 || to < from) to = n - 1;
+    if (to - from < 2) {
+      to = Math.min(n - 1, from + 2);
+      from = Math.max(0, to - 2);
+    }
+    return { from, to };
+  }
+
+  function setLineZoom(chart, labels, from, to) {
+    const z = lineZoom[chart];
+    if (from <= 0 && to >= labels.length - 1) {
+      z.preset = "all";
+      return;
+    }
+    z.preset = "";
+    z.fromKey = labels[from];
+    z.toKey = labels[to];
+  }
+
+  function renderLineZoomBar(chart, range, n) {
+    const el = $(LINE_ZOOM_ID[chart]);
+    if (!el) return;
+    const data = lineZoomData[chart];
+    const z = lineZoom[chart];
+    el.hidden = n < 4;
+    if (n < 4) return;
+    const presets = LINE_ZOOM_PRESETS[chart]
+      .map(
+        ([id, label]) =>
+          `<button type="button" class="chart-leg zoom-preset ${z.preset === id ? "on" : ""}" data-line-zoom="${chart}" data-zoom-preset="${id}">${label}</button>`
+      )
+      .join("");
+    el.innerHTML = `<div class="chart-zoom-presets">${presets}</div>
+      <span class="chart-zoom-range">${esc(data.labels[range.from])} — ${esc(data.labels[range.to])} · ${range.to - range.from + 1} из ${n}</span>
+      <span class="chart-zoom-hint">колесо — масштаб · перетаскивание — сдвиг · двойной клик — всё</span>`;
+  }
+
+  function paintLineZoomed(chart, { instant = false } = {}) {
+    const data = lineZoomData[chart];
+    if (!data?.canvas) return;
+    const n = data.labels.length;
+    const range = lineZoomRange(chart, data.labels);
+    FinCharts.line(data.canvas, {
+      labels: data.labels.slice(range.from, range.to + 1),
+      datasets: data.datasets.map((ds) => ({ ...ds, values: ds.values.slice(range.from, range.to + 1) })),
+      instant,
+    });
+    renderLineZoomBar(chart, range, n);
+  }
+
+  /** Колесо, перетаскивание и двойной клик. Отступы — как у FinCharts.line. */
+  function bindLineZoom(canvas, chart) {
+    if (canvas.dataset.lineZoomBound) return;
+    canvas.dataset.lineZoomBound = "1";
+    const PAD_L = 58;
+    const PAD_R = 18;
+    canvas.addEventListener(
+      "wheel",
+      (e) => {
+        const data = lineZoomData[chart];
+        const n = data?.labels.length || 0;
+        if (n < 4) return;
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const r = Math.min(1, Math.max(0, (e.clientX - rect.left - PAD_L) / Math.max(1, rect.width - PAD_L - PAD_R)));
+        const { from, to } = lineZoomRange(chart, data.labels);
+        const span = to - from;
+        const next = Math.min(n - 1, Math.max(2, Math.round(span * (e.deltaY > 0 ? 1.25 : 0.8))));
+        if (next === span) return;
+        let nf = Math.round(from + r * span - r * next);
+        nf = Math.max(0, Math.min(nf, n - 1 - next));
+        setLineZoom(chart, data.labels, nf, nf + next);
+        paintLineZoomed(chart, { instant: true });
+      },
+      { passive: false }
+    );
+    let drag = null;
+    canvas.addEventListener("pointerdown", (e) => {
+      const data = lineZoomData[chart];
+      if (e.button !== 0 || !data || lineZoom[chart].preset === "all") return;
+      drag = { x: e.clientX, ...lineZoomRange(chart, data.labels) };
+      canvas.setPointerCapture?.(e.pointerId);
+      canvas.classList.add("is-panning");
+    });
+    canvas.addEventListener("pointermove", (e) => {
+      const data = lineZoomData[chart];
+      if (!drag || !data) return;
+      const n = data.labels.length;
+      const rect = canvas.getBoundingClientRect();
+      const span = drag.to - drag.from;
+      const perPoint = Math.max(1, rect.width - PAD_L - PAD_R) / Math.max(1, span);
+      const nf = Math.max(0, Math.min(drag.from + Math.round((drag.x - e.clientX) / perPoint), n - 1 - span));
+      if (nf === lineZoomRange(chart, data.labels).from) return;
+      setLineZoom(chart, data.labels, nf, nf + span);
+      paintLineZoomed(chart, { instant: true });
+    });
+    const stop = () => {
+      drag = null;
+      canvas.classList.remove("is-panning");
+    };
+    canvas.addEventListener("pointerup", stop);
+    canvas.addEventListener("pointercancel", stop);
+    canvas.addEventListener("dblclick", () => {
+      lineZoom[chart].preset = "all";
+      paintLineZoomed(chart, { instant: true });
+    });
   }
 
   function renderDashboard() {
@@ -1824,7 +1983,7 @@
     renderKpis();
     renderInsights();
     const rows = dashRows();
-    paintTrendLine($("chart-dash-line"), rows, "day", "order_date", 14);
+    paintTrendLine($("chart-dash-line"), rows, "day", "order_date");
     const byStatus = {};
     rows.forEach(({ line, totals }) => {
       const name = line.status || "Без статуса";
@@ -3104,6 +3263,7 @@
     $("cmp-b").innerHTML = cmpHtml(b);
     const withCost = a.cost > 0.005 || b.cost > 0.005;
     FinCharts.bar($("chart-an-bar"), {
+      tinyLabels: true,
       labels: withCost ? ["Выручка", "Оплачено", "Долг", "Расход", "Чистыми", "Позиции"] : ["Выручка", "Оплачено", "Долг", "Позиции"],
       scale: "group",
       formats: withCost ? ["money", "money", "money", "money", "money", "count"] : ["money", "money", "money", "count"],
@@ -9013,7 +9173,15 @@
       chartPrefs.series[chart] = { ...on, [id]: next };
       persistChartPrefs();
       if (chart === "analytics") paintTrendLine($("chart-an-line"), analyticsRows(), $("f-group").value, $("f-date-field").value);
-      else paintTrendLine($("chart-dash-line"), dashRows(), "day", "order_date", 14);
+      else paintTrendLine($("chart-dash-line"), dashRows(), "day", "order_date");
+    });
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-zoom-preset]");
+      if (!btn) return;
+      const chart = btn.dataset.lineZoom;
+      if (!lineZoom[chart]) return;
+      lineZoom[chart].preset = btn.dataset.zoomPreset;
+      paintLineZoomed(chart);
     });
 
     $("btn-save").addEventListener("click", () => save());

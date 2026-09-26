@@ -641,6 +641,14 @@ input[type="search"]::-webkit-search-decoration {
 .chart-leg:not(.on) { opacity: 0.5; }
 .chart-leg:not(.on) i { filter: grayscale(0.8); }
 .chart-leg:hover { border-color: var(--accent-2); }
+.chart-zoom { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; margin: -2px 0 8px; }
+.chart-zoom[hidden] { display: none; }
+.chart-zoom-presets { display: flex; gap: 6px; flex-wrap: wrap; }
+.chart-zoom .zoom-preset { min-height: 24px; padding: 2px 10px; font-size: 11px; }
+.chart-zoom .zoom-preset.on { border-color: var(--accent-2); color: var(--accent); }
+.chart-zoom-range { font: 600 11px var(--mono); color: var(--ink); }
+.chart-zoom-hint { margin-left: auto; font-size: 11px; color: var(--muted); }
+.chart-box canvas.is-panning { cursor: grabbing !important; }
 .chart-box { height: 280px; position: relative; }
 .chart-box canvas { width: 100%; height: 100%; display: block; }
 .fin-tip {
@@ -1132,21 +1140,36 @@ html[data-theme="dark"] .line-menu { background: #1b2538; border-color: var(--li
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 10px;
-  margin-top: 12px;
+  gap: 8px 14px;
+  margin-top: 14px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
+  background: transparent;
 }
 .filter-presets {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
+}
+.filter-presets-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-right: 2px;
+}
+.filter-bar .btn.small {
+  min-height: 30px;
+  padding: 5px 12px;
 }
 .filter-check {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   margin-left: auto;
+  min-height: 30px;
   font-size: 13px;
   color: var(--ink);
   user-select: none;
@@ -2354,8 +2377,7 @@ html[data-theme="dark"] .order-work,
 html[data-theme="dark"] table.data th,
 html[data-theme="dark"] table.data tfoot td,
 html[data-theme="dark"] .share-fold,
-html[data-theme="dark"] .share-order,
-html[data-theme="dark"] .filter-bar {
+html[data-theme="dark"] .share-order {
   background: #1b2538;
   color: var(--ink);
 }

@@ -225,6 +225,7 @@
                 <h3>Выручка по дням</h3>
                 <div class="chart-legend" id="dash-line-legend"></div>
               </div>
+              <div class="chart-zoom" id="dash-line-zoom" hidden></div>
               <div class="chart-box"><canvas id="chart-dash-line"></canvas></div>
             </div>
             <div class="card">
@@ -294,7 +295,7 @@
               </div>
               <div class="field"><label>Статус</label><select id="f-status"><option value="">Все</option></select></div>
               <div class="field"><label>Тип заказа</label><select id="f-type"><option value="">Все</option></select></div>
-              <div class="field"><label>Заказчик</label><input id="f-customer" data-suggest="customer" autocomplete="off" spellcheck="false" /></div>
+              <div class="field span-2"><label>Заказчик</label><input id="f-customer" data-suggest="customer" autocomplete="off" spellcheck="false" /></div>
               <div class="field"><label>Продукт</label><input id="f-product" data-suggest="product" autocomplete="off" spellcheck="false" /></div>
               <div class="field"><label>Ед. изм.</label><select id="f-unit"><option value="">Все</option></select></div>
               <div class="field"><label>Сумма от</label><input type="number" id="f-min" step="0.01" /></div>
@@ -302,6 +303,7 @@
             </div>
             <div class="filter-bar">
               <div class="filter-presets">
+                <span class="filter-presets-label">Период</span>
                 <button class="btn small" type="button" id="btn-preset-today">Сегодня</button>
                 <button class="btn small" type="button" id="btn-preset-week">7 дней</button>
                 <button class="btn small" type="button" id="btn-preset-month">Этот месяц</button>
@@ -335,6 +337,7 @@
                 <h3>Динамика</h3>
                 <div class="chart-legend" id="an-line-legend"></div>
               </div>
+              <div class="chart-zoom" id="an-line-zoom" hidden></div>
               <div class="chart-box"><canvas id="chart-an-line"></canvas></div>
             </div>
             <div class="card">
