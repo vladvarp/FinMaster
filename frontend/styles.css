@@ -4784,7 +4784,7 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
   width: calc(100% / var(--days));
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   pointer-events: none;
-  z-index: 4;
+  z-index: 1;
 }
 .gantt-grid {
   position: absolute;
@@ -4804,7 +4804,6 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
 }
 .gantt-row {
   position: relative;
-  z-index: 1;
   border-bottom: 1px solid var(--line);
   cursor: pointer;
 }
@@ -4819,7 +4818,7 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
   top: 0;
   bottom: 0;
   width: 260px;
-  z-index: 3;
+  z-index: 5;
   background: linear-gradient(90deg, var(--card) 78%, transparent);
 }
 .gantt-expand {
@@ -4896,7 +4895,7 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
   overflow-y: hidden;
   scrollbar-gutter: stable;
 }
-.gantt-body { position: relative; z-index: 1; }
+.gantt-body { position: relative; z-index: 1; min-height: 100%; }
 .gantt-track { min-height: 64px; cursor: pointer; }
 .gantt-day {
   display: flex;
@@ -4965,7 +4964,7 @@ html[data-theme="dark"] .cloud-switch > span { background: #475569; }
   background: var(--danger);
   transform: translateX(-1px);
   pointer-events: none;
-  z-index: 5;
+  z-index: 2;
 }
 .gantt-bar {
   position: absolute;

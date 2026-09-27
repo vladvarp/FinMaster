@@ -5492,10 +5492,10 @@
     <div class="gantt-scroll" id="gantt-scroll" style="--days:${n}">
       <div class="gantt-days">${head}<div class="gantt-day-tip" id="gantt-day-tip" hidden></div></div>
       <div class="gantt">
-        <div class="gantt-day-col" id="gantt-day-col" hidden></div>
-        ${todayLine}
         <div class="gantt-body">
           <div class="gantt-grid" aria-hidden="true">${gridCols}</div>
+          <div class="gantt-day-col" id="gantt-day-col" hidden></div>
+          ${todayLine}
           ${rows || empty}
         </div>
       </div>
@@ -12649,8 +12649,10 @@
       }
       if (!state.desktop) return;
       try {
-        applyRemotePayload(await apiGet("/api/remote/info"));
+        const probe = $("remote-ngrok")?.checked ? "?probe=1" : "";
+        applyRemotePayload(await apiGet(`/api/remote/info${probe}`));
         renderRemoteLive();
+        renderRemoteSignals();
       } catch {
         renderRemoteLive();
       }
@@ -12758,21 +12760,61 @@
     if (!remote.ngrokReady) {
       setTokenDot("ngrok-token-dot", { state: "", title: "Токен ngrok не сохранён" });
     } else if (remote.ngrok && remote.tunnel?.error) {
-      setTokenDot("ngrok-token-dot", { state: "err", title: `Токен сохранён, ошибка туннеля: ${remote.tunnel.error}` });
-    } else if (remote.public_url) {
-      setTokenDot("ngrok-token-dot", { state: "live", title: "Токен сохранён, туннель работает" });
+      setTokenDot("ngrok-token-dot", { state: "err", title: remote.tunnel.error });
+    } else if (remote.ngrok && remote.public_url && remote.tunnel?.online !== false) {
+      setTokenDot("ngrok-token-dot", { state: "live", title: "Туннель выходит в интернет" });
+    } else if (remote.ngrok) {
+      setTokenDot("ngrok-token-dot", { state: "on", title: "Токен сохранён, туннель ещё не открыт" });
     } else {
-      setTokenDot("ngrok-token-dot", { state: "on", title: "Токен ngrok сохранён" });
+      setTokenDot("ngrok-token-dot", { state: "on", title: "Токен сохранён, туннель выключен" });
     }
 
-    if (!remote.telegramReady) {
+    if (!remote.telegramReady && !remote.telegramListening) {
       setTokenDot("tg-token-dot", { state: "", title: "Токен Telegram-бота не сохранён" });
     } else if (remote.telegramError) {
-      setTokenDot("tg-token-dot", { state: "err", title: `Токен сохранён, ошибка: ${remote.telegramError}` });
+      setTokenDot("tg-token-dot", { state: "err", title: `Нет связи: ${remote.telegramError}` });
     } else if (remote.telegramListening) {
-      setTokenDot("tg-token-dot", { state: "live", title: "Токен сохранён, бот слушает" });
+      setTokenDot("tg-token-dot", { state: "live", title: "Бот слушает сообщения" });
     } else {
-      setTokenDot("tg-token-dot", { state: "on", title: "Токен Telegram-бота сохранён" });
+      setTokenDot("tg-token-dot", { state: "on", title: "Токен сохранён, бот сейчас не слушает" });
+    }
+  }
+
+  function renderRemoteSignals() {
+    renderTokenDots();
+    const tgStatus = $("remote-tg-status");
+    if (tgStatus && !tgStatus.dataset.hold) {
+      tgStatus.className = "remote-ngrok-status";
+      if (remote.telegramError) {
+        tgStatus.classList.add("err");
+        tgStatus.textContent = remote.telegramError;
+      } else if (remote.telegramListening) {
+        tgStatus.classList.add("ok");
+        tgStatus.textContent = "Бот слушает. Напишите /start — отчёты, заказы, снимки и ссылка на телефон.";
+      } else if (remote.telegramReady) {
+        tgStatus.textContent = "Токен сохранён. Нажмите «Проверить связь», если бот не отвечает.";
+      } else {
+        tgStatus.textContent = "Вставьте токен от @BotFather и нажмите «Запомнить токен».";
+      }
+    }
+    const ngrokStatus = $("remote-ngrok-status");
+    if (ngrokStatus && !ngrokStatus.dataset.hold) {
+      const tun = remote.tunnel || {};
+      ngrokStatus.className = "remote-ngrok-status";
+      if (!remote.ngrok && !remote.ngrokReady) ngrokStatus.textContent = "";
+      else if (!remote.ngrok) ngrokStatus.textContent = "Туннель выключен. Токен сохранён.";
+      else if (tun.error) {
+        ngrokStatus.classList.add("err");
+        ngrokStatus.textContent = tun.error;
+      } else if (remote.public_url && tun.online !== false) {
+        ngrokStatus.classList.add("ok");
+        ngrokStatus.textContent = "Туннель открыт. Сканируйте QR или сохраните ссылку в закладки — работает из любой сети.";
+      } else if (!remote.ngrokInstalled) {
+        ngrokStatus.classList.add("err");
+        ngrokStatus.textContent = "ngrok не установлен. Скачайте с ngrok.com и добавьте в PATH.";
+      } else {
+        ngrokStatus.textContent = "Туннель ещё не поднят — сохраните токен и включите доступ.";
+      }
     }
   }
 
@@ -12858,46 +12900,15 @@
     if (auto) auto.checked = !!remote.autostart;
     const ngrokChk = $("remote-ngrok");
     if (ngrokChk) ngrokChk.checked = !!remote.ngrok;
+    const ngrokCheck = $("remote-ngrok-check");
+    if (ngrokCheck) ngrokCheck.disabled = !remote.ngrok;
     const tokenInput = $("remote-ngrok-token");
     if (tokenInput && remote.ngrokReady && !tokenInput.value) tokenInput.placeholder = "токен сохранён — можно не вводить заново";
     const tgToken = $("remote-tg-token");
     if (tgToken && remote.telegramReady && !tgToken.value) tgToken.placeholder = "токен сохранён — можно не вводить заново";
     const tgChat = $("remote-tg-chat");
     if (tgChat && remote.telegramChatId && !tgChat.value) tgChat.value = remote.telegramChatId;
-    renderTokenDots();
-    const tgStatus = $("remote-tg-status");
-    if (tgStatus && !tgStatus.dataset.hold) {
-      tgStatus.className = "remote-ngrok-status";
-      if (remote.telegramError) {
-        tgStatus.classList.add("err");
-        tgStatus.textContent = remote.telegramError;
-      } else if (remote.telegramListening) {
-        tgStatus.classList.add("ok");
-        tgStatus.textContent = "Бот слушает. Напишите /start — отчёты, заказы, снимки и ссылка на телефон.";
-      } else if (remote.telegramReady) {
-        tgStatus.textContent = "Токен сохранён. Нажмите «Запомнить токен», если бот ещё не отвечает.";
-      } else {
-        tgStatus.textContent = "Вставьте токен от @BotFather и нажмите «Запомнить токен».";
-      }
-    }
-    const ngrokStatus = $("remote-ngrok-status");
-    if (ngrokStatus) {
-      const tun = remote.tunnel || {};
-      ngrokStatus.className = "remote-ngrok-status";
-      if (!remote.ngrok) ngrokStatus.textContent = "";
-      else if (tun.error) {
-        ngrokStatus.classList.add("err");
-        ngrokStatus.textContent = tun.error;
-      } else if (remote.public_url) {
-        ngrokStatus.classList.add("ok");
-        ngrokStatus.textContent = "Туннель открыт. Сканируйте QR или сохраните ссылку в закладки — работает из любой сети.";
-      } else if (!remote.ngrokInstalled) {
-        ngrokStatus.classList.add("err");
-        ngrokStatus.textContent = "ngrok не установлен. Скачайте с ngrok.com и добавьте в PATH.";
-      } else {
-        ngrokStatus.textContent = "Туннель ещё не поднят — сохраните токен и включите доступ.";
-      }
-    }
+    renderRemoteSignals();
     renderRemoteLive();
   }
 
@@ -13316,6 +13327,8 @@
     });
     $("remote-ngrok")?.addEventListener("change", async (e) => {
       const on = e.target.checked;
+      const ngrokCheck = $("remote-ngrok-check");
+      if (ngrokCheck) ngrokCheck.disabled = !on;
       if (on) $("remote-ngrok-box")?.closest(".remote-fold")?.classList.remove("collapsed");
       const token = $("remote-ngrok-token")?.value?.trim() || "";
       const body = { enabled: on };
@@ -13323,9 +13336,17 @@
       try {
         if (on && !remote.enabled) await remoteStart();
         renderRemoteModal(await apiPost("/api/remote/ngrok", body));
-        toast(on ? "Интернет-туннель включён" : "Интернет-туннель выключен, токен сохранён");
+        const tun = remote.tunnel || {};
+        toast(
+          on
+            ? remote.public_url
+              ? "Интернет-туннель включён"
+              : tun.error || "Туннель включён, ссылка пока локальная"
+            : "Интернет-туннель выключен, токен сохранён"
+        );
       } catch (err) {
         e.target.checked = !on;
+        if (ngrokCheck) ngrokCheck.disabled = on;
         toast(err.message || String(err));
       }
     });
@@ -13356,6 +13377,42 @@
         if (status) delete status.dataset.hold;
       }
     };
+    const checkRemoteLink = async (kind) => {
+      if (kind === "ngrok" && !$("remote-ngrok")?.checked) return;
+      const status = $(kind === "ngrok" ? "remote-ngrok-status" : "remote-tg-status");
+      const btn = $(kind === "ngrok" ? "remote-ngrok-check" : "remote-tg-check");
+      if (status) {
+        status.dataset.hold = "1";
+        status.className = "remote-ngrok-status";
+        status.textContent = "Проверяю связь…";
+      }
+      if (btn) btn.disabled = true;
+      try {
+        const body = { kind };
+        if (kind === "telegram") {
+          const token = $("remote-tg-token")?.value?.trim();
+          if (token) body.token = token;
+        }
+        const data = await apiPost("/api/remote/check", body);
+        renderRemoteModal(data);
+        if (status) {
+          status.className = `remote-ngrok-status ${data.ok ? "ok" : "err"}`;
+          status.textContent = data.check || (data.ok ? "Связь есть" : "Нет связи");
+        }
+        toast(data.check || (data.ok ? "Связь есть" : "Нет связи"));
+      } catch (err) {
+        if (status) {
+          status.className = "remote-ngrok-status err";
+          status.textContent = err.message || String(err);
+        }
+        toast(`Проверка связи: ${err.message || err}`);
+      } finally {
+        if (status) delete status.dataset.hold;
+        if (btn) btn.disabled = false;
+      }
+    };
+    $("remote-ngrok-check")?.addEventListener("click", () => checkRemoteLink("ngrok"));
+    $("remote-tg-check")?.addEventListener("click", () => checkRemoteLink("telegram"));
     $("remote-tg-save")?.addEventListener("click", () => postTelegram(false));
     $("remote-tg-send")?.addEventListener("click", () => postTelegram(true));
     $("remote-ngrok-save")?.addEventListener("click", async () => {

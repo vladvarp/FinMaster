@@ -318,7 +318,8 @@ def _remote_public(ip: str | None = None, via: str | None = None) -> dict[str, A
     tunnel = TUNNEL.snapshot()
     if settings.get("ngrok") and not tunnel.get("url") and REMOTE.enabled:
         tunnel = _ensure_tunnel(settings)
-    public_base = str(tunnel.get("url") or "")
+    # Адрес агента есть и без интернета. Наружу отдаём его только если связь реально есть.
+    public_base = str(tunnel.get("url") or "") if tunnel.get("online") else ""
     public_url = _mobile_url(public_base, token) if public_base else ""
     mode = via or settings.get("via") or "lan"
     if mode == "ngrok" and public_url:
@@ -354,6 +355,7 @@ def _remote_public(ip: str | None = None, via: str | None = None) -> dict[str, A
             "url": public_base,
             "error": tunnel.get("error") or "",
             "running": bool(tunnel.get("running")),
+            "online": bool(tunnel.get("online")),
         },
     }
 
@@ -770,8 +772,6 @@ def api_remote_ngrok():
     payload = _remote_public()
     payload["ok"] = True
     _telegram_sync_menu()
-    if settings.get("ngrok") and REMOTE.enabled and not payload.get("public_url"):
-        return jsonify({**payload, "error": payload.get("tunnel", {}).get("error") or "Не удалось поднять ngrok."}), 400
     return jsonify(payload)
 
 
@@ -887,10 +887,75 @@ def api_remote_log_clear():
 
 @app.get("/api/remote/info")
 def api_remote_info():
+    if request.args.get("probe") == "1":
+        settings = storage.remote_settings()
+        if settings.get("ngrok") and settings.get("ngrok_token"):
+            TUNNEL.probe(SERVER_PORT, wanted=True, timeout=2.5)
     snap = REMOTE.snapshot(with_doc=False)
     snap.update(_remote_public())
     snap["autosave"] = _autosave_on()
     return jsonify(snap)
+
+
+@app.post("/api/remote/check")
+def api_remote_check():
+    """Явная проверка ngrok или Telegram: запрос в сервис и свежие индикаторы."""
+    if not _is_local():
+        return jsonify({"error": "Только в окне программы."}), 403
+    data = request.get_json(silent=True) or {}
+    kind = str(data.get("kind") or "")
+    settings = storage.remote_settings()
+    if kind == "ngrok":
+        if not settings.get("ngrok"):
+            payload = _remote_public()
+            payload["ok"] = True
+            payload["check"] = "Туннель выключен."
+            return jsonify(payload)
+        if not settings.get("ngrok_token"):
+            payload = _remote_public()
+            payload["ok"] = False
+            payload["check"] = "Токен ngrok не сохранён."
+            return jsonify(payload)
+        TUNNEL.probe(SERVER_PORT, wanted=True, force=True)
+        payload = _remote_public()
+        tunnel = payload.get("tunnel") or {}
+        if settings.get("ngrok") and payload.get("public_url") and (payload.get("tunnel") or {}).get("online", True):
+            text = "Туннель открыт. Связь с ngrok есть."
+            ok = True
+        elif not settings.get("ngrok"):
+            text = "Туннель выключен. Токен сохранён."
+            ok = True
+        else:
+            text = str(tunnel.get("error") or "Туннель сейчас не открыт.")
+            ok = False
+        payload["ok"] = ok
+        payload["check"] = text
+        g.netlog_text = text
+        g.netlog_level = "ok" if ok else "err"
+        g.netlog_key = "ngrok-check"
+        return jsonify(payload)
+    if kind == "telegram":
+        token = str(data.get("token") or settings.get("telegram_bot_token") or "").strip()
+        result = TELEGRAM.probe(token)
+        payload = _remote_public()
+        username = str(result.get("username") or "")
+        who = f"@{username}" if username else "бот"
+        if result.get("ok") and result.get("listening"):
+            text = f"Связь есть: {who} слушает сообщения."
+            ok = True
+        elif result.get("ok"):
+            text = f"Токен верный ({who}), но бот сейчас не слушает."
+            ok = False
+        else:
+            text = str(result.get("error") or "Нет связи с Telegram.")
+            ok = False
+        payload["ok"] = ok
+        payload["check"] = text
+        g.netlog_text = text
+        g.netlog_level = "ok" if ok else "err"
+        g.netlog_key = "tg-check"
+        return jsonify(payload)
+    return jsonify({"error": "Нечего проверять."}), 400
 
 
 @app.post("/api/remote/publish")

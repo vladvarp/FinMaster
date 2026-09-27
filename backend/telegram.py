@@ -535,6 +535,30 @@ class TelegramBot:
         with self._lock:
             return {"listening": self._running and bool(self._token), "error": self._error}
 
+    def probe(self, token: str = "") -> dict[str, Any]:
+        """Проверяет токен запросом getMe, не трогая очередь сообщений."""
+        with self._lock:
+            active = self._token
+            token = str(token or active or "").strip()
+            listening = bool(self._running and active and active == token)
+        if not token:
+            return {"ok": False, "listening": False, "error": "Токен Telegram-бота не сохранён."}
+        try:
+            data = _call(token, "getMe", timeout=8)
+        except RuntimeError as exc:
+            message = str(exc)
+            with self._lock:
+                if self._token == token:
+                    self._error = message
+            return {"ok": False, "listening": listening, "error": message}
+        user = data.get("result") if isinstance(data.get("result"), dict) else {}
+        username = str(user.get("username") or "").strip()
+        with self._lock:
+            if self._token == token:
+                self._error = ""
+                listening = bool(self._running and self._token)
+        return {"ok": True, "listening": listening, "username": username, "error": ""}
+
     def token(self) -> str:
         with self._lock:
             return self._token

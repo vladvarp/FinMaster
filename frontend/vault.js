@@ -16,6 +16,8 @@
       hint: "Копилка — отложили деньги: они уходят с рук в копилку. Сумма с минусом — достали из копилки обратно.",
     },
   };
+  const TYPE_KEYS = { in: "Ctrl+Q", out: "Ctrl+W", save: "Ctrl+E" };
+  const TYPE_BY_CODE = { KeyQ: "in", KeyW: "out", KeyE: "save" };
 
   const $ = (id) => document.getElementById(id);
 
@@ -172,7 +174,7 @@
           ${Object.entries(TYPES)
             .map(
               ([id, meta]) =>
-                `<button type="button" class="vt-${id} ${id === type ? "active" : ""}" data-vault-type="${id}" role="radio" aria-checked="${id === type}" title="${esc(meta.hint)}">${esc(meta.label)}</button>`
+                `<button type="button" class="vt-${id} ${id === type ? "active" : ""}" data-vault-type="${id}" role="radio" aria-checked="${id === type}" title="${esc(meta.hint)} · ${TYPE_KEYS[id]}">${esc(meta.label)}</button>`
             )
             .join("")}
         </div>
@@ -733,6 +735,22 @@
         api?.toast?.("Строка удалена · Ctrl+Z — вернуть");
       }
     });
+
+    document.addEventListener(
+      "keydown",
+      (e) => {
+        if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.repeat) return;
+        const type = TYPE_BY_CODE[e.code];
+        if (!type) return;
+        const view = $("view-vault");
+        if (!view?.classList.contains("active")) return;
+        if (document.querySelector(".modal.open") || $("palette")?.classList.contains("open")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setDraftType(type);
+      },
+      true
+    );
 
     body?.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;

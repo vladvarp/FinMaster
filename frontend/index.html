@@ -987,7 +987,10 @@
                   <span>Токен ngrok</span>
                   <input type="password" id="remote-ngrok-token" placeholder="2abc… из dashboard.ngrok.com" autocomplete="off" />
                 </label>
-                <button type="button" class="btn small" id="remote-ngrok-save">Сохранить и включить</button>
+                <div class="remote-tg-actions">
+                  <button type="button" class="btn small" id="remote-ngrok-save">Сохранить и включить</button>
+                  <button type="button" class="btn small" id="remote-ngrok-check">Проверить связь</button>
+                </div>
                 <div class="remote-ngrok-status" id="remote-ngrok-status"></div>
               </div>
             </div>
@@ -1009,6 +1012,7 @@
                 </label>
                 <div class="remote-tg-actions">
                   <button type="button" class="btn small" id="remote-tg-save">Запомнить токен</button>
+                  <button type="button" class="btn small" id="remote-tg-check">Проверить связь</button>
                   <button type="button" class="btn small primary" id="remote-tg-send">Отправить ссылку сейчас</button>
                 </div>
                 <div class="remote-ngrok-status" id="remote-tg-status"></div>
@@ -1187,6 +1191,12 @@
           <div class="help-row"><span>К сегодняшнему дню</span><span><kbd>T</kbd></span></div>
           <div class="help-row"><span>Масштаб / прокрутка дней в таймлайне</span><span>колесо на навигаторе / на линейке дней</span></div>
           <div class="help-row"><span>Таймлайн / классический / неделя</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span></div>
+        </section>
+        <section class="help-section">
+          <h4>Хранилище</h4>
+          <div class="help-row"><span>Пополнение</span><span><kbd>Ctrl</kbd><kbd>Q</kbd></span></div>
+          <div class="help-row"><span>Снятие</span><span><kbd>Ctrl</kbd><kbd>W</kbd></span></div>
+          <div class="help-row"><span>Копилка</span><span><kbd>Ctrl</kbd><kbd>E</kbd></span></div>
         </section>
         <section class="help-section">
           <h4>Калькулятор</h4>
