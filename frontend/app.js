@@ -12963,7 +12963,33 @@
     }, 250);
   }
 
+  function watchRemoteAccess() {
+    if (remote.accessWatch) return;
+    remote.accessWatch = true;
+    const tick = async () => {
+      if (!state.desktop) return;
+      try {
+        const data = await apiGet("/api/remote/info");
+        const was = !!remote.enabled;
+        applyRemotePayload(data);
+        if (!!remote.enabled !== was) {
+          const auto = $("remote-autostart");
+          if (auto) auto.checked = !!remote.enabled;
+          if ($("remote-modal")?.classList.contains("open")) renderRemoteLive();
+          else remoteBadge();
+          if (remote.enabled) remotePublish();
+        }
+        if (remote.enabled && !remote.polling) remotePoll();
+      } catch {
+        /* сервер ещё поднимается */
+      }
+      if (state.desktop) setTimeout(tick, 2500);
+    };
+    setTimeout(tick, 2500);
+  }
+
   async function remotePoll() {
+    if (remote.polling) return;
     remote.polling = true;
     while (remote.enabled) {
       try {
@@ -13433,6 +13459,7 @@
         remoteBadge();
         if (remote.enabled && !remote.polling) remotePoll();
       }
+      watchRemoteAccess();
     } catch {
       state.desktop = false;
       state.autosave = localStorage.getItem(LS_AUTOSAVE) === "true";

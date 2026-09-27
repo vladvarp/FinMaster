@@ -63,6 +63,8 @@
       fieldsOpen: false,
       linesOpen: false,
     },
+    shareProfiles: [],
+    shareProfilesSig: "",
     device: null,
     deviceFactsOpen: false,
     snapReturn: null,
@@ -1057,7 +1059,10 @@
         if (data.changed) applySnapshot(data);
         else {
           noteOnline();
-          if (applyFileLists(data) && state.view === "files") renderFiles();
+          const lists = applyFileLists(data) && state.view === "files";
+          const profiles = applyShareProfiles(data.share_profiles);
+          if (lists) renderFiles();
+          else if (profiles) refreshSnapProfiles();
         }
         if (state.version <= before) await sleep(400);
       } catch (err) {
@@ -1110,7 +1115,44 @@
     return true;
   }
 
+  function applyShareProfiles(raw) {
+    if (!Array.isArray(raw)) return false;
+    const known = new Set(SNAP_FIELDS.map((f) => f.id));
+    const next = [];
+    raw.forEach((item) => {
+      const name = String(item?.name || "").trim().replace(/\s+/g, " ");
+      const fields = Array.isArray(item?.fields) ? item.fields.filter((id) => known.has(id)) : [];
+      if (!name || !fields.length) return;
+      next.push({
+        name: name.slice(0, 80),
+        fields,
+        hideLabels: !!item.hideLabels,
+        hideStamp: !!item.hideStamp,
+      });
+    });
+    const sig = JSON.stringify(next);
+    if (sig === state.shareProfilesSig) return false;
+    state.shareProfilesSig = sig;
+    state.shareProfiles = next;
+    return true;
+  }
+
+  function refreshSnapProfiles() {
+    if (state.view !== "snapshot" || document.activeElement?.id === "snap-title") return;
+    renderSnapshot();
+  }
+
+  function snapProfileOn(profile) {
+    const fields = [...(state.snap.fields || [])].filter((id) => SNAP_FIELDS.some((f) => f.id === id)).sort();
+    return (
+      [...profile.fields].sort().join("\0") === fields.join("\0") &&
+      !!profile.hideLabels === !!state.snap.hideLabels &&
+      !!profile.hideStamp === !!state.snap.hideStamp
+    );
+  }
+
   function applySnapshot(data, initial = false) {
+    const profilesChanged = applyShareProfiles(data.share_profiles);
     if (typeof data.version === "number") state.version = Math.max(state.version, data.version);
     if (typeof data.autosave === "boolean") applyAutosave(data.autosave);
     const prevPath = state.path;
@@ -1137,16 +1179,19 @@
     const fresh = incomingVer == null ? true : incomingVer > state.docVersion;
     if (!initial && !fresh && !pathChanged && !expectHit) {
       if (listsChanged && state.view === "files") renderFiles();
+      else if (profilesChanged) refreshSnapProfiles();
       return;
     }
     if (!initial && data.origin === state.cid && !pathChanged && !expectHit) {
       if (incomingVer != null) state.docVersion = Math.max(state.docVersion, incomingVer);
       if (listsChanged && state.view === "files") renderFiles();
+      else if (profilesChanged) refreshSnapProfiles();
       return;
     }
     if (!initial && (state.pushTimer || state.pushing || isTyping()) && !pathChanged && !expectHit) {
       if (data.document) state.pending = data.document;
       if (listsChanged && state.view === "files") renderFiles();
+      else if (profilesChanged) refreshSnapProfiles();
       return;
     }
     if (incomingVer != null) state.docVersion = Math.max(state.docVersion, incomingVer);
@@ -2484,14 +2529,22 @@
     );
   }
 
-  function statsRows() {
-    const list = orders().filter((o) => matchesFilter(o, state.stats.filter));
-    return list
+  function statsOrders() {
+    return orders().filter((order) => (order.lines || []).some((line) => !isFrozenLine(line)));
+  }
+
+  function statsLines(list) {
+    return (list || [])
       .flatMap((order) => (order.lines || []).map((line) => ({ order, line })))
-      .filter(({ line }) => {
-        if (state.stats.status && line.status !== state.stats.status) return false;
-        return matchesStatsPeriod(line.order_date, state.stats.period);
-      });
+      .filter(({ line }) => !isFrozenLine(line));
+  }
+
+  function statsRows() {
+    const list = statsOrders().filter((o) => matchesFilter(o, state.stats.filter));
+    return statsLines(list).filter(({ line }) => {
+      if (state.stats.status && line.status !== state.stats.status) return false;
+      return matchesStatsPeriod(line.order_date, state.stats.period);
+    });
   }
 
   function renderCalendar() {
@@ -2664,10 +2717,7 @@
   function renderStats() {
     if (!requireDocument()) return;
     const all = statsRows();
-    renderStatsChips(
-      orders().flatMap((order) => (order.lines || []).map((line) => ({ order, line }))),
-      orders()
-    );
+    renderStatsChips(statsLines(statsOrders()), statsOrders());
     const list = [...new Set(all.map((r) => r.order))];
     const agg = all.reduce(
       (acc, { line }) => {
@@ -3140,6 +3190,17 @@
             <button type="button" class="chip" data-preset="invoice">Как счёт</button>
             <button type="button" class="chip" data-preset="full">Всё</button>
           </div>
+          ${
+            state.shareProfiles.length
+              ? `<div class="snap-prof-label">Профили</div>
+          <div class="chips wrap">${state.shareProfiles
+            .map(
+              (profile, i) =>
+                `<button type="button" class="chip ${snapProfileOn(profile) ? "active" : ""}" data-snap-profile="${i}">${esc(profile.name)}</button>`
+            )
+            .join("")}</div>`
+              : ""
+          }
           <div class="chips wrap">${SNAP_FIELDS.map(
             (f) =>
               `<button type="button" class="chip ${state.snap.fields.includes(f.id) ? "active" : ""}" data-field="${f.id}">${esc(f.label)}</button>`
@@ -4517,6 +4578,17 @@
       const preset = e.target.closest("[data-preset]");
       if (preset) {
         state.snap.fields = (SNAP_PRESETS[preset.dataset.preset] || SNAP_PRESETS.invoice).slice();
+        saveSnapPrefs();
+        renderSnapshot();
+        return;
+      }
+      const profileBtn = e.target.closest("[data-snap-profile]");
+      if (profileBtn) {
+        const profile = state.shareProfiles[Number(profileBtn.dataset.snapProfile)];
+        if (!profile) return;
+        state.snap.fields = profile.fields.slice();
+        state.snap.hideLabels = !!profile.hideLabels;
+        state.snap.hideStamp = !!profile.hideStamp;
         saveSnapPrefs();
         renderSnapshot();
         return;

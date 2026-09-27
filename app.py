@@ -199,6 +199,32 @@ def _mobile_url(base: str, token: str) -> str:
     return f"{base.rstrip('/')}/m?t={token}"
 
 
+def _share_profiles() -> list[dict[str, Any]]:
+    """Профили полей снимка для заказчика — те же, что в окне на компьютере."""
+    raw = storage.ui_prefs().get("share_profiles")
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = " ".join(str(item.get("name") or "").split())
+        fields = item.get("fields")
+        if not name or not isinstance(fields, list):
+            continue
+        out.append(
+            {
+                "name": name[:80],
+                "fields": [str(field) for field in fields if isinstance(field, str)],
+                "hideLabels": bool(item.get("hideLabels")),
+                "hideStamp": bool(item.get("hideStamp")),
+            }
+        )
+        if len(out) >= 40:
+            break
+    return out
+
+
 def _qr_svg(url: str) -> str:
     try:
         return qr.svg(url, module=6)
@@ -237,6 +263,19 @@ def _telegram_live_url(chat_id: str = "") -> dict[str, Any]:
     return {"url": url, "access": access_on, "ngrok": ngrok_on}
 
 
+def _set_web_access(enabled: bool) -> dict[str, Any]:
+    """Тумблер веб-интерфейса: то же, что «Включить доступ» в окне «Телефон»."""
+    settings = storage.remote_settings()
+    if enabled:
+        storage.save_remote_settings(autostart=True)
+        REMOTE.start(str(settings.get("token") or ""))
+    else:
+        REMOTE.stop()
+        TUNNEL.stop()
+        storage.save_remote_settings(autostart=False)
+    return _telegram_live_url()
+
+
 def _start_telegram(settings: dict[str, Any] | None = None) -> None:
     cfg = settings or storage.remote_settings()
     token = str(cfg.get("telegram_bot_token") or TELEGRAM.token() or "").strip()
@@ -248,6 +287,7 @@ def _start_telegram(settings: dict[str, Any] | None = None) -> None:
         on_request=_telegram_live_url,
         on_offset=lambda value: storage.save_remote_settings(telegram_offset=value),
         on_rotate=_rotate_remote_link,
+        on_access=_set_web_access,
     )
     _telegram_sync_menu()
 
@@ -398,10 +438,13 @@ def api_theme():
 @app.post("/api/ui-pref")
 def api_ui_pref():
     data = request.get_json(silent=True) or {}
+    key = str(data.get("key") or "")
     try:
-        prefs = storage.set_ui_pref(str(data.get("key") or ""), data.get("value"))
+        prefs = storage.set_ui_pref(key, data.get("value"))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+    if key == "share_profiles":
+        REMOTE.notify()
     return jsonify({"ok": True, "ui_prefs": prefs})
 
 
@@ -889,6 +932,7 @@ def api_remote_pull():
     snap["recent"] = _recent_payload()
     snap["library"] = storage.list_library_reports()
     snap["autosave"] = _autosave_on()
+    snap["share_profiles"] = _share_profiles()
     return jsonify(snap)
 
 
@@ -900,6 +944,7 @@ def api_remote_session():
     snap["library"] = storage.list_library_reports()
     snap["desktop_online"] = bool(REMOTE.clients("desktop"))
     snap["autosave"] = _autosave_on()
+    snap["share_profiles"] = _share_profiles()
     cid = request.args.get("cid") or ""
     name = request.args.get("name") or ""
     if cid:

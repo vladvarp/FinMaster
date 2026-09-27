@@ -340,7 +340,7 @@ def toggle_warnings(info: Any) -> list[str]:
     flags = _status(info)
     notes: list[str] = []
     if not flags.get("access"):
-        notes.append("Чтобы открыть интерфейс на телефоне, включите тумблер доступа в окне <b>Телефон</b>.")
+        notes.append("Нажмите <b>Включить доступ к веб</b> или тумблер «Включить доступ» в окне <b>Телефон</b> на компьютере.")
     elif not flags.get("ngrok"):
         notes.append("Чтобы зайти не из домашнего Wi‑Fi, включите тумблер <b>Через интернет (ngrok)</b>.")
     return notes
@@ -363,7 +363,7 @@ def access_text(url: str, info: Any = None) -> str:
     banner = channel_block(flags, link)
     warns = toggle_warnings(flags)
     if not flags.get("access"):
-        return f"{banner}\n\n" + "\n\n".join(warns) + "\n\nПосле включения нажмите «Ссылка» ещё раз."
+        return f"{banner}\n\n" + "\n\n".join(warns)
     if not link:
         return f"{banner}\n\nПока нет ссылки. Проверьте окно <b>Телефон</b> на компьютере."
     how = "Откроется из любой сети, внутри Telegram." if is_internet(flags, link) else "Откроется только в той же Wi‑Fi."
@@ -379,18 +379,30 @@ def send_welcome(token: str, chat_id: str, info: Any = None) -> None:
     send_html(token, chat_id, welcome_text(info), _menu_keyboard(str(flags.get("url") or "")))
 
 
-def send_access(token: str, chat_id: str, url: str, info: Any = None) -> None:
+def web_access_btn(info: Any, data: str = "Wa") -> dict[str, Any]:
+    on = bool(_status(info).get("access"))
+    return _btn("Выключить доступ к веб" if on else "Включить доступ к веб", data)
+
+
+def access_rows(url: str, info: Any = None) -> list[list[dict[str, Any]]]:
     flags = _status(info)
     link = str(url or flags.get("url") or "").strip()
     can_open = bool(flags.get("access")) and link.startswith(("http://", "https://"))
-    rows = []
+    rows: list[list[dict[str, Any]]] = []
     if can_open:
         rows.append([_open_btn("Открыть приложение" if _web_app_url(link) else "Открыть FinMaster", link)])
         rows.append([_btn("Обновить ссылку", "L"), _btn("Новая ссылка", "N")])
     else:
         rows.append([_btn("Получить ссылку", "L")])
+    rows.append([web_access_btn(flags, "Wa")])
     rows.append([_btn("Отчёты", "R"), _btn("Заказы", "O")])
-    send_html(token, chat_id, access_text(link, flags), _inline(rows), preview=False)
+    return rows
+
+
+def send_access(token: str, chat_id: str, url: str, info: Any = None, message_id: int | None = None) -> None:
+    flags = _status(info)
+    link = str(url or flags.get("url") or "").strip()
+    send_html(token, chat_id, access_text(link, flags), _inline(access_rows(link, flags)), preview=False, message_id=message_id)
 
 
 def send_link(token: str, chat_id: str, url: str, info: Any = None) -> str:
@@ -515,6 +527,7 @@ class TelegramBot:
         self._on_request: Callable[[str], Any] | None = None
         self._on_offset: Callable[[int], None] | None = None
         self._on_rotate: Callable[[], Any] | None = None
+        self._on_access: Callable[[bool], Any] | None = None
         self._skip = True
         self._chats: dict[str, ChatSession] = {}
 
@@ -567,6 +580,7 @@ class TelegramBot:
         on_request: Callable[[str], Any] | None = None,
         on_offset: Callable[[int], None] | None = None,
         on_rotate: Callable[[], Any] | None = None,
+        on_access: Callable[[bool], Any] | None = None,
     ) -> None:
         token = str(token or "").strip()
         with self._lock:
@@ -574,6 +588,7 @@ class TelegramBot:
             self._on_request = on_request
             self._on_offset = on_offset
             self._on_rotate = on_rotate
+            self._on_access = on_access
             if not same:
                 self._token = token
                 self._offset = max(0, int(offset or 0))
@@ -766,6 +781,8 @@ class TelegramBot:
             notice = "Выпускаю новую ссылку…"
         elif data in {"SP", "ST"}:
             notice = "Готовлю снимок…"
+        elif data in {"Wh", "Wa"}:
+            notice = "Переключаю доступ…"
         if qid:
             try:
                 payload = {"callback_query_id": qid}
@@ -790,6 +807,8 @@ class TelegramBot:
             "D": "детали заказа",
             "SP": "снимок PNG",
             "ST": "снимок текстом",
+            "Wh": "доступ к веб",
+            "Wa": "доступ к веб",
         }
         hint = labels.get(data)
         if not hint:
@@ -824,9 +843,31 @@ class TelegramBot:
             session.message_id = int(mid)
         self._dispatch(token, chat_id, data)
 
+    def _toggle_web_access(self, token: str, chat_id: str, home: bool) -> None:
+        info = self._status_for(chat_id)
+        want = not bool(info.get("access"))
+        with self._lock:
+            cb = self._on_access
+        if cb is None:
+            send_html(token, chat_id, "Переключить доступ можно в окне «Телефон» на компьютере.")
+            return
+        try:
+            result = cb(want)
+        except Exception as exc:
+            send_html(token, chat_id, f"Не удалось переключить доступ: {html_esc(str(exc))}")
+            return
+        flags = _status(result if isinstance(result, dict) else None)
+        if home:
+            self._show(token, chat_id, "home")
+            return
+        session = self._chat(chat_id)
+        send_access(token, chat_id, str(flags.get("url") or ""), flags, session.message_id)
+
     def _dispatch(self, token: str, chat_id: str, data: str) -> None:
         session = self._chat(chat_id)
-        if data == "H":
+        if data in {"Wh", "Wa"}:
+            self._toggle_web_access(token, chat_id, data == "Wh")
+        elif data == "H":
             self._show(token, chat_id, "home")
         elif data == "R":
             session.rpage = 0
@@ -1164,7 +1205,8 @@ class TelegramBot:
         return self._screen_home(session)
 
     def _screen_home(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
-        info = {"url": "", "access": REMOTE.enabled, "ngrok": False}
+        settings = storage.remote_settings()
+        info = {"url": "", "access": REMOTE.enabled, "ngrok": bool(settings.get("ngrok"))}
         doc, live = self._doc_of(session)
         title = str(doc.get("title") or "")
         path = session.path or _live_path()
@@ -1174,7 +1216,11 @@ class TelegramBot:
         else:
             current = "Отчёт ещё не выбран — откройте файл из папки FinMaster."
         text = f"{welcome_text(info)}\n\n{current}"
-        rows = [[_btn("Отчёты", "R"), _btn("Заказы", "O")], [_btn("Ссылка на телефон", "L"), _btn("Новая ссылка", "N")]]
+        rows = [
+            [web_access_btn(info, "Wh")],
+            [_btn("Отчёты", "R"), _btn("Заказы", "O")],
+            [_btn("Ссылка на телефон", "L"), _btn("Новая ссылка", "N")],
+        ]
         return text, rows
 
     def _screen_reports(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
