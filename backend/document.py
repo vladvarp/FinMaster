@@ -73,10 +73,11 @@ def _work_pauses(raw: Any, start: str, end: str) -> list[dict[str, Any]]:
             continue
         a = a or b
         b = b or a
+        explicit_end = not item.get("open") and bool(stored_end)
         was_open = bool(item.get("open")) or not stored_end
         open_pause = False
         if not end:
-            if was_open or (b and b >= today):
+            if not explicit_end and (was_open or (b and b >= today)):
                 open_pause = bool(a)
                 b = today
         elif was_open or not stored_end:
@@ -92,6 +93,7 @@ def _work_pauses(raw: Any, start: str, end: str) -> list[dict[str, Any]]:
         if end and a > end:
             continue
         if not end and open_pause and a > today:
+            items.append((a, "", True))
             continue
         if a and (open_pause or (b and a <= b)):
             items.append((a, "" if open_pause else b, open_pause))

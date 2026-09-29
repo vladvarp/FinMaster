@@ -4177,21 +4177,30 @@
     if (pause.open) return true;
     const till = dateDay(pause.end);
     if (!till) return !!dateDay(pause.start);
-    return till >= dayKey(dayStart(new Date()));
+    return false;
   }
 
   function pauseEndKey(order, pause, today = dayStart(new Date())) {
-    if (pauseIsOpen(order, pause)) return dayKey(today);
+    if (pauseIsOpen(order, pause)) {
+      const startKey = dateDay(pause.start);
+      const todayKey = dayKey(today);
+      // Пауза со следующего дня рисуется одним днём у края полосы, стрелка значит «и дальше».
+      if (startKey && startKey > todayKey) return startKey;
+      return todayKey;
+    }
     return dateDay(pause?.end);
   }
 
   function isPaused(order, day) {
     const key = typeof day === "string" ? String(day).slice(0, 10) : dayKey(dayStart(day));
-    const today = dayStart(new Date());
+    const todayKey = dayKey(dayStart(new Date()));
     return workPauses(order).some((pause) => {
       const from = dateDay(pause.start);
-      const till = pauseEndKey(order, pause, today);
-      return from && till && key >= from && key <= till;
+      if (!from || key < from) return false;
+      // Пауза без конца, которая начинается позже сегодня, закрывает все дни вперёд.
+      if (pauseIsOpen(order, pause) && from > todayKey) return true;
+      const till = pauseEndKey(order, pause, dayStart(new Date()));
+      return !!(till && key <= till);
     });
   }
 
@@ -4216,8 +4225,9 @@
       let from = dateDay(pause.start);
       let till = dateDay(pause.end);
       const todayKey = envEnd && !end ? envEnd : dayKey(dayStart(new Date()));
+      const explicitEnd = !pause.open && !!dateDay(pause.end);
       const wasOpen = !!(pause.open || !till);
-      let open = !end && (wasOpen || (till && envEnd && till >= envEnd));
+      let open = !end && !explicitEnd && (wasOpen || (till && envEnd && till >= envEnd));
       if (from && till && till < from) [from, till] = [till, from];
       if (!from && !till && !wasOpen) return;
       from = from || till || envStart;
@@ -4229,7 +4239,10 @@
         if (envEnd && till > envEnd) till = envEnd;
       }
       if (envStart && till < envStart) return;
-      if (envEnd && from > envEnd) return;
+      if (envEnd && from > envEnd) {
+        if (!end && wasOpen) items.push({ start: from, end: "", open: true });
+        return;
+      }
       if (from && till && from <= till) {
         items.push(open ? { start: from, end: merge ? "" : till, open: true } : { start: from, end: till });
       }
@@ -4245,7 +4258,8 @@
       const lastEndKey = last ? (last.open ? envEnd : last.end) : "";
       const lastEnd = lastEndKey ? parseDay(lastEndKey) : null;
       const nextStart = parseDay(pause.start);
-      if (last && lastEnd && nextStart && nextStart <= addDays(lastEnd, 1)) {
+      const futureOpen = !!(pause.open && envEnd && pause.start > envEnd);
+      if (!futureOpen && last && lastEnd && nextStart && nextStart <= addDays(lastEnd, 1)) {
         if (pause.open || last.open) {
           last.end = "";
           last.open = true;
@@ -4256,6 +4270,48 @@
     });
     order.work_pauses = merged;
     return order;
+  }
+
+  function futureOpenPauses(proxy, today) {
+    const todayKey = dayKey(today);
+    return workPauses(proxy).filter((pause) => pauseIsOpen(proxy, pause) && dateDay(pause.start) > todayKey);
+  }
+
+  function toggleLineFromNextDay(proxy) {
+    const today = dayStart(new Date());
+    if (dateDay(proxy?.work_end)) return "";
+    if (workStatus(proxy, today) !== "now") return "";
+    const todayKey = dayKey(today);
+    if (futureOpenPauses(proxy, today).length) {
+      proxy.work_pauses = workPauses(proxy).filter((pause) => !(pauseIsOpen(proxy, pause) && dateDay(pause.start) > todayKey));
+      normalizeWorkPauses(proxy);
+      return "Пауза со следующего дня снята";
+    }
+    if (isPaused(proxy, today)) {
+      let changed = false;
+      proxy.work_pauses = workPauses(proxy).map((pause) => {
+        const from = dateDay(pause.start);
+        if (!from || from > todayKey) return pause;
+        const till = pauseIsOpen(proxy, pause) ? todayKey : dateDay(pause.end);
+        if (!till || todayKey < from || todayKey > till) return pause;
+        if (pauseIsOpen(proxy, pause)) {
+          changed = true;
+          return { start: from, end: todayKey };
+        }
+        if (till === todayKey) {
+          changed = true;
+          return { start: from, end: "", open: true };
+        }
+        return pause;
+      });
+      if (!changed) return "";
+      normalizeWorkPauses(proxy);
+      return isPaused(proxy, addDays(today, 1)) ? "С завтра снова на паузе" : "С завтрашнего дня без паузы";
+    }
+    const key = dayKey(addDays(today, 1));
+    proxy.work_pauses = workPauses(proxy).concat({ start: key, end: "", open: true });
+    normalizeWorkPauses(proxy);
+    return "С завтрашнего дня позиция на паузе";
   }
 
   function addWorkPause(order, day) {
@@ -4776,6 +4832,32 @@
     };
   }
 
+  function openPauseDrawTill(order, today) {
+    let till = null;
+    const todayKey = dayKey(today);
+    workPauses(order).forEach((pause) => {
+      if (!pauseIsOpen(order, pause)) return;
+      const startKey = dateDay(pause.start);
+      if (!startKey || startKey <= todayKey) return;
+      const end = parseDay(startKey);
+      if (!till || end > till) till = end;
+    });
+    return till;
+  }
+
+  function resumeDrawTill(order, today) {
+    if (dateDay(order?.work_end)) return null;
+    const todayKey = dayKey(today);
+    const tomorrow = addDays(today, 1);
+    if (!isPaused(order, today) || isPaused(order, tomorrow)) return null;
+    const closedToday = workPauses(order).some((pause) => dateDay(pause.end) === todayKey && !pauseIsOpen(order, pause));
+    if (!closedToday) return null;
+    let day = tomorrow;
+    const cap = addDays(day, 8);
+    while (day <= cap && isWeekend(day)) day = addDays(day, 1);
+    return day;
+  }
+
   function orderDrawSpan(order, today = dayStart(new Date())) {
     const { start, end } = workSpan(order);
     if (!start && !end) return null;
@@ -4801,6 +4883,10 @@
           if (own.from > till) till = own.from;
         });
       }
+      const ahead = openPauseDrawTill(order, today);
+      if (ahead && ahead > till) till = ahead;
+      const resumed = resumeDrawTill(order, today);
+      if (resumed && resumed > till) till = resumed;
       return { from: start, till };
     }
     if (!start && end) return { from: end, till: end };
@@ -5299,7 +5385,7 @@
         const cut = `${first ? "" : " is-cut-start"}${last ? "" : " is-cut-end"}`;
         return `<div class="gantt-bar tone-${status.tone} ${status.id === "now" ? "is-live" : ""} ${planned ? "is-planned" : ""} ${due && showEnd ? "has-deadline" : ""} ${showOpenEnd ? "is-open-end" : ""}${cut}" data-cal-id="${id}"${lineAttr} data-cal-drag="move" style="--from:${left};--span:${span};--bar:${esc(color)}" title="${esc(tip)}">
           ${showStart ? `<i class="gantt-h start" data-cal-drag="start"></i>` : ""}
-          ${showEnd ? `<i class="gantt-h end" data-cal-drag="end"></i>` : ""}
+          ${showEnd ? `<i class="gantt-h end" data-cal-drag="end"${!isOrderBar && openEnd && showOpenEnd ? ` title="Shift+клик — пауза или работа со следующего дня"` : ""}></i>` : ""}
         </div>`;
       })
       .concat(
@@ -5311,14 +5397,17 @@
           const derived = isOrderBar;
           const showOrderStart = derived && edgeStart?.kind === "pause" && edgeStart.i === i;
           const showOrderEnd = derived && edgeEnd?.kind === "pause" && edgeEnd.i === i;
-          const pauseTip = openPause
-            ? `${label} · пауза с ${calFmtDay(seg.from)} · идёт, пока не снимете${openEnd ? " · выполняется" : ""}${derived ? " · из позиций" : ""}`
-            : `${label} · пауза ${calFmtDay(seg.from)}${span > 1 ? ` — ${calFmtDay(seg.till)}` : ""}${derived ? " · из позиций" : ""}`;
+          const ahead = !derived && pauseIsOpen(target, workPauses(target)[seg.index]) && dayKey(seg.from) > dayKey(win.today);
+          const pauseTip = ahead
+            ? `${label} · с ${calFmtDay(seg.from)} на паузе и дальше`
+            : openPause
+              ? `${label} · пауза с ${calFmtDay(seg.from)} · идёт, пока не снимете${openEnd ? " · выполняется" : ""}${derived ? " · из позиций" : ""}`
+              : `${label} · пауза ${calFmtDay(seg.from)}${span > 1 ? ` — ${calFmtDay(seg.till)}` : ""}${derived ? " · из позиций" : ""}`;
           const orderLenHandles = derived
             ? `${showOrderStart ? `<i class="gantt-h start" data-cal-drag="start"></i>` : ""}${showOrderEnd ? `<i class="gantt-h end" data-cal-drag="end"></i>` : ""}`
             : `${seg.showStart ? `<i class="gantt-h start" data-cal-drag="pause-start"></i>` : "<i></i>"}
             ${seg.showEnd ? `<i class="gantt-h end" data-cal-drag="pause-end"></i>` : "<i></i>"}`;
-          return `<div class="gantt-bar is-pause ${showOpenEnd ? "is-open-end" : ""} ${derived ? "is-derived" : ""} ${showOrderStart || showOrderEnd ? "has-len-h" : ""}" data-cal-id="${id}"${lineAttr} data-pause-i="${seg.index}" ${derived ? "" : `data-cal-drag="pause-move"`} style="--from:${left};--span:${span};--bar:${esc(color)}" title="${esc(pauseTip)}">
+          return `<div class="gantt-bar is-pause ${ahead ? "is-ahead" : ""} ${showOpenEnd ? "is-open-end" : ""} ${derived ? "is-derived" : ""} ${showOrderStart || showOrderEnd ? "has-len-h" : ""}" data-cal-id="${id}"${lineAttr} data-pause-i="${seg.index}" ${derived ? "" : `data-cal-drag="pause-move"`} style="--from:${left};--span:${span};--bar:${esc(color)}" title="${esc(pauseTip)}">
             ${orderLenHandles}
           </div>`;
         })
@@ -5503,7 +5592,7 @@
     <div class="cal-hint hint-i">
       <button type="button" class="info-btn" title="Подсказка по таймлайну" aria-label="Подсказка по таймлайну">i</button>
       <div class="hint-i-pop" role="tooltip">
-        Колесо на навигаторе — масштаб, на датах — период. Полосу двигают, края меняют даты. Стрелка — позиции. Паузы правят у позиций (Shift+клик); у заказа пауза сама, если день пустой или все позиции стоят.
+        Колесо на навигаторе — масштаб, на датах — период. Полосу двигают, края меняют даты. Стрелка — позиции. Паузы правят у позиций (Shift+клик). Shift+клик по правому краю открытой позиции переключает со следующего дня: на паузу или снова в работу. Повторный клик возвращает как было. У заказа пауза сама, если день пустой или все позиции стоят.
       </div>
     </div>`;
   }
@@ -6142,7 +6231,6 @@
     const handle = e.target.closest("[data-cal-drag]");
     if (!handle) return;
     const mode = handle.dataset.calDrag || "";
-    if (e.shiftKey && !mode.startsWith("pause")) return;
     const bar = handle.closest(".gantt-bar[data-cal-id]");
     const order = findOrder(bar?.dataset.calId);
     if (!order) return;
@@ -6150,6 +6238,39 @@
     if (!track) return;
     const lineId = bar.dataset.calLine || "";
     const line = lineId ? findCalendarLine(order, lineId) : null;
+    if (e.shiftKey && (mode === "end" || mode === "pause-end") && line) {
+      const proxy = lineWorkProxy(order, line);
+      const today = dayStart(new Date());
+      if (!dateDay(proxy.work_end) && workStatus(proxy, today) === "now") {
+        e.preventDefault();
+        e.stopPropagation();
+        calSkipClick = true;
+        calendarState().selected = order.id;
+        calendarState().selectedLine = line.id;
+        let message = "";
+        applyCalendarOrder(
+          (item) => {
+            message = toggleLineFromNextDay(item);
+          },
+          { stay: true }
+        );
+        if (message) {
+          const cal = calendarState();
+          const tomorrow = addDays(today, 1);
+          const from = cal.viewFrom instanceof Date ? cal.viewFrom : null;
+          const to = from ? addDays(from, Math.max(1, cal.viewDays || 1) - 1) : null;
+          if (from && to && (tomorrow < from || tomorrow > to)) {
+            cal.viewFrom = addDays(tomorrow, -Math.max(3, Math.floor((cal.viewDays || 14) * 0.55)));
+            cal.anchor = cal.viewFrom;
+            clampTimelineView();
+            renderCalendar();
+          }
+          toast(message);
+        }
+        return;
+      }
+    }
+    if (e.shiftKey && !mode.startsWith("pause")) return;
     if (mode.startsWith("pause") && !line) {
       toast("Паузы заказа считаются из позиций");
       return;
