@@ -5303,6 +5303,27 @@
     clampTimelineView();
   }
 
+  function timelineZoomAtFocus(focus, factor) {
+    const full = clampTimelineView();
+    const idx = Math.max(0, Math.min(full.span - 1, dayDiff(full.from, focus)));
+    timelineZoomAt(full.span ? (idx + 0.5) / full.span : 0.5, factor);
+  }
+
+  function timelineWheelDelta(e) {
+    const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    return delta;
+  }
+
+  function timelineScrollByWheel(delta) {
+    if (!delta) return;
+    const step = Math.max(1, Math.round(Math.abs(delta) / 70));
+    const cal = calendarState();
+    cal.viewFrom = addDays(cal.viewFrom, (delta > 0 ? 1 : -1) * step);
+    clampTimelineView();
+    cal.anchor = cal.viewFrom;
+    renderCalendar();
+  }
+
   function timelineLaneItems(today) {
     const blocks = calendarOrders()
       .map((order) => {
@@ -6645,6 +6666,36 @@
   function onCalWheel(e) {
     if (calendarState().mode !== "timeline") return;
     const nav = e.target.closest("#tl-nav");
+    const gantt = e.target.closest("#gantt-scroll");
+    if (!nav && !gantt) return;
+    if (e.ctrlKey) {
+      e.preventDefault();
+      const delta = e.deltaY || e.deltaX;
+      if (!delta) return;
+      const factor = delta > 0 ? 1.14 : 0.88;
+      if (nav) {
+        const track = $("tl-nav-track");
+        if (!track) return;
+        const rect = track.getBoundingClientRect();
+        const ratio = rect.width ? Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) : 0.5;
+        timelineZoomAt(ratio, factor);
+      } else {
+        const box = gantt.querySelector(".gantt-days") || gantt;
+        const rect = box.getBoundingClientRect();
+        const ratio = rect.width ? Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) : 0.5;
+        const cal = calendarState();
+        const focus = addDays(cal.viewFrom, Math.min(Math.max(cal.viewDays - 1, 0), Math.floor(ratio * cal.viewDays)));
+        timelineZoomAtFocus(focus, factor);
+      }
+      calendarState().anchor = calendarState().viewFrom;
+      renderCalendar();
+      return;
+    }
+    if (e.shiftKey) {
+      e.preventDefault();
+      timelineScrollByWheel(timelineWheelDelta(e));
+      return;
+    }
     const days = e.target.closest(".gantt-days");
     if (!nav && !days) return;
     e.preventDefault();
@@ -6658,14 +6709,7 @@
       renderCalendar();
       return;
     }
-    const delta = e.deltaX || e.deltaY;
-    if (!delta) return;
-    const step = Math.max(1, Math.round(Math.abs(delta) / 70));
-    const cal = calendarState();
-    cal.viewFrom = addDays(cal.viewFrom, (delta > 0 ? 1 : -1) * step);
-    clampTimelineView();
-    cal.anchor = cal.viewFrom;
-    renderCalendar();
+    timelineScrollByWheel(e.deltaX || e.deltaY);
   }
 
   function showGanttDayTip(day, pointer) {
