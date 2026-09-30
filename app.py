@@ -1396,7 +1396,7 @@ def main(splash=None) -> None:
     start_opts = {}
     if os.path.exists(ICON_PATH):
         start_opts["icon"] = ICON_PATH
-    report("Готово", 100)
+    report("Открываю окно…", 100)
     if splash is not None:
         if hasattr(splash, "finish"):
             splash.finish(2.0)

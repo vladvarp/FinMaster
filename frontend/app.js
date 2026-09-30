@@ -48,6 +48,7 @@
     "finmaster.pdfProfiles": "pdf_profiles",
     "finmaster.sharePdf": "share_pdf",
     "finmaster.shareGrand": "share_grand",
+    "finmaster.formulaProfiles": "formula_profiles",
   };
   const prefTimers = {};
   const CLOUD_LAYOUTS = ["galaxy", "orbit", "timeline", "constellation"];
@@ -852,6 +853,7 @@
       work_end: "",
       work_pauses: [],
       frozen: false,
+      notes: "",
     };
   }
 
@@ -1315,7 +1317,7 @@
 
   function matchesSearch(order, line, q) {
     if (!q) return true;
-    const blob = [order.number, order.customer, order.name, order.notes, line?.product, line?.order_type, line?.status]
+    const blob = [order.number, order.customer, order.name, order.notes, line?.product, line?.order_type, line?.status, line?.notes]
       .join(" ")
       .toLowerCase();
     return blob.includes(q);
@@ -2221,6 +2223,21 @@
     return values.map((v) => `<option ${v === selected ? "selected" : ""}>${esc(v)}</option>`).join("");
   }
 
+  const openLineNotes = new Set();
+
+  function lineHasNote(line) {
+    return !!String(line?.notes || "").trim();
+  }
+
+  function lineNoteRow(line, cols) {
+    const open = openLineNotes.has(line.id);
+    return `<tr class="line-note-row${open ? " open" : ""}" data-line="${line.id}">
+      <td colspan="${cols}"><div class="line-note">
+        <textarea data-lk="notes" rows="2" maxlength="2000" placeholder="Комментарий к позиции">${esc(line.notes || "")}</textarea>
+      </div></td>
+    </tr>`;
+  }
+
   const ORDER_COLS = [
     ["drag", "", 28],
     ["order_type", "Тип заказа", 130],
@@ -2235,7 +2252,7 @@
     ["unpaid", "Не оплачено", 110],
     ["total", "Итог", 120],
     ["status", "Статус", 140],
-    ["actions", "", 86],
+    ["actions", "", 118],
   ];
 
   function ensureUi() {
@@ -2447,7 +2464,7 @@
               <tbody>
                 ${
                   income.length
-                    ? income.map((line) => orderLineRow(line, ctx)).join("")
+                    ? income.map((line) => orderLineRow(line, ctx) + lineNoteRow(line, ORDER_COLS.length)).join("")
                     : `<tr><td colspan="${ORDER_COLS.length}" class="empty-cell">${frozen.length ? "Все позиции заморожены — они ниже, в отдельном блоке." : expense.length ? "Доходных позиций нет — только расходы. Нажмите «+ Тип заказа»." : "Нет позиций. Нажмите «+ Тип заказа»."}</td></tr>`
                 }
               </tbody>
@@ -2493,6 +2510,7 @@
       <td class="num computed">${esc(money(t.after))}<div style="color:#94a3b8;font-weight:500;font-size:11px">до скидки ${esc(money(t.total))}</div></td>
       <td><select data-lk="status">${optionList(unique([line.status, ...statusNames]), line.status)}</select></td>
       <td><div class="row-actions">
+        <button type="button" class="note-btn ${lineHasNote(line) ? "has-note" : ""}" data-act="linenotes" title="Комментарий к позиции" aria-label="Комментарий к позиции">i</button>
         <button class="btn icon small" data-act="dupline" title="Дублировать строку (Ctrl+Alt+D)">⧉</button>
         <button class="btn icon small danger" data-act="delline" title="Удалить строку">✕</button>
       </div></td>
@@ -2535,6 +2553,7 @@
       <td><input data-lk="order_date" type="date" value="${esc(dateDay(line.order_date))}" /></td>
       <td class="num computed">−${esc(money(t.cost))}</td>
       <td><div class="row-actions">
+        <button type="button" class="note-btn ${lineHasNote(line) ? "has-note" : ""}" data-act="linenotes" title="Комментарий к позиции" aria-label="Комментарий к позиции">i</button>
         <button class="btn icon small" data-act="dupline" title="Дублировать строку">⧉</button>
         <button class="btn icon small danger" data-act="delline" title="Удалить строку">✕</button>
       </div></td>
@@ -2553,7 +2572,7 @@
             <th></th><th>Тип</th><th>Вид</th><th>За что</th><th>Расчёт</th><th class="num">Кол-во</th><th>Ед.</th>
             <th class="num">Сумма за ед.</th><th>Дата</th><th class="num">Итог</th><th></th>
           </tr></thead>
-          <tbody>${expense.map((line) => orderCostRow(line, ctx)).join("")}</tbody>
+          <tbody>${expense.map((line) => orderCostRow(line, ctx) + lineNoteRow(line, 11)).join("")}</tbody>
         </table>
       </div>
     </div>`;
@@ -2573,7 +2592,7 @@
         <table class="data">
           ${colgroupHtml()}
           <thead><tr>${orderHeadHtml()}</tr></thead>
-          <tbody>${income.map((line) => orderLineRow(line, ctx)).join("")}</tbody>
+          <tbody>${income.map((line) => orderLineRow(line, ctx) + lineNoteRow(line, ORDER_COLS.length)).join("")}</tbody>
         </table>
       </div>`
           : ""
@@ -2586,7 +2605,7 @@
             <th></th><th>Тип</th><th>Вид</th><th>За что</th><th>Расчёт</th><th class="num">Кол-во</th><th>Ед.</th>
             <th class="num">Сумма за ед.</th><th>Дата</th><th class="num">Итог</th><th></th>
           </tr></thead>
-          <tbody>${expense.map((line) => orderCostRow(line, ctx)).join("")}</tbody>
+          <tbody>${expense.map((line) => orderCostRow(line, ctx) + lineNoteRow(line, 11)).join("")}</tbody>
         </table>
       </div>`
           : ""
@@ -5338,7 +5357,7 @@
     return items.map((item) => ({ ...item, lane: laneOf.get(item) || 0, lanes }));
   }
 
-  function ganttBarsHtml(target, win, { order, lineId = "", label = "", color = "", meta } = {}) {
+  function ganttBarsHtml(target, win, { order, lineId = "", label = "", color = "", meta, hasNote = false, noteText = "" } = {}) {
     const status = meta || workStatusMeta(target);
     const segs = orderWorkSegments(target, win.from, win.to, win.today);
     const pauses = orderPauseSegments(target, win.from, win.to, win.today);
@@ -5371,6 +5390,23 @@
       : openEnd
         ? `${label} · выполняется`
         : label;
+    const note = String(noteText || "").trim();
+    let noteKind = "";
+    let noteIndex = -1;
+    if (note) {
+      const marks = segs
+        .map((seg, i) => ({ kind: "work", i, from: seg.from.getTime() }))
+        .concat(pauses.map((seg, i) => ({ kind: "pause", i, from: seg.from.getTime() })));
+      const first = marks.reduce((best, cur) => (!best || cur.from < best.from ? cur : best), null);
+      if (first) {
+        noteKind = first.kind;
+        noteIndex = first.i;
+      }
+    }
+    const noteMark = (kind, i) =>
+      note && noteKind === kind && noteIndex === i
+        ? `<span class="gantt-note-mark" data-tip="${esc(note)}">i</span>`
+        : "";
     const lineAttr = lineId ? ` data-cal-line="${esc(lineId)}"` : "";
     const id = esc(order.id);
     return segs
@@ -5384,6 +5420,7 @@
         const showEnd = isOrderBar ? edgeEnd?.kind === "work" && edgeEnd.i === i : last;
         const cut = `${first ? "" : " is-cut-start"}${last ? "" : " is-cut-end"}`;
         return `<div class="gantt-bar tone-${status.tone} ${status.id === "now" ? "is-live" : ""} ${planned ? "is-planned" : ""} ${due && showEnd ? "has-deadline" : ""} ${showOpenEnd ? "is-open-end" : ""}${cut}" data-cal-id="${id}"${lineAttr} data-cal-drag="move" style="--from:${left};--span:${span};--bar:${esc(color)}" title="${esc(tip)}">
+          ${noteMark("work", i)}
           ${showStart ? `<i class="gantt-h start" data-cal-drag="start"></i>` : ""}
           ${showEnd ? `<i class="gantt-h end" data-cal-drag="end"${!isOrderBar && openEnd && showOpenEnd ? ` title="Shift+клик — пауза или работа со следующего дня"` : ""}></i>` : ""}
         </div>`;
@@ -5408,6 +5445,7 @@
             : `${seg.showStart ? `<i class="gantt-h start" data-cal-drag="pause-start"></i>` : "<i></i>"}
             ${seg.showEnd ? `<i class="gantt-h end" data-cal-drag="pause-end"></i>` : "<i></i>"}`;
           return `<div class="gantt-bar is-pause ${ahead ? "is-ahead" : ""} ${showOpenEnd ? "is-open-end" : ""} ${derived ? "is-derived" : ""} ${showOrderStart || showOrderEnd ? "has-len-h" : ""}" data-cal-id="${id}"${lineAttr} data-pause-i="${seg.index}" ${derived ? "" : `data-cal-drag="pause-move"`} style="--from:${left};--span:${span};--bar:${esc(color)}" title="${esc(pauseTip)}">
+            ${noteMark("pause", i)}
             ${orderLenHandles}
           </div>`;
         })
@@ -5512,9 +5550,15 @@
         const due = orderDeadline(order, win.today);
         const label = `${orderNum(order)} ${orderTitle(order)}`.trim();
         const color = calendarBarColor(order);
-        const bars = ganttBarsHtml(order, win, { order, label, color });
-        if (!bars) return "";
         const workLines = calendarWorkLines(order);
+        const bars = ganttBarsHtml(order, win, {
+          order,
+          label,
+          color,
+          hasNote: lineHasNote(order),
+          noteText: String(order.notes || "").trim(),
+        });
+        if (!bars) return "";
         const open = calendarLinesOpen(order.id);
         const expand = workLines.length
           ? `<button type="button" class="gantt-expand ${open ? "is-open" : ""}" data-cal-expand="${esc(order.id)}" title="${open ? "Скрыть позиции" : "Показать позиции"} · или правый клик по строке заказа" aria-label="${open ? "Скрыть позиции" : "Показать позиции"}" aria-expanded="${open}">${ganttExpandIcon()}</button>`
@@ -5532,6 +5576,8 @@
                   label: `${label} · ${lineLabel}`,
                   color: calendarLineBarColor(order, line),
                   meta: lineMeta,
+                  hasNote: lineHasNote(line),
+                  noteText: String(line.notes || "").trim(),
                 });
                 const days = workDurationDays(proxy);
                 return `<div class="gantt-row is-line ${calSelectedClass(order.id, line.id)} ${linePaused ? "is-paused" : ""}" data-cal-id="${esc(order.id)}" data-cal-line="${esc(line.id)}">
@@ -5708,6 +5754,13 @@
               : `${esc(selected.customer || "без заказчика")}${workDurationDays(selected) ? ` · ${workDurationDays(selected)} дн.` : ""}`
           }</div>
           ${due ? `<div class="cal-due-line">Дедлайн ${esc(calFmtDay(due, true))}</div>` : ""}
+          ${
+            selectedLine
+              ? `<label class="cal-line-note">Комментарий к позиции
+                  <textarea id="cal-line-note" data-cal-line-note rows="3" maxlength="2000" placeholder="Что важно по этой позиции">${esc(selectedLine.notes || "")}</textarea>
+                </label>`
+              : ""
+          }
           <div class="cal-dates">
             <div class="field"><label>Начало</label><input type="date" data-cal-field="work_start" value="${esc(dateDay(workTarget.work_start))}" /></div>
             <div class="field"><label>Конец</label><input type="date" data-cal-field="work_end" value="${esc(dateDay(workTarget.work_end))}" /></div>
@@ -5986,6 +6039,17 @@
       cashCopy(calendarPlanText(), "План работ скопирован");
       return;
     }
+    const noteBtn = e.target.closest("[data-cal-note]");
+    if (noteBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const cal = calendarState();
+      cal.selected = noteBtn.dataset.calNote || "";
+      cal.selectedLine = noteBtn.dataset.calNoteLine || "";
+      renderCalendar();
+      requestAnimationFrame(() => $("cal-line-note")?.focus());
+      return;
+    }
     const actBtn = e.target.closest("[data-cal-act]");
     if (actBtn) {
       onCalendarAct(actBtn.dataset.calAct, actBtn);
@@ -6175,6 +6239,20 @@
       const month = Number($("cal-month-pick")?.value ?? cal.anchor.getMonth());
       const year = Number($("cal-year-pick")?.value ?? cal.anchor.getFullYear());
       cal.anchor = new Date(year, month, 1);
+      renderCalendar();
+      return;
+    }
+    if (e.target.dataset.calLineNote != null) {
+      const cal = calendarState();
+      const order = findOrder(cal.selected);
+      const line = findCalendarLine(order, cal.selectedLine);
+      if (!line) return;
+      const next = String(e.target.value || "").slice(0, 2000);
+      if ((line.notes || "") !== next) {
+        historyCommit();
+        line.notes = next;
+        markDirty();
+      }
       renderCalendar();
       return;
     }
@@ -6686,6 +6764,15 @@
     $("view-calendar")?.addEventListener("click", onCalClick);
     $("view-calendar")?.addEventListener("contextmenu", onCalContextMenu);
     $("view-calendar")?.addEventListener("change", onCalChange);
+    $("view-calendar")?.addEventListener("input", (e) => {
+      if (e.target.id !== "cal-line-note") return;
+      const cal = calendarState();
+      const order = findOrder(cal.selected);
+      const line = findCalendarLine(order, cal.selectedLine);
+      if (!line) return;
+      line.notes = String(e.target.value || "").slice(0, 2000);
+      markDirty();
+    });
     $("cal-board")?.addEventListener("pointerdown", onCalPointerDown);
     $("cal-board")?.addEventListener("pointermove", onGanttDayHover);
     $("cal-board")?.addEventListener("pointerleave", onGanttDayHover);
@@ -7412,6 +7499,16 @@
         if (state.view === "orders") renderOrders();
         else updateOrdersSummary?.();
       },
+      askConfirm,
+      formulaProfiles: () => {
+        try {
+          const list = JSON.parse(localStorage.getItem("finmaster.formulaProfiles") || "[]");
+          return Array.isArray(list) ? list : [];
+        } catch {
+          return [];
+        }
+      },
+      saveFormulaProfiles: (list) => persistPref("finmaster.formulaProfiles", JSON.stringify(list), { now: true }),
       copyText: async (text) => {
         if (state.desktop) await apiPost("/api/clipboard-text", { text });
         else if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
@@ -9929,7 +10026,11 @@
       }
     } else {
       const prevKind = key === "order_type" ? typeKind(line.order_type) : "";
-      line[key] = e.target.type === "number" ? num(e.target.value) : e.target.value;
+      line[key] = key === "notes" ? String(e.target.value || "").slice(0, 2000) : e.target.type === "number" ? num(e.target.value) : e.target.value;
+      if (key === "notes") {
+        const on = lineHasNote(line);
+        card.querySelectorAll(`[data-line="${cssEscape(line.id)}"] .note-btn`).forEach((btn) => btn.classList.toggle("has-note", on));
+      }
       if (key === "product") {
         if (e.type === "change") ensureProduct(line.product, line.unit, line.price, productKindOfLine(line), line.tax_percent);
         applyLineProductDefaults(tr, line);
@@ -12459,6 +12560,19 @@
     if (!card) return;
     const order = findOrder(card.dataset.order);
     if (!order) return;
+    if (act === "linenotes") {
+      const tr = e.target.closest("[data-line]");
+      const id = tr?.dataset.line;
+      if (!id) return;
+      const open = openLineNotes.has(id);
+      if (open) openLineNotes.delete(id);
+      else openLineNotes.add(id);
+      const noteRow = card.querySelector(`tr.line-note-row[data-line="${cssEscape(id)}"]`);
+      tr.querySelector(".note-btn")?.classList.toggle("open", !open);
+      noteRow?.classList.toggle("open", !open);
+      if (!open) requestAnimationFrame(() => noteRow?.querySelector("textarea")?.focus());
+      return;
+    }
     if (act === "notes") {
       const panel = card.querySelector(".order-notes");
       const btn = card.querySelector(".note-btn");

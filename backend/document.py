@@ -1077,6 +1077,7 @@ def normalize_document(raw: Any) -> dict[str, Any]:
                     line["work_start"] = ls
                     line["work_end"] = le
                     line["frozen"] = bool(line.get("frozen"))
+                    line["notes"] = _clip_text(line.get("notes"), 2000)
                     env_s, env_e = ls or start, le or end
                     line["work_pauses"] = _work_pauses(line.get("work_pauses"), env_s, env_e) if (env_s or env_e) else []
             cleaned_orders.append(order)

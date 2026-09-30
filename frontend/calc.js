@@ -2772,6 +2772,230 @@
     </article>`;
   }
 
+  const LS_FORMULA_PROFILES = "finmaster.formulaProfiles";
+  let formulaProfilesMem = null;
+  let formulaProfileNodeId = "";
+
+  function loadFormulaProfiles() {
+    if (formulaProfilesMem) return formulaProfilesMem;
+    const fromApi = api?.formulaProfiles?.();
+    const raw = Array.isArray(fromApi) ? fromApi : [];
+    const cleaned = raw
+      .map((item) => {
+        const name = String(item?.name || "").trim().replace(/\s+/g, " ").slice(0, 40);
+        const inputs = (Array.isArray(item?.inputs) ? item.inputs : [])
+          .map((letter) => String(letter || "").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 1))
+          .filter(Boolean)
+          .slice(0, 26);
+        const outputs = (Array.isArray(item?.outputs) ? item.outputs : [])
+          .map((out) => ({
+            name: String(out?.name || "").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 1),
+            expr: String(out?.expr || "0").slice(0, 200),
+          }))
+          .filter((out) => out.name)
+          .slice(0, MATH_MAX);
+        if (!name || !inputs.length || !outputs.length) return null;
+        return { name, inputs, outputs };
+      })
+      .filter(Boolean)
+      .slice(0, 40);
+    formulaProfilesMem = cleaned;
+    return cleaned;
+  }
+
+  function storeFormulaProfiles(list) {
+    formulaProfilesMem = list.slice();
+    try {
+      localStorage.setItem(LS_FORMULA_PROFILES, JSON.stringify(formulaProfilesMem));
+    } catch {
+      /* ignore */
+    }
+    api?.saveFormulaProfiles?.(formulaProfilesMem);
+  }
+
+  function formulaSnapshot(node) {
+    return {
+      inputs: (node.inputs || []).map((port) => String(port.name || "").trim()),
+      outputs: (node.outputs || []).map((port) => ({
+        name: String(port.name || "").trim(),
+        expr: String(port.expr || "0"),
+      })),
+    };
+  }
+
+  function formulaProfileKey(profile) {
+    return JSON.stringify({
+      inputs: profile.inputs,
+      outputs: profile.outputs.map((out) => ({ name: out.name, expr: out.expr })),
+    });
+  }
+
+  function formulaProfilesHtml(node) {
+    const list = loadFormulaProfiles();
+    const current = formulaProfileKey(formulaSnapshot(node));
+    const selected = list.findIndex((profile) => formulaProfileKey(profile) === current);
+    const empty = !list.length;
+    const options = empty
+      ? `<option value="">Создайте профиль</option>`
+      : `<option value="" hidden ${selected < 0 ? "selected" : ""}></option>${list
+          .map(
+            (profile, i) =>
+              `<option value="${i}" ${i === selected ? "selected" : ""}>${esc(profile.name)}</option>`
+          )
+          .join("")}`;
+    return `<div class="calc-fprof">
+      <select data-formula-profile aria-label="Профили формулы" title="${empty ? "Профилей пока нет. Создайте новый кнопкой +" : "Подставить сохранённую формулу"}"${empty ? " disabled" : ""}>
+        ${options}
+      </select>
+      <button type="button" class="calc-mini" data-formula-profile-save title="Сохранить текущую формулу как профиль">+</button>
+      <button type="button" class="calc-mini" data-formula-profile-del title="Удалить профили">×</button>
+    </div>`;
+  }
+
+  function applyFormulaProfile(node, bp, profile) {
+    const oldIn = new Set((node.inputs || []).map((port) => port.id));
+    const oldOut = new Set((node.outputs || []).map((port) => port.id));
+    bp.links = (bp.links || []).filter((link) => {
+      if (link.to === node.id && oldIn.has(link.toPort)) return false;
+      if (link.from === node.id && oldOut.has(link.fromPort)) return false;
+      return true;
+    });
+    const used = new Set();
+    const take = (raw) => {
+      let letter = String(raw || "")
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z]/g, "")
+        .slice(0, 1);
+      if (!letter || used.has(letter)) letter = nextLetter(used) || "A";
+      used.add(letter);
+      return letter;
+    };
+    node.inputs = profile.inputs.slice(0, 26).map((name) => ({ id: uid(), name: take(name) }));
+    if (!node.inputs.length) node.inputs = [{ id: uid(), name: take("A") }];
+    node.outputs = profile.outputs.slice(0, MATH_MAX).map((out) => ({
+      id: uid(),
+      name: take(out.name),
+      expr: String(out.expr || "0").slice(0, 200),
+    }));
+    if (!node.outputs.length) node.outputs = [{ id: uid(), name: take("C"), expr: "0" }];
+  }
+
+  function openFormulaProfileSave(node) {
+    formulaProfileNodeId = node.id;
+    const modal = $("formula-profile-modal");
+    const input = $("formula-profile-name");
+    if (!modal || !input) return;
+    input.value = "";
+    modal.classList.add("open");
+    setTimeout(() => input.focus(), 30);
+  }
+
+  function closeFormulaProfileSave() {
+    $("formula-profile-modal")?.classList.remove("open");
+    formulaProfileNodeId = "";
+  }
+
+  function commitFormulaProfileSave() {
+    const node = formulaNode(formulaProfileNodeId);
+    const input = $("formula-profile-name");
+    const name = String(input?.value || "").trim().replace(/\s+/g, " ").slice(0, 40);
+    if (!node) {
+      closeFormulaProfileSave();
+      return;
+    }
+    if (!name) {
+      api?.toast?.("Введите название профиля");
+      input?.focus();
+      return;
+    }
+    const list = loadFormulaProfiles().slice();
+    const key = name.toLocaleLowerCase("ru");
+    const idx = list.findIndex((profile) => profile.name.toLocaleLowerCase("ru") === key);
+    const entry = { name, ...formulaSnapshot(node) };
+    if (idx >= 0) list[idx] = entry;
+    else list.push(entry);
+    storeFormulaProfiles(list);
+    closeFormulaProfileSave();
+    render();
+    api?.toast?.(idx >= 0 ? `Профиль «${name}» обновлён` : `Профиль «${name}» сохранён`);
+  }
+
+  function openFormulaProfileDelete() {
+    const modal = $("formula-profile-del-modal");
+    const box = $("formula-profile-del-list");
+    if (!modal || !box) return;
+    const list = loadFormulaProfiles();
+    box.innerHTML = list.length
+      ? list
+          .map(
+            (profile, i) =>
+              `<label class="formula-profile-pick"><input type="checkbox" data-formula-del="${i}" /> <span>${esc(profile.name)}</span></label>`
+          )
+          .join("")
+      : `<p class="formula-profile-empty">Сохранённых профилей пока нет.</p>`;
+    const ok = $("formula-profile-del-ok");
+    if (ok) ok.disabled = !list.length;
+    modal.classList.add("open");
+  }
+
+  function closeFormulaProfileDelete() {
+    $("formula-profile-del-modal")?.classList.remove("open");
+  }
+
+  async function commitFormulaProfileDelete() {
+    const picked = [...document.querySelectorAll("#formula-profile-del-list [data-formula-del]:checked")].map((el) =>
+      Number(el.dataset.formulaDel)
+    );
+    if (!picked.length) {
+      api?.toast?.("Отметьте профили, которые нужно удалить");
+      return;
+    }
+    const list = loadFormulaProfiles();
+    const names = picked.map((i) => list[i]?.name).filter(Boolean);
+    const ok = api?.askConfirm
+      ? await api.askConfirm({
+          title: names.length === 1 ? "Удалить профиль?" : "Удалить профили?",
+          text:
+            names.length === 1
+              ? `Профиль «${names[0]}» будет удалён. Текущая формула не изменится.`
+              : `Будут удалены: ${names.map((name) => `«${name}»`).join(", ")}. Текущая формула не изменится.`,
+          ok: "Удалить",
+          danger: true,
+        })
+      : false;
+    if (!ok) return;
+    const drop = new Set(picked);
+    storeFormulaProfiles(list.filter((_, i) => !drop.has(i)));
+    closeFormulaProfileDelete();
+    render();
+    api?.toast?.(names.length === 1 ? `Профиль «${names[0]}» удалён` : `Удалено профилей: ${names.length}`);
+  }
+
+  function bindFormulaProfileModals() {
+    $("formula-profile-cancel")?.addEventListener("click", closeFormulaProfileSave);
+    $("formula-profile-ok")?.addEventListener("click", commitFormulaProfileSave);
+    $("formula-profile-name")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        commitFormulaProfileSave();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closeFormulaProfileSave();
+      }
+    });
+    $("formula-profile-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("formula-profile-modal")) closeFormulaProfileSave();
+    });
+    $("formula-profile-del-cancel")?.addEventListener("click", closeFormulaProfileDelete);
+    $("formula-profile-del-ok")?.addEventListener("click", () => {
+      commitFormulaProfileDelete();
+    });
+    $("formula-profile-del-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("formula-profile-del-modal")) closeFormulaProfileDelete();
+    });
+  }
+
   function formulaNodeHtml(node, bp, graph) {
     const bad = graph.errors.has(node.id);
     const linked = usedInputPorts(node.id, bp.links);
@@ -2781,6 +3005,7 @@
         <span>Формула</span>
         <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
       </header>
+      ${formulaProfilesHtml(node)}
       <div class="calc-ports">
         <div class="calc-sec">Входы</div>
         ${(node.inputs || [])
@@ -4170,6 +4395,7 @@
   function bind() {
     if (session.bound) return;
     session.bound = true;
+    bindFormulaProfileModals();
     const root = $("view-calculator");
     const board = $("calc-board");
     if (!root || !board) return;
@@ -4569,6 +4795,14 @@
         render();
         return;
       }
+      if (e.target.closest("[data-formula-profile-save]") && node.type === "formula") {
+        openFormulaProfileSave(node);
+        return;
+      }
+      if (e.target.closest("[data-formula-profile-del]") && node.type === "formula") {
+        openFormulaProfileDelete();
+        return;
+      }
       if (e.target.closest("[data-add-in]") && node.type === "formula") {
         if ((node.inputs || []).length >= 26) return;
         const used = formulaLetterSet(node);
@@ -4763,6 +4997,17 @@
         return;
       }
       if (node.type !== "formula") return;
+      if (e.target.dataset.formulaProfile != null) {
+        const raw = String(e.target.value || "");
+        if (!raw) return;
+        const profile = loadFormulaProfiles()[Number(raw)];
+        if (!profile) return;
+        applyFormulaProfile(node, bp, profile);
+        dirty();
+        render();
+        api?.toast?.(`Профиль «${profile.name}»`);
+        return;
+      }
       if (e.target.dataset.inName) {
         const port = node.inputs.find((item) => item.id === e.target.dataset.inName);
         if (port) {

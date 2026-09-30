@@ -542,7 +542,7 @@ class Splash:
     def finish(self, hold: float = 2.0) -> None:
         if self._closed:
             return
-        self.step("Готово", 100)
+        self.set_progress(100)
         deadline = time.perf_counter() + 8.0
         while not self._closed and self._display < 99.4 and time.perf_counter() < deadline:
             self.pump()
@@ -550,6 +550,7 @@ class Splash:
         self._display = 100.0
         self._progress = 100.0
         self._draw_bar(100.0)
+        self.step("Готово")
         self.pump()
         end = time.perf_counter() + max(0.0, hold)
         while not self._closed and time.perf_counter() < end:

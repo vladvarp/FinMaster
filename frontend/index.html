@@ -728,6 +728,29 @@
     </div>
   </div>
 
+  <div class="modal" id="formula-profile-modal">
+    <div class="modal-card confirm-modal">
+      <h3>Новый профиль формулы</h3>
+      <label class="field"><span>Название</span><input id="formula-profile-name" maxlength="40" placeholder="Например, Скидка" autocomplete="off" spellcheck="false" /></label>
+      <div class="modal-actions">
+        <button class="btn" type="button" id="formula-profile-cancel">Отмена</button>
+        <button class="btn primary" type="button" id="formula-profile-ok">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="formula-profile-del-modal">
+    <div class="modal-card confirm-modal">
+      <h3>Удалить профили</h3>
+      <p>Отметьте профили. Удаление произойдёт только после подтверждения.</p>
+      <div class="formula-profile-list" id="formula-profile-del-list"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" id="formula-profile-del-cancel">Отмена</button>
+        <button class="btn danger" type="button" id="formula-profile-del-ok">Удалить выбранные</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal" id="confirm-modal">
     <div class="modal-card confirm-modal">
       <h3 id="confirm-title">Подтверждение</h3>

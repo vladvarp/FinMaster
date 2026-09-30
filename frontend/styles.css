@@ -784,6 +784,82 @@ input[type="search"]::-webkit-search-decoration {
   border-color: var(--accent-2);
   box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
 }
+.row-actions .note-btn {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  font-size: 14px;
+}
+.line-note-row { display: none; }
+.line-note-row.open { display: table-row; }
+.line-note { padding: 8px 12px 12px; background: #f8fafc; }
+.line-note textarea {
+  width: 100%;
+  min-height: 58px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+.line-note textarea:focus {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
+}
+html[data-theme="dark"] .line-note { background: #121a2b; }
+html[data-theme="dark"] .line-note textarea { background: #1b2538; color: var(--ink); }
+.gantt-note-mark {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  z-index: 5;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  border-radius: 50%;
+  background: #fff;
+  color: #0f766e;
+  font: italic 700 11px/16px Georgia, "Times New Roman", serif;
+  text-align: center;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.18);
+  cursor: help;
+}
+.gantt-row.is-line .gantt-note-mark {
+  left: 4px;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  font-size: 10px;
+  line-height: 14px;
+}
+.cal-line-note {
+  display: block;
+  margin: 8px 0 10px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.cal-line-note textarea {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  min-height: 72px;
+  resize: vertical;
+  text-transform: none;
+  letter-spacing: 0;
+  font: inherit;
+  font-weight: 450;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--card);
+}
 
 .order-globals {
   display: grid;
@@ -5830,6 +5906,48 @@ html[data-theme="dark"] .calc-mini-toggle {
 }
 .calc-node.is-scheme { width: 220px; }
 .calc-node.is-formula { width: 360px; }
+.calc-fprof {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 4px;
+  align-items: center;
+  padding: 6px 8px 2px;
+}
+.calc-fprof select {
+  min-width: 0;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.calc-fprof select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+#formula-profile-modal .modal-actions,
+#formula-profile-del-modal .modal-actions { margin-top: 18px; }
+.formula-profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 280px;
+  overflow: auto;
+  margin: 8px 0 4px;
+}
+.formula-profile-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 14px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink);
+}
+.formula-profile-empty { margin: 8px 0; color: var(--muted); }
 .calc-node.is-filter,
 .calc-node.is-dashboard {
   width: 384px;
