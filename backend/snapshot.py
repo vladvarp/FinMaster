@@ -9,6 +9,7 @@ from typing import Any
 from backend.finance import (
     customer_org,
     fmt_date,
+    is_frozen,
     line_kind,
     line_totals,
     lines_totals,
@@ -181,6 +182,49 @@ THEMES = {
 
 MONEY_COLS = {"price", "total", "paid", "unpaid"}
 
+PDF_DEFAULTS = {
+    "orient": "portrait",
+    "margin": "normal",
+    "headerEach": True,
+    "pageNums": True,
+    "crop": False,
+    "orderTitles": False,
+    "tableAlign": "stretch",
+    "numAlign": "right",
+    "headAlign": "auto",
+    "grand": True,
+    "font": "segoe",
+    "scale": 100,
+    "density": "normal",
+    "zebra": True,
+    "grid": False,
+    "bold": True,
+}
+PDF_MARGINS = {"narrow": 22, "normal": 36, "wide": 56}
+
+
+def normalize_pdf_opts(raw: Any = None) -> dict[str, Any]:
+    src = raw if isinstance(raw, dict) else {}
+    out: dict[str, Any] = {}
+    for key, default in PDF_DEFAULTS.items():
+        value = src.get(key, default)
+        if isinstance(default, bool):
+            out[key] = bool(value)
+        elif key == "orient":
+            out[key] = "landscape" if str(value) == "landscape" else "portrait"
+        elif key == "margin":
+            out[key] = str(value) if str(value) in PDF_MARGINS else "normal"
+        elif key == "scale":
+            try:
+                out[key] = max(60, min(200, int(value)))
+            except (TypeError, ValueError):
+                out[key] = 100
+        elif key in {"tableAlign", "numAlign", "headAlign", "font", "density"}:
+            out[key] = str(value or default)
+        else:
+            out[key] = value if value is not None else default
+    return out
+
 
 def normalize_fields(fields: Any) -> list[str]:
     ids = [str(item) for item in (fields or []) if str(item) in FIELD_BY_ID]
@@ -328,13 +372,16 @@ def totals_text(
 def income_blocks(
     doc: dict[str, Any], blocks: list[dict[str, Any]], fields: list[str] | None = None
 ) -> list[dict[str, Any]]:
-    """Расходы уходят заказчику только при включённом поле «Налоги и затраты»."""
-    if fields is not None and "expenses" in fields:
-        return [block for block in blocks or [] if block.get("lines")]
+    """Живые позиции для заказчика; расходы — только при поле «Налоги и затраты»."""
     types = type_index(doc)
+    with_expenses = fields is not None and "expenses" in fields
     out: list[dict[str, Any]] = []
     for block in blocks or []:
-        lines = [line for line in block.get("lines") or [] if not line_kind(line, types)]
+        lines = [
+            line
+            for line in block.get("lines") or []
+            if isinstance(line, dict) and not is_frozen(line) and (with_expenses or not line_kind(line, types))
+        ]
         if lines:
             out.append({**block, "lines": lines})
     return out
@@ -613,4 +660,54 @@ def render_png(
     image = image.resize((width * 2, height * 2), Image.Resampling.LANCZOS)
     buf = io.BytesIO()
     image.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def render_pdf(
+    doc: dict[str, Any],
+    blocks: list[dict[str, Any]],
+    fields: list[str],
+    theme_name: str = "teal",
+    hide_labels: bool = False,
+    hide_stamp: bool = False,
+    title: str = "",
+    opts: dict[str, Any] | None = None,
+) -> bytes:
+    """PDF по снимку: учитывает шаблон (ориентация, поля, масштаб, обрезка)."""
+    png = render_png(doc, blocks, fields, theme_name, hide_labels, hide_stamp, title)
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise RuntimeError("Для PDF нужна библиотека Pillow. Перезапустите FinMaster — она установится сама.") from exc
+    image = Image.open(io.BytesIO(png)).convert("RGB")
+    cfg = normalize_pdf_opts(opts)
+    dpi = 150.0
+    if cfg.get("crop"):
+        buf = io.BytesIO()
+        image.save(buf, format="PDF", resolution=dpi)
+        return buf.getvalue()
+
+    portrait = cfg.get("orient") != "landscape"
+    page_w_pt = 595.28 if portrait else 841.89
+    page_h_pt = 841.89 if portrait else 595.28
+    page_w = max(1, int(round(page_w_pt * dpi / 72.0)))
+    page_h = max(1, int(round(page_h_pt * dpi / 72.0)))
+    margin_pt = PDF_MARGINS.get(str(cfg.get("margin") or "normal"), 36)
+    margin = max(0, int(round(margin_pt * dpi / 72.0)))
+    scale = max(0.6, min(2.0, float(cfg.get("scale") or 100) / 100.0))
+    avail_w = max(1, page_w - margin * 2)
+    avail_h = max(1, page_h - margin * 2)
+    fit = min(avail_w / image.width, avail_h / image.height) * scale
+    fit = min(fit, 4.0)
+    new_w = max(1, int(round(image.width * fit)))
+    new_h = max(1, int(round(image.height * fit)))
+    if new_w > avail_w or new_h > avail_h:
+        shrink = min(avail_w / new_w, avail_h / new_h)
+        new_w = max(1, int(round(new_w * shrink)))
+        new_h = max(1, int(round(new_h * shrink)))
+    resized = image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    page = Image.new("RGB", (page_w, page_h), (255, 255, 255))
+    page.paste(resized, (margin + (avail_w - new_w) // 2, margin + (avail_h - new_h) // 2))
+    buf = io.BytesIO()
+    page.save(buf, format="PDF", resolution=dpi)
     return buf.getvalue()

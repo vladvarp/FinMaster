@@ -9542,6 +9542,8 @@
       }
     });
     $("share-check-all")?.addEventListener("click", () => setAllShareChecks(true));
+    $("share-check-debt")?.addEventListener("click", () => setShareChecksByPay("debt"));
+    $("share-check-paid")?.addEventListener("click", () => setShareChecksByPay("paid"));
     $("share-check-none")?.addEventListener("click", () => setAllShareChecks(false));
     $("share-profile-save")?.addEventListener("click", saveShareProfile);
     $("share-profile-name")?.addEventListener("keydown", (e) => {
@@ -10776,6 +10778,33 @@
     renderSharePreview();
   }
 
+  function shareLinePayMatch(line, order, mode) {
+    if (!line || isFrozenLine(line) || isExpenseLine(line)) return false;
+    const tot = lineTotals(line, order);
+    if (mode === "debt") return tot.unpaid > 0.005;
+    if (mode === "paid") return tot.after > 0.005 && tot.unpaid <= 0.005;
+    return true;
+  }
+
+  /** Отметить в снимке только позиции с долгом или только оплаченные. */
+  function setShareChecksByPay(mode) {
+    document.querySelectorAll("#share-orders .share-order").forEach((block) => {
+      const order = findOrder(block.dataset.order);
+      let any = false;
+      block.querySelectorAll("[data-share-line]").forEach((el) => {
+        const line = (order?.lines || []).find((item) => item.id === el.dataset.shareLine);
+        const on = shareLinePayMatch(line, order, mode);
+        el.checked = on;
+        if (on) any = true;
+      });
+      const orderCb = block.querySelector("[data-share-order]");
+      if (orderCb) orderCb.checked = any;
+      if (any) block.classList.remove("collapsed");
+    });
+    applyShareSearch();
+    renderSharePreview();
+  }
+
   /* ---- Профили полей снимка (общие для всех отчётов) ---- */
 
   const LS_SHARE_PROFILES = "finmaster.shareProfiles";
@@ -11528,15 +11557,19 @@
   }
 
   /** Раскладка PDF в пунктах (1/72 дюйма): список страниц с командами рисования. */
-  function sharePdfLayout(o) {
-    const blocks = selectedShareBlocks();
+  function sharePdfLayout(o, ctx) {
+    const blocks = Array.isArray(ctx?.blocks) && ctx.blocks.length ? ctx.blocks : selectedShareBlocks();
     if (!blocks.length) return null;
-    const fields = currentShareFields();
-    const hideLabels = shareHideLabels();
-    const hideStamp = shareHideStamp();
+    const fields = Array.isArray(ctx?.fields) && ctx.fields.length
+      ? SHARE_FIELDS.map((f) => f.id).filter((id) => ctx.fields.includes(id))
+      : currentShareFields();
+    const hideLabels = ctx?.hideLabels != null ? !!ctx.hideLabels : shareHideLabels();
+    const hideStamp = ctx?.hideStamp != null ? !!ctx.hideStamp : shareHideStamp();
     const cols = SHARE_FIELDS.filter((c) => c.kind === "col" && fields.includes(c.id));
-    const title = shareTitleText(blocks);
-    const theme = shareTheme();
+    const customTitle = String(ctx?.title || "").trim();
+    const title = customTitle || shareTitleText(blocks);
+    const theme =
+      ctx?.themeKey && SHARE_THEMES[ctx.themeKey] ? SHARE_THEMES[ctx.themeKey] : shareTheme();
     const portrait = o.orient !== "landscape";
     const W = portrait ? 595.28 : 841.89;
     const H = portrait ? 841.89 : 595.28;
@@ -11913,6 +11946,66 @@
     const step = 0x8000;
     for (let i = 0; i < bytes.length; i += step) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
     return btoa(bin);
+  }
+
+  async function buildSharePdfBase64(opts, ctx) {
+    const layout = sharePdfLayout(pdfOptsSnapshot(opts || {}), ctx || null);
+    if (!layout) throw new Error("Выберите заказы и строки для PDF");
+    if (!window.FinPdf?.build) throw new Error("модуль PDF не загружен");
+    const pages = layout.pages.map((p) => ({
+      canvas: renderPdfPageCanvas(layout, p, PDF_EXPORT_SCALE),
+      widthPt: layout.W,
+      heightPt: p.h || layout.H,
+    }));
+    const bytes = await window.FinPdf.build(pages, { title: layout.title });
+    return bytesToBase64(bytes);
+  }
+
+  let pdfJobBusy = false;
+  let pdfJobTimer = 0;
+
+  async function pollDesktopPdfJob() {
+    if (!state.desktop || pdfJobBusy) return;
+    pdfJobBusy = true;
+    try {
+      const job = await apiGet("/api/desktop/pdf-job");
+      if (!job?.id) return;
+      const blocks = Array.isArray(job.blocks)
+        ? job.blocks
+            .map((block) => {
+              const order = block?.order;
+              const lines = Array.isArray(block?.lines) ? block.lines.filter((line) => line && typeof line === "object") : [];
+              if (!order || typeof order !== "object" || !lines.length) return null;
+              return { order, lines };
+            })
+            .filter(Boolean)
+        : [];
+      try {
+        const base64 = await buildSharePdfBase64(job.opts, {
+          blocks,
+          fields: job.fields,
+          hideLabels: job.hide_labels,
+          hideStamp: job.hide_stamp,
+          title: job.title,
+          themeKey: job.theme,
+        });
+        await apiPost("/api/desktop/pdf-job", { id: job.id, base64 });
+      } catch (err) {
+        await apiPost("/api/desktop/pdf-job", { id: job.id, error: String(err?.message || err || "ошибка PDF") });
+      }
+    } catch {
+      /* окно ещё не готово или сервер перезапускается */
+    } finally {
+      pdfJobBusy = false;
+    }
+  }
+
+  function watchDesktopPdfJobs() {
+    if (!state.desktop || pdfJobTimer) return;
+    pdfJobTimer = setInterval(() => {
+      pollDesktopPdfJob();
+    }, 900);
+    pollDesktopPdfJob();
   }
 
   async function saveSharePdf() {
@@ -13796,6 +13889,7 @@
         if (remote.enabled && !remote.polling) remotePoll();
       }
       watchRemoteAccess();
+      watchDesktopPdfJobs();
     } catch {
       state.desktop = false;
       state.autosave = localStorage.getItem(LS_AUTOSAVE) === "true";

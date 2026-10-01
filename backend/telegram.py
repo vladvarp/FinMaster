@@ -17,6 +17,7 @@ from backend import storage
 from backend.document import normalize_document
 from backend.finance import (
     html_esc,
+    is_frozen,
     money_decimals,
     line_kind,
     line_totals,
@@ -28,6 +29,7 @@ from backend.finance import (
 )
 from backend.remote import SESSION as REMOTE
 from backend import snapshot as snapmod
+from backend.pdf_bridge import PDF_BRIDGE
 
 
 ASK_LINK = {
@@ -45,6 +47,86 @@ ASK_ORDERS = {"заказы", "/orders"}
 ASK_MENU = {"/start", "/help", "меню", "start", "help"}
 
 PAGE = 6
+SNAP_THEMES = list(snapmod.THEMES.keys())
+
+
+def _share_profiles() -> list[dict[str, Any]]:
+    """Пользовательские профили полей снимка — те же, что в окне на компьютере."""
+    raw = storage.ui_prefs().get("share_profiles")
+    if not isinstance(raw, list):
+        return []
+    known = set(snapmod.FIELD_IDS)
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = " ".join(str(item.get("name") or "").split())
+        fields = [str(field) for field in (item.get("fields") or []) if isinstance(field, str) and field in known]
+        if not name or not fields:
+            continue
+        out.append(
+            {
+                "name": name[:80],
+                "fields": snapmod.normalize_fields(fields),
+                "hideLabels": bool(item.get("hideLabels")),
+                "hideStamp": bool(item.get("hideStamp")),
+            }
+        )
+        if len(out) >= 40:
+            break
+    return out
+
+
+def _pdf_opts(raw: Any = None) -> dict[str, Any]:
+    return snapmod.normalize_pdf_opts(raw)
+
+
+def _saved_pdf_opts() -> dict[str, Any]:
+    raw = storage.ui_prefs().get("share_pdf")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            raw = {}
+    return _pdf_opts(raw if isinstance(raw, dict) else {})
+
+
+def _pdf_profiles() -> list[dict[str, Any]]:
+    """Профили оформления PDF — те же, что в окне PDF на компьютере."""
+    raw = storage.ui_prefs().get("pdf_profiles")
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = " ".join(str(item.get("name") or "").split())
+        opts = item.get("opts")
+        if not name or not isinstance(opts, dict):
+            continue
+        out.append({"name": name[:80], "opts": _pdf_opts(opts)})
+        if len(out) >= 40:
+            break
+    return out
+
+
+def _pdf_profile_on(opts: dict[str, Any], profile: dict[str, Any]) -> bool:
+    cur = _pdf_opts(opts)
+    saved = profile.get("opts") or {}
+    return all(str(cur.get(key)) == str(saved.get(key)) for key in snapmod.PDF_DEFAULTS)
+
+
+def _chunk_btns(items: list[dict[str, str]], cols: int = 2) -> list[list[dict[str, str]]]:
+    rows: list[list[dict[str, str]]] = []
+    row: list[dict[str, str]] = []
+    for item in items:
+        row.append(item)
+        if len(row) >= cols:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return rows
 
 
 def _call(token: str, method: str, payload: dict[str, Any] | None = None, timeout: float = 15) -> dict[str, Any]:
@@ -511,6 +593,9 @@ class ChatSession:
             "title": "",
             "order_ids": [],
             "skip": {},
+            "pay_filter": "all",
+            "pdf_opts": _saved_pdf_opts(),
+            "ready": False,
         }
 
 
@@ -763,7 +848,7 @@ class TelegramBot:
         if session.awaiting == "title":
             session.snap["title"] = text[:80]
             session.awaiting = ""
-            self._show(token, chat_id, "snap")
+            self._show(token, chat_id, "look")
             return
         if low in ASK_LINK:
             send_access(token, chat_id, str(info.get("url") or ""), info)
@@ -803,7 +888,7 @@ class TelegramBot:
             notice = "Новая ссылка…"
         elif data == "Ny":
             notice = "Выпускаю новую ссылку…"
-        elif data in {"SP", "ST"}:
+        elif data in {"SP", "ST", "Sdp"}:
             notice = "Готовлю снимок…"
         elif data in {"Wh", "Wa"}:
             notice = "Переключаю доступ…"
@@ -827,9 +912,14 @@ class TelegramBot:
             "Ny": "подтверждение новой ссылки",
             "Nn": "отмена новой ссылки",
             "S": "снимок",
+            "SB": "снимок",
+            "So": "оформление снимка",
+            "Sv": "профили снимка",
             "PC": "открыть на ПК",
             "D": "детали заказа",
             "SP": "снимок PNG",
+            "Sd": "шаблон PDF",
+            "Sdp": "снимок PDF",
             "ST": "снимок текстом",
             "Wh": "доступ к веб",
             "Wa": "доступ к веб",
@@ -922,7 +1012,19 @@ class TelegramBot:
         elif data == "PC":
             self._open_on_pc(token, chat_id)
         elif data == "S":
-            self._prepare_snap(session)
+            self._prepare_snap(session, reset=True)
+            self._show(token, chat_id, "snap")
+        elif data == "SB":
+            self._show(token, chat_id, "snap")
+        elif data == "So":
+            self._show(token, chat_id, "look")
+        elif data == "Sv":
+            self._show(token, chat_id, "profiles")
+        elif data.startswith("Sx:"):
+            self._apply_share_profile(session, int(data[3:] or -1))
+            self._show(token, chat_id, "snap")
+        elif data.startswith("Sy:"):
+            self._apply_pay_filter(session, data[3:] if data[3:] in {"all", "debt", "paid"} else "all")
             self._show(token, chat_id, "snap")
         elif data.startswith("Sp:"):
             preset = data[3:]
@@ -931,13 +1033,13 @@ class TelegramBot:
             self._show(token, chat_id, "snap")
         elif data.startswith("St:"):
             session.snap["theme"] = snapmod.theme_key(data[3:])
-            self._show(token, chat_id, "snap")
+            self._show(token, chat_id, "look")
         elif data == "Shl":
             session.snap["hide_labels"] = not session.snap.get("hide_labels")
-            self._show(token, chat_id, "snap")
+            self._show(token, chat_id, "look")
         elif data == "Shs":
             session.snap["hide_stamp"] = not session.snap.get("hide_stamp")
-            self._show(token, chat_id, "snap")
+            self._show(token, chat_id, "look")
         elif data == "SF":
             self._show(token, chat_id, "fields")
         elif data.startswith("Sf:"):
@@ -948,25 +1050,70 @@ class TelegramBot:
         elif data.startswith("Sn:"):
             self._toggle_line(session, int(data[3:] or -1))
             self._show(token, chat_id, "lines")
+        elif data == "La":
+            self._select_lines_all(session, True)
+            self._show(token, chat_id, "lines")
+        elif data == "Ln":
+            self._select_lines_all(session, False)
+            self._show(token, chat_id, "lines")
+        elif data == "Li":
+            self._invert_lines(session)
+            self._show(token, chat_id, "lines")
+        elif data.startswith("Ls:"):
+            self._select_lines_by_status(session, int(data[3:] or -1))
+            self._show(token, chat_id, "lines")
+        elif data == "LG":
+            self._finish_lines(token, chat_id)
         elif data == "SA":
             self._show(token, chat_id, "add")
         elif data.startswith("Sa:"):
             self._toggle_order(session, int(data[3:] or -1))
             self._show(token, chat_id, "add")
+        elif data == "Aa":
+            self._select_orders_all(session, True)
+            self._show(token, chat_id, "add")
+        elif data == "An":
+            self._select_orders_all(session, False)
+            self._show(token, chat_id, "add")
+        elif data == "Ai":
+            self._invert_orders(session)
+            self._show(token, chat_id, "add")
+        elif data.startswith("As:"):
+            self._select_orders_by_status(session, int(data[3:] or -1))
+            self._show(token, chat_id, "add")
+        elif data == "AG":
+            self._finish_orders(token, chat_id)
         elif data == "SC":
             session.awaiting = "title"
             send_html(token, chat_id, "Напишите заголовок снимка одним сообщением. Пустое не отправляйте — отмена через «Меню».")
         elif data == "SX":
             session.snap["title"] = ""
-            self._show(token, chat_id, "snap")
+            self._show(token, chat_id, "look")
         elif data == "SP":
             self._send_snap(token, chat_id, "png")
+        elif data == "Sd":
+            session.snap["pdf_opts"] = _pdf_opts(session.snap.get("pdf_opts") or _saved_pdf_opts())
+            self._show(token, chat_id, "pdf")
+        elif data == "Sdp":
+            self._send_snap(token, chat_id, "pdf")
+        elif data.startswith("Pf:"):
+            self._apply_pdf_profile(session, int(data[3:] or -1))
+            self._show(token, chat_id, "pdf")
         elif data == "ST":
             self._send_snap(token, chat_id, "text")
         elif data == "B":
-            back = {"fields": "snap", "lines": "snap", "add": "snap", "snap": "order", "order": "orders", "orders": "home", "reports": "home"}.get(
-                session.screen, "home"
-            )
+            back = {
+                "fields": "snap",
+                "lines": "snap",
+                "add": "snap",
+                "look": "snap",
+                "profiles": "snap",
+                "pdf": "snap",
+                "snap": "order",
+                "order": "orders",
+                "orders": "home",
+                "reports": "home",
+            }.get(session.screen, "home")
             self._show(token, chat_id, back)
         else:
             self._show(token, chat_id, session.screen or "home")
@@ -1030,19 +1177,83 @@ class TelegramBot:
         REMOTE.issue_command("open", path=os.path.abspath(session.path))
         send_html(token, chat_id, "Прошу компьютер открыть этот отчёт.")
 
-    def _prepare_snap(self, session: ChatSession) -> None:
+    def _prepare_snap(self, session: ChatSession, *, reset: bool = False) -> None:
         doc, _ = self._doc_of(session)
         ui = doc.get("ui") if isinstance(doc.get("ui"), dict) else {}
-        saved = ui.get("share_fields") if isinstance(ui.get("share_fields"), list) else []
-        if saved:
-            session.snap["fields"] = snapmod.normalize_fields(saved)
-        session.snap["theme"] = snapmod.theme_key(str(ui.get("share_theme") or session.snap.get("theme") or "teal"))
-        if session.order_id:
-            session.snap["order_ids"] = [session.order_id]
-        elif not session.snap.get("order_ids"):
-            session.snap["order_ids"] = list(session.orders[:1])
+        if reset or not session.snap.get("ready"):
+            saved = ui.get("share_fields") if isinstance(ui.get("share_fields"), list) else []
+            if saved:
+                session.snap["fields"] = snapmod.normalize_fields(saved)
+            else:
+                session.snap["fields"] = list(snapmod.PRESETS["invoice"])
+            session.snap["theme"] = snapmod.theme_key(str(ui.get("share_theme") or session.snap.get("theme") or "teal"))
+            session.snap["hide_labels"] = False
+            session.snap["hide_stamp"] = False
+            session.snap["title"] = ""
+            session.snap["skip"] = {}
+            session.snap["pay_filter"] = "all"
+            session.snap["pdf_opts"] = _saved_pdf_opts()
+            if session.order_id:
+                session.snap["order_ids"] = [session.order_id]
+            else:
+                session.snap["order_ids"] = list(session.orders[:1])
+            session.snap["ready"] = True
+            return
+        ids = [str(item) for item in (session.snap.get("order_ids") or []) if item]
+        if session.order_id and session.order_id not in ids:
+            ids = [session.order_id] + ids
+        if not ids and session.orders:
+            ids = list(session.orders[:1])
+        session.snap["order_ids"] = ids
         session.snap.setdefault("skip", {})
-        session.snap["title"] = session.snap.get("title") or ""
+        session.snap["fields"] = snapmod.normalize_fields(session.snap.get("fields"))
+        session.snap["theme"] = snapmod.theme_key(str(session.snap.get("theme") or "teal"))
+
+    def _apply_share_profile(self, session: ChatSession, index: int) -> None:
+        profiles = _share_profiles()
+        if index < 0 or index >= len(profiles):
+            return
+        profile = profiles[index]
+        session.snap["fields"] = list(profile["fields"])
+        session.snap["hide_labels"] = bool(profile.get("hideLabels"))
+        session.snap["hide_stamp"] = bool(profile.get("hideStamp"))
+
+    def _line_pay_match(
+        self, line: dict[str, Any], order: dict[str, Any], types: dict[str, str] | None, mode: str
+    ) -> bool:
+        if mode not in {"debt", "paid"}:
+            return True
+        if line_kind(line, types):
+            return False
+        tot = line_totals(line, types, order)
+        if mode == "debt":
+            return tot["unpaid"] > 0.005
+        return tot["after"] > 0.005 and tot["unpaid"] <= 0.005
+
+    def _apply_pay_filter(self, session: ChatSession, mode: str) -> None:
+        session.snap["pay_filter"] = mode if mode in {"all", "debt", "paid"} else "all"
+        session.snap["skip"] = {}
+        if session.snap["pay_filter"] == "all":
+            return
+        doc, _ = self._doc_of(session)
+        ids: list[str] = []
+        for order in doc.get("orders") or []:
+            if not isinstance(order, dict):
+                continue
+            if self._snap_lines(doc, order, session):
+                oid = str(order.get("id") or "")
+                if oid:
+                    ids.append(oid)
+        session.snap["order_ids"] = ids
+
+    def _apply_pdf_profile(self, session: ChatSession, index: int) -> None:
+        if index < 0:
+            session.snap["pdf_opts"] = _saved_pdf_opts()
+            return
+        profiles = _pdf_profiles()
+        if index >= len(profiles):
+            return
+        session.snap["pdf_opts"] = _pdf_opts(profiles[index].get("opts"))
 
     def _toggle_field(self, session: ChatSession, index: int) -> None:
         if index < 0 or index >= len(snapmod.FIELD_IDS):
@@ -1058,29 +1269,110 @@ class TelegramBot:
     def _snap_lines(
         self, doc: dict[str, Any], order: dict[str, Any] | None, session: ChatSession | None = None
     ) -> list[dict[str, Any]]:
-        """Позиции для снимка: налоги и затраты доступны, только если включено поле «Налоги и затраты»."""
+        """Позиции для снимка: без замороженных; налоги/затраты — только с полем «Налоги и затраты»; долг/оплата — по фильтру снимка."""
         with_expenses = "expenses" in snapmod.normalize_fields((session.snap if session else {}).get("fields"))
+        pay = str((session.snap if session else {}).get("pay_filter") or "all")
         types = type_index(doc)
         return [
             line
             for line in ((order or {}).get("lines") or [])
-            if isinstance(line, dict) and (with_expenses or not line_kind(line, types))
+            if isinstance(line, dict)
+            and not is_frozen(line)
+            and (with_expenses or not line_kind(line, types))
+            and self._line_pay_match(line, order or {}, types, pay)
         ]
+
+    def _snap_line_entries(self, session: ChatSession, doc: dict[str, Any]) -> list[dict[str, Any]]:
+        """Плоский список позиций по всем выбранным заказам."""
+        entries: list[dict[str, Any]] = []
+        for order_id in session.snap.get("order_ids") or []:
+            order = self._find_order(doc, order_id)
+            if not order:
+                continue
+            label = str(order.get("number") or order.get("name") or "заказ")
+            for index, line in enumerate(self._snap_lines(doc, order, session)):
+                line_id = str(line.get("id") or f"i{index}")
+                entries.append({"order_id": order_id, "order_label": label, "line": line, "line_id": line_id})
+        return entries
 
     def _toggle_line(self, session: ChatSession, index: int) -> None:
         doc, _ = self._doc_of(session)
-        order = self._find_order(doc, session.order_id)
-        lines = self._snap_lines(doc, order, session)
-        if index < 0 or index >= len(lines):
+        entries = self._snap_line_entries(session, doc)
+        if index < 0 or index >= len(entries):
             return
-        line_id = str(lines[index].get("id") or f"i{index}")
+        entry = entries[index]
         skip: dict[str, list[str]] = session.snap.setdefault("skip", {})
-        current = set(skip.get(session.order_id) or [])
-        if line_id in current:
-            current.remove(line_id)
+        current = set(skip.get(entry["order_id"]) or [])
+        if entry["line_id"] in current:
+            current.remove(entry["line_id"])
         else:
-            current.add(line_id)
-        skip[session.order_id] = list(current)
+            current.add(entry["line_id"])
+        skip[entry["order_id"]] = list(current)
+
+    def _line_statuses(self, entries: list[dict[str, Any]]) -> list[str]:
+        seen: list[str] = []
+        for entry in entries:
+            status = str((entry.get("line") or {}).get("status") or "").strip()
+            if status and status not in seen:
+                seen.append(status)
+        return seen
+
+    def _select_lines_all(self, session: ChatSession, on: bool) -> None:
+        doc, _ = self._doc_of(session)
+        entries = self._snap_line_entries(session, doc)
+        skip: dict[str, list[str]] = session.snap.setdefault("skip", {})
+        if on:
+            for entry in entries:
+                banned = set(skip.get(entry["order_id"]) or [])
+                banned.discard(entry["line_id"])
+                skip[entry["order_id"]] = list(banned)
+            return
+        by_order: dict[str, set[str]] = {}
+        for entry in entries:
+            by_order.setdefault(entry["order_id"], set()).add(entry["line_id"])
+        for order_id, ids in by_order.items():
+            skip[order_id] = list(ids)
+
+    def _invert_lines(self, session: ChatSession) -> None:
+        doc, _ = self._doc_of(session)
+        entries = self._snap_line_entries(session, doc)
+        skip: dict[str, list[str]] = session.snap.setdefault("skip", {})
+        by_order: dict[str, list[str]] = {}
+        for entry in entries:
+            by_order.setdefault(entry["order_id"], []).append(entry["line_id"])
+        for order_id, ids in by_order.items():
+            banned = set(skip.get(order_id) or [])
+            skip[order_id] = [line_id for line_id in ids if line_id not in banned]
+
+    def _select_lines_by_status(self, session: ChatSession, index: int) -> None:
+        doc, _ = self._doc_of(session)
+        entries = self._snap_line_entries(session, doc)
+        statuses = self._line_statuses(entries)
+        if index < 0 or index >= len(statuses):
+            return
+        want = statuses[index]
+        skip: dict[str, list[str]] = session.snap.setdefault("skip", {})
+        for entry in entries:
+            if str((entry.get("line") or {}).get("status") or "").strip() != want:
+                continue
+            banned = set(skip.get(entry["order_id"]) or [])
+            banned.discard(entry["line_id"])
+            skip[entry["order_id"]] = list(banned)
+
+    def _lines_selected_count(self, session: ChatSession) -> int:
+        doc, _ = self._doc_of(session)
+        entries = self._snap_line_entries(session, doc)
+        skip = session.snap.get("skip") or {}
+        return sum(1 for entry in entries if entry["line_id"] not in set(skip.get(entry["order_id"]) or []))
+
+    def _finish_lines(self, token: str, chat_id: str) -> None:
+        session = self._chat(chat_id)
+        if self._lines_selected_count(session) < 1:
+            session.snap["pick_error"] = "Выберите хотя бы одну позицию."
+            self._show(token, chat_id, "lines")
+            return
+        session.snap.pop("pick_error", None)
+        self._show(token, chat_id, "snap")
 
     def _toggle_order(self, session: ChatSession, index: int) -> None:
         if index < 0 or index >= len(session.orders):
@@ -1088,11 +1380,55 @@ class TelegramBot:
         order_id = session.orders[index]
         ids = list(session.snap.get("order_ids") or [])
         if order_id in ids:
-            if len(ids) > 1:
-                ids = [item for item in ids if item != order_id]
+            ids = [item for item in ids if item != order_id]
         else:
             ids.append(order_id)
         session.snap["order_ids"] = ids
+
+    def _order_list_statuses(self, session: ChatSession, doc: dict[str, Any], orders: list[dict[str, Any]]) -> list[str]:
+        seen: list[str] = []
+        for order in orders:
+            for line in self._snap_lines(doc, order, session):
+                status = str(line.get("status") or "").strip()
+                if status and status not in seen:
+                    seen.append(status)
+        return seen
+
+    def _select_orders_all(self, session: ChatSession, on: bool) -> None:
+        if on:
+            session.snap["order_ids"] = list(session.orders)
+        else:
+            session.snap["order_ids"] = []
+
+    def _invert_orders(self, session: ChatSession) -> None:
+        chosen = set(session.snap.get("order_ids") or [])
+        session.snap["order_ids"] = [oid for oid in session.orders if oid not in chosen]
+
+    def _select_orders_by_status(self, session: ChatSession, index: int) -> None:
+        doc, _ = self._doc_of(session)
+        orders = self._filtered_orders(session, doc)
+        session.orders = [str(order.get("id") or "") for order in orders]
+        statuses = self._order_list_statuses(session, doc, orders)
+        if index < 0 or index >= len(statuses):
+            return
+        want = statuses[index]
+        chosen = set(session.snap.get("order_ids") or [])
+        for order in orders:
+            oid = str(order.get("id") or "")
+            if not oid:
+                continue
+            if any(str(line.get("status") or "").strip() == want for line in self._snap_lines(doc, order, session)):
+                chosen.add(oid)
+        session.snap["order_ids"] = [oid for oid in session.orders if oid in chosen]
+
+    def _finish_orders(self, token: str, chat_id: str) -> None:
+        session = self._chat(chat_id)
+        if not (session.snap.get("order_ids") or []):
+            session.snap["pick_error"] = "Выберите хотя бы один заказ."
+            self._show(token, chat_id, "add")
+            return
+        session.snap.pop("pick_error", None)
+        self._show(token, chat_id, "snap")
 
     def _doc_of(self, session: ChatSession) -> tuple[dict[str, Any], bool]:
         path = session.path or _live_path()
@@ -1176,6 +1512,7 @@ class TelegramBot:
         title = str(session.snap.get("title") or "")
         hide_labels = bool(session.snap.get("hide_labels"))
         hide_stamp = bool(session.snap.get("hide_stamp"))
+        caption = snapmod.default_title(blocks, title)
         try:
             if kind == "png":
                 png = snapmod.render_png(
@@ -1187,14 +1524,28 @@ class TelegramBot:
                     hide_stamp,
                     title,
                 )
-                caption = snapmod.default_title(blocks, title)
                 send_photo(token, chat_id, png, caption, "finmaster-snapshot.png")
+            elif kind == "pdf":
+                opts = _pdf_opts(session.snap.get("pdf_opts") or _saved_pdf_opts())
+                payload = {
+                    "blocks": [{"order": block["order"], "lines": block["lines"]} for block in blocks],
+                    "fields": fields,
+                    "theme": str(session.snap.get("theme") or "teal"),
+                    "hide_labels": hide_labels,
+                    "hide_stamp": hide_stamp,
+                    "title": title,
+                    "opts": opts,
+                    "path": session.path or "",
+                }
+                pdf = PDF_BRIDGE.request(payload, timeout=90.0)
+                name = f"{(caption or 'Заказы')[:80]}.pdf".replace("/", "_").replace("\\", "_")
+                send_document(token, chat_id, pdf, name, caption, "application/pdf")
             else:
                 text = snapmod.render_text(doc, blocks, fields, hide_labels, hide_stamp, title)
                 if len(text) < 3800:
                     send_html(token, chat_id, f"<pre>{html_esc(text)}</pre>")
                 else:
-                    send_document(token, chat_id, text.encode("utf-8"), "finmaster-snapshot.txt", snapmod.default_title(blocks, title))
+                    send_document(token, chat_id, text.encode("utf-8"), "finmaster-snapshot.txt", caption)
         except Exception as exc:
             send_html(token, chat_id, html_esc(str(exc) or "Не удалось собрать снимок."))
 
@@ -1220,6 +1571,12 @@ class TelegramBot:
             return self._screen_order(session)
         if screen == "snap":
             return self._screen_snap(session)
+        if screen == "look":
+            return self._screen_look(session)
+        if screen == "profiles":
+            return self._screen_profiles(session)
+        if screen == "pdf":
+            return self._screen_pdf(session)
         if screen == "fields":
             return self._screen_fields(session)
         if screen == "lines":
@@ -1392,66 +1749,193 @@ class TelegramBot:
         fields = snapmod.normalize_fields(session.snap.get("fields"))
         theme = snapmod.theme_key(str(session.snap.get("theme") or "teal"))
         preset = next((key for key, ids in snapmod.PRESETS.items() if ids == fields), "")
+        profiles = _share_profiles()
+        active_profile = ""
+        field_set = set(fields)
+        for profile in profiles:
+            if (
+                set(profile["fields"]) == field_set
+                and bool(profile.get("hideLabels")) == bool(session.snap.get("hide_labels"))
+                and bool(profile.get("hideStamp")) == bool(session.snap.get("hide_stamp"))
+            ):
+                active_profile = profile["name"]
+                break
         names = [str(block["order"].get("number") or block["order"].get("name") or "заказ") for block in blocks]
         lines_n = sum(len(block["lines"]) for block in blocks)
+        set_label = active_profile or snapmod.PRESET_LABELS.get(preset, "свой набор")
+        pay = str(session.snap.get("pay_filter") or "all")
+        pay_label = {"all": "все позиции", "debt": "только с долгом", "paid": "только оплаченные"}.get(pay, "все позиции")
         text = (
-            f"<b>Снимок</b>\n"
+            f"<b>Снимок для заказчика</b>\n"
             f"{html_esc(', '.join(names) or 'нет заказов')} · позиций: {lines_n}\n"
-            f"набор: {html_esc(snapmod.PRESET_LABELS.get(preset, 'свой'))}\n"
+            f"позиции: {pay_label}\n"
+            f"набор: {html_esc(set_label)}\n"
+            f"тема: {html_esc(snapmod.THEMES[theme]['label'])} · "
+            f"подписи: {'скрыты' if session.snap.get('hide_labels') else 'видны'} · "
+            f"дата: {'скрыта' if session.snap.get('hide_stamp') else 'есть'}\n"
+            f"заголовок: {html_esc(session.snap.get('title') or 'как на компьютере')}"
+        )
+        rows: list[list[dict[str, str]]] = []
+        if profiles:
+            if len(profiles) <= 4:
+                rows.extend(
+                    _chunk_btns(
+                        [
+                            _btn(("· " if p["name"] == active_profile else "") + _clip(p["name"], 28), f"Sx:{i}")
+                            for i, p in enumerate(profiles)
+                        ],
+                        2,
+                    )
+                )
+            else:
+                rows.append([_btn(f"Профили ({len(profiles)})" + (f" · {active_profile}" if active_profile else ""), "Sv")])
+        rows.append(
+            [
+                _btn("· Все" if pay == "all" else "Все", "Sy:all"),
+                _btn("· Долг" if pay == "debt" else "Долг", "Sy:debt"),
+                _btn("· Оплата" if pay == "paid" else "Оплата", "Sy:paid"),
+            ]
+        )
+        rows.append([_btn("Для работы", "Sp:work"), _btn("Как счёт", "Sp:invoice")])
+        rows.append([_btn("Коротко", "Sp:short"), _btn("Все поля", "Sp:full")])
+        rows.append([_btn("Поля", "SF"), _btn("Позиции", "SN"), _btn("Заказы", "SA")])
+        rows.append([_btn("Оформление", "So")])
+        rows.append([_btn("Картинка PNG", "SP"), _btn("PDF", "Sd"), _btn("Текст", "ST")])
+        rows.append([_btn("К заказу", "D"), _btn("К заказам", "O")])
+        return text, rows
+
+    def _screen_pdf(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
+        profiles = _pdf_profiles()
+        opts = _pdf_opts(session.snap.get("pdf_opts") or _saved_pdf_opts())
+        session.snap["pdf_opts"] = opts
+        active = ""
+        for profile in profiles:
+            if _pdf_profile_on(opts, profile):
+                active = profile["name"]
+                break
+        orient = "альбом" if opts.get("orient") == "landscape" else "книга"
+        margin = {"narrow": "узкие", "normal": "обычные", "wide": "широкие"}.get(str(opts.get("margin")), "обычные")
+        text = (
+            "<b>PDF для заказчика</b>\n"
+            f"шаблон: {html_esc(active or 'текущие настройки с компьютера')}\n"
+            f"{orient} · поля {margin} · масштаб {int(opts.get('scale') or 100)}%"
+            + (" · обрезка" if opts.get("crop") else "")
+        )
+        rows: list[list[dict[str, str]]] = []
+        default_on = not active
+        rows.append([_btn(("· " if default_on else "") + "Как на компьютере", "Pf:-1")])
+        if profiles:
+            for i, profile in enumerate(profiles):
+                on = profile["name"] == active
+                rows.append([_btn(("· " if on else "") + _clip(profile["name"], 56), f"Pf:{i}")])
+        else:
+            text += "\n\nСохранённых шаблонов PDF пока нет — используются настройки из окна PDF на компьютере."
+        rows.append([_btn("Отправить PDF", "Sdp")])
+        rows.append([_btn("Назад", "SB")])
+        return text, rows
+
+    def _screen_look(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
+        theme = snapmod.theme_key(str(session.snap.get("theme") or "teal"))
+        text = (
+            "<b>Оформление снимка</b>\n"
             f"тема: {html_esc(snapmod.THEMES[theme]['label'])}\n"
             f"подписи: {'скрыты' if session.snap.get('hide_labels') else 'видны'} · "
             f"дата: {'скрыта' if session.snap.get('hide_stamp') else 'есть'}\n"
             f"заголовок: {html_esc(session.snap.get('title') or 'как на компьютере')}"
         )
-        rows = [
-            [_btn("Для работы", "Sp:work"), _btn("Как счёт", "Sp:invoice")],
-            [_btn("Коротко", "Sp:short"), _btn("Все поля", "Sp:full")],
-            [_btn("Изумруд", "St:teal"), _btn("Графит", "St:graphite"), _btn("Индиго", "St:indigo")],
-            [_btn("Золото", "St:gold"), _btn("Вишня", "St:rose"), _btn("Минимал", "St:mono"), _btn("Ночь", "St:night")],
+        theme_btns = [
+            _btn(("· " if key == theme else "") + snapmod.THEMES[key]["label"], f"St:{key}") for key in SNAP_THEMES
+        ]
+        rows = _chunk_btns(theme_btns, 3)
+        rows.append(
             [
                 _btn("Подписи ✓" if not session.snap.get("hide_labels") else "Подписи", "Shl"),
                 _btn("Дата ✓" if not session.snap.get("hide_stamp") else "Дата", "Shs"),
-            ],
-            [_btn("Поля", "SF"), _btn("Позиции", "SN"), _btn("Заказы", "SA")],
-            [_btn("Заголовок", "SC"), _btn("Сбросить заголовок", "SX")],
-            [_btn("Картинка PNG", "SP"), _btn("Текст", "ST")],
-            [_btn("К заказу", "D"), _btn("К заказам", "O")],
-        ]
+            ]
+        )
+        rows.append([_btn("Заголовок", "SC"), _btn("Сбросить заголовок", "SX")])
+        rows.append([_btn("Готово", "SB")])
         return text, rows
+
+    def _screen_profiles(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
+        profiles = _share_profiles()
+        fields = snapmod.normalize_fields(session.snap.get("fields"))
+        if not profiles:
+            return "Пользовательских профилей пока нет. Сохраните их в снимке на компьютере.", [[_btn("Назад", "SB")]]
+        rows: list[list[dict[str, str]]] = []
+        for i, profile in enumerate(profiles):
+            on = (
+                set(profile["fields"]) == set(fields)
+                and bool(profile.get("hideLabels")) == bool(session.snap.get("hide_labels"))
+                and bool(profile.get("hideStamp")) == bool(session.snap.get("hide_stamp"))
+            )
+            rows.append([_btn(("· " if on else "") + _clip(profile["name"], 56), f"Sx:{i}")])
+        rows.append([_btn("Назад", "SB")])
+        return "<b>Профили снимка</b>\nте же, что сохранены на компьютере.", rows
 
     def _screen_fields(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
         fields = set(snapmod.normalize_fields(session.snap.get("fields")))
+        meta = [item for item in snapmod.FIELDS if item["kind"] == "meta"]
+        cols = [item for item in snapmod.FIELDS if item["kind"] == "col"]
         rows: list[list[dict[str, str]]] = []
-        pair: list[dict[str, str]] = []
-        for index, item in enumerate(snapmod.FIELDS):
-            mark = "✓ " if item["id"] in fields else ""
-            pair.append(_btn(f"{mark}{item['label']}", f"Sf:{index}"))
-            if len(pair) == 2:
+
+        def add_group(title: str, items: list[dict[str, Any]]) -> None:
+            rows.append([_btn(title, "SF")])
+            pair: list[dict[str, str]] = []
+            for item in items:
+                index = snapmod.FIELD_IDS.index(item["id"])
+                mark = "✓ " if item["id"] in fields else ""
+                pair.append(_btn(f"{mark}{item['label']}", f"Sf:{index}"))
+                if len(pair) == 2:
+                    rows.append(pair)
+                    pair = []
+            if pair:
                 rows.append(pair)
-                pair = []
-        if pair:
-            rows.append(pair)
-        rows.append([_btn("Готово", "S")])
-        return "<b>Поля снимка</b>\nнажмите, чтобы включить или выключить — как на компьютере.", rows
+
+        add_group("— Шапка заказа —", meta)
+        add_group("— Столбцы таблицы —", cols)
+        rows.append([_btn("Готово", "SB")])
+        return "<b>Поля снимка</b>\nнажмите, чтобы включить или выключить. Выбор сохранится.", rows
 
     def _screen_lines(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
         doc, _ = self._doc_of(session)
-        order = self._find_order(doc, session.order_id)
-        skip = set((session.snap.get("skip") or {}).get(session.order_id) or [])
-        rows: list[list[dict[str, str]]] = []
-        lines = self._snap_lines(doc, order, session)
-        if not lines:
-            return "В этом заказе нет позиций для снимка.", [[_btn("Назад", "S")]]
+        entries = self._snap_line_entries(session, doc)
+        if not entries:
+            return "Нет позиций для снимка среди выбранных заказов.", [[_btn("Назад", "SB")]]
+        skip = session.snap.get("skip") or {}
         types = type_index(doc)
-        for index, line in enumerate(lines):
-            line_id = str(line.get("id") or f"i{index}")
-            mark = "" if line_id in skip else "✓ "
+        selected = self._lines_selected_count(session)
+        statuses = self._line_statuses(entries)
+        rows: list[list[dict[str, str]]] = [
+            [_btn("Выбрать все", "La"), _btn("Снять все", "Ln"), _btn("Инверт.", "Li")],
+        ]
+        if statuses:
+            rows.append([_btn("— Статусы —", "SN")])
+            rows.extend(
+                _chunk_btns([_btn(_clip(status, 28), f"Ls:{i}") for i, status in enumerate(statuses)], 2)
+            )
+        multi = len({entry["order_id"] for entry in entries}) > 1
+        for index, entry in enumerate(entries[:40]):
+            banned = set(skip.get(entry["order_id"]) or [])
+            mark = "" if entry["line_id"] in banned else "✓ "
+            line = entry["line"]
             kind = line_kind(line, types)
             tail = " · налог" if kind == "tax" else " · затрата" if kind else ""
-            label = f"{mark}{line.get('product') or '—'} · {qty_text(line)}{tail}"
+            status = str(line.get("status") or "").strip()
+            status_bit = f" · {status}" if status else ""
+            head = f"{entry['order_label']}: " if multi else ""
+            label = f"{mark}{head}{line.get('product') or '—'} · {qty_text(line)}{status_bit}{tail}"
             rows.append([_btn(_clip(label, 60), f"Sn:{index}")])
-        rows.append([_btn("Готово", "S")])
-        return "<b>Позиции снимка</b>\nснимите галочку, чтобы не показывать строку.", rows
+        if len(entries) > 40:
+            rows.append([_btn(f"…ещё {len(entries) - 40}", "SN")])
+        rows.append([_btn("Готово", "LG")])
+        warn = str(session.snap.pop("pick_error", "") or "")
+        head = f"⚠️ {html_esc(warn)}\n\n" if warn else ""
+        return (
+            f"{head}<b>Позиции снимка</b>\nвыбрано {selected} из {len(entries)}. "
+            "Статус добавляет позиции к уже выбранным, не сбрасывая предыдущий выбор.",
+            rows,
+        )
 
     def _screen_add(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
         doc, _ = self._doc_of(session)
@@ -1461,14 +1945,28 @@ class TelegramBot:
         orders = self._filtered_orders(session, doc)
         session.orders = [str(order.get("id") or "") for order in orders]
         types = type_index(doc)
-        rows: list[list[dict[str, str]]] = []
+        statuses = self._order_list_statuses(session, doc, orders)
+        rows: list[list[dict[str, str]]] = [
+            [_btn("Выбрать все", "Aa"), _btn("Снять все", "An"), _btn("Инверт.", "Ai")],
+        ]
+        if statuses:
+            rows.append([_btn("— Статусы —", "SA")])
+            rows.extend(
+                _chunk_btns([_btn(_clip(status, 28), f"As:{i}") for i, status in enumerate(statuses)], 2)
+            )
         for index, order in enumerate(orders[:18]):
             mark = "✓ " if str(order.get("id") or "") in chosen else ""
             rows.append([_btn(_clip(f"{mark}{_order_label(order, currency, types, decimals)}"), f"Sa:{index}")])
-        if not rows:
-            rows.append([_btn("Нет заказов", "S")])
-        rows.append([_btn("Готово", "S")])
-        return "<b>Заказы на снимке</b>\nможно собрать несколько, как на компьютере.", rows
+        if not orders:
+            rows.append([_btn("Нет заказов", "SB")])
+        rows.append([_btn("Готово", "AG")])
+        warn = str(session.snap.pop("pick_error", "") or "")
+        head = f"⚠️ {html_esc(warn)}\n\n" if warn else ""
+        return (
+            f"{head}<b>Заказы на снимке</b>\nвыбрано {len(chosen)} из {len(orders)}. "
+            "Статус добавляет заказы с такими позициями, не снимая уже отмеченные.",
+            rows,
+        )
 
 
 BOT = TelegramBot()

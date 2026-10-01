@@ -22,6 +22,7 @@ from backend.telegram import set_menu_button as telegram_set_menu
 from backend.telegram import push_open_controls as telegram_push_open
 from backend.tunnel import TUNNEL
 from backend.watch import WATCHER
+from backend.pdf_bridge import PDF_BRIDGE
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 FRONTEND = os.path.join(ROOT, "frontend")
@@ -651,6 +652,39 @@ def api_dialog_pdf():
     if not path:
         return jsonify({"cancelled": True})
     return jsonify({"path": path, "cancelled": False})
+
+
+@app.get("/api/desktop/pdf-job")
+def api_desktop_pdf_job():
+    """Окно программы забирает задание PDF от Telegram-бота."""
+    if not _is_local():
+        return jsonify({"error": "Только в окне программы."}), 403
+    job = PDF_BRIDGE.take()
+    return jsonify(job or {})
+
+
+@app.post("/api/desktop/pdf-job")
+def api_desktop_pdf_job_done():
+    """Окно возвращает готовый PDF (base64) или ошибку."""
+    if not _is_local():
+        return jsonify({"error": "Только в окне программы."}), 403
+    data = request.get_json(silent=True) or {}
+    job_id = str(data.get("id") or "")
+    if not job_id:
+        return jsonify({"error": "Нет id задания."}), 400
+    err = str(data.get("error") or "").strip()
+    if err:
+        PDF_BRIDGE.complete(job_id, error=err)
+        return jsonify({"ok": True})
+    raw = data.get("base64") or ""
+    try:
+        pdf = base64.b64decode(raw)
+    except Exception:
+        return jsonify({"error": "Некорректный PDF."}), 400
+    if not pdf:
+        return jsonify({"error": "Пустой PDF."}), 400
+    PDF_BRIDGE.complete(job_id, data=pdf)
+    return jsonify({"ok": True})
 
 
 @app.post("/api/write-bytes")

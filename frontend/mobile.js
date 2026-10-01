@@ -3159,6 +3159,11 @@
           <span class="fold-side"><small id="snap-lines-meta">${picked.length} из ${lines.length}</small><span class="fold-ico">▾</span></span>
         </button>
         <div class="fold-body">
+          <div class="chips inline" style="margin-bottom:8px">
+            <button type="button" class="chip" data-snap-pay="all">Все</button>
+            <button type="button" class="chip" data-snap-pay="debt">Долг</button>
+            <button type="button" class="chip" data-snap-pay="paid">Оплата</button>
+          </div>
           <div class="list tight">${lines
             .map((line, i) => {
               const on = picked.includes(line);
@@ -4573,6 +4578,28 @@
       if (e.target.closest("#snap-lines-fold")) {
         state.snap.linesOpen = !state.snap.linesOpen;
         e.target.closest(".fold")?.classList.toggle("closed", !state.snap.linesOpen);
+        return;
+      }
+      const snapPay = e.target.closest("[data-snap-pay]");
+      if (snapPay) {
+        const order = snapOrder();
+        const mode = snapPay.dataset.snapPay;
+        const all = snapCandidates(order);
+        if (mode === "all") {
+          state.snap.lines = null;
+        } else {
+          const ids = all
+            .filter((line) => {
+              if (isExpenseLine(line)) return false;
+              const tot = lineTotals(line, order);
+              if (mode === "debt") return tot.unpaid > 0.005;
+              return tot.after > 0.005 && tot.unpaid <= 0.005;
+            })
+            .map((line) => line.id);
+          state.snap.lines = new Set(ids);
+        }
+        state.snap.linesOpen = true;
+        renderSnapshot();
         return;
       }
       const preset = e.target.closest("[data-preset]");
