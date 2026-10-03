@@ -1157,8 +1157,31 @@ html[data-theme="dark"] .cost-kind.tax { color: #ddd6fe; background: #3b2a63; }
   border-top: 1px dashed var(--line);
   background: color-mix(in srgb, #64748b 8%, var(--card));
 }
-.order-frozen .oe-title { color: #475569; }
+.order-frozen .oe-head {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  padding: 8px 12px;
+}
+.order-frozen .oe-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #475569;
+}
 .order-frozen .oe-sum { color: var(--muted); }
+.order-frozen .frozen-ico {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--muted);
+  transition: transform 0.16s ease;
+}
+.order-frozen.collapsed .frozen-ico { transform: rotate(-90deg); }
+.order-frozen.collapsed .order-frozen-body { display: none; }
 :root {
   --frozen-stripe-a: color-mix(in srgb, #64748b 16%, var(--card));
   --frozen-stripe-b: color-mix(in srgb, #64748b 5%, var(--card));

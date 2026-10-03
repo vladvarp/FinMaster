@@ -63,10 +63,13 @@
           <span class="costs-sum" id="costs-sum"></span>
         </div>
         <div class="list tight" id="costs-list" hidden></div>
-        <div class="section-row" id="frozen-row" hidden>
-          <h3 class="section" id="frozen-title">Замороженные</h3>
+        <div class="frozen-block" id="frozen-block" hidden>
+          <button type="button" class="frozen-toggle" id="frozen-toggle" aria-expanded="false">
+            <span class="section" id="frozen-title">Замороженные</span>
+            <span class="fold-ico" aria-hidden="true">▾</span>
+          </button>
+          <div class="list tight" id="frozen-list"></div>
         </div>
-        <div class="list tight" id="frozen-list" hidden></div>
         <div class="stack">
           <button type="button" class="btn wide" id="btn-add-cost" hidden>+ Налог или затрата</button>
           <button type="button" class="btn wide" id="btn-order-snapshot">Снимок для заказчика</button>

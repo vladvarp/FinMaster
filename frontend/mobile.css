@@ -416,6 +416,7 @@ html[data-theme="dark"] input[type="date"] { color-scheme: dark; }
 /* ===== Списки и карточки ===== */
 .list { display: flex; flex-direction: column; gap: 10px; }
 .list.tight { gap: 8px; }
+.list[hidden] { display: none !important; }
 
 .card {
   background: var(--card);
@@ -693,7 +694,35 @@ html[data-theme="dark"] input[type="date"] { color-scheme: dark; }
   gap: 10px;
   margin: 18px 0 10px;
 }
+.section-row[hidden] { display: none !important; }
 .section-row .section { margin: 0; }
+.frozen-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.frozen-toggle .section {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.frozen-block { margin: 18px 0 10px; }
+.frozen-block[hidden] { display: none !important; }
+.frozen-toggle .fold-ico { font-size: 14px; transition: transform 0.16s ease; }
+.frozen-block:not(.is-open) .fold-ico { transform: rotate(-90deg); }
+.frozen-block:not(.is-open) #frozen-list { display: none; }
 
 /* ===== Строки позиций ===== */
 .line-row {

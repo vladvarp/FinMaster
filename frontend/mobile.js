@@ -41,6 +41,7 @@
     scroll: { orders: 0, stats: 0, snapshot: 0, files: 0, calendar: 0, order: {} },
     editLineId: null,
     headOpen: false,
+    frozenOpen: false,
     cal: { mode: "extended", filter: "all", anchor: null },
     query: "",
     filter: "all",
@@ -1583,6 +1584,7 @@
 
   function setView(view, orderId) {
     const changed = view !== state.view || (orderId !== undefined && orderId !== state.orderId);
+    if (orderId !== undefined && orderId !== state.orderId) state.frozenOpen = false;
     if (changed) savePageScroll();
     state.view = view;
     if (orderId !== undefined) state.orderId = orderId;
@@ -1693,7 +1695,8 @@
     box.innerHTML = list
       .map((order) => {
         const t = orderTotals(order);
-        const tint = statusMeta(order.lines?.[0]?.status).color;
+        const live = (order.lines || []).filter((line) => !isFrozenLine(line));
+        const tint = statusMeta(live[0]?.status || order.lines?.[0]?.status).color;
         const debt = t.unpaid > 0.005;
         return `<article class="card order-item" data-open="${esc(order.id)}" style="--tint:${esc(tint)}">
           <div class="oi-top">
@@ -1701,11 +1704,11 @@
             <span class="oi-sep">—</span>
             <span class="oi-customer">${esc(order.name || "без названия")}</span>
           </div>
-          <div class="oi-name">${esc(order.customer || "Без заказчика")} · ${(order.lines || []).length} поз.</div>
+          <div class="oi-name">${esc(order.customer || "Без заказчика")} · ${live.length} поз.</div>
           <div class="oi-foot">
             <span class="sum">${esc(money(t.after))}</span>
             ${debt ? `<span class="sum debt">долг ${esc(money(t.unpaid))}</span>` : `<span class="sum paid">оплачено</span>`}
-            ${statusDotsHtml(order.lines)}
+            ${statusDotsHtml(live)}
           </div>
         </article>`;
       })
@@ -1839,12 +1842,14 @@
     }
     if (addCost) addCost.hidden = !typeNames("expense").length;
 
-    const frozenRow = $("frozen-row");
+    const frozenBlock = $("frozen-block");
     const frozenList = $("frozen-list");
-    if (frozenRow && frozenList) {
-      frozenRow.hidden = !frozen.length;
-      frozenList.hidden = !frozen.length;
+    if (frozenBlock && frozenList) {
+      const open = !!state.frozenOpen && frozen.length > 0;
+      frozenBlock.hidden = !frozen.length;
+      frozenBlock.classList.toggle("is-open", open);
       $("frozen-title").textContent = `Замороженные · ${frozen.length}`;
+      $("frozen-toggle")?.setAttribute("aria-expanded", open ? "true" : "false");
       frozenList.innerHTML = frozen.map((line, i) => (isExpenseLine(line) ? costRowHtml(line, i) : lineRowHtml(line, i))).join("");
     }
   }
@@ -4568,6 +4573,12 @@
       if (e.target.closest("#order-fold")) {
         state.headOpen = !state.headOpen;
         document.querySelector("#order-head .fold")?.classList.toggle("closed", !state.headOpen);
+        return;
+      }
+      if (e.target.closest("#frozen-toggle")) {
+        state.frozenOpen = !state.frozenOpen;
+        $("frozen-block")?.classList.toggle("is-open", state.frozenOpen);
+        $("frozen-toggle")?.setAttribute("aria-expanded", state.frozenOpen ? "true" : "false");
         return;
       }
       if (e.target.closest("#snap-fields-fold")) {

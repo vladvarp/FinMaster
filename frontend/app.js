@@ -2224,6 +2224,7 @@
   }
 
   const openLineNotes = new Set();
+  const openFrozenOrders = new Set();
 
   function lineHasNote(line) {
     return !!String(line?.notes || "").trim();
@@ -2580,12 +2581,15 @@
 
   function orderFrozenHtml(frozen, ctx) {
     if (!frozen.length) return "";
+    const open = openFrozenOrders.has(ctx.order?.id);
     const income = frozen.filter((line) => !isExpenseLine(line));
     const expense = frozen.filter((line) => isExpenseLine(line));
-    return `<div class="order-frozen">
-      <div class="oe-head"><span class="oe-title">Замороженные позиции</span>
+    return `<div class="order-frozen${open ? "" : " collapsed"}">
+      <button type="button" class="oe-head" data-act="toggle-frozen" aria-expanded="${open ? "true" : "false"}">
+        <span class="oe-title"><span class="frozen-ico" aria-hidden="true">▾</span>Замороженные позиции</span>
         <span class="oe-sum">${frozen.length} · не учитываются нигде</span>
-      </div>
+      </button>
+      <div class="order-frozen-body">
       ${
         income.length
           ? `<div class="table-wrap">
@@ -2610,6 +2614,7 @@
       </div>`
           : ""
       }
+      </div>
     </div>`;
   }
 
@@ -12697,6 +12702,14 @@
     if (!card) return;
     const order = findOrder(card.dataset.order);
     if (!order) return;
+    if (act === "toggle-frozen") {
+      const open = openFrozenOrders.has(order.id);
+      if (open) openFrozenOrders.delete(order.id);
+      else openFrozenOrders.add(order.id);
+      card.querySelector(".order-frozen")?.classList.toggle("collapsed", open);
+      e.target.closest("[data-act='toggle-frozen']")?.setAttribute("aria-expanded", open ? "false" : "true");
+      return;
+    }
     if (act === "linenotes") {
       const tr = e.target.closest("[data-line]");
       const id = tr?.dataset.line;
