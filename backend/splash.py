@@ -639,7 +639,7 @@ class Splash:
         else:
             self.pump()
 
-    def finish(self, hold: float = 2.0) -> None:
+    def finish(self, hold: float = 0.1) -> None:
         if self._headless:
             self.close()
             return

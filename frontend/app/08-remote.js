@@ -1083,6 +1083,26 @@
     document.addEventListener("focusout", () => setTimeout(flushRemoteDoc, 150));
   }
 
+  let externalOpenBusy = false;
+
+  async function acceptExternalOpens() {
+    if (!state.desktop || externalOpenBusy) return;
+    externalOpenBusy = true;
+    try {
+      const data = await apiGet("/api/instance/pending");
+      for (const path of data.paths || []) {
+        if (!path || (samePath(path, state.path) && state.doc)) continue;
+        const ok = await confirmSwitchReport();
+        if (!ok) continue;
+        await openPath(path);
+      }
+    } catch {
+      /* окно ещё поднимается */
+    } finally {
+      externalOpenBusy = false;
+    }
+  }
+
   async function boot() {
     try {
       bind();
@@ -1106,6 +1126,8 @@
       }
       watchRemoteAccess();
       watchDesktopPdfJobs();
+      acceptExternalOpens();
+      setInterval(acceptExternalOpens, 800);
     } catch {
       state.desktop = false;
       state.autosave = localStorage.getItem(LS_AUTOSAVE) === "true";

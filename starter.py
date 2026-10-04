@@ -47,7 +47,7 @@ def _child_env() -> dict[str, str]:
     return env
 
 
-def launch_app() -> None:
+def launch_app(open_path: str = "") -> None:
     script = os.path.join(ROOT, "run.vbs")
     if not os.path.isfile(script):
         raise FileNotFoundError("Не найден run.vbs рядом с программой.")
@@ -55,11 +55,14 @@ def launch_app() -> None:
     host = os.path.join(system, "System32", "wscript.exe")
     if not os.path.isfile(host):
         host = "wscript.exe"
+    env = _child_env()
+    if open_path:
+        env["FINMASTER_OPEN"] = open_path
     flags = 0x08000000 if sys.platform == "win32" else 0
     subprocess.Popen(
         [host, "//nologo", script],
         cwd=ROOT,
-        env=_child_env(),
+        env=env,
         creationflags=flags,
         close_fds=True,
     )
@@ -132,12 +135,21 @@ def _needs_install() -> tuple[bool, list[str]]:
 
 def main() -> int:
     hide_console()
+    report_path = ""
+    try:
+        from backend.instance import handoff_existing, requested_report
+
+        report_path = requested_report()
+        if handoff_existing(report_path):
+            return 0
+    except Exception:
+        report_path = ""
     os.chdir(ROOT)
     try:
         while True:
             install, missing = _needs_install()
             if not install:
-                launch_app()
+                launch_app(report_path)
                 return 0
             splash = Splash(os.path.join(ROOT, "frontend", "favicon.png"))
             try:
@@ -147,7 +159,7 @@ def main() -> int:
                     splash.step("В папке FinMaster нет Python. Скачиваю 3.12.10 с python.org…", 14)
                 _follow_install(splash)
                 splash.step("Запускаю программу…", 97)
-                launch_app()
+                launch_app(report_path)
                 splash.close()
                 return 0
             except Exception as exc:

@@ -17,6 +17,18 @@ from backend.dialogs import open_report_dialog, save_csv_dialog, save_pdf_dialog
 from backend.document import empty_document, normalize_document, now_iso
 from backend.remote import SESSION as REMOTE
 from backend.remote import lan_candidates
+from backend.filetype import register_reports
+from backend.instance import (
+    capture_hwnd,
+    check_token,
+    claim_or_handoff,
+    focus_window,
+    owns_instance,
+    publish as publish_instance,
+    queue as queue_instance,
+    requested_report,
+    take_pending,
+)
 from backend.startup import set_windows_login, windows_login_enabled
 from backend.telegram import BOT as TELEGRAM
 from backend.telegram import send_link as telegram_send_link
@@ -660,6 +672,28 @@ def api_dialog_open():
     if not path:
         return jsonify({"cancelled": True})
     return jsonify(_open_path(path))
+
+
+@app.post("/api/instance/open")
+def api_instance_open():
+    """Вторая копия просит уже открытое окно выйти на передний план и открыть отчёт."""
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    if not check_token(str(data.get("token") or "")):
+        return jsonify({"error": "Чужая копия."}), 403
+    path = str(data.get("path") or "").strip()
+    if path:
+        queue_instance(path)
+    focus_window()
+    return jsonify({"ok": True})
+
+
+@app.get("/api/instance/pending")
+def api_instance_pending():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    return jsonify({"paths": take_pending()})
 
 
 @app.post("/api/open-path")
@@ -1423,6 +1457,14 @@ def run_server(port: int) -> None:
 def main(splash=None) -> None:
     global WINDOW, WINDOW_FULLSCREEN, FORCE_CLOSE, DIRTY, SERVER_PORT
 
+    if sys.platform == "win32" and not owns_instance() and claim_or_handoff(requested_report()):
+        if splash is not None:
+            try:
+                splash.close()
+            except Exception:
+                pass
+        return
+
     def report(text: str, progress: float | None = None) -> None:
         if splash is not None:
             splash.step(text, progress)
@@ -1461,6 +1503,15 @@ def main(splash=None) -> None:
         report("Сервер готов", 86)
     else:
         report("Сервер ещё поднимается…", 86)
+
+    try:
+        register_reports(ROOT)
+    except Exception:
+        pass
+    try:
+        publish_instance(port)
+    except Exception:
+        pass
 
     if settings.get("autostart") and settings.get("ngrok"):
         report("Подключение интернет-туннеля…", 90)
@@ -1524,6 +1575,8 @@ def main(splash=None) -> None:
 
     try:
         def restore_window_state() -> None:
+            capture_hwnd(WINDOW)
+            focus_window()
             if storage.window_maximized():
                 try:
                     WINDOW.maximize()
@@ -1561,9 +1614,9 @@ def main(splash=None) -> None:
     report("Открываю окно…", 100)
     if splash is not None:
         if hasattr(splash, "finish"):
-            splash.finish(2.0)
+            splash.finish(0.1)
         else:
-            time.sleep(2.0)
+            time.sleep(0.1)
             splash.close()
     webview.start(**start_opts)
 
