@@ -1,0 +1,16 @@
+/* ==== Подсветка найденного заказа ==== */
+.order-card.flash {
+  animation: card-flash 1.6s ease;
+}
+@keyframes card-flash {
+  0% { box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.55); }
+  30% { box-shadow: 0 0 0 6px rgba(20, 184, 166, 0.28); }
+  100% { box-shadow: var(--shadow); }
+}
+.line-row.focus-row td { background-color: color-mix(in srgb, var(--accent-2) 8%, transparent); }
+tr.flash-row { animation: row-flash 1.7s ease; }
+@keyframes row-flash {
+  0% { background-color: color-mix(in srgb, var(--accent-2) 34%, transparent); }
+  100% { background-color: transparent; }
+}
+

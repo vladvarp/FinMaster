@@ -1,0 +1,32 @@
+/* ==== Быстрые фильтры ==== */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 650;
+  transition: all 0.14s ease;
+}
+.chip:hover { color: var(--ink); border-color: var(--accent-2); }
+.chip.active {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(15, 118, 110, 0.3);
+}
+.chip-count {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--muted);
+}
+.chip.active .chip-count { background: rgba(255, 255, 255, 0.22); color: #fff; }
+.chip:empty, .chip-count:empty { display: none; }
+

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -167,6 +168,86 @@ def favicon_png():
 @app.get("/favicon.svg")
 def favicon_svg():
     return send_from_directory(FRONTEND, "favicon.svg", mimetype="image/svg+xml")
+
+
+# Куски одного файла: браузер по-прежнему получает прежние адреса.
+# Части склеиваются по префиксу 01-, 02- и остаются одной областью видимости, без import.
+_SOURCE_BUNDLES = {
+    "app.js": ("app", "js"),
+    "mobile.js": ("mobile", "js"),
+    "styles.css": ("app/styles", "css"),
+    "mobile.css": ("mobile/styles", "css"),
+    "charts.js": ("modules/charts", "js"),
+    "cloud.js": ("modules/cloud", "js"),
+    "calc.js": ("modules/calc", "js"),
+    "presentation.js": ("modules/presentation", "js"),
+    "pdf.js": ("modules/pdf", "js"),
+    "vault.js": ("modules/vault", "js"),
+    "datepicker.js": ("modules/datepicker", "js"),
+}
+
+
+_BUNDLE_CLOSE = b"\n/* bundle-seam */\n})();\n"
+_BUNDLE_OPENS = (
+    b"/* bundle-seam */\n(() => {\n  class OrderCloud {\n",
+    b"/* bundle-seam */\n(() => {\n",
+    b"/* bundle-seam */\n(function () {\n",
+)
+
+
+def _bundle_part(data: bytes, index: int, count: int) -> bytes:
+    """Убирает скобки, которые нужны только редактору на краях разрезанной функции."""
+    if count < 2:
+        return data
+    if index == 0 and data.endswith(_BUNDLE_CLOSE):
+        data = data[: -len(_BUNDLE_CLOSE)]
+    elif index == count - 1:
+        for mark in _BUNDLE_OPENS:
+            if data.startswith(mark):
+                data = data[len(mark) :]
+                break
+    return data
+
+
+def _bundle_bytes(folder: str, ext: str) -> bytes | None:
+    directory = os.path.join(FRONTEND, folder)
+    if not os.path.isdir(directory):
+        return None
+    names = sorted(
+        name
+        for name in os.listdir(directory)
+        if re.fullmatch(rf"\d{{2}}-[a-z0-9-]+\.{re.escape(ext)}", name)
+    )
+    if not names:
+        return None
+    chunks: list[bytes] = []
+    for index, name in enumerate(names):
+        with open(os.path.join(directory, name), "rb") as fh:
+            raw = fh.read()
+        chunks.append(_bundle_part(raw, index, len(names)) if ext == "js" else raw)
+    return b"".join(chunks)
+
+
+@app.get("/app.js")
+@app.get("/mobile.js")
+@app.get("/styles.css")
+@app.get("/mobile.css")
+@app.get("/charts.js")
+@app.get("/cloud.js")
+@app.get("/calc.js")
+@app.get("/presentation.js")
+@app.get("/pdf.js")
+@app.get("/vault.js")
+@app.get("/datepicker.js")
+def bundled_source():
+    """Отдаёт цельный файл, склеенный из частей. Порядок — префикс имени 01-, 02-."""
+    filename = request.path.rsplit("/", 1)[-1]
+    folder, ext = _SOURCE_BUNDLES[filename]
+    body = _bundle_bytes(folder, ext)
+    if body is None:
+        return send_from_directory(FRONTEND, filename)
+    kind = "text/css" if ext == "css" else "text/javascript"
+    return _no_cache(app.response_class(body, mimetype=kind))
 
 
 @app.get("/<path:filename>")

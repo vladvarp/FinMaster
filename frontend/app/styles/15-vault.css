@@ -1,0 +1,204 @@
+/* ==== Хранилище ==== */
+.vault-view.active { display: flex; flex-direction: column; gap: 10px; }
+.vault-body { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.vault-body .card { padding: 14px 16px; }
+.vault-name {
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  font: 800 20px/1.25 var(--sans);
+  padding: 4px 8px;
+  margin: -4px -8px 10px;
+  border-radius: var(--control-radius);
+  outline: none;
+}
+.vault-name:hover { border-color: var(--line); }
+.vault-name:focus { border-color: var(--accent-2); background: var(--control-bg); box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12); }
+.vault-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.vault-kpi {
+  --tone: var(--accent);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--tone) 28%, var(--line));
+  background: color-mix(in srgb, var(--tone) 7%, var(--card));
+  min-width: 0;
+}
+.vault-kpi span { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.vault-kpi b { font: 800 20px/1.2 var(--mono); color: var(--tone); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vault-kpi small { font-size: 11px; color: var(--muted); }
+.vault-kpi.hand.neg { --tone: var(--danger); }
+.vault-kpi.save { --tone: var(--gold); }
+.vault-kpi.in { --tone: var(--ok); }
+.vault-kpi.out { --tone: var(--danger); }
+.vault-goal { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+.vault-goal-field { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.vault-goal-field input,
+.vault-add-row input {
+  border: 1px solid var(--line);
+  background: var(--control-bg);
+  color: var(--ink);
+  border-radius: var(--control-radius);
+  padding: 7px 10px;
+  font: 600 13px var(--sans);
+  min-height: 34px;
+  outline: none;
+  min-width: 0;
+}
+.vault-goal-field input { width: 130px; font-family: var(--mono); }
+.vault-goal-field input:focus,
+.vault-add-row input:focus { border-color: var(--accent-2); box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12); }
+.vault-progress {
+  flex: 1 1 180px;
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--gold) 14%, var(--bg-2));
+  overflow: hidden;
+  min-width: 120px;
+}
+.vault-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--gold) 70%, #fff), var(--gold));
+  transition: width 0.3s ease;
+}
+.vault-goal-note { font-size: 12px; color: var(--muted); font-weight: 600; }
+.vault-add-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vault-in-name { flex: 1 1 220px; }
+.vault-in-amount { flex: 0 0 130px; font-family: var(--mono) !important; }
+.vault-in-date { flex: 0 0 150px; }
+.vault-type-seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.vault-type-seg button {
+  --tone: var(--accent);
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  font: 700 12px var(--sans);
+  padding: 9px 12px;
+  cursor: pointer;
+}
+.vault-type-seg button:last-child { border-right: 0; }
+.vault-type-seg button:hover { color: var(--ink); background: color-mix(in srgb, var(--tone) 8%, var(--card)); }
+.vault-type-seg button.active { color: var(--tone); background: color-mix(in srgb, var(--tone) 16%, var(--card)); box-shadow: inset 0 -2px 0 var(--tone); }
+.vault-type-seg .vt-in { --tone: var(--ok); }
+.vault-type-seg .vt-out { --tone: var(--danger); }
+.vault-type-seg .vt-save { --tone: var(--gold); }
+.vault-type-hint { margin-top: 8px; font-size: 12px; color: var(--muted); }
+.vault-list-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.vault-list-head h3 { margin: 0; font-size: 15px; }
+.vault-filter { display: flex; gap: 6px; flex-wrap: wrap; }
+.vault-chip {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font: 700 12px var(--sans);
+  cursor: pointer;
+}
+.vault-chip em { font-style: normal; opacity: 0.7; margin-left: 2px; }
+.vault-chip:hover { color: var(--ink); }
+.vault-chip.active { color: var(--accent); border-color: var(--accent-2); background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
+.vault-body .card.vault-chart { padding: 10px 16px; }
+.vault-chart-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-height: 30px; }
+.vault-chart-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: 800 15px var(--sans);
+  padding: 4px 6px;
+  margin-left: -6px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.vault-chart-toggle:hover { background: var(--bg-2); }
+.vault-chart-ico { width: 14px; color: var(--muted); font-size: 12px; }
+.vault-chart-hint { font-size: 12px; color: var(--muted); }
+.vault-chart-modes { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.vault-chart-sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+.vault-series { display: inline-flex; align-items: center; gap: 6px; }
+.vault-series i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1.5px solid #eab308;
+  background: transparent;
+}
+.vault-series.on { color: var(--ink); border-color: color-mix(in srgb, #eab308 55%, var(--line)); }
+.vault-series.on i { background: #eab308; }
+.vault-series:not(.on) { text-decoration: line-through; opacity: 0.75; }
+.vault-chart-box { height: 260px; margin-top: 8px; }
+.vault-chart-box canvas { touch-action: none; }
+.vault-chart-box canvas.is-panning { cursor: grabbing !important; }
+.vault-zoom { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.vault-zoom-presets { display: flex; gap: 6px; flex-wrap: wrap; }
+.vault-zoom-range { font: 600 12px var(--mono); color: var(--ink); }
+.vault-zoom-hint { margin-left: auto; font-size: 11px; color: var(--muted); }
+.vault-year { display: inline-flex; align-items: center; gap: 4px; }
+.vault-year b { min-width: 48px; text-align: center; font: 800 15px var(--mono); }
+.vault-year-nav {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.vault-year-nav:hover:not(:disabled) { border-color: var(--accent-2); color: var(--accent); }
+.vault-year-nav:disabled { opacity: 0.35; cursor: default; }
+.vault-chart-empty { padding: 26px 0 16px; text-align: center; color: var(--muted); font-size: 13px; }
+.vault-table { width: 100%; }
+.vault-table td.num.computed { color: var(--ink); }
+.vault-table td.num.computed.neg { color: var(--danger); }
+.vault-table td.num.computed.save { color: var(--gold); }
+.vault-row { --tone: var(--accent); }
+.vault-row.vt-in { --tone: var(--ok); --fill: #22c55e; }
+.vault-row.vt-out { --tone: var(--danger); --fill: #ef4444; }
+.vault-row.vt-save { --tone: #b8860b; --fill: #eab308; }
+.vault-row {
+  box-shadow: inset 6px 0 0 var(--tone);
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--tone) 40%, #fff) 0%,
+    color-mix(in srgb, var(--tone) 14%, #fff) 38%,
+    #fff 62%
+  );
+  transition: box-shadow 0.16s ease;
+}
+html[data-theme="dark"] .vault-row {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--tone) 34%, #151d2e) 0%,
+    color-mix(in srgb, var(--tone) 12%, #151d2e) 38%,
+    #151d2e 62%
+  );
+}
+.vault-row:hover { box-shadow: inset 6px 0 0 var(--tone), 0 1px 0 rgba(15, 23, 42, 0.06); }
+.vault-row td,
+.vault-row td select { background-color: transparent; }
+.vault-row td:first-child { padding-left: 12px; }
+.vault-row select { color: var(--tone) !important; }
+.vault-amount { display: flex; align-items: center; gap: 2px; }
+.vault-sign { color: var(--tone); font: 800 14px var(--mono); width: 12px; text-align: center; }
+.vault-amount input { text-align: right; font-family: var(--mono) !important; color: var(--tone) !important; }
+@media (max-width: 1100px) {
+  .vault-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+

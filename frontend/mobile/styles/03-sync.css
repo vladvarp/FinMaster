@@ -1,0 +1,37 @@
+/* ===== Индикатор связи ===== */
+.sync-bar {
+  position: fixed;
+  top: calc(var(--top) + var(--sat));
+  left: 0;
+  right: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 0;
+  overflow: hidden;
+  font-size: 11.5px;
+  color: #fff;
+  background: var(--muted);
+  transition: height 0.22s ease;
+}
+
+.sync-bar.show { height: 22px; }
+.sync-bar.ok { background: var(--ok); }
+.sync-bar.warn { background: var(--warn); }
+.sync-bar.err { background: var(--danger); }
+
+.sync-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #fff;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.75); }
+  50% { opacity: 1; transform: scale(1); }
+}
+

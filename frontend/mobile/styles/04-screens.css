@@ -1,0 +1,171 @@
+/* ===== Экраны ===== */
+.screen {
+  padding: 12px 12px 28px;
+  animation: fade-in 0.22s ease;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+#screen-order,
+#screen-snapshot {
+  animation: none;
+}
+#screen-order.swipe-next,
+#screen-snapshot.swipe-next {
+  animation: order-swipe-next 0.22s ease;
+}
+#screen-order.swipe-prev,
+#screen-snapshot.swipe-prev {
+  animation: order-swipe-prev 0.22s ease;
+}
+#editor-body.swipe-next { animation: order-swipe-next 0.22s ease; }
+#editor-body.swipe-prev { animation: order-swipe-prev 0.22s ease; }
+@keyframes order-swipe-next {
+  from { transform: translateX(36px); opacity: 0.55; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes order-swipe-prev {
+  from { transform: translateX(-36px); opacity: 0.55; }
+  to { transform: none; opacity: 1; }
+}
+
+.search-wrap {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  align-items: center;
+}
+.search-wrap input { flex: 1; min-width: 0; }
+.search-wrap .mcal-filter { flex: 0 0 auto; }
+.search-wrap .mcal-filter > .btn { min-height: 46px; }
+.search-wrap .mcal-filter > .btn svg { pointer-events: none; }
+.search-wrap .mcal-filter-menu { left: auto; right: 0; }
+.sort-btn {
+  flex: 0 0 auto;
+  min-height: 46px;
+  padding: 0 13px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+}
+
+input,
+select,
+textarea,
+button {
+  font-family: inherit;
+  font-size: 16px;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  min-height: 48px;
+  padding: 11px 13px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--field);
+  color: var(--ink);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 36px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 16px) calc(50% - 2px), calc(100% - 11px) calc(50% - 2px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+input[type="checkbox"] {
+  appearance: none;
+  width: 36px;
+  height: 20px;
+  min-height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--line);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 8%, transparent);
+  position: relative;
+  flex: 0 0 36px;
+  cursor: pointer;
+  transition: background 0.16s ease;
+}
+input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.18);
+  transition: transform 0.16s ease;
+}
+input[type="checkbox"]:checked { background: var(--accent); }
+input[type="checkbox"]:checked::after { transform: translateX(16px); }
+input[type="checkbox"]:focus { box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.18); }
+
+input[type="range"] {
+  appearance: none;
+  width: 100%;
+  min-height: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 99px;
+  background: var(--line);
+}
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+}
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 99px;
+  background: var(--line);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+textarea { min-height: 76px; resize: vertical; line-height: 1.45; }
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.18);
+}
+
+html[data-theme="dark"] input[type="date"] { color-scheme: dark; }
+

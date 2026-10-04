@@ -1,0 +1,104 @@
+/* ===== Строки позиций ===== */
+.line-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 12px 12px 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  transition: transform 0.12s ease;
+}
+.line-row:active { transform: scale(0.985); }
+.line-row.is-dragging {
+  opacity: 0.42;
+  transform: none;
+  pointer-events: none;
+}
+.lr-drag {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 36px;
+  margin: 0 -4px 0 -6px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  touch-action: none;
+  cursor: grab;
+}
+.lr-drag span {
+  display: block;
+  width: 10px;
+  height: 16px;
+  margin: 10px auto;
+  background-image: radial-gradient(var(--muted) 1.15px, transparent 1.2px);
+  background-size: 5px 5px;
+  background-position: 0 0;
+}
+.lr-drag:active { cursor: grabbing; }
+.line-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--tint, var(--accent));
+}
+
+.lr-index {
+  flex: 0 0 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.lr-main { flex: 1; min-width: 0; }
+.lr-main strong {
+  display: block;
+  font-size: 15.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lr-main small {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lr-status {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: #fff;
+}
+
+.lr-right {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+}
+.lr-right b { font-size: 16px; font-variant-numeric: tabular-nums; }
+.lr-right small { font-size: 11.5px; color: var(--muted); }
+.lr-right small.debt { color: var(--danger); }
+.lr-right small.paid { color: var(--ok); }
+.lr-go { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); color: var(--line); font-size: 20px; }
+.lr-right { padding-right: 14px; }
+

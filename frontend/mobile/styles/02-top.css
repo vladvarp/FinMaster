@@ -1,0 +1,58 @@
+/* ===== Шапка ===== */
+.topbar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 30;
+  height: calc(var(--top) + var(--sat));
+  padding: var(--sat) 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, var(--accent), #115e59 70%);
+  color: #eafaf7;
+  box-shadow: 0 6px 20px rgba(15, 118, 110, 0.28);
+}
+
+.topbar-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  padding-left: 4px;
+}
+
+.topbar-title strong {
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-title span {
+  font-size: 11.5px;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.icon-btn {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.14);
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  transition: transform 0.12s ease, background 0.16s ease, opacity 0.16s ease;
+}
+
+.icon-btn:active { transform: scale(0.93); }
+.icon-btn:disabled { opacity: 0.35; }
+.icon-btn.accent { background: rgba(255, 255, 255, 0.92); color: var(--accent); border-color: transparent; font-weight: 700; }
+.icon-btn.ghost { border-color: var(--line); background: var(--field); color: var(--ink); }
+#btn-back { font-size: 26px; padding-bottom: 4px; }
+

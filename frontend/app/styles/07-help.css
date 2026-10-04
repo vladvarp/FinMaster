@@ -1,0 +1,60 @@
+/* ==== Шпаргалка ==== */
+.modal-card.help-modal {
+  width: min(920px, calc(100vw - 32px));
+  max-height: min(88vh, 860px);
+  display: flex;
+  flex-direction: column;
+}
+.modal-card.help-modal > p { flex: 0 0 auto; }
+.modal-card.help-modal .modal-actions { flex: 0 0 auto; }
+.help-grid {
+  columns: 2;
+  column-gap: 28px;
+  margin: 0 0 18px;
+  overflow: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.help-section {
+  break-inside: avoid;
+  page-break-inside: avoid;
+  margin: 0 0 16px;
+}
+.help-section h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+.help-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.help-section .help-row:first-of-type { border-top: 0; }
+
+@media (max-width: 1100px) {
+  .help-grid { columns: 1; }
+  .cmd-btn .cmd-text, .cmd-btn kbd { display: none; }
+}
+
+html[data-theme="dark"] .modal-card {
+  background: #151d2e;
+  color: var(--ink);
+}
+html[data-theme="dark"] .insight:hover { box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45); }
+html[data-theme="dark"] .chip { background: #1b2538; }
+html[data-theme="dark"] .chip.active { background: var(--accent); color: #fff; }
+html[data-theme="dark"] kbd { background: #1b2538; color: #cbd5e1; }
+html[data-theme="dark"] .fin-tip,
+html[data-theme="dark"] .ui-tip,
+html[data-theme="dark"] .hint-i-pop,
+html[data-theme="dark"] .cloud-tooltip {
+  box-shadow: var(--tip-shadow);
+}
+

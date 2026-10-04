@@ -1,0 +1,76 @@
+:root {
+  --accent: #0f766e;
+  --accent-2: #14b8a6;
+  --gold: #c9a227;
+  --danger: #dc2626;
+  --ok: #059669;
+  --warn: #d97706;
+  --bg: #f1f5f9;
+  --card: #ffffff;
+  --ink: #0f172a;
+  --muted: #5b6878;
+  --line: #e2e8f0;
+  --field: #ffffff;
+  --radius: 16px;
+  --shadow: 0 10px 26px rgba(15, 23, 42, 0.09);
+  --top: 58px;
+  --tab: 64px;
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+}
+
+html[data-theme="dark"] {
+  --bg: #0c1220;
+  --card: #151d2e;
+  --ink: #e8eef8;
+  --muted: #a3b0c4;
+  --line: #2a364c;
+  --field: #1b2538;
+  --shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.4;
+  overscroll-behavior-y: contain;
+}
+
+body {
+  padding-top: calc(var(--top) + var(--sat));
+  padding-bottom: calc(var(--tab) + var(--sab));
+  min-height: 100vh;
+}
+
+html.in-telegram {
+  --sat: max(
+    env(safe-area-inset-top, 0px),
+    calc(var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px))
+  );
+  --sab: max(
+    env(safe-area-inset-bottom, 0px),
+    calc(var(--tg-safe-area-inset-bottom, 0px) + var(--tg-content-safe-area-inset-bottom, 0px))
+  );
+}
+
+html.in-telegram,
+html.in-telegram body {
+  overscroll-behavior: none;
+}
+
+html.in-telegram body {
+  min-height: var(--tg-viewport-stable-height, 100vh);
+}
+
+body.locked { overflow: hidden; }
+

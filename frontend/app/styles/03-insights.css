@@ -1,0 +1,131 @@
+/* ==== Инсайты ==== */
+.dash-focus {
+  margin-bottom: 14px;
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.16), var(--shadow);
+}
+.focus-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.focus-head b { font-size: 18px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.focus-tag {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.focus-name { font-weight: 600; }
+.focus-cust { color: var(--muted); font-size: 13px; }
+.focus-acts { margin-left: auto; display: flex; gap: 8px; }
+.focus-sums {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.focus-sum {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-2);
+}
+.focus-sum span {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.focus-sum b { font-size: 17px; font-variant-numeric: tabular-nums; }
+.focus-sum.ok b { color: var(--ok); }
+.focus-sum.warn b { color: var(--danger); }
+.focus-notes {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-left: 3px solid var(--accent-2);
+  border-radius: 0 10px 10px 0;
+  background: var(--bg-2);
+  color: var(--muted);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+@media (max-width: 1100px) {
+  .focus-sums { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.insights-card { margin-bottom: 12px; }
+.insights-sub {
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 8px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.insights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+.insight {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tint, #0f766e) 9%, var(--card)), var(--card));
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+.insight:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+}
+.insight-ico {
+  flex: 0 0 36px;
+  height: 36px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  color: #fff;
+  background: linear-gradient(150deg, var(--tint, #0f766e), color-mix(in srgb, var(--tint, #0f766e) 55%, #0f172a));
+}
+.insight-body { min-width: 0; flex: 1; }
+.insight-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 650;
+}
+.insight-value {
+  font-size: 19px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  margin-top: 3px;
+  word-break: break-word;
+}
+.insight-note { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.trend {
+  align-self: center;
+  font-size: 12px;
+  font-weight: 750;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: var(--bg-2);
+  color: var(--muted);
+}
+.trend.up { background: rgba(5, 150, 105, 0.14); color: var(--ok); }
+.trend.down { background: rgba(220, 38, 38, 0.14); color: var(--danger); }
+

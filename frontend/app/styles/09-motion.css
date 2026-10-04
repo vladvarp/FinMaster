@@ -1,0 +1,71 @@
+/* ==== Динамика интерфейса ==== */
+.view.active {
+  animation: view-in 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes view-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.card,
+.kpi,
+.order-card {
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.card:hover,
+.kpi:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.14);
+}
+html[data-theme="dark"] .card:hover,
+html[data-theme="dark"] .kpi:hover { box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5); }
+.kpi {
+  position: relative;
+  overflow: hidden;
+}
+.kpi::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.kpi.warn::before { background: linear-gradient(180deg, #f87171, var(--danger)); }
+.kpi.ok::before { background: linear-gradient(180deg, #34d399, var(--ok)); }
+.kpi:hover::before { opacity: 1; }
+.kpi .value { transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1); }
+.kpi:hover .value { transform: translateX(3px); }
+.order-card:hover { box-shadow: 0 14px 34px rgba(15, 23, 42, 0.13); }
+.btn {
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+}
+.btn:active { transform: scale(0.97); }
+.btn.primary:hover { box-shadow: 0 6px 18px rgba(15, 118, 110, 0.32); }
+.nav button { transition: background 0.16s ease, color 0.16s ease, padding-left 0.16s ease; }
+.nav button:hover { padding-left: 16px; }
+.line-row { transition: box-shadow 0.16s ease; }
+.line-row:hover { box-shadow: inset 6px 0 0 var(--status-color, #94a3b8), 0 1px 0 rgba(15, 23, 42, 0.06); }
+.toast.show { animation: toast-in 0.24s cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+.modal.open .modal-card { animation: modal-in 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(-12px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.recent-item { transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease; }
+.recent-item:hover { transform: translateX(3px); }
+.share-theme { transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.16s ease, color 0.14s ease; }
+.share-theme:hover { transform: translateY(-2px); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+

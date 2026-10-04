@@ -1,0 +1,29 @@
+/* ===== Снимок ===== */
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 13px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  box-shadow: var(--shadow);
+}
+.pick-row.on { border-color: var(--accent-2); }
+.pick-row input { width: 36px; height: 20px; min-height: 20px; flex: 0 0 36px; }
+.pick-row .pr-main { flex: 1; min-width: 0; }
+.pick-row strong { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pick-row small { display: block; font-size: 12.5px; color: var(--muted); }
+.pick-row b { font-variant-numeric: tabular-nums; font-size: 15px; }
+.pick-row.cost b { color: var(--warn); }
+.pick-row.cost.on { border-color: var(--warn); }
+
+.preview-wrap {
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.preview { min-width: 100%; width: max-content; }
+

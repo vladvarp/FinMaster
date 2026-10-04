@@ -1,0 +1,22 @@
+/* ===== Раскрывающийся блок ===== */
+.fold { padding: 0; overflow: hidden; }
+.fold-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 14px;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+.fold-ico { color: var(--muted); transition: transform 0.2s ease; }
+.fold-side { display: inline-flex; align-items: center; gap: 8px; }
+.fold-side small { font-size: 12.5px; font-weight: 650; color: var(--muted); }
+.fold.closed .fold-ico { transform: rotate(-90deg); }
+.fold.closed .fold-body { display: none; }
+.fold-body { padding: 0 14px 14px; }
+

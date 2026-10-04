@@ -1,0 +1,98 @@
+/* ==== Командная палитра ==== */
+.palette {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: none;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12vh 20px 20px;
+  background: rgba(7, 16, 24, 0.5);
+  backdrop-filter: blur(4px);
+}
+.palette.open { display: flex; }
+.palette-card {
+  width: min(680px, 100%);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  animation: palette-in 0.16s ease;
+}
+@keyframes palette-in {
+  from { opacity: 0; transform: translateY(-10px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.palette-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.palette-input .ico { color: var(--accent-2); font-size: 16px; }
+.palette-input input {
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 16px;
+  min-width: 0;
+  padding-right: 4px;
+}
+.palette-input.has-value input { padding-right: 32px; }
+.palette-input .search-clear { right: 12px; }
+.palette-list { overflow: auto; padding: 6px; }
+.palette-group {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 700;
+  padding: 10px 10px 4px;
+}
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-size: 13px;
+}
+.palette-item .pi-ico {
+  flex: 0 0 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-2);
+  color: var(--accent);
+  font-size: 13px;
+}
+.palette-item .pi-title { font-weight: 650; }
+.palette-item .pi-sub { color: var(--muted); font-size: 12px; }
+.palette-item .pi-right { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.palette-item.active { background: color-mix(in srgb, var(--accent-2) 16%, transparent); }
+.palette-item.active .pi-ico { background: var(--accent); color: #fff; }
+.palette-empty { padding: 26px 12px; text-align: center; color: var(--muted); font-size: 13px; }
+.palette-foot {
+  display: flex;
+  gap: 14px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--muted);
+  font-size: 11px;
+}
+

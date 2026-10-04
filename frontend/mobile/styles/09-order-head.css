@@ -1,0 +1,79 @@
+/* ===== Шапка заказа ===== */
+.order-top {
+  position: sticky;
+  top: calc(var(--top) + var(--sat));
+  z-index: 15;
+  margin: -12px -12px 12px;
+  padding: 10px 14px 12px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+}
+
+.ot-line { display: flex; align-items: baseline; gap: 9px; }
+.ot-num { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+.ot-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ot-sums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 9px; }
+.ot-sum {
+  padding: 7px 9px;
+  border-radius: 11px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+.ot-sum span {
+  display: block;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 650;
+}
+.ot-sum b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.ot-sum.debt b { color: var(--danger); }
+.ot-sum.paid b { color: var(--ok); }
+
+.section-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 18px 0 10px;
+}
+.section-row[hidden] { display: none !important; }
+.section-row .section { margin: 0; }
+.frozen-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.frozen-toggle .section {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.frozen-block { margin: 18px 0 10px; }
+.frozen-block[hidden] { display: none !important; }
+.frozen-toggle .fold-ico { font-size: 14px; transition: transform 0.16s ease; }
+.frozen-block:not(.is-open) .fold-ico { transform: rotate(-90deg); }
+.frozen-block:not(.is-open) #frozen-list { display: none; }
+

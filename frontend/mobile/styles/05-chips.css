@@ -1,0 +1,73 @@
+/* ===== Чипы ===== */
+.chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar { display: none; }
+.chips.inline { padding: 2px 0 0; margin-bottom: 6px; }
+.chips.wrap { flex-wrap: wrap; overflow: visible; padding-top: 0; padding-bottom: 12px; }
+.chips.wrap .chip { min-height: 32px; padding: 5px 10px; font-size: 13px; }
+.snap-prof-label {
+  margin: 2px 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+#screen-stats .chips { padding-bottom: 8px; }
+.stats-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.stats-pick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--field);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+}
+.stats-pick span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stats-pick span.on { color: var(--accent); }
+.stats-pick .picker-ico { flex: 0 0 auto; font-size: 12px; color: var(--muted); }
+#screen-stats .chip { min-height: 34px; padding: 6px 12px; font-size: 13px; }
+
+.chip {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  font-size: 14px;
+  white-space: nowrap;
+  transition: transform 0.12s ease, background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.chip:active { transform: scale(0.95); }
+.chip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.chip b { font-weight: 700; opacity: 0.75; margin-left: 5px; }
+.chip.theme-chip { display: inline-flex; align-items: center; gap: 7px; }
+.chip .sw { width: 15px; height: 15px; border-radius: 5px; display: inline-block; }
+
