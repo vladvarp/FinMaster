@@ -831,7 +831,7 @@ html[data-theme="dark"] .line-note { background: #121a2b; }
 html[data-theme="dark"] .line-note textarea { background: #1b2538; color: var(--ink); }
 .gantt-note-mark {
   position: absolute;
-  left: 6px;
+  left: calc(100% + 6px);
   top: 50%;
   z-index: 5;
   width: 16px;
@@ -844,15 +844,18 @@ html[data-theme="dark"] .line-note textarea { background: #1b2538; color: var(--
   text-align: center;
   box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.18);
   cursor: help;
+  pointer-events: auto;
 }
+.gantt-bar.is-open-end > .gantt-note-mark { left: calc(100% + 22px); }
 .gantt-row.is-line .gantt-note-mark {
-  left: 4px;
+  left: calc(100% + 5px);
   width: 14px;
   height: 14px;
   margin-top: -7px;
   font-size: 10px;
   line-height: 14px;
 }
+.gantt-row.is-line .gantt-bar.is-open-end > .gantt-note-mark { left: calc(100% + 14px); }
 .cal-line-note {
   display: block;
   margin: 8px 0 10px;
@@ -1387,6 +1390,7 @@ html[data-theme="dark"] .line-menu { background: #1b2538; border-color: var(--li
   position: relative;
   min-height: min(62vh, 640px);
   height: min(62vh, 640px);
+  margin-bottom: 28px;
   border: 1px solid var(--line);
   border-radius: 18px;
   overflow: hidden;

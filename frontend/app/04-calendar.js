@@ -810,6 +810,7 @@
         anchor: dayStart(new Date()),
         viewFrom: null,
         viewDays: TL_DEFAULT_DAYS,
+        followOrder: readCalFollow(),
       };
     }
     if (!state.calendar.openLines || typeof state.calendar.openLines !== "object") state.calendar.openLines = {};
@@ -818,6 +819,18 @@
       state.calendar.anchor = dayStart(new Date());
     }
     return state.calendar;
+  }
+
+  function readCalFollow() {
+    try {
+      const raw = localStorage.getItem(LS_CAL_FOLLOW);
+      if (raw === "false" || raw === "0") return false;
+      if (raw === "true" || raw === "1") return true;
+    } catch {
+      /* ignore */
+    }
+    const saved = state.doc?.ui?.calendar?.follow_order;
+    return typeof saved === "boolean" ? saved : true;
   }
 
   function persistCalendar() {
@@ -930,15 +943,22 @@
     return full;
   }
 
-  function goTimelineToday() {
+  function goCalendarDay(day) {
     const cal = calendarState();
-    const today = dayStart(new Date());
-    cal.anchor = today;
+    const target = dayStart(day instanceof Date ? day : parseDay(day));
+    if (!target) return false;
+    cal.anchor = target;
     if (cal.mode === "timeline") {
       if (!cal.viewDays) cal.viewDays = TL_DEFAULT_DAYS;
-      cal.viewFrom = addDays(today, -Math.floor((cal.viewDays - 1) / 2));
+      cal.viewFrom = addDays(target, -Math.floor((cal.viewDays - 1) / 2));
       clampTimelineView();
     }
+    cal.revealDay = dayKey(target);
+    return true;
+  }
+
+  function goTimelineToday() {
+    goCalendarDay(new Date());
   }
 
   function calendarWindow() {
@@ -1116,16 +1136,52 @@
     return String(order?.name || "").trim() || "без названия";
   }
 
-  function calChipHtml(order, day) {
+  function calChipHtml(order, day, opts = {}) {
     const meta = workStatusMeta(order, day);
     const role = day ? calendarRole(order, day) : meta.label;
     const due = orderDeadline(order);
     const dueText = due && meta.id !== "paused" ? `до ${calFmtDay(due)}` : "";
-    return `<button type="button" class="cal-chip tone-${meta.tone} ${due ? "has-deadline" : ""}" data-cal-id="${esc(order.id)}" title="${esc(`${orderNum(order)} ${orderTitle(order)} · ${meta.label}${due ? ` · дедлайн ${calFmtDay(due, true)}` : ""}`)}" style="--bar:${esc(calendarBarColor(order))}">
+    const note = opts.week ? String(order.notes || "").trim() : "";
+    const title = `${orderNum(order)} ${orderTitle(order)} · ${meta.label}${due ? ` · дедлайн ${calFmtDay(due, true)}` : ""}`;
+    const picked = calendarState().selected === order.id ? "is-selected" : "";
+    if (opts.week) {
+      return `<button type="button" class="cal-chip is-week tone-${meta.tone} ${due ? "has-deadline" : ""} ${picked}" data-cal-id="${esc(order.id)}" title="${esc(title)}" style="--bar:${esc(calendarBarColor(order))}">
+        <span class="cal-chip-title"><b>${esc(orderNum(order))}</b> ${esc(orderTitle(order))}</span>
+        <i>${esc(dueText || role)}</i>
+        ${note ? `<em class="cal-note">${esc(note)}</em>` : ""}
+      </button>`;
+    }
+    return `<button type="button" class="cal-chip tone-${meta.tone} ${due ? "has-deadline" : ""} ${picked}" data-cal-id="${esc(order.id)}" title="${esc(title)}" style="--bar:${esc(calendarBarColor(order))}">
       <b>${esc(orderNum(order))}</b>
       <span>${esc(orderTitle(order))}</span>
       <i>${esc(dueText || role)}</i>
     </button>`;
+  }
+
+  function lineActiveOnDay(order, line, day) {
+    if (/отмен|аннул|черн/i.test(line?.status || "")) return "";
+    const proxy = lineWorkProxy(order, line);
+    if (!dateDay(proxy.work_start) && !dateDay(proxy.work_end)) return "";
+    if (isPaused(proxy, day)) return "pause";
+    if (orderCoversDay(proxy, day)) return "work";
+    return "";
+  }
+
+  function weekLinesHtml(order, day) {
+    const rows = calendarWorkLines(order)
+      .map((line, index) => ({ line, index, kind: lineActiveOnDay(order, line, day) }))
+      .filter((row) => row.kind);
+    if (!rows.length) return "";
+    return `<div class="cal-lines">${rows
+      .map(({ line, index, kind }) => {
+        const note = String(line.notes || "").trim();
+        return `<button type="button" class="cal-line ${kind === "pause" ? "is-pause" : ""} ${calSelectedClass(order.id, line.id)}" data-cal-id="${esc(order.id)}" data-cal-line="${esc(line.id)}">
+          <span>${esc(lineWorkName(line, index))}</span>
+          <i>${kind === "pause" ? "На паузе" : "в работе"}</i>
+          ${note ? `<em class="cal-note">${esc(note)}</em>` : ""}
+        </button>`;
+      })
+      .join("")}</div>`;
   }
 
   function renderCalendar() {
@@ -1176,6 +1232,10 @@
       off.weekends.join() !== DEFAULT_WEEKENDS.join() || off.offDays.length > 0 || off.workDays.length > 0;
     weekendBtn?.classList.toggle("active", customOff);
     weekendBtn?.setAttribute("aria-expanded", String(!!weekendOpen));
+    const followBtn = $("cal-follow");
+    const followOn = cal.followOrder !== false;
+    followBtn?.classList.toggle("active", followOn);
+    followBtn?.setAttribute("aria-pressed", String(followOn));
     if (weekendMenu) {
       weekendMenu.innerHTML = weekendMenuHtml();
       weekendMenu.hidden = !weekendOpen;
@@ -1193,11 +1253,20 @@
 
     const board = $("cal-board");
     const keepY = board.scrollTop;
+    const keepCols = {};
+    board.querySelectorAll(".cal-col-body").forEach((el) => {
+      const day = el.closest("[data-cal-day]")?.dataset.calDay;
+      if (day) keepCols[day] = el.scrollTop;
+    });
     const keepGanttY = document.querySelector("#gantt-scroll .gantt")?.scrollTop || 0;
     if (cal.mode === "classic") board.innerHTML = renderClassicCalendar(win, list, load);
     else if (cal.mode === "extended") board.innerHTML = renderExtendedCalendar(win, list, load);
     else board.innerHTML = renderTimelineCalendar(win, list, load);
     board.scrollTop = keepY;
+    board.querySelectorAll(".cal-col-body").forEach((el) => {
+      const day = el.closest("[data-cal-day]")?.dataset.calDay;
+      if (day && keepCols[day]) el.scrollTop = keepCols[day];
+    });
     const ganttEl = document.querySelector("#gantt-scroll .gantt");
     if (ganttEl) ganttEl.scrollTop = keepGanttY;
     $("cal-side").innerHTML = renderCalendarSide(win, all, list);
@@ -1400,12 +1469,12 @@
     let noteIndex = -1;
     if (note) {
       const marks = segs
-        .map((seg, i) => ({ kind: "work", i, from: seg.from.getTime() }))
-        .concat(pauses.map((seg, i) => ({ kind: "pause", i, from: seg.from.getTime() })));
-      const first = marks.reduce((best, cur) => (!best || cur.from < best.from ? cur : best), null);
-      if (first) {
-        noteKind = first.kind;
-        noteIndex = first.i;
+        .map((seg, i) => ({ kind: "work", i, till: seg.till.getTime() }))
+        .concat(pauses.map((seg, i) => ({ kind: "pause", i, till: seg.till.getTime() })));
+      const last = marks.reduce((best, cur) => (!best || cur.till >= best.till ? cur : best), null);
+      if (last) {
+        noteKind = last.kind;
+        noteIndex = last.i;
       }
     }
     const noteMark = (kind, i) =>
@@ -1654,13 +1723,16 @@
       const key = dayKey(d);
       const inMonth = d.getMonth() === win.from.getMonth();
       const items = list.filter((order) => orderMarksDay(order, d));
-      const shown = items.slice(0, 3);
+      const selectedId = calendarState().selected;
+      const hit = selectedId ? items.find((order) => order.id === selectedId) : null;
+      let shown = items.slice(0, 3);
+      if (hit && !shown.some((order) => order.id === hit.id)) shown = [hit, ...shown.slice(0, 2)];
       const more = items.length - shown.length;
       const hot = (load.map[key] || 0) >= CAL_HOT_LOAD;
       const note = dayNote(key);
       cells.push(`<div class="cal-cell ${inMonth ? "" : "is-out"} ${dayToneClass(d)} ${note ? "has-note" : ""} ${key === dayKey(win.today) ? "is-today" : ""} ${calendarState().pick === key ? "is-pick" : ""} ${hot ? "is-hot" : ""}" data-cal-day="${key}">
         <div class="cal-cell-n">${d.getDate()}${items.length ? `<b>${items.length}</b>` : ""}</div>
-        ${note ? `<div class="cal-day-memo">${esc(note)}</div>` : ""}
+        ${note ? `<div class="cal-day-memo cal-note">${esc(note)}</div>` : ""}
         ${shown.map((order) => calChipHtml(order, d)).join("")}
         ${more > 0 ? `<div class="cal-more">ещё ${more}</div>` : ""}
       </div>`);
@@ -1681,19 +1753,24 @@
         const n = load.map[key] || 0;
         const pct = Math.min(100, (n / Math.max(CAL_HOT_LOAD, load.peak || 1)) * 100);
         const note = dayNote(key);
+        const chip = (order) => calChipHtml(order, day, { week: true });
         return `<div class="cal-col ${dayToneClass(day)} ${note ? "has-note" : ""} ${key === dayKey(win.today) ? "is-today" : ""} ${calendarState().pick === key ? "is-pick" : ""} ${n >= CAL_HOT_LOAD ? "is-hot" : ""}" data-cal-day="${key}">
-          <div class="cal-col-head">
-            <strong>${RU_WEEKDAYS[(day.getDay() + 6) % 7]}</strong>
-            <span>${calFmtDay(day)}</span>
-            <em>${n} зак.</em>
+          <div class="cal-col-pin">
+            <div class="cal-col-head">
+              <strong>${RU_WEEKDAYS[(day.getDay() + 6) % 7]}</strong>
+              <span>${calFmtDay(day)}</span>
+              <em>${n} зак.</em>
+            </div>
+            <div class="cal-load"><i style="width:${pct}%"></i></div>
+            ${note ? `<div class="cal-day-memo cal-note">${esc(note)}</div>` : ""}
           </div>
-          <div class="cal-load"><i style="width:${pct}%"></i></div>
-          ${note ? `<div class="cal-day-memo">${esc(note)}</div>` : ""}
-          ${starts.length ? `<div class="cal-col-sec">Старт</div>${starts.map((order) => calChipHtml(order, day)).join("")}` : ""}
-          ${running.length ? `<div class="cal-col-sec">В работе</div>${running.map((order) => calChipHtml(order, day)).join("")}` : ""}
-          ${paused.length ? `<div class="cal-col-sec">На паузе</div>${paused.map((order) => calChipHtml(order, day)).join("")}` : ""}
-          ${ends.length ? `<div class="cal-col-sec">Финиш</div>${ends.map((order) => calChipHtml(order, day)).join("")}` : ""}
-          ${items.length ? "" : `<div class="cal-col-empty">пусто</div>`}
+          <div class="cal-col-body">
+            ${starts.length ? `<div class="cal-col-sec">Старт</div>${starts.map(chip).join("")}` : ""}
+            ${running.length ? `<div class="cal-col-sec">В работе</div>${running.map((order) => `${chip(order)}${weekLinesHtml(order, day)}`).join("")}` : ""}
+            ${paused.length ? `<div class="cal-col-sec">На паузе</div>${paused.map(chip).join("")}` : ""}
+            ${ends.length ? `<div class="cal-col-sec">Финиш</div>${ends.map(chip).join("")}` : ""}
+            ${items.length ? "" : `<div class="cal-col-empty">пусто</div>`}
+          </div>
         </div>`;
       })
       .join("");
@@ -1764,7 +1841,9 @@
               ? `<label class="cal-line-note">Комментарий к позиции
                   <textarea id="cal-line-note" data-cal-line-note rows="3" maxlength="2000" placeholder="Что важно по этой позиции">${esc(selectedLine.notes || "")}</textarea>
                 </label>`
-              : ""
+              : `<label class="cal-line-note">Комментарий к заказу
+                  <textarea id="cal-order-note" data-cal-order-note rows="3" maxlength="2000" placeholder="Комментарий, договорённости, детали…">${esc(selected.notes || "")}</textarea>
+                </label>`
           }
           <div class="cal-dates">
             <div class="field"><label>Начало</label><input type="date" data-cal-field="work_start" value="${esc(dateDay(workTarget.work_start))}" /></div>
@@ -1915,14 +1994,25 @@
 
   function calendarSelect(id, lineId = "") {
     const cal = calendarState();
+    const nextLine = lineId || "";
+    if (cal.selected === id && (cal.selectedLine || "") === nextLine) {
+      cal.selected = "";
+      cal.selectedLine = "";
+      renderCalendar();
+      return;
+    }
     cal.selected = id;
-    cal.selectedLine = lineId || "";
+    cal.selectedLine = nextLine;
     const order = findOrder(id);
     if (!order) {
       renderCalendar();
       return;
     }
     const line = findCalendarLine(order, lineId);
+    if (cal.followOrder === false) {
+      renderCalendar();
+      return;
+    }
     revealOrderOnCalendar(line ? lineWorkProxy(order, line) : order);
   }
 
@@ -2037,6 +2127,22 @@
     }
     if (e.target.closest("#cal-today")) {
       goTimelineToday();
+      renderCalendar();
+      return;
+    }
+    if (e.target.closest("#cal-pick-day")) {
+      const pick = calendarState().pick;
+      if (!pick || !goCalendarDay(pick)) {
+        toast("Сначала выделите день");
+        return;
+      }
+      renderCalendar();
+      return;
+    }
+    if (e.target.closest("#cal-follow")) {
+      const cal = calendarState();
+      cal.followOrder = cal.followOrder === false;
+      persistPref(LS_CAL_FOLLOW, JSON.stringify(cal.followOrder !== false), { now: true });
       renderCalendar();
       return;
     }
@@ -2258,6 +2364,15 @@
         line.notes = next;
         markDirty();
       }
+      renderCalendar();
+      return;
+    }
+    if (e.target.dataset.calOrderNote != null) {
+      const order = findOrder(calendarState().selected);
+      if (!order) return;
+      order.notes = String(e.target.value || "").slice(0, 2000);
+      historyCommit();
+      markDirty();
       renderCalendar();
       return;
     }
@@ -2793,13 +2908,20 @@
     $("view-calendar")?.addEventListener("contextmenu", onCalContextMenu);
     $("view-calendar")?.addEventListener("change", onCalChange);
     $("view-calendar")?.addEventListener("input", (e) => {
-      if (e.target.id !== "cal-line-note") return;
       const cal = calendarState();
       const order = findOrder(cal.selected);
-      const line = findCalendarLine(order, cal.selectedLine);
-      if (!line) return;
-      line.notes = String(e.target.value || "").slice(0, 2000);
-      markDirty();
+      if (!order) return;
+      if (e.target.id === "cal-line-note") {
+        const line = findCalendarLine(order, cal.selectedLine);
+        if (!line) return;
+        line.notes = String(e.target.value || "").slice(0, 2000);
+        markDirty();
+        return;
+      }
+      if (e.target.id === "cal-order-note") {
+        order.notes = String(e.target.value || "").slice(0, 2000);
+        markDirty();
+      }
     });
     $("cal-board")?.addEventListener("pointerdown", onCalPointerDown);
     $("cal-board")?.addEventListener("pointermove", onGanttDayHover);
