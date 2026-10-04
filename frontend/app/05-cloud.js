@@ -1463,6 +1463,7 @@
         return;
       }
     }
+    if (payload && "runtime_choice" in payload) applyRuntimeMenu(payload.runtime_choice !== false);
     state.recentItems = payload.recent || [];
     state.library = payload.library || null;
     state.listsSig = fileListsSig(state.library, state.recentItems);
@@ -1891,16 +1892,6 @@
       if (data.job && data.job.error) log.textContent += (lines.length ? "\n" : "") + data.job.error;
       log.scrollTop = log.scrollHeight;
     }
-    const install = $("runtime-install");
-    if (install) {
-      const running = !!(data.job && data.job.running);
-      install.disabled = running;
-      install.textContent = running
-        ? "Установка…"
-        : data.folder && data.folder.available
-          ? "Установить библиотеки в папку"
-          : "Скачать Python и библиотеки";
-    }
   }
 
   function paintRuntimeJob(job) {
@@ -1912,11 +1903,6 @@
       log.textContent = lines.join("\n");
       if (job && job.error) log.textContent += (lines.length ? "\n" : "") + job.error;
       log.scrollTop = log.scrollHeight;
-    }
-    const install = $("runtime-install");
-    if (install) {
-      install.disabled = !!(job && job.running);
-      if (job && job.running) install.textContent = "Установка…";
     }
   }
 
@@ -1962,23 +1948,18 @@
     $("runtime-modal")?.classList.remove("open");
   }
 
+  function applyRuntimeMenu(show) {
+    const button = $("btn-runtime");
+    const sep = $("runtime-menu-sep");
+    if (button) button.hidden = !show;
+    if (sep) sep.hidden = !show;
+  }
+
   function bindRuntime() {
     $("btn-runtime")?.addEventListener("click", () => openRuntime());
     $("runtime-close")?.addEventListener("click", () => closeRuntime());
     $("runtime-modal")?.addEventListener("click", (e) => {
       if (e.target === $("runtime-modal")) closeRuntime();
-    });
-    $("runtime-install")?.addEventListener("click", async () => {
-      const button = $("runtime-install");
-      if (button) button.disabled = true;
-      try {
-        const job = await apiPost("/api/runtime/install", {});
-        paintRuntimeJob(job);
-        startRuntimePoll();
-      } catch (err) {
-        toast(err.message || "Не удалось начать установку");
-        if (button) button.disabled = false;
-      }
     });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && $("runtime-modal")?.classList.contains("open")) closeRuntime();

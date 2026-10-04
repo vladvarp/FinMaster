@@ -182,8 +182,9 @@ def _known_system_exes() -> list[str]:
 
 
 def system_pythonw() -> str:
-    """Интерпретатор системы, не копия в папке FinMaster."""
+    """Интерпретатор системы, не копия рядом с программой и не копия в папке отчётов."""
     folder = runtime_dir()
+    beside = program_python_dir()
     candidates: list[str] = []
     override = (os.environ.get("FINMASTER_PYTHONW") or "").strip()
     if override:
@@ -197,7 +198,7 @@ def system_pythonw() -> str:
     for path in candidates:
         if not path or not os.path.isfile(path) or _skip_store(path):
             continue
-        if _under(path, folder):
+        if _under(path, folder) or _under(path, beside):
             continue
         return path if path.lower().endswith("pythonw.exe") else _console_exe(path)
     launcher = ""
@@ -215,9 +216,24 @@ def system_pythonw() -> str:
     except (OSError, subprocess.TimeoutExpired):
         return ""
     exe = (proc.stdout or "").strip()
-    if proc.returncode != 0 or not exe or not os.path.isfile(exe) or _under(exe, folder):
+    if proc.returncode != 0 or not exe or not os.path.isfile(exe) or _under(exe, folder) or _under(exe, beside):
         return ""
     return exe
+
+
+def program_python_dir(project_root: str | None = None) -> str:
+    """Python рядом с файлами программы, не в папке отчётов."""
+    return os.path.join(project_root or _ROOT, "python")
+
+
+def program_pythonw(project_root: str | None = None) -> str:
+    path = os.path.join(program_python_dir(project_root), "pythonw.exe")
+    return path if os.path.isfile(path) else ""
+
+
+def using_program_python(project_root: str | None = None) -> bool:
+    """Сейчас программа уже запущена копией Python из своей папки."""
+    return bool(program_pythonw(project_root)) and _under(sys.executable, program_python_dir(project_root))
 
 
 def folder_pythonw() -> str:
@@ -277,7 +293,7 @@ def _powershell() -> str:
     return path if os.path.isfile(path) else "powershell.exe"
 
 
-_SKIP_SCAN = {".git", ".kilo", "build", "dist", "__pycache__", "node_modules", ".venv", "venv", "env"}
+_SKIP_SCAN = {".git", ".kilo", "build", "dist", "__pycache__", "node_modules", ".venv", "venv", "env", "python"}
 # Имя в import не всегда совпадает с именем пакета в pip.
 _IMPORT_TO_PACKAGE = {
     "pil": "pillow",
@@ -586,6 +602,8 @@ def start_install() -> None:
 
 
 def set_mode(mode: str) -> None:
+    if program_pythonw():
+        raise ValueError("Python лежит в папке программы, переключение недоступно")
     if mode not in {"system", "folder"}:
         raise ValueError("Неизвестный режим запуска")
     if mode == "system" and not system_pythonw():
@@ -654,7 +672,8 @@ def status() -> dict[str, Any]:
         "active_path": sys.executable,
         "active_version": sys.version.split()[0],
         "preference": choice,
-        "can_switch": can_switch,
+        "can_switch": can_switch and not program_pythonw(),
+        "runtime_choice": not program_pythonw(),
         "restart_needed": restart,
         "note": note,
         "folder": _env_block(

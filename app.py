@@ -455,6 +455,7 @@ def api_bootstrap():
             "theme": "dark" if cfg.get("theme") == "dark" else "light",
             "ui_prefs": storage.ui_prefs(),
             "desktop": True,
+            "runtime_choice": not runtime.program_pythonw(),
             "remote": _remote_public(),
         }
     )

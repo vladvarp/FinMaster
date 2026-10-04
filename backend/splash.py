@@ -134,7 +134,11 @@ def ensure_packages(splash: "Splash", requirements: str) -> None:
     root = os.path.dirname(os.path.abspath(requirements)) if requirements else os.path.dirname(
         os.path.dirname(os.path.abspath(__file__))
     )
-    from backend.runtime import install_list_path, missing_here
+    from backend.runtime import install_list_path, missing_here, using_program_python
+
+    if using_program_python(root):
+        splash.step("Библиотеки на месте", 22)
+        return
 
     missing = missing_here(root)
     if not missing:

@@ -1,6 +1,6 @@
 Option Explicit
 ' Тихий запуск FinMaster — без консоли и без мигания cmd.
-Dim sh, fso, dir, pyw, app, folderPy, systemPy, mode
+Dim sh, fso, dir, pyw, app, appPy, folderPy, systemPy, mode
 Dim BundledSkip
 BundledSkip = ""
 
@@ -17,10 +17,13 @@ End If
 
 folderPy = BundledPythonw(sh, fso)
 BundledSkip = folderPy
+appPy = dir & "\python\pythonw.exe"
 mode = ReadRuntimeMode(fso, sh)
 systemPy = FindPythonw(sh, fso)
 
-If mode = "system" And systemPy <> "" Then
+If fso.FileExists(appPy) Then
+  pyw = appPy
+ElseIf mode = "system" And systemPy <> "" Then
   pyw = systemPy
 ElseIf folderPy <> "" Then
   pyw = folderPy
@@ -66,12 +69,19 @@ Function ReadRuntimeMode(fso, sh)
 End Function
 
 Function IsSkipped(path)
-  Dim folder, bundled
+  Dim folder, bundled, beside
   IsSkipped = False
-  If BundledSkip = "" Or path = "" Then Exit Function
+  If path = "" Then Exit Function
   folder = LCase(fso.GetParentFolderName(path))
+  If folder = "" Then Exit Function
+  beside = LCase(dir & "\python")
+  If folder = beside Then
+    IsSkipped = True
+    Exit Function
+  End If
+  If BundledSkip = "" Then Exit Function
   bundled = LCase(fso.GetParentFolderName(BundledSkip))
-  If folder <> "" And folder = bundled Then IsSkipped = True
+  If folder = bundled Then IsSkipped = True
 End Function
 
 Function FindPythonw(sh, fso)

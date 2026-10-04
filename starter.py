@@ -20,7 +20,7 @@ ROOT = project_root()
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from backend.runtime import folder_pythonw, install_blocking, missing_packages  # noqa: E402
+from backend.runtime import folder_pythonw, install_blocking, missing_packages, program_pythonw  # noqa: E402
 from backend.splash import Splash, hide_console, install_caption  # noqa: E402
 
 
@@ -121,7 +121,9 @@ def _follow_install(splash: Splash) -> None:
 
 
 def _needs_install() -> tuple[bool, list[str]]:
-    """Своя заставка exe нужна, когда в папке FinMaster нет Python или библиотек из файлов программы."""
+    """Своя заставка exe нужна, когда Python ещё не лежит ни рядом с программой, ни в папке отчётов."""
+    if program_pythonw(ROOT):
+        return False, []
     if not folder_pythonw():
         return True, []
     missing = missing_packages(ROOT)
