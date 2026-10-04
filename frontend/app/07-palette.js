@@ -9,9 +9,9 @@
       { group: "Разделы", ico: "⌂", title: "Дашборд", sub: "KPI, инсайты и графики", run: () => setView("dashboard") },
       { group: "Разделы", ico: "☰", title: "Заказы", sub: "таблицы заказов и позиций", run: () => setView("orders") },
       { group: "Разделы", ico: "◷", title: "Аналитика", sub: "фильтры, сравнение периодов", run: () => setView("analytics") },
-      { group: "Разделы", ico: "₽", title: "Касса", sub: "платёжный календарь и дебиторка", run: () => setView("cashflow") },
+      { group: "Разделы", ico: "₽", title: "Касса", sub: "долги, сроки оплат и дебиторка", keys: "касса платежи просрочка", run: () => setView("cashflow") },
       { group: "Разделы", ico: "↗", title: "Прогнозирование", sub: "выручка и прибыль на месяцы и годы", run: () => setView("forecast") },
-      { group: "Разделы", ico: "▦", title: "Календарь", sub: "старт, финиш и что идёт сейчас", run: () => setView("calendar") },
+      { group: "Разделы", ico: "▦", title: "Календарь", sub: "без фильтра", keys: "календарь работ", run: () => openCalendarView("", "all") },
       { group: "Разделы", ico: "∑", title: "Калькулятор", sub: "схемы из заказов, операторов и формул", run: () => setView("calculator") },
       { group: "Разделы", ico: "▣", title: "Презентация", sub: "инфографика из блоков и схем", run: () => setView("presentation") },
       { group: "Разделы", ico: "✣", title: "Облако заказов", sub: "живая карта заказов и позиций", run: () => setView("cloud") },
@@ -105,42 +105,12 @@
       },
       {
         group: "Фильтры",
-        ico: "▦",
-        title: "Календарь: идёт сейчас",
-        sub: "заказы в работе сегодня",
-        run: () => {
-          calendarState().filter = "now";
-          persistCalendar();
-          setView("calendar");
-        },
-      },
-      {
-        group: "Фильтры",
-        ico: "!",
-        title: "Касса: просроченные долги",
-        run: () => {
-          cashResetFilters();
-          cashState().filter = "overdue";
-          setView("cashflow");
-        },
-      },
-      {
-        group: "Фильтры",
         ico: "₽",
         title: "Касса: скопировать сводку",
+        keys: "касса сводка",
         run: () => {
           if (!state.doc) return;
           cashCopy(cashSummaryText(cashData()), "Сводка по кассе скопирована");
-        },
-      },
-      {
-        group: "Фильтры",
-        ico: "∑",
-        title: "Аналитика: только долги",
-        run: () => {
-          setView("analytics");
-          $("f-unpaid").checked = true;
-          renderAnalytics();
         },
       },
       {
@@ -194,6 +164,251 @@
         },
       },
     ];
+    return items.concat(paletteSmartItems());
+  }
+
+  function openCalendarView(mode, filter) {
+    const cal = calendarState();
+    if (mode) cal.mode = mode;
+    cal.filter = filter || "all";
+    persistCalendar();
+    markDirty();
+    setView("calendar");
+  }
+
+  function openCashView(filter) {
+    cashResetFilters();
+    cashState().filter = filter || "all";
+    setView("cashflow");
+  }
+
+  function openForecastView(metric, horizon) {
+    const metricEl = $("forecast-metric");
+    const horizonEl = $("forecast-horizon");
+    if (metricEl && metric) {
+      metricEl.value = metric;
+      metricEl.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    if (horizonEl && horizon) {
+      horizonEl.value = String(horizon);
+      horizonEl.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    setView("forecast");
+  }
+
+  function openAnalyticsView({ unpaid, group } = {}) {
+    setView("analytics");
+    if (unpaid != null && $("f-unpaid")) $("f-unpaid").checked = !!unpaid;
+    if (group && $("f-group")) $("f-group").value = group;
+    renderAnalytics();
+  }
+
+  function openCloudView(patch) {
+    Object.assign(cloudState(), patch);
+    persistCloudPrefs();
+    setView("cloud");
+    syncCloudControls();
+    orderCloud?.setOptions?.(patch);
+  }
+
+  function paletteSmartItems() {
+    const items = [];
+    const push = (item) => items.push(item);
+
+    ORDER_FILTERS.forEach(([id, name]) => {
+      push({
+        group: "Фильтры",
+        ico: "☰",
+        title: id === "all" ? "Заказы · без фильтра" : `Заказы · ${name}`,
+        sub: "список заказов",
+        keys: `заказы ${name}`,
+        run: () => {
+          state.orderFilter = id;
+          setView("orders");
+        },
+      });
+    });
+
+    const calModes = [
+      ["timeline", "Таймлайн", "таймлайн гант диаграмма"],
+      ["classic", "Месяц", "месяц классический сетка"],
+      ["extended", "Неделя", "неделя старты финиш"],
+    ];
+    const calFilters = CALENDAR_FILTERS.filter(([id]) => id !== "all");
+    calModes.forEach(([mode, name, keys]) => {
+      push({
+        group: "Календарь",
+        ico: "▦",
+        title: `Календарь · ${name}`,
+        sub: "вид без фильтра",
+        keys: `календарь ${keys}`,
+        run: () => openCalendarView(mode, "all"),
+      });
+    });
+    calFilters.forEach(([id, name]) => {
+      push({
+        group: "Календарь",
+        ico: "▦",
+        title: `Календарь · ${name}`,
+        sub: "фильтр",
+        keys: `календарь ${name}`,
+        run: () => openCalendarView("", id),
+      });
+    });
+    calModes.forEach(([mode, modeName, modeKeys]) => {
+      calFilters.forEach(([id, filterName]) => {
+        push({
+          group: "Календарь",
+          ico: "▦",
+          title: `Календарь · ${modeName} · ${filterName}`,
+          sub: "вид и фильтр",
+          keys: `календарь ${modeKeys} ${filterName}`,
+          rankBias: 28,
+          run: () => openCalendarView(mode, id),
+        });
+      });
+    });
+
+    [
+      ["all", "без фильтра", "все"],
+      ["overdue", "Просрочено", "просрочка долги"],
+      ["week", "Срок до 7 дней", "неделя срок"],
+      ["nodate", "Без срока", "без даты"],
+    ].forEach(([id, name, keys]) => {
+      push({
+        group: "Фильтры",
+        ico: "₽",
+        title: id === "all" ? "Касса · без фильтра" : `Касса · ${name}`,
+        sub: "платежи и долги",
+        keys: `касса ${keys}`,
+        run: () => openCashView(id),
+      });
+    });
+
+    push({
+      group: "Фильтры",
+      ico: "∑",
+      title: "Аналитика · только долги",
+      sub: "фильтр",
+      keys: "аналитика долг неоплаченные",
+      run: () => openAnalyticsView({ unpaid: true }),
+    });
+    push({
+      group: "Фильтры",
+      ico: "∑",
+      title: "Аналитика · без фильтра",
+      sub: "все позиции",
+      keys: "аналитика все",
+      run: () => openAnalyticsView({ unpaid: false }),
+    });
+    [
+      ["day", "по дням"],
+      ["week", "по неделям"],
+      ["month", "по месяцам"],
+    ].forEach(([id, name]) => {
+      push({
+        group: "Фильтры",
+        ico: "∑",
+        title: `Аналитика · ${name}`,
+        sub: "группировка",
+        keys: `аналитика ${name}`,
+        run: () => openAnalyticsView({ group: id }),
+      });
+    });
+
+    [
+      ["revenue", "Выручка"],
+      ["paid", "Оплаты"],
+      ["cost", "Затраты"],
+      ["net", "Чистыми"],
+    ].forEach(([id, name]) => {
+      push({
+        group: "Прогноз",
+        ico: "↗",
+        title: `Прогноз · ${name}`,
+        sub: "показатель",
+        keys: `прогноз прогнозирование ${name}`,
+        run: () => openForecastView(id, 0),
+      });
+    });
+    [
+      [6, "6 месяцев"],
+      [12, "год"],
+      [24, "2 года"],
+      [36, "3 года"],
+      [60, "5 лет"],
+    ].forEach(([horizon, name]) => {
+      push({
+        group: "Прогноз",
+        ico: "↗",
+        title: `Прогноз · ${name}`,
+        sub: "горизонт",
+        keys: `прогноз горизонт ${name}`,
+        run: () => openForecastView("", horizon),
+      });
+    });
+
+    [
+      ["galaxy", "Звёздные системы"],
+      ["orbit", "Орбитальное кольцо"],
+      ["timeline", "Финансовая ось"],
+      ["constellation", "Созвездия работ"],
+    ].forEach(([id, name]) => {
+      push({
+        group: "Облако",
+        ico: "✣",
+        title: `Облако · ${name}`,
+        sub: "геометрия",
+        keys: `облако ${name}`,
+        run: () => openCloudView({ layout: id }),
+      });
+    });
+    [
+      ["status", "по статусу"],
+      ["customer", "по заказчику"],
+      ["debt", "по оплате"],
+      ["type", "по типу"],
+    ].forEach(([id, name]) => {
+      push({
+        group: "Облако",
+        ico: "✣",
+        title: `Облако · цвет ${name}`,
+        sub: "раскраска",
+        keys: `облако цвет ${name}`,
+        run: () => openCloudView({ color: id }),
+      });
+    });
+    [
+      ["amount", "по сумме"],
+      ["debt", "по долгу"],
+      ["quantity", "по количеству"],
+      ["equal", "одинаковый"],
+    ].forEach(([id, name]) => {
+      push({
+        group: "Облако",
+        ico: "✣",
+        title: `Облако · размер ${name}`,
+        sub: "размер точек",
+        keys: `облако размер ${name}`,
+        run: () => openCloudView({ size: id }),
+      });
+    });
+    push({
+      group: "Облако",
+      ico: "✣",
+      title: "Облако · только долги",
+      sub: "фильтр",
+      keys: "облако долг",
+      run: () => openCloudView({ debtOnly: true }),
+    });
+    push({
+      group: "Облако",
+      ico: "✣",
+      title: "Облако · без фильтра",
+      sub: "все заказы",
+      keys: "облако все",
+      run: () => openCloudView({ debtOnly: false }),
+    });
     return items;
   }
 
@@ -238,10 +453,47 @@
     return items;
   }
 
-  function paletteMatch(item, tokens) {
-    if (!tokens.length) return true;
-    const hay = `${item.title} ${item.sub || ""} ${item.group}`.toLowerCase();
-    return tokens.every((t) => hay.includes(t));
+  function paletteWords(text) {
+    return String(text || "")
+      .toLowerCase()
+      .split(/[^a-zа-яё0-9]+/i)
+      .filter(Boolean);
+  }
+
+  function paletteTokenHit(token, word) {
+    if (!token || !word) return 0;
+    if (word === token) return 140;
+    if (word.startsWith(token)) return 116;
+    if (token.startsWith(word) && word.length >= 4) return 100;
+    let shared = 0;
+    const n = Math.min(token.length, word.length);
+    while (shared < n && token[shared] === word[shared]) shared += 1;
+    if (shared >= 4) return 92;
+    if (word.includes(token)) return 36;
+    return 0;
+  }
+
+  function paletteScore(item, tokens) {
+    if (!tokens.length) return 0;
+    const titleWords = paletteWords(`${item.title || ""} ${item.keys || ""}`);
+    const groupWords = paletteWords(item.group);
+    const subWords = paletteWords(item.sub);
+    let total = 0;
+    for (const token of tokens) {
+      let best = 0;
+      titleWords.forEach((word) => {
+        best = Math.max(best, paletteTokenHit(token, word));
+      });
+      groupWords.forEach((word) => {
+        best = Math.max(best, Math.round(paletteTokenHit(token, word) * 0.5));
+      });
+      subWords.forEach((word) => {
+        best = Math.max(best, Math.round(paletteTokenHit(token, word) * 0.2));
+      });
+      if (!best) return 0;
+      total += best;
+    }
+    return total - (item.rankBias || 0);
   }
 
   function renderPaletteList(query, keepIndex) {
@@ -251,13 +503,16 @@
       .split(/\s+/)
       .filter(Boolean);
     const all = [...paletteCommands(), ...paletteDataItems()];
-    const limit = tokens.length ? 8 : 5;
+    const limit = tokens.length ? 16 : 5;
+    let ranked = all.map((item, index) => ({ item, index, score: paletteScore(item, tokens) }));
+    if (tokens.length) {
+      ranked = ranked.filter((row) => row.score > 0).sort((a, b) => b.score - a.score || a.index - b.index);
+    }
     const counts = {};
     const items = [];
-    all.forEach((item) => {
-      if (!paletteMatch(item, tokens)) return;
-      counts[item.group] = (counts[item.group] || 0) + 1;
-      if (counts[item.group] <= limit) items.push(item);
+    ranked.forEach((row) => {
+      counts[row.item.group] = (counts[row.item.group] || 0) + 1;
+      if (counts[row.item.group] <= limit) items.push(row.item);
     });
     palette.items = items.slice(0, 40);
     palette.index = keepIndex ? Math.min(palette.index, Math.max(0, palette.items.length - 1)) : 0;

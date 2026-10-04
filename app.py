@@ -17,6 +17,7 @@ from backend.dialogs import open_report_dialog, save_csv_dialog, save_pdf_dialog
 from backend.document import empty_document, normalize_document, now_iso
 from backend.remote import SESSION as REMOTE
 from backend.remote import lan_candidates
+from backend.startup import set_windows_login, windows_login_enabled
 from backend.telegram import BOT as TELEGRAM
 from backend.telegram import send_link as telegram_send_link
 from backend.telegram import set_menu_button as telegram_set_menu
@@ -423,6 +424,7 @@ def _remote_public(ip: str | None = None, via: str | None = None) -> dict[str, A
         "qr": _qr_svg(url),
         "version": REMOTE.version,
         "autostart": bool(settings.get("autostart")),
+        "windows_login": windows_login_enabled(ROOT),
         "devices": settings.get("devices") or [],
         "clients": REMOTE.clients(),
         "ngrok": bool(settings.get("ngrok")),
@@ -851,6 +853,19 @@ def api_clipboard_png():
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
     return jsonify({"ok": True})
+
+
+@app.post("/api/remote/windows-login")
+def api_remote_windows_login():
+    """Тумблер автозагрузки: программа открывается при входе в Windows."""
+    if not _is_local():
+        return jsonify({"error": "Только в окне программы."}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        on = set_windows_login(ROOT, bool(data.get("enabled")))
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, "windows_login": on})
 
 
 @app.post("/api/remote/start")

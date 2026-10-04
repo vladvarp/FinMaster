@@ -259,6 +259,7 @@
     if (Array.isArray(data.clients)) remote.clients = data.clients;
     if (Array.isArray(data.devices)) remote.devices = data.devices;
     if (typeof data.autostart === "boolean") remote.autostart = data.autostart;
+    if (typeof data.windows_login === "boolean") remote.windowsLogin = data.windows_login;
     if (data.qr) remote.qr = data.qr;
     if (data.lan_url) remote.lan_url = data.lan_url;
     if ("public_url" in data) remote.public_url = data.public_url || "";
@@ -471,6 +472,8 @@
     renderRemoteIps();
     const auto = $("remote-autostart");
     if (auto) auto.checked = !!remote.autostart;
+    const login = $("remote-windows-login");
+    if (login && typeof remote.windowsLogin === "boolean") login.checked = remote.windowsLogin;
     const ngrokChk = $("remote-ngrok");
     if (ngrokChk) ngrokChk.checked = !!remote.ngrok;
     const ngrokCheck = $("remote-ngrok-check");
@@ -1033,6 +1036,18 @@
     $("remote-autostart")?.addEventListener("change", async (e) => {
       if (e.target.checked) await remoteStart();
       else await remoteStop();
+    });
+    $("remote-windows-login")?.addEventListener("change", async (e) => {
+      const want = !!e.target.checked;
+      try {
+        const data = await apiPost("/api/remote/windows-login", { enabled: want });
+        remote.windowsLogin = !!data.windows_login;
+        e.target.checked = remote.windowsLogin;
+        toast(remote.windowsLogin ? "FinMaster откроется вместе с Windows" : "Автозагрузка выключена");
+      } catch (err) {
+        e.target.checked = !want;
+        toast(err.message || "Не удалось изменить автозагрузку");
+      }
     });
     $("device-info-close")?.addEventListener("click", () => $("device-info-modal")?.classList.remove("open"));
     $("device-info-modal")?.addEventListener("click", (e) => {
