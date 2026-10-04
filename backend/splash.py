@@ -251,11 +251,15 @@ class Splash:
     MARGIN = 28
     CORNER = 26
 
-    def __init__(self, icon_png: str = "") -> None:
+    def __init__(self, icon_png: str = "", *, closable: bool = False, on_cancel: Callable[[], None] | None = None) -> None:
         self._headless = tk is None
         self._closed = False
         self._failed = False
         self._retry = False
+        self._cancelled = False
+        self._closable = closable
+        self._on_cancel = on_cancel
+        self._close_btn: tk.Widget | None = None
         self.lines: list[str] = []
         if self._headless:
             return
@@ -422,6 +426,61 @@ class Splash:
             c.tag_raise(tid)
 
         self._draw_bar(0)
+        if self._closable:
+            self._draw_close(c, x2, y1)
+
+    def _draw_close(self, canvas: tk.Canvas, x2: float, y1: float) -> None:
+        """Настоящая кнопка поверх холста: рамка заставки иначе забирает клик себе."""
+        cx, cy = x2 - 36, y1 + 32
+        size = 28
+        button = tk.Button(
+            self.root,
+            text="×",
+            command=self.cancel,
+            font=("Segoe UI", 14),
+            fg=INK,
+            bg="#f8fafc",
+            activeforeground=INK,
+            activebackground="#e2e8f0",
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=LINE,
+            cursor="hand2",
+            takefocus=0,
+        )
+        button.place(x=int(cx - size / 2), y=int(cy - size / 2), width=size, height=size)
+        button.lift()
+        self._close_btn = button
+        self._close_box = (int(cx - size / 2), int(cy - size / 2), size, size)
+        canvas.bind("<Button-1>", self._hit_close, add="+")
+
+    def _hit_close(self, event: tk.Event) -> None:
+        box = getattr(self, "_close_box", None)
+        if not box:
+            return
+        x, y, w, h = box
+        if x <= event.x <= x + w and y <= event.y <= y + h:
+            self.cancel()
+
+    def cancel(self) -> None:
+        if self._cancelled:
+            return
+        self._cancelled = True
+        callback = self._on_cancel
+        if callback is not None:
+            try:
+                callback()
+            except Exception:
+                pass
+        try:
+            self.root.after(0, self.close)
+        except tk.TclError:
+            self.close()
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
 
     def _try_draw_icon(self, canvas: tk.Canvas, cx: float, cy: float) -> bool:
         path = self._icon_png
@@ -599,6 +658,11 @@ class Splash:
             except tk.TclError:
                 pass
 
+        if self._close_btn is not None:
+            try:
+                self._close_btn.lift()
+            except tk.TclError:
+                pass
         self._schedule_tick()
 
     def set_progress(self, value: float) -> None:

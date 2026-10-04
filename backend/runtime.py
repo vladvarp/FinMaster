@@ -22,6 +22,7 @@ _REQUIREMENTS = os.path.join(_ROOT, "requirements.txt")
 _LOCK = threading.Lock()
 _JOB: dict[str, Any] = {"running": False, "log": [], "error": "", "ok": False}
 _CREATE_NO_WINDOW = 0x08000000
+_INSTALL_PROC: subprocess.Popen[Any] | None = None
 
 
 def runtime_dir() -> str:
@@ -510,9 +511,37 @@ def missing_here(project_root: str) -> list[str]:
     return _missing_for(sys.executable, project_root)
 
 
+def abort_install() -> None:
+    """Остановить текущую установку Python и все её дочерние процессы."""
+    proc = _INSTALL_PROC
+    if proc is None or proc.poll() is not None:
+        return
+    _kill_process_tree(proc)
+
+
+def _kill_process_tree(proc: subprocess.Popen[Any]) -> None:
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=_CREATE_NO_WINDOW,
+            check=False,
+        )
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=3)
+    except Exception:
+        pass
+
+
 def install_blocking(
     on_line: Callable[[str], None] | None = None,
     project_root: str | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> None:
     """Ставит Python и библиотеки в папку FinMaster. Без окна консоли."""
     if sys.platform != "win32":
@@ -551,15 +580,26 @@ def install_blocking(
         proc = subprocess.Popen(cmd, **kwargs)
     except OSError as exc:
         raise RuntimeError(f"Не удалось запустить установку: {exc}") from exc
+    global _INSTALL_PROC
+    _INSTALL_PROC = proc
     seen = 0
-    while proc.poll() is None:
-        lines = _read_log()
-        while seen < len(lines):
-            if on_line:
-                on_line(lines[seen])
-            seen += 1
-        _publish_log()
-        time.sleep(0.12)
+    try:
+        while proc.poll() is None:
+            if should_stop and should_stop():
+                _kill_process_tree(proc)
+                raise RuntimeError("Установка прервана")
+            lines = _read_log()
+            while seen < len(lines):
+                if on_line:
+                    on_line(lines[seen])
+                seen += 1
+            _publish_log()
+            time.sleep(0.12)
+    finally:
+        if _INSTALL_PROC is proc:
+            _INSTALL_PROC = None
+    if should_stop and should_stop():
+        raise RuntimeError("Установка прервана")
     lines = _read_log()
     while seen < len(lines):
         if on_line:

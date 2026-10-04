@@ -20,7 +20,7 @@ ROOT = project_root()
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from backend.runtime import folder_pythonw, install_blocking, missing_packages, program_pythonw  # noqa: E402
+from backend.runtime import abort_install, folder_pythonw, install_blocking, missing_packages, program_pythonw  # noqa: E402
 from backend.splash import Splash, hide_console, install_caption  # noqa: E402
 
 
@@ -74,6 +74,10 @@ def _pump_until(splash: Splash, worker: threading.Thread) -> None:
         time.sleep(0.016)
 
 
+class InstallCancelled(Exception):
+    """Пользователь закрыл заставку установки крестиком."""
+
+
 def _follow_install(splash: Splash) -> None:
     box: queue.Queue[str | None] = queue.Queue()
     failed: list[BaseException] = []
@@ -83,7 +87,7 @@ def _follow_install(splash: Splash) -> None:
 
     def work() -> None:
         try:
-            install_blocking(on_line, project_root=ROOT)
+            install_blocking(on_line, project_root=ROOT, should_stop=lambda: splash.cancelled)
         except BaseException as exc:
             failed.append(exc)
         finally:
@@ -92,6 +96,8 @@ def _follow_install(splash: Splash) -> None:
     threading.Thread(target=work, daemon=True).start()
     progress = 16.0
     while True:
+        if splash.cancelled:
+            raise InstallCancelled()
         try:
             item = box.get(timeout=0.016)
         except queue.Empty:
@@ -119,6 +125,8 @@ def _follow_install(splash: Splash) -> None:
         splash.step(caption)
         splash.log(item)
         splash.set_progress(progress)
+    if splash.cancelled:
+        raise InstallCancelled()
     if failed:
         raise failed[0]
 
@@ -145,13 +153,24 @@ def main() -> int:
     except Exception:
         report_path = ""
     os.chdir(ROOT)
+    splash: Splash | None = None
     try:
         while True:
             install, missing = _needs_install()
             if not install:
+                if splash is not None:
+                    splash.close()
                 launch_app(report_path)
                 return 0
-            splash = Splash(os.path.join(ROOT, "frontend", "favicon.png"))
+            if splash is None:
+                splash = Splash(
+                    os.path.join(ROOT, "frontend", "favicon.png"),
+                    closable=True,
+                    on_cancel=abort_install,
+                )
+            if splash.cancelled:
+                splash.close()
+                return 1
             try:
                 if missing:
                     splash.step("В файлах программы не хватает: " + ", ".join(missing) + ". Скачиваю…", 14)
@@ -162,10 +181,26 @@ def main() -> int:
                 launch_app(report_path)
                 splash.close()
                 return 0
+            except InstallCancelled:
+                splash.close()
+                return 1
             except Exception as exc:
-                if not splash.fail(str(exc), retry=True):
+                if splash.cancelled:
+                    splash.close()
                     return 1
+                splash.step("Сбой, повторяю…", None)
+                splash.log(str(exc))
+                deadline = time.perf_counter() + 1.0
+                while time.perf_counter() < deadline:
+                    if splash.cancelled:
+                        splash.close()
+                        return 1
+                    splash.pump()
+                    time.sleep(0.016)
+                splash.set_progress(8)
     except Exception as exc:
+        if splash is not None:
+            splash.close()
         _tell(str(exc))
         return 1
 
