@@ -244,6 +244,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  transition: grid-template-columns 0.32s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .app.sidebar-collapsed {
   grid-template-columns: 64px 1fr;
@@ -260,6 +261,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   overflow: hidden;
   padding: 10px 10px 12px;
   gap: 10px;
+  transition: padding 0.32s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .brand {
@@ -319,6 +321,20 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   border: 1px solid var(--side-line);
   border-radius: 14px;
   padding: 12px;
+  overflow: hidden;
+  max-height: 220px;
+  transition:
+    max-height 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.22s ease,
+    padding 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    border-width 0.32s ease;
+}
+.brand-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 220px;
+  transition: max-width 0.32s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease;
 }
 .file-title {
   display: flex;
@@ -1874,10 +1890,17 @@ tr.is-dragging,
 }
 th[data-col="drag"] { padding: 0; }
 
-.app.sidebar-collapsed .brand-text,
-.app.sidebar-collapsed .file-box,
-.app.sidebar-collapsed .nav-label {
-  display: none;
+.app.sidebar-collapsed .brand-text {
+  max-width: 0;
+  opacity: 0;
+}
+.app.sidebar-collapsed .file-box {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-width: 0;
+  pointer-events: none;
 }
 .app.sidebar-collapsed .sidebar {
   padding: 8px 6px;
@@ -1885,7 +1908,68 @@ th[data-col="drag"] { padding: 0; }
   overflow: visible;
   z-index: 40;
 }
-.app.sidebar-collapsed .nav button { justify-content: center; padding: 10px 0; }
+.app.sidebar-collapsed .nav {
+  width: 100%;
+  align-items: stretch;
+}
+.app.sidebar-collapsed .nav button {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 10px 0 10px 16px;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: max-width 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.app.sidebar-collapsed .nav button .nav-ico {
+  flex: 0 0 20px;
+  width: 20px;
+  text-align: center;
+}
+.app.sidebar-collapsed .nav button .nav-label {
+  display: block;
+  max-width: 0;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  pointer-events: none;
+  transition:
+    max-width 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.18s ease,
+    padding 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.app.sidebar-collapsed .nav button:hover,
+.app.sidebar-collapsed .nav button:focus-visible {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.app.sidebar-collapsed .nav button .nav-label.is-out {
+  position: fixed;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  max-width: 220px;
+  opacity: 1;
+  margin: 0;
+  padding: 0 14px 0 8px;
+  overflow: hidden;
+  pointer-events: auto;
+  background: color-mix(in srgb, var(--side-ink) 8%, var(--side));
+  color: var(--side-ink);
+  box-shadow: 8px 6px 18px rgba(0, 0, 0, 0.28);
+  border-radius: 0 12px 12px 0;
+  transition: max-width 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.18s ease, padding 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.app.sidebar-collapsed .nav button.active .nav-label.is-out {
+  background: color-mix(in srgb, var(--accent) 22%, var(--side));
+  color: var(--accent);
+}
 .app.sidebar-collapsed .sidebar-head {
   flex-direction: column;
   position: relative;
@@ -2493,6 +2577,14 @@ html[data-theme="dark"] .nav button.active {
   background: linear-gradient(90deg, rgba(15,118,110,0.35), rgba(15,118,110,0.08));
   color: #fff;
   box-shadow: inset 3px 0 0 var(--accent-2);
+}
+html[data-theme="dark"] .app.sidebar-collapsed .nav button .nav-label.is-out {
+  background: #121a2c;
+  color: #e8eef8;
+}
+html[data-theme="dark"] .app.sidebar-collapsed .nav button.active .nav-label.is-out {
+  background: #14343a;
+  color: #fff;
 }
 html[data-theme="dark"] .btn.danger {
   background: #3a1c1c;

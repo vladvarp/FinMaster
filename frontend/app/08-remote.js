@@ -1,5 +1,3 @@
-/* bundle-seam */
-(() => {
   /* ========== Управление с телефона ========== */
 
   const remote = {
@@ -1106,4 +1104,3 @@
   window.finmasterOpen = openFromDialog;
 
   boot();
-})();

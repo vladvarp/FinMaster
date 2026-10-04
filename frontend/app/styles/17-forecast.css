@@ -1,0 +1,8 @@
+/* ==== Прогнозирование ==== */
+#forecast-kpi .empty { padding: 28px 8px; }
+#view-forecast .chart-box { height: 280px; }
+#forecast-legend { margin-bottom: 8px; }
+#forecast-models tbody tr { cursor: pointer; }
+#forecast-models tbody tr.is-on td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+#forecast-models .data td:first-child,
+#forecast-years .data td:first-child { white-space: nowrap; }

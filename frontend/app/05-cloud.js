@@ -1058,6 +1058,7 @@
     if (state.view === "orders") renderOrders();
     if (state.view === "analytics") renderAnalytics();
     if (state.view === "cashflow") renderCashflow();
+    if (state.view === "forecast") renderForecast();
     if (state.view === "calendar") renderCalendar();
     if (state.view === "calculator") renderCalculator();
     if (state.view === "presentation") renderPresentation();
@@ -1070,6 +1071,7 @@
       const list = state.doc.customers || [];
       $("customer-list").innerHTML = unique(list.map((c) => c.name)).map((c) => `<option value="${esc(c)}">`).join("");
     }
+    refreshAssistant();
     applySidebar();
   }
 
@@ -2213,7 +2215,7 @@
     });
     window.addEventListener("resize", placeHistoryPanel);
     window.addEventListener("scroll", placeHistoryPanel, true);
-    $("btn-command").addEventListener("click", openPalette);
+    bindAssistantWindow();
     $("btn-fullscreen")?.addEventListener("click", () => toggleAppFullscreen());
     document.addEventListener("fullscreenchange", () => {
       if (state.desktop || cloudFullscreenOn()) return;
@@ -2229,7 +2231,6 @@
       if (e.target === $("help-modal")) $("help-modal").classList.remove("open");
     });
     $("palette").addEventListener("click", (e) => {
-      if (e.target === $("palette")) closePalette();
       const item = e.target.closest("[data-pi]");
       if (item) paletteRun(Number(item.dataset.pi));
     });
@@ -2246,7 +2247,8 @@
         paletteRun(palette.index);
       } else if (e.key === "Escape") {
         e.preventDefault();
-        closePalette();
+        e.stopPropagation();
+        setAssistantMin(true);
       }
     });
     $("orders-list").addEventListener("focusin", onExprFocus);
@@ -3148,8 +3150,8 @@
           closeNetConsole();
           return;
         }
-        if (paletteIsOpen()) {
-          closePalette();
+        if (paletteIsOpen() && !$("palette").classList.contains("is-min") && $("palette")?.contains(document.activeElement)) {
+          setAssistantMin(true);
           return;
         }
         if ($("confirm-modal")?.classList.contains("open")) {
@@ -3230,9 +3232,9 @@
         }
       }
       if (!ctrl) return;
-      if (code === "KeyK" || (e.shiftKey && code === "KeyP")) {
+      if ((code === "Space" && !e.altKey && !e.shiftKey) || code === "KeyK" || (e.shiftKey && code === "KeyP")) {
         e.preventDefault();
-        paletteIsOpen() ? closePalette() : openPalette();
+        summonAssistant();
         return;
       }
       if (code === "Backquote" || e.key === "`" || e.key === "ё" || e.key === "Ё") {

@@ -63,8 +63,10 @@
       const t = reduceMotion() ? 1 : Math.min(1, (now - start) / DUR);
       const e = easeOut(t);
       inst.current = inst.target.map((row, i) => row.map((v, j) => {
-        const f = inst.from[i]?.[j] ?? 0;
-        return f + (v - f) * e;
+        if (v == null || !Number.isFinite(v)) return null;
+        const f = inst.from[i]?.[j];
+        const from = f == null || !Number.isFinite(f) ? v : f;
+        return from + (v - from) * e;
       }));
       draw(inst);
       if (t < 1) inst.raf = requestAnimationFrame(step);

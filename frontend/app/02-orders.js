@@ -556,11 +556,13 @@
   function showApp() {
     $("start-screen").classList.add("hidden");
     $("app-shell").hidden = false;
+    ensureAssistant();
   }
 
   function showStart() {
     $("start-screen").classList.remove("hidden");
     $("app-shell").hidden = true;
+    closePalette();
     renderStartLists();
   }
 
@@ -1635,11 +1637,46 @@
     }).join("");
   }
 
+  function bindNavFlyout() {
+    const nav = $("nav");
+    if (!nav || nav.dataset.flyout) return;
+    nav.dataset.flyout = "1";
+    const place = (btn, open) => {
+      const label = btn.querySelector(".nav-label");
+      if (!label) return;
+      if (!open || !$("app-shell")?.classList.contains("sidebar-collapsed")) {
+        label.classList.remove("is-out");
+        label.style.left = "";
+        label.style.top = "";
+        label.style.height = "";
+        return;
+      }
+      const rect = btn.getBoundingClientRect();
+      label.style.left = `${Math.round(rect.right)}px`;
+      label.style.top = `${Math.round(rect.top)}px`;
+      label.style.height = `${Math.round(rect.height)}px`;
+      label.classList.add("is-out");
+    };
+    nav.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("mouseenter", () => place(btn, true));
+      btn.addEventListener("focus", () => place(btn, true));
+      btn.addEventListener("mouseleave", () => place(btn, false));
+      btn.addEventListener("blur", () => place(btn, false));
+    });
+  }
+
   function applySidebar() {
     const shell = $("app-shell");
     if (!shell || !state.doc) return;
     const collapsed = !!ensureUi().sidebar_collapsed;
     shell.classList.toggle("sidebar-collapsed", collapsed);
+    bindNavFlyout();
+    shell.querySelectorAll(".nav button").forEach((tab) => {
+      tab.removeAttribute("title");
+      tab.removeAttribute("data-tip");
+      tab.setAttribute("data-no-tip", "1");
+      if (!collapsed) tab.querySelector(".nav-label")?.classList.remove("is-out");
+    });
     const btn = $("btn-toggle-sidebar");
     if (btn) {
       btn.title = collapsed ? "Развернуть панель" : "Свернуть панель";

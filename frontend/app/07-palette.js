@@ -1,5 +1,8 @@
   /* ==== Командная палитра ==== */
-  const palette = { items: [], index: 0 };
+  const palette = { items: [], index: 0, drag: null };
+  const ASSISTANT_KEY = "finmaster.assistant";
+  const ASSISTANT_MIN_W = 320;
+  const ASSISTANT_MIN_H = 280;
 
   function paletteCommands() {
     const items = [
@@ -7,6 +10,7 @@
       { group: "Разделы", ico: "☰", title: "Заказы", sub: "таблицы заказов и позиций", run: () => setView("orders") },
       { group: "Разделы", ico: "◷", title: "Аналитика", sub: "фильтры, сравнение периодов", run: () => setView("analytics") },
       { group: "Разделы", ico: "₽", title: "Касса", sub: "платёжный календарь и дебиторка", run: () => setView("cashflow") },
+      { group: "Разделы", ico: "↗", title: "Прогнозирование", sub: "выручка и прибыль на месяцы и годы", run: () => setView("forecast") },
       { group: "Разделы", ico: "▦", title: "Календарь", sub: "старт, финиш и что идёт сейчас", run: () => setView("calendar") },
       { group: "Разделы", ico: "∑", title: "Калькулятор", sub: "схемы из заказов, операторов и формул", run: () => setView("calculator") },
       { group: "Разделы", ico: "▣", title: "Презентация", sub: "инфографика из блоков и схем", run: () => setView("presentation") },
@@ -240,7 +244,7 @@
     return tokens.every((t) => hay.includes(t));
   }
 
-  function renderPaletteList(query) {
+  function renderPaletteList(query, keepIndex) {
     const tokens = String(query || "")
       .trim()
       .toLowerCase()
@@ -256,8 +260,13 @@
       if (counts[item.group] <= limit) items.push(item);
     });
     palette.items = items.slice(0, 40);
-    palette.index = 0;
+    palette.index = keepIndex ? Math.min(palette.index, Math.max(0, palette.items.length - 1)) : 0;
     drawPalette();
+  }
+
+  function refreshAssistant() {
+    if (palette.hold || !paletteIsOpen() || $("palette")?.classList.contains("is-min")) return;
+    renderPaletteList($("palette-input")?.value || "", true);
   }
 
   function drawPalette() {
@@ -293,26 +302,377 @@
   function paletteRun(index) {
     const item = palette.items[index];
     if (!item) return;
-    closePalette();
+    const list = $("palette-list");
+    const input = $("palette-input");
+    const scroll = list?.scrollTop || 0;
+    const value = input?.value ?? "";
+    palette.hold = true;
+    const finish = () => {
+      palette.hold = false;
+      const inside = $("palette")?.contains(document.activeElement);
+      if (input && inside && !document.querySelector(".modal.open")) input.focus({ preventScroll: true });
+      if (input && input.value !== value) input.value = value;
+      if (list) list.scrollTop = scroll;
+    };
     try {
-      item.run();
+      const result = item.run();
+      if (result && typeof result.then === "function") {
+        result.finally(() => requestAnimationFrame(finish));
+        return;
+      }
     } catch (err) {
       toast(String(err.message || err));
     }
+    requestAnimationFrame(finish);
+  }
+
+  function assistantSaved() {
+    try {
+      return JSON.parse(localStorage.getItem(ASSISTANT_KEY) || "null");
+    } catch {
+      return null;
+    }
+  }
+
+  function clampAssistantSize(w, h) {
+    const maxW = Math.max(ASSISTANT_MIN_W, window.innerWidth - 16);
+    const maxH = Math.max(ASSISTANT_MIN_H, window.innerHeight - 16);
+    return {
+      w: Math.min(maxW, Math.max(ASSISTANT_MIN_W, Math.round(w))),
+      h: Math.min(maxH, Math.max(ASSISTANT_MIN_H, Math.round(h))),
+    };
+  }
+
+  const ASSISTANT_ORB = 68;
+
+  function syncAssistantMinButton() {
+    const box = $("palette");
+    const btn = $("palette-min");
+    if (!box || !btn) return;
+    const min = box.classList.contains("is-min");
+    btn.textContent = "—";
+    btn.title = "Свернуть";
+    btn.setAttribute("aria-label", btn.title);
+    box.removeAttribute("title");
+    const orb = min && !box.classList.contains("is-morph-in") && !box.classList.contains("is-morph-out");
+    if (orb) {
+      box.removeAttribute("data-no-tip");
+      box.setAttribute("data-tip", "Открыть ассистента");
+    } else {
+      box.removeAttribute("data-tip");
+      box.setAttribute("data-no-tip", "1");
+    }
+  }
+
+  function orbPoint() {
+    return {
+      x: 22,
+      y: Math.max(8, window.innerHeight - 22 - ASSISTANT_ORB),
+      w: ASSISTANT_ORB,
+      h: ASSISTANT_ORB,
+      radius: ASSISTANT_ORB / 2,
+    };
+  }
+
+  function windowPoint() {
+    const saved = assistantSaved() || {};
+    const size = clampAssistantSize(saved.w || 440, saved.h || 520);
+    const orb = orbPoint();
+    let x = orb.x;
+    let y = orb.y + ASSISTANT_ORB - size.h;
+    if (saved.placed && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
+      x = saved.x;
+      y = saved.y;
+    }
+    x = Math.max(8, Math.min(Math.max(8, window.innerWidth - size.w - 8), x));
+    y = Math.max(8, Math.min(Math.max(8, window.innerHeight - size.h - 8), y));
+    return { x, y, w: size.w, h: size.h, radius: 16 };
+  }
+
+  function assistantInputFocused() {
+    return document.activeElement === $("palette-input");
+  }
+
+  function placeAssistant(frame) {
+    const box = $("palette");
+    if (!box || !frame) return;
+    box.style.left = `${Math.round(frame.x)}px`;
+    box.style.top = `${Math.round(frame.y)}px`;
+    box.style.right = "auto";
+    box.style.bottom = "auto";
+    box.style.width = `${Math.round(frame.w)}px`;
+    box.style.height = `${Math.round(frame.h)}px`;
+    box.style.borderRadius = `${frame.radius}px`;
+  }
+
+  function cancelAssistantIdle() {
+    clearTimeout(palette.idle);
+    palette.idle = 0;
+    $("palette")?.classList.remove("is-idle");
+  }
+
+  function finishAssistantIdle() {
+    palette.idle = 0;
+    const box = $("palette");
+    if (!box?.classList.contains("open") || !box.classList.contains("is-idle") || box.classList.contains("is-min") || palette.pointerInside) return;
+    if (assistantInputFocused()) return;
+    setAssistantMin(true);
+  }
+
+  function beginAssistantIdle() {
+    const box = $("palette");
+    if (!box?.classList.contains("open") || box.classList.contains("is-min") || box.classList.contains("is-idle") || palette.drag) return;
+    box.classList.add("is-idle");
+    clearTimeout(palette.idle);
+    palette.idle = setTimeout(finishAssistantIdle, 5000);
+  }
+
+  function wakeAssistant() {
+    const box = $("palette");
+    if (!box?.classList.contains("open") || box.classList.contains("is-min")) return;
+    cancelAssistantIdle();
+    if (!box.contains(document.activeElement)) $("palette-input")?.focus({ preventScroll: true });
+  }
+
+  function assistantContainsPoint(x, y) {
+    const box = $("palette");
+    if (!box) return false;
+    const rect = box.getBoundingClientRect();
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return false;
+    const hit = document.elementFromPoint(x, y);
+    return !hit || hit === box || box.contains(hit);
+  }
+
+  function persistAssistantFrame(frame) {
+    const box = $("palette");
+    if (!box) return;
+    const prev = assistantSaved() || {};
+    const min = box.classList.contains("is-min");
+    const rect = box.getBoundingClientRect();
+    const size = frame
+      ? { w: frame.w, h: frame.h }
+      : min
+        ? clampAssistantSize(prev.w || 440, prev.h || 520)
+        : clampAssistantSize(rect.width, rect.height);
+    const x = frame ? frame.x : min && Number.isFinite(prev.x) ? prev.x : rect.left;
+    const y = frame ? frame.y : min && Number.isFinite(prev.y) ? prev.y : rect.top;
+    const placed = !!(frame?.placed || prev.placed);
+    try {
+      localStorage.setItem(
+        ASSISTANT_KEY,
+        JSON.stringify({ x, y, w: size.w, h: size.h, min, placed })
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function setAssistantMin(min) {
+    const box = $("palette");
+    if (!box) return;
+    const want = !!min;
+    if (want && (box.classList.contains("is-min") || palette.morphTo === "min")) return;
+    if (!want && box.classList.contains("open") && !box.classList.contains("is-min") && palette.morphTo !== "min") {
+      $("palette-input")?.focus({ preventScroll: true });
+      return;
+    }
+    cancelAssistantIdle();
+    if (want && !box.classList.contains("is-min")) persistAssistantFrame();
+    if (want && box.contains(document.activeElement)) document.activeElement.blur();
+    const token = (palette.morphToken || 0) + 1;
+    palette.morphToken = token;
+    palette.morphTo = want ? "min" : "open";
+    box.classList.add("open");
+    box.classList.remove("is-morph-in", "is-morph-out");
+    if (want) box.classList.add("is-morph-in");
+    else box.classList.remove("is-min");
+    if (!want) box.classList.add("is-morph-out");
+    placeAssistant(want ? orbPoint() : windowPoint());
+    if (!want && !$("palette-list")?.childElementCount) renderPaletteList($("palette-input")?.value || "");
+    syncAssistantMinButton();
+    let settled = false;
+    const finish = (e) => {
+      if (settled || palette.morphToken !== token) return;
+      if (e && (e.target !== box || e.propertyName !== "width")) return;
+      settled = true;
+      palette.morphTo = "";
+      box.removeEventListener("transitionend", finish);
+      box.classList.remove("is-morph-in", "is-morph-out");
+      if (want) box.classList.add("is-min");
+      syncAssistantMinButton();
+      if (!want) {
+        persistAssistantFrame(windowPoint());
+        $("palette-input")?.focus({ preventScroll: true });
+      }
+    };
+    box.addEventListener("transitionend", finish);
+    setTimeout(finish, 700);
+  }
+
+  function showAssistantOrb() {
+    if (!state.doc || $("app-shell").hidden) return;
+    const box = $("palette");
+    if (!box || (box.classList.contains("open") && box.classList.contains("is-min"))) return;
+    cancelAssistantIdle();
+    box.classList.add("is-drag");
+    placeAssistant(orbPoint());
+    box.classList.add("open", "is-min");
+    requestAnimationFrame(() => box.classList.remove("is-drag"));
+    syncAssistantMinButton();
+  }
+
+  function ensureAssistant() {
+    if (!state.doc || $("app-shell").hidden) return;
+    if (!$("palette")?.classList.contains("open")) showAssistantOrb();
+  }
+
+  function bindAssistantWindow() {
+    const box = $("palette");
+    const head = $("palette-head");
+    const grip = $("palette-resize");
+    if (!box || !head || box.dataset.bound) return;
+    box.dataset.bound = "1";
+    $("palette-min")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setAssistantMin(true);
+    });
+    box.addEventListener("click", (e) => {
+      if (!box.classList.contains("is-min") || e.target.closest("button")) return;
+      setAssistantMin(false);
+    });
+    box.addEventListener("pointerdown", () => wakeAssistant());
+    box.addEventListener("focusin", () => {
+      if (palette.pointerInside) cancelAssistantIdle();
+    });
+    box.addEventListener("focusout", () => {
+      setTimeout(() => {
+        if (palette.pointerInside) wakeAssistant();
+        else if (assistantInputFocused()) return;
+        else if (box.classList.contains("is-idle")) {
+          clearTimeout(palette.idle);
+          palette.idle = setTimeout(finishAssistantIdle, 2000);
+        } else if (!box.contains(document.activeElement)) beginAssistantIdle();
+      }, 0);
+    });
+    $("palette-input")?.addEventListener("input", (e) => {
+      const input = $("palette-input");
+      const removed = String(e.inputType || "").startsWith("delete");
+      if (removed || !input?.value) return;
+      cancelAssistantIdle();
+    });
+    document.addEventListener("pointerdown", (e) => {
+      if (!box.classList.contains("open") || box.classList.contains("is-min") || palette.drag) return;
+      if (assistantContainsPoint(e.clientX, e.clientY)) {
+        palette.pointerInside = true;
+        wakeAssistant();
+        return;
+      }
+      palette.pointerInside = false;
+      beginAssistantIdle();
+    }, true);
+    document.addEventListener("pointermove", (e) => {
+      if (!box.classList.contains("open") || box.classList.contains("is-min")) {
+        palette.pointerInside = false;
+        return;
+      }
+      if (palette.drag || box.classList.contains("is-drag")) {
+        palette.pointerInside = true;
+        return;
+      }
+      const inside = assistantContainsPoint(e.clientX, e.clientY);
+      if (inside) {
+        const entered = !palette.pointerInside;
+        palette.pointerInside = true;
+        if (entered || box.classList.contains("is-idle") || !box.contains(document.activeElement)) wakeAssistant();
+      } else if (palette.pointerInside) {
+        palette.pointerInside = false;
+        beginAssistantIdle();
+      }
+    });
+    head.addEventListener("dblclick", (e) => {
+      if (e.target.closest("button")) return;
+      setAssistantMin(!box.classList.contains("is-min"));
+    });
+    head.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || e.target.closest("button")) return;
+      e.preventDefault();
+      const rect = box.getBoundingClientRect();
+      palette.drag = { kind: "move", dx: e.clientX - rect.left, dy: e.clientY - rect.top };
+      box.classList.add("is-drag");
+      head.setPointerCapture(e.pointerId);
+    });
+    grip?.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || box.classList.contains("is-min")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = box.getBoundingClientRect();
+      palette.drag = { kind: "resize", x: e.clientX, y: e.clientY, w: rect.width, h: rect.height };
+      box.classList.add("is-drag");
+      grip.setPointerCapture(e.pointerId);
+    });
+    const onMove = (e) => {
+      const drag = palette.drag;
+      if (!drag) return;
+      if (drag.kind === "move") {
+        const x = Math.max(8, Math.min(window.innerWidth - 80, e.clientX - drag.dx));
+        const y = Math.max(8, Math.min(window.innerHeight - 40, e.clientY - drag.dy));
+        box.style.left = `${x}px`;
+        box.style.top = `${y}px`;
+        box.style.right = "auto";
+      } else {
+        const next = clampAssistantSize(drag.w + e.clientX - drag.x, drag.h + e.clientY - drag.y);
+        box.style.width = `${next.w}px`;
+        box.style.height = `${next.h}px`;
+      }
+    };
+    const onUp = (e) => {
+      const kind = palette.drag?.kind;
+      if (palette.drag) {
+        const rect = box.getBoundingClientRect();
+        persistAssistantFrame(
+          kind === "move"
+            ? { x: rect.left, y: rect.top, w: rect.width, h: rect.height, placed: true }
+            : undefined
+        );
+      }
+      palette.drag = null;
+      box.classList.remove("is-drag");
+      if (!wasDrag || !box.classList.contains("open") || box.classList.contains("is-min")) return;
+      if (assistantContainsPoint(e.clientX, e.clientY)) {
+        palette.pointerInside = true;
+        wakeAssistant();
+      } else {
+        palette.pointerInside = false;
+        beginAssistantIdle();
+      }
+    };
+    window.addEventListener("resize", () => {
+      if (box.classList.contains("open") && box.classList.contains("is-min") && !palette.drag) placeAssistant(orbPoint());
+    });
+    head.addEventListener("pointermove", onMove);
+    head.addEventListener("pointerup", onUp);
+    head.addEventListener("pointercancel", onUp);
+    grip?.addEventListener("pointermove", onMove);
+    grip?.addEventListener("pointerup", onUp);
+    grip?.addEventListener("pointercancel", onUp);
+  }
+
+  function summonAssistant() {
+    if (!state.doc || $("app-shell").hidden) return;
+    const box = $("palette");
+    if (!box.classList.contains("open")) showAssistantOrb();
+    setAssistantMin(!box.classList.contains("is-min"));
   }
 
   function openPalette() {
-    if (!state.doc || $("app-shell").hidden) return;
-    $("palette").classList.add("open");
-    const input = $("palette-input");
-    input.value = "";
-    syncSearchClear(input);
-    renderPaletteList("");
-    setTimeout(() => input.focus(), 10);
+    summonAssistant();
   }
 
   function closePalette() {
-    $("palette").classList.remove("open");
+    cancelAssistantIdle();
+    const box = $("palette");
+    if (!box) return;
+    box.classList.remove("open", "is-min", "is-idle", "is-drag");
   }
 
   function paletteIsOpen() {

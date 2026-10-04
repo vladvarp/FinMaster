@@ -122,18 +122,19 @@
           </div>
         </div>
         <nav class="nav" id="nav">
-          <button data-view="orders" title="Заказы"><span class="nav-ico">☰</span><span class="nav-label">Заказы</span></button>
-          <button data-view="dashboard" class="active" title="Дашборд"><span class="nav-ico">⌂</span><span class="nav-label">Дашборд</span></button>
+          <button data-view="orders" data-no-tip="1"><span class="nav-ico">☰</span><span class="nav-label">Заказы</span></button>
+          <button data-view="dashboard" class="active" data-no-tip="1"><span class="nav-ico">⌂</span><span class="nav-label">Дашборд</span></button>
 
-          <button data-view="analytics" title="Аналитика"><span class="nav-ico">◷</span><span class="nav-label">Аналитика</span></button>
-          <button data-view="cashflow" title="Касса: платёжный календарь и дебиторка"><span class="nav-ico">₽</span><span class="nav-label">Касса</span></button>
-          <button data-view="calendar" title="Календарь работ: когда заказы начаты, идут и закончены"><span class="nav-ico">▦</span><span class="nav-label">Календарь</span></button>
-          <button data-view="calculator" title="Калькулятор: схемы из заказов, операторов и формул"><span class="nav-ico">∑</span><span class="nav-label">Калькулятор</span></button>
-          <button data-view="presentation" title="Презентация: инфографика из блоков и схем"><span class="nav-ico">▣</span><span class="nav-label">Презентация</span></button>
-          <button data-view="cloud" title="Облако заказов: интерактивная карта связей"><span class="nav-ico">✣</span><span class="nav-label">Облако</span></button>
-          <button data-view="vault" title="Хранилище: личный учёт денег и копилки"><span class="nav-ico">◈</span><span class="nav-label">Хранилище</span></button>
-          <button data-view="customers" title="Заказчики"><span class="nav-ico">◉</span><span class="nav-label">Заказчики</span></button>
-          <button data-view="catalogs" title="Справочники"><span class="nav-ico">⚙</span><span class="nav-label">Справочники</span></button>
+          <button data-view="analytics" data-no-tip="1"><span class="nav-ico">◷</span><span class="nav-label">Аналитика</span></button>
+          <button data-view="cashflow" data-no-tip="1"><span class="nav-ico">₽</span><span class="nav-label">Касса</span></button>
+          <button data-view="forecast" data-no-tip="1"><span class="nav-ico">↗</span><span class="nav-label">Прогнозирование</span></button>
+          <button data-view="calendar" data-no-tip="1"><span class="nav-ico">▦</span><span class="nav-label">Календарь</span></button>
+          <button data-view="calculator" data-no-tip="1"><span class="nav-ico">∑</span><span class="nav-label">Калькулятор</span></button>
+          <button data-view="presentation" data-no-tip="1"><span class="nav-ico">▣</span><span class="nav-label">Презентация</span></button>
+          <button data-view="cloud" data-no-tip="1"><span class="nav-ico">✣</span><span class="nav-label">Облако</span></button>
+          <button data-view="vault" data-no-tip="1"><span class="nav-ico">◈</span><span class="nav-label">Хранилище</span></button>
+          <button data-view="customers" data-no-tip="1"><span class="nav-ico">◉</span><span class="nav-label">Заказчики</span></button>
+          <button data-view="catalogs" data-no-tip="1"><span class="nav-ico">⚙</span><span class="nav-label">Справочники</span></button>
         
         </nav>
       </div>
@@ -147,9 +148,6 @@
             <input id="global-search" type="search" placeholder="Поиск по номеру, заказчику, названию, продукту…" autocomplete="off" />
             <button type="button" class="search-clear" data-search-clear="global-search" title="Очистить" aria-label="Очистить поиск">×</button>
           </div>
-          <button class="btn cmd-btn" type="button" id="btn-command" title="Командная палитра">
-            <span class="cmd-star">✦</span><span class="cmd-text">Команды</span><kbd>Ctrl</kbd><kbd>K</kbd>
-          </button>
         </div>
         <div class="top-right">
           <div class="file-quick" role="group" aria-label="Файл">
@@ -400,6 +398,43 @@
           <div class="card" style="margin-top:12px">
             <h3>Кто должен <span class="insights-sub">дисциплина — средняя задержка оплаты относительно срока</span></h3>
             <div class="table-wrap" id="cash-debtors"></div>
+          </div>
+        </div>
+
+        <div class="view" id="view-forecast">
+          <div class="toolbar">
+            <div class="left">
+              <select id="forecast-metric" class="btn" title="Какой ряд прогнозировать">
+                <option value="revenue">Выручка</option>
+                <option value="paid">Оплаты</option>
+                <option value="cost">Затраты</option>
+                <option value="net">Чистыми</option>
+              </select>
+              <select id="forecast-horizon" class="btn" title="На сколько вперёд считать">
+                <option value="6">6 месяцев</option>
+                <option value="12" selected>12 месяцев</option>
+                <option value="24">2 года</option>
+                <option value="36">3 года</option>
+                <option value="60">5 лет</option>
+              </select>
+            </div>
+            <div class="right hint" id="forecast-note"></div>
+          </div>
+          <div class="kpis" id="forecast-kpi"></div>
+          <div class="card">
+            <h3>Факт и прогноз <span class="insights-sub" id="forecast-chart-sub">медианный ансамбль и коридор моделей</span></h3>
+            <div class="chart-legend" id="forecast-legend"></div>
+            <div class="chart-box"><canvas id="chart-forecast"></canvas></div>
+          </div>
+          <div class="grid-2" style="margin-top:12px">
+            <div class="card">
+              <h3>По годам <span class="insights-sub">сумма месяцев прогноза внутри календарного года</span></h3>
+              <div class="table-wrap" id="forecast-years"></div>
+            </div>
+            <div class="card">
+              <h3>Модели <span class="insights-sub">ошибка — на последних месяцах, без подглядывания вперёд</span></h3>
+              <div class="table-wrap" id="forecast-models"></div>
+            </div>
           </div>
         </div>
 
@@ -959,7 +994,12 @@
   </div>
 
   <div class="palette" id="palette">
-    <div class="palette-card">
+    <div class="palette-head" id="palette-head">
+      <span class="palette-title">Ассистент</span>
+      <span class="palette-hint"><kbd>Ctrl</kbd><kbd>Пробел</kbd></span>
+      <button type="button" class="palette-tool" id="palette-min" title="Свернуть" aria-label="Свернуть">—</button>
+    </div>
+    <div class="palette-body">
       <div class="palette-input">
         <span class="ico">✦</span>
         <input id="palette-input" placeholder="Команда, заказ, заказчик или продукт…" autocomplete="off" spellcheck="false" />
@@ -969,9 +1009,10 @@
       <div class="palette-foot">
         <span><kbd>↑</kbd><kbd>↓</kbd> выбор</span>
         <span><kbd>Enter</kbd> выполнить</span>
-        <span><kbd>Esc</kbd> закрыть</span>
+        <span><kbd>Esc</kbd> свернуть</span>
       </div>
     </div>
+    <div class="palette-resize" id="palette-resize" title="Изменить размер"></div>
   </div>
 
   <div class="modal" id="remote-modal">
@@ -1210,7 +1251,7 @@
         </section>
         <section class="help-section">
           <h4>Общее</h4>
-          <div class="help-row"><span>Командная палитра</span><span><kbd>Ctrl</kbd><kbd>K</kbd></span></div>
+          <div class="help-row"><span>Ассистент</span><span><kbd>Ctrl</kbd><kbd>Пробел</kbd></span></div>
           <div class="help-row"><span>Отменить / история снимков</span><span><kbd>Ctrl</kbd><kbd>Z</kbd></span></div>
           <div class="help-row"><span>Повторить действие</span><span><kbd>Ctrl</kbd><kbd>Y</kbd></span></div>
           <div class="help-row"><span>Поиск по отчёту</span><span><kbd>Ctrl</kbd><kbd>F</kbd></span></div>
