@@ -186,7 +186,7 @@
         const inMonth = d.getMonth() === from.getMonth();
         const note = dayNote(key);
         cells.push(`<button type="button" class="mcal-cell ${inMonth ? "" : "is-out"} ${dayToneClass(d)} ${note ? "has-note" : ""} ${key === dayKey(today) ? "is-today" : ""} ${cal.pick === key ? "is-pick" : ""} ${mcalDayTone(covering)}" data-cal-day="${key}">
-          <b>${d.getDate()}</b>${n ? `<i>${n}</i>` : ""}${note ? `<em class="mcal-memo">${esc(note)}</em>` : ""}
+          <b>${d.getDate()}</b>${n ? `<i>${n}</i>` : ""}${note ? `<span class="mcal-dot" aria-label="Есть заметка"></span>` : ""}
         </button>`);
       }
       board = `<div class="mcal-weekdays">${RU_WEEKDAYS.map((w, i) => `<span class="${calendarOffSettings().weekends.includes(i) ? "is-weekend" : ""}">${w}</span>`).join("")}</div>
