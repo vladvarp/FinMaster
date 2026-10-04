@@ -44,6 +44,7 @@ def _blank_config() -> dict[str, Any]:
         "theme": "light",
         "window_maximized": False,
         "history_limit": HISTORY_LIMIT_DEFAULT,
+        "python_runtime": "folder",
     }
 
 
@@ -101,6 +102,8 @@ def load_config() -> dict[str, Any]:
             data.setdefault("theme", "light")
             data.setdefault("window_maximized", False)
             data["history_limit"] = clamp_history_limit(data.get("history_limit"))
+            if data.get("python_runtime") not in {"system", "folder"}:
+                data["python_runtime"] = "folder"
             if isinstance(data.get("remote"), dict):
                 _fill_secrets(data["remote"])
             _CACHE = _clone(data)

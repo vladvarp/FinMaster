@@ -100,6 +100,8 @@
             <button type="button" class="btn ghost" id="btn-open" role="menuitem">Открыть</button>
             <button type="button" class="btn ghost" id="btn-save" role="menuitem">Сохранить</button>
             <button type="button" class="btn ghost" id="btn-save-as" role="menuitem">Сохранить как</button>
+            <div class="file-menu-sep" role="separator"></div>
+            <button type="button" class="btn ghost" id="btn-runtime" role="menuitem">Среда запуска</button>
           </div>
         </div>
       </div>
@@ -1168,6 +1170,29 @@
 
       <div class="modal-actions">
         <button class="btn ghost" type="button" id="report-settings-close">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="runtime-modal">
+    <div class="modal-card runtime-modal" role="dialog" aria-modal="true" aria-labelledby="runtime-title">
+      <h3 id="runtime-title">Среда запуска</h3>
+      <p class="runtime-lead" id="runtime-note"></p>
+      <div id="runtime-choices"></div>
+      <div class="runtime-block">
+        <div class="runtime-label">Папка FinMaster</div>
+        <div class="runtime-path" id="runtime-folder-path"></div>
+        <div id="runtime-folder-libs"></div>
+      </div>
+      <div class="runtime-block" id="runtime-system-block" hidden>
+        <div class="runtime-label">Системный Python</div>
+        <div class="runtime-path" id="runtime-system-path"></div>
+        <div id="runtime-system-libs"></div>
+      </div>
+      <pre class="runtime-log" id="runtime-log" hidden></pre>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" id="runtime-install">Скачать Python и библиотеки</button>
+        <button class="btn primary" type="button" id="runtime-close">Закрыть</button>
       </div>
     </div>
   </div>

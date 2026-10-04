@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import math
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
-import tkinter as tk
+try:
+    import tkinter as tk
+except ImportError:
+    tk = None  # type: ignore[assignment]
 from typing import Any, Callable
 
 
@@ -28,6 +33,17 @@ ACCENT_SOFT = "#99f6e4"
 ACCENT_WASH = "#ccfbf1"
 GOLD = "#c9a227"
 DANGER = "#dc2626"
+
+
+def _tell_user(text: str) -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(None, str(text)[:800], "FinMaster", 0x10)
+    except Exception:
+        pass
 
 
 def hide_console() -> None:
@@ -52,38 +68,106 @@ def _python_for_pip() -> str:
     return exe
 
 
-def ensure_packages(splash: "Splash", requirements: str) -> None:
-    missing: list[str] = []
-    for module, package in (("flask", "flask"), ("webview", "pywebview"), ("PIL", "pillow")):
+def install_caption(line: str) -> str:
+    """Короткая строка статуса по сырому выводу установки."""
+    text = " ".join(str(line).split())
+    if len(text) > 8 and text[2] == ":" and text[5] == ":":
+        text = text[9:].strip()
+    low = text.lower()
+    if low.startswith("collecting "):
+        return "Скачиваю " + text.split(None, 1)[1]
+    if low.startswith("downloading "):
+        name = text.split(None, 1)[1].split()[0]
+        return "Загружаю файл " + name
+    if low.startswith("using cached "):
+        return "Беру из кэша " + text.split(None, 2)[2].split()[0]
+    if low.startswith("requirement already satisfied"):
+        tail = text.split(":", 1)[-1].strip()
+        return "Уже установлен " + (tail.split()[0] if tail else text)
+    if low.startswith("installing collected packages"):
+        tail = text.split(":", 1)[-1].strip()
+        return "Записываю в папку: " + tail if tail else "Записываю пакеты в папку"
+    if low.startswith("successfully installed"):
+        return "Готово: " + text.split(None, 2)[-1]
+    if "building wheel" in low:
+        return "Собираю пакет " + text
+    if low.startswith("installing build dependencies") or low.startswith("getting requirements"):
+        return text[:1].upper() + text[1:]
+    return text
+
+
+def _drive_install(splash: "Splash", proc: subprocess.Popen[str], start: float, limit: float) -> int:
+    """Читает вывод установки в фоне и не даёт заставке замереть."""
+    assert proc.stdout is not None
+    box: queue.Queue[str | None] = queue.Queue()
+
+    def reader() -> None:
         try:
-            __import__(module)
-        except ImportError:
-            missing.append(package)
+            for raw in proc.stdout:
+                box.put(raw)
+        finally:
+            box.put(None)
+
+    threading.Thread(target=reader, daemon=True).start()
+    seen = 0
+    while True:
+        try:
+            raw = box.get(timeout=0.016)
+        except queue.Empty:
+            splash.pump()
+            continue
+        if raw is None:
+            splash.pump()
+            break
+        line = " ".join(raw.split())
+        if not line:
+            splash.pump()
+            continue
+        seen += 1
+        splash.step(install_caption(line))
+        splash.log(line)
+        splash.set_progress(min(start + seen * 0.35, limit))
+    return proc.wait()
+
+
+def ensure_packages(splash: "Splash", requirements: str) -> None:
+    root = os.path.dirname(os.path.abspath(requirements)) if requirements else os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__))
+    )
+    from backend.runtime import install_list_path, missing_here
+
+    missing = missing_here(root)
     if not missing:
         splash.step("Библиотеки на месте", 22)
         return
 
-    splash.step("Устанавливаю " + ", ".join(missing) + "…", 14)
-    cmd = [_python_for_pip(), "-m", "pip", "install", "-r", requirements]
+    splash.step("Не хватает: " + ", ".join(missing) + ". Скачиваю…", 14)
+    cmd = [
+        _python_for_pip(),
+        "-u",
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+        "--progress-bar",
+        "off",
+        "--no-warn-script-location",
+        "-r",
+        install_list_path(root),
+    ]
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
     kwargs: dict = {
         "stdout": subprocess.PIPE,
         "stderr": subprocess.STDOUT,
         "text": True,
         "bufsize": 1,
+        "env": env,
     }
     if sys.platform == "win32":
         kwargs["creationflags"] = CREATE_NO_WINDOW
     proc = subprocess.Popen(cmd, **kwargs)
-    assert proc.stdout is not None
-    seen = 0
-    for raw in proc.stdout:
-        line = raw.strip()
-        if not line:
-            continue
-        seen += 1
-        splash.log(line)
-        splash.set_progress(min(14 + seen * 0.35, 28))
-    code = proc.wait()
+    code = _drive_install(splash, proc, 14, 28)
     if code != 0:
         raise RuntimeError("Не удалось установить библиотеки. Проверьте интернет и Python.")
     splash.step("Библиотеки установлены", 30)
@@ -164,8 +248,15 @@ class Splash:
     CORNER = 26
 
     def __init__(self, icon_png: str = "") -> None:
+        self._headless = tk is None
         self._closed = False
+        self._failed = False
+        self._retry = False
         self.lines: list[str] = []
+        if self._headless:
+            return
+        self._closed = False
+        self.lines = []
         self._progress = 0.0
         self._display = 0.0
         self._anim_t = 0.0
@@ -208,7 +299,6 @@ class Splash:
             pass
         self.root.geometry(self._centered())
         self._build()
-        self.pump()
         self._schedule_tick()
 
     def _centered(self) -> str:
@@ -300,7 +390,9 @@ class Splash:
         # Status + progress
         left = x1 + 36
         right = x2 - 36
-        self._status_id = c.create_text(left, y1 + 198, text="Запуск…", fill=INK, font=("Segoe UI", 12), anchor="w")
+        self._status_id = c.create_text(
+            left, y1 + 198, text="Запуск…", fill=INK, font=("Segoe UI", 12), anchor="w", width=(right - left) - 72
+        )
         self._pct_id = c.create_text(right, y1 + 198, text="0%", fill=ACCENT, font=("Segoe UI Semibold", 12), anchor="e")
 
         by = y1 + 226
@@ -310,7 +402,9 @@ class Splash:
         self._bar_fill = c.create_rectangle(bx1, by1, bx1, by2, fill=ACCENT, outline="")
         self._shimmer_id = c.create_rectangle(bx1, by1, bx1, by2, fill=ACCENT_SOFT, outline="")
 
-        self._log_id = c.create_text(left, by + 36, text="", fill=SOFT, font=("Segoe UI", 9), anchor="w")
+        self._log_id = c.create_text(
+            left, by + 28, text="", fill=SOFT, font=("Segoe UI", 9), anchor="nw", width=right - left
+        )
 
         c.create_text(left, y2 - 28, text="OFFLINE-FIRST", fill=SOFT, font=("Segoe UI", 8), anchor="w")
         self._foot_id = c.create_text(
@@ -474,7 +568,7 @@ class Splash:
                 col = _lerp_hex(ACCENT_WASH, ACCENT_2 if i < 4 else ACCENT, fade)
                 try:
                     c.coords(tid, px - rad, py - rad, px + rad, py + rad)
-                    c.itemconfigure(tid, fill=col, state="normal")
+                    c.itemconfigure(tid, fill=col, state="disabled")
                     c.tag_raise(tid)
                 except tk.TclError:
                     pass
@@ -501,11 +595,10 @@ class Splash:
             except tk.TclError:
                 pass
 
-        self.pump()
         self._schedule_tick()
 
     def set_progress(self, value: float) -> None:
-        if self._closed:
+        if self._headless or self._closed:
             return
         nxt = max(0.0, min(100.0, float(value)))
         if nxt >= self._progress - 0.01:
@@ -513,14 +606,14 @@ class Splash:
         self.pump()
 
     def log(self, text: str) -> None:
-        if self._closed or not text:
+        if self._headless or self._closed or not text:
             return
         line = " ".join(str(text).split())
-        if len(line) > 78:
-            line = line[:77] + "…"
+        if len(line) > 8 and line[2] == ":" and line[5] == ":":
+            line = line[9:].strip()
         self.lines.append(line)
-        self.lines = self.lines[-3:]
-        shown = "  ·  ".join(self.lines[-2:])
+        self.lines = self.lines[-4:]
+        shown = "\n".join(self.lines[-2:])
         try:
             self._canvas.itemconfigure(self._log_id, text=shown)
         except tk.TclError:
@@ -528,10 +621,13 @@ class Splash:
         self.pump()
 
     def step(self, text: str, progress: float | None = None) -> None:
-        if self._closed:
+        if self._headless or self._closed:
             return
+        shown = str(text)
+        if len(shown) > 64:
+            shown = shown[:63] + "…"
         try:
-            self._canvas.itemconfigure(self._status_id, text=text, fill=INK)
+            self._canvas.itemconfigure(self._status_id, text=shown, fill=INK)
         except tk.TclError:
             pass
         if progress is not None:
@@ -540,6 +636,9 @@ class Splash:
             self.pump()
 
     def finish(self, hold: float = 2.0) -> None:
+        if self._headless:
+            self.close()
+            return
         if self._closed:
             return
         self.set_progress(100)
@@ -558,8 +657,44 @@ class Splash:
             time.sleep(0.016)
         self.close()
 
-    def fail(self, text: str) -> None:
+    def _answer(self, retry: bool) -> None:
+        if self._closed:
+            return
+        self._retry = bool(retry)
+        self._closed = True
+        try:
+            self.root.quit()
+        except tk.TclError:
+            pass
+
+    def _action_button(self, parent: tk.Widget, text: str, command: Callable[[], None], *, primary: bool) -> None:
+        if primary:
+            colors = {"bg": ACCENT, "fg": "#ffffff", "activebackground": ACCENT_2, "activeforeground": "#ffffff"}
+        else:
+            colors = {"bg": "#ffffff", "fg": INK, "activebackground": ACCENT_WASH, "activeforeground": INK}
+        button = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            font=("Segoe UI Semibold", 11),
+            relief="flat",
+            bd=0,
+            padx=18,
+            pady=6,
+            cursor="hand2",
+            highlightthickness=1,
+            highlightbackground=ACCENT if primary else LINE,
+            **colors,
+        )
+        button.pack(side="left", padx=6)
+        button.bind("<ButtonPress-1>", lambda _event: command(), add="+")
+
+    def fail(self, text: str, *, retry: bool = False) -> bool:
         self._failed = True
+        self._retry = False
+        if self._headless:
+            _tell_user(text)
+            return False
         try:
             self._canvas.itemconfigure(self._status_id, text="Сбой запуска", fill=DANGER)
             self._canvas.itemconfigure(self._foot_id, text="")
@@ -569,30 +704,32 @@ class Splash:
         self.log(text)
         self.set_progress(100)
         if self._closed:
-            return
-        x1, y1, x2, y2 = self.W / 2 - 72, self.H - 78, self.W / 2 + 72, self.H - 44
-        btn = _round_rect(self._canvas, x1, y1, x2, y2, 12, fill=ACCENT, outline="")
-        label = self._canvas.create_text(
-            (x1 + x2) / 2, (y1 + y2) / 2, text="Закрыть", fill="#ffffff", font=("Segoe UI Semibold", 11)
-        )
-
-        def _hover(_e: object, color: str) -> None:
-            try:
-                self._canvas.itemconfigure(btn, fill=color)
-            except tk.TclError:
-                pass
-
-        for item in (btn, label):
-            self._canvas.tag_bind(item, "<Button-1>", lambda _e: self.close())
-            self._canvas.tag_bind(item, "<Enter>", lambda e: _hover(e, ACCENT_2))
-            self._canvas.tag_bind(item, "<Leave>", lambda e: _hover(e, ACCENT))
+            return False
+        bar = tk.Frame(self.root, bg=CARD)
+        if retry:
+            self._action_button(bar, "Повторить", lambda: self._answer(True), primary=True)
+        self._action_button(bar, "Закрыть", lambda: self._answer(False), primary=not retry)
+        bar.place(x=self.W / 2, y=self.H - 70, anchor="n")
+        bar.lift()
+        try:
+            self.root.lift()
+            self.root.focus_force()
+        except tk.TclError:
+            pass
+        self.root.bind("<Escape>", lambda _e: self._answer(False))
         try:
             self.root.mainloop()
         except tk.TclError:
             pass
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
+        self._closed = True
+        return self._retry
 
     def pump(self) -> None:
-        if self._closed:
+        if self._headless or self._closed:
             return
         try:
             self.root.update_idletasks()
@@ -601,9 +738,16 @@ class Splash:
             self._closed = True
 
     def close(self) -> None:
+        if self._headless:
+            self._closed = True
+            return
         if self._closed:
             return
         self._closed = True
+        try:
+            self.root.quit()
+        except tk.TclError:
+            pass
         try:
             self.root.destroy()
         except tk.TclError:

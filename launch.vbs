@@ -1,6 +1,8 @@
 Option Explicit
 ' Тихий запуск FinMaster — без консоли и без мигания cmd.
-Dim sh, fso, dir, pyw, app
+Dim sh, fso, dir, pyw, app, folderPy, systemPy, mode
+Dim BundledSkip
+BundledSkip = ""
 
 Set sh = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -13,9 +15,19 @@ If Not fso.FileExists(app) Then
   WScript.Quit 1
 End If
 
-pyw = FindPythonw(sh, fso)
-If pyw = "" Then
-  MsgBox "Не найден pythonw.exe. Установите Python и отметьте «Add to PATH».", vbCritical, "FinMaster"
+folderPy = BundledPythonw(sh, fso)
+BundledSkip = folderPy
+mode = ReadRuntimeMode(fso, sh)
+systemPy = FindPythonw(sh, fso)
+
+If mode = "system" And systemPy <> "" Then
+  pyw = systemPy
+ElseIf folderPy <> "" Then
+  pyw = folderPy
+ElseIf systemPy <> "" Then
+  pyw = systemPy
+Else
+  MsgBox "Python в папке FinMaster ещё не установлен. Запустите FinMaster.exe.", vbCritical, "FinMaster"
   WScript.Quit 1
 End If
 
@@ -23,13 +35,52 @@ End If
 sh.Run """" & pyw & """ """ & app & """", 0, False
 WScript.Quit 0
 
+Function BundledPythonw(sh, fso)
+  Dim docs, p
+  BundledPythonw = ""
+  docs = sh.SpecialFolders("MyDocuments")
+  If docs = "" Then Exit Function
+  p = docs & "\FinMaster\python\pythonw.exe"
+  If fso.FileExists(p) Then BundledPythonw = p
+End Function
+
+Function ReadRuntimeMode(fso, sh)
+  Dim cfg, ts, text, p, tail
+  ReadRuntimeMode = "folder"
+  cfg = sh.ExpandEnvironmentStrings("%APPDATA%") & "\FinMaster\config.json"
+  If Not fso.FileExists(cfg) Then Exit Function
+  On Error Resume Next
+  Set ts = fso.OpenTextFile(cfg, 1, False)
+  If Err.Number <> 0 Then
+    Err.Clear
+    On Error Goto 0
+    Exit Function
+  End If
+  text = ts.ReadAll
+  ts.Close
+  On Error Goto 0
+  p = InStr(1, text, """python_runtime""", 1)
+  If p = 0 Then Exit Function
+  tail = Mid(text, p, 64)
+  If InStr(1, tail, """system""", 1) > 0 Then ReadRuntimeMode = "system"
+End Function
+
+Function IsSkipped(path)
+  Dim folder, bundled
+  IsSkipped = False
+  If BundledSkip = "" Or path = "" Then Exit Function
+  folder = LCase(fso.GetParentFolderName(path))
+  bundled = LCase(fso.GetParentFolderName(BundledSkip))
+  If folder <> "" And folder = bundled Then IsSkipped = True
+End Function
+
 Function FindPythonw(sh, fso)
   Dim p, i, candidates
   FindPythonw = ""
 
   p = Trim(sh.ExpandEnvironmentStrings("%FINMASTER_PYTHONW%"))
   If p <> "" And p <> "%FINMASTER_PYTHONW%" Then
-    If fso.FileExists(p) Then FindPythonw = p : Exit Function
+    If fso.FileExists(p) And Not IsSkipped(p) Then FindPythonw = p : Exit Function
   End If
 
   ' Обход PATH без запуска cmd (иначе мелькает консоль)
@@ -40,7 +91,7 @@ Function FindPythonw(sh, fso)
   p = FindInPath(fso, sh, "py.exe")
   If p <> "" Then
     p = PythonFromPyLauncher(sh, fso, p)
-    If p <> "" Then FindPythonw = p : Exit Function
+    If p <> "" And Not IsSkipped(p) Then FindPythonw = p : Exit Function
   End If
 
   candidates = Array( _
@@ -56,7 +107,7 @@ Function FindPythonw(sh, fso)
     "C:\Python311\pythonw.exe" _
   )
   For i = 0 To UBound(candidates)
-    If fso.FileExists(candidates(i)) Then FindPythonw = candidates(i) : Exit Function
+    If fso.FileExists(candidates(i)) And Not IsSkipped(candidates(i)) Then FindPythonw = candidates(i) : Exit Function
   Next
 End Function
 
@@ -73,7 +124,7 @@ Function FindInPath(fso, sh, exeName)
       If InStr(low, "\windowsapps") = 0 Then
         If Right(folder, 1) <> "\" Then folder = folder & "\"
         candidate = folder & exeName
-        If fso.FileExists(candidate) Then
+        If fso.FileExists(candidate) And Not IsSkipped(candidate) Then
           FindInPath = candidate
           Exit Function
         End If

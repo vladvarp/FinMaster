@@ -12,7 +12,7 @@ from typing import Any
 
 from flask import Flask, g, jsonify, request, send_from_directory
 
-from backend import netlog, qr, storage
+from backend import netlog, qr, runtime, storage
 from backend.dialogs import open_report_dialog, save_csv_dialog, save_pdf_dialog, save_png_dialog, save_report_dialog
 from backend.document import empty_document, normalize_document, now_iso
 from backend.remote import SESSION as REMOTE
@@ -458,6 +458,37 @@ def api_bootstrap():
             "remote": _remote_public(),
         }
     )
+
+
+@app.get("/api/runtime")
+def api_runtime():
+    return jsonify(runtime.status())
+
+
+@app.get("/api/runtime/job")
+def api_runtime_job():
+    return jsonify(runtime.job_snapshot())
+
+
+@app.post("/api/runtime/mode")
+def api_runtime_mode():
+    data = request.get_json(silent=True) or {}
+    try:
+        runtime.set_mode(str(data.get("mode") or ""))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(runtime.status())
+
+
+@app.post("/api/runtime/install")
+def api_runtime_install():
+    try:
+        runtime.start_install()
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 409
+    return jsonify(runtime.job_snapshot())
 
 
 @app.post("/api/dirty")

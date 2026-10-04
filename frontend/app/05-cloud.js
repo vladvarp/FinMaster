@@ -1789,6 +1789,202 @@
     window.addEventListener("blur", hide);
   }
 
+  const RUNTIME_TITLES = { flask: "Flask", pywebview: "pywebview", pillow: "Pillow" };
+  let runtimeTimer = 0;
+  let runtimeView = null;
+
+  function stopRuntimePoll() {
+    if (!runtimeTimer) return;
+    clearInterval(runtimeTimer);
+    runtimeTimer = 0;
+  }
+
+  function runtimeLibs(host, packages) {
+    host.replaceChildren();
+    (packages || []).forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "runtime-lib";
+      const name = document.createElement("span");
+      name.textContent = RUNTIME_TITLES[item.name] || item.name;
+      const state = document.createElement("span");
+      state.className = item.installed ? "ok" : "miss";
+      state.textContent = item.installed ? `установлен ${item.version || ""}`.trim() : "нужно установить";
+      row.append(name, state);
+      host.append(row);
+    });
+  }
+
+  function runtimeChoice(box, data, mode, title, detail, enabled) {
+    const label = document.createElement("label");
+    label.className = "runtime-choice" + (data.preference === mode ? " is-on" : "") + (enabled ? "" : " is-off");
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "finmaster-runtime";
+    input.value = mode;
+    input.checked = data.preference === mode;
+    input.disabled = !enabled;
+    const text = document.createElement("span");
+    const strong = document.createElement("b");
+    strong.textContent = title;
+    const small = document.createElement("small");
+    small.textContent = detail;
+    text.append(strong, small);
+    label.append(input, text);
+    if (enabled) {
+      input.addEventListener("change", async () => {
+        if (!input.checked) return;
+        try {
+          paintRuntime(await apiPost("/api/runtime/mode", { mode }));
+        } catch (err) {
+          toast(err.message || "Не удалось сменить среду");
+          paintRuntime(await apiGet("/api/runtime"));
+        }
+      });
+    }
+    box.append(label);
+  }
+
+  function paintRuntime(data) {
+    const note = $("runtime-note");
+    if (note) note.textContent = data.note || "";
+    const choices = $("runtime-choices");
+    if (choices) {
+      choices.replaceChildren();
+      const folder = data.folder || {};
+      runtimeChoice(
+        choices,
+        data,
+        "folder",
+        "Папка FinMaster",
+        folder.available
+          ? `По умолчанию · своя копия рядом с отчётами${folder.version ? " · " + folder.version : ""}`
+          : "По умолчанию · ещё не скачана",
+        !!folder.available
+      );
+      if (data.can_switch) {
+        const system = data.system || {};
+        runtimeChoice(
+          choices,
+          data,
+          "system",
+          "Системный Python",
+          system.version ? `Уже установлен в Windows · ${system.version}` : "Уже установлен в Windows",
+          true
+        );
+      }
+    }
+    const folderPath = $("runtime-folder-path");
+    if (folderPath) folderPath.textContent = (data.folder && data.folder.path) || "";
+    runtimeLibs($("runtime-folder-libs"), data.folder && data.folder.packages);
+    const systemBlock = $("runtime-system-block");
+    if (systemBlock) {
+      systemBlock.hidden = !data.can_switch;
+      const systemPath = $("runtime-system-path");
+      if (systemPath) systemPath.textContent = (data.system && data.system.path) || "";
+      runtimeLibs($("runtime-system-libs"), data.can_switch ? data.system && data.system.packages : []);
+    }
+    const log = $("runtime-log");
+    const lines = (data.job && data.job.log) || [];
+    if (log) {
+      log.hidden = !lines.length && !(data.job && data.job.error);
+      log.textContent = lines.join("\n");
+      if (data.job && data.job.error) log.textContent += (lines.length ? "\n" : "") + data.job.error;
+      log.scrollTop = log.scrollHeight;
+    }
+    const install = $("runtime-install");
+    if (install) {
+      const running = !!(data.job && data.job.running);
+      install.disabled = running;
+      install.textContent = running
+        ? "Установка…"
+        : data.folder && data.folder.available
+          ? "Установить библиотеки в папку"
+          : "Скачать Python и библиотеки";
+    }
+  }
+
+  function paintRuntimeJob(job) {
+    if (runtimeView) runtimeView = { ...runtimeView, job };
+    const log = $("runtime-log");
+    const lines = (job && job.log) || [];
+    if (log) {
+      log.hidden = !lines.length && !(job && job.error);
+      log.textContent = lines.join("\n");
+      if (job && job.error) log.textContent += (lines.length ? "\n" : "") + job.error;
+      log.scrollTop = log.scrollHeight;
+    }
+    const install = $("runtime-install");
+    if (install) {
+      install.disabled = !!(job && job.running);
+      if (job && job.running) install.textContent = "Установка…";
+    }
+  }
+
+  async function refreshRuntime() {
+    const data = await apiGet("/api/runtime");
+    runtimeView = data;
+    paintRuntime(data);
+    if (data.job && data.job.running) startRuntimePoll();
+    else stopRuntimePoll();
+    return data;
+  }
+
+  function startRuntimePoll() {
+    if (runtimeTimer) return;
+    runtimeTimer = setInterval(async () => {
+      try {
+        const job = await apiGet("/api/runtime/job");
+        if (job.running) {
+          paintRuntimeJob(job);
+          return;
+        }
+        stopRuntimePoll();
+        await refreshRuntime();
+        if (job.error) toast(job.error);
+        else if (job.ok) toast("Библиотеки установлены в папку FinMaster");
+      } catch {
+        stopRuntimePoll();
+      }
+    }, 800);
+  }
+
+  async function openRuntime() {
+    $("runtime-modal")?.classList.add("open");
+    try {
+      await refreshRuntime();
+    } catch (err) {
+      toast(err.message || "Не удалось прочитать среду запуска");
+    }
+  }
+
+  function closeRuntime() {
+    stopRuntimePoll();
+    $("runtime-modal")?.classList.remove("open");
+  }
+
+  function bindRuntime() {
+    $("btn-runtime")?.addEventListener("click", () => openRuntime());
+    $("runtime-close")?.addEventListener("click", () => closeRuntime());
+    $("runtime-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("runtime-modal")) closeRuntime();
+    });
+    $("runtime-install")?.addEventListener("click", async () => {
+      const button = $("runtime-install");
+      if (button) button.disabled = true;
+      try {
+        const job = await apiPost("/api/runtime/install", {});
+        paintRuntimeJob(job);
+        startRuntimePoll();
+      } catch (err) {
+        toast(err.message || "Не удалось начать установку");
+        if (button) button.disabled = false;
+      }
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && $("runtime-modal")?.classList.contains("open")) closeRuntime();
+    });
+  }
+
   function bind() {
     applyTheme(localStorage.getItem(LS_THEME) || currentTheme(), false);
     bindGlobalTooltips();
@@ -1799,6 +1995,7 @@
     bindCashflow();
     bindCalendar();
     bindFileMenu();
+    bindRuntime();
     bindCloud();
     bindCalculator();
     bindPresentation();
