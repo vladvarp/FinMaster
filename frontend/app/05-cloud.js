@@ -3277,13 +3277,13 @@
         return;
       }
       if (code === "KeyZ" && !e.shiftKey) {
-        if (paletteIsOpen()) return;
+        if (assistantCapturesUndo()) return;
         e.preventDefault();
         undo();
         return;
       }
       if (code === "KeyY" || (code === "KeyZ" && e.shiftKey)) {
-        if (paletteIsOpen()) return;
+        if (assistantCapturesUndo()) return;
         e.preventDefault();
         redo();
       }

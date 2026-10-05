@@ -934,6 +934,11 @@
     return $("palette").classList.contains("open");
   }
 
+  function assistantCapturesUndo() {
+    const box = $("palette");
+    return !!box && box.classList.contains("open") && !box.classList.contains("is-min") && box.contains(document.activeElement);
+  }
+
   function pageFullscreenOn() {
     const el = document.fullscreenElement || document.webkitFullscreenElement;
     return el === document.documentElement;
