@@ -1590,13 +1590,23 @@
       e.preventDefault();
       row.classList.add("is-dragging");
       const parent = row.parentNode;
+      const note = row.nextElementSibling;
+      const paired = note?.classList?.contains("line-note-row") && note.dataset.line === row.dataset.line ? note : null;
       let moved = false;
       const move = (ev) => {
         const el = document.elementFromPoint(ev.clientX, ev.clientY);
-        const over = el?.closest(item);
-        if (!over || over === row || over.parentNode !== parent) return;
+        let over = el?.closest(item);
+        if (!over) {
+          const noteRow = el?.closest("tr.line-note-row");
+          const prev = noteRow?.previousElementSibling;
+          if (prev?.matches?.(item)) over = prev;
+        }
+        if (!over || over === row || over === paired || over.parentNode !== parent) return;
         const rect = over.getBoundingClientRect();
-        parent.insertBefore(row, ev.clientY > rect.top + rect.height / 2 ? over.nextSibling : over);
+        const before = ev.clientY > rect.top + rect.height / 2 ? over.nextSibling : over;
+        if (before === row || before === paired) return;
+        parent.insertBefore(row, before);
+        if (paired) parent.insertBefore(paired, row.nextSibling);
         moved = true;
       };
       const up = () => {
@@ -2255,13 +2265,14 @@
     $("orders-list").addEventListener("focusout", onExprBlur);
     bindSortable($("orders-list"), {
       handle: ".line-drag",
-      item: "tr[data-line]",
+      item: "tr.line-row",
       onCommit: (tr) => {
         const card = tr.closest("[data-order]");
         const order = findOrder(card?.dataset.order);
-        if (!order) return;
-        const ids = [...card.querySelectorAll("tr[data-line]")].map((r) => r.dataset.line);
-        order.lines = ids.map((id) => order.lines.find((l) => l.id === id)).filter(Boolean);
+        const tbody = tr.closest("tbody");
+        if (!order || !tbody) return;
+        const ids = [...tbody.querySelectorAll("tr.line-row[data-line]")].map((r) => r.dataset.line);
+        if (!applyLineGroupOrder(order, lineTableGroup(tr), ids)) return;
         markDirty();
         renderOrders();
       },

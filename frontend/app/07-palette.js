@@ -1125,15 +1125,17 @@
       return;
     }
     if (act === "delline") {
-      const id = e.target.closest("[data-line]")?.dataset.line;
+      const tr = e.target.closest("tr.line-row[data-line]");
+      const id = tr?.dataset.line;
       if (!id) return;
       if (order.lines.length <= 1) {
         toast("У заказа должна остаться хотя бы одна позиция. Удалите заказ целиком, если он не нужен.");
         return;
       }
       historyCommit();
-      window.FinCalc?.pruneOrderLinks?.(order.id, id);
-      order.lines = order.lines.filter((l) => l.id !== id);
+      const lastCopy = removeOneLine(order, tr);
+      if (lastCopy == null) return;
+      if (lastCopy) window.FinCalc?.pruneOrderLinks?.(order.id, id);
       markDirty();
       renderOrders();
       undoToast("Строка удалена");

@@ -54,6 +54,59 @@
     return { income, expense, frozen };
   }
 
+  function lineTableGroup(tr) {
+    const frozen = !!tr?.closest(".order-frozen");
+    const cost = !!tr?.classList.contains("cost-row");
+    if (frozen && cost) return "frozen-expense";
+    if (frozen) return "frozen-income";
+    if (cost) return "expense";
+    return "income";
+  }
+
+  function lineInTableGroup(line, group) {
+    if (group === "income") return !isFrozenLine(line) && !isExpenseLine(line);
+    if (group === "expense") return !isFrozenLine(line) && isExpenseLine(line);
+    if (group === "frozen-income") return isFrozenLine(line) && !isExpenseLine(line);
+    if (group === "frozen-expense") return isFrozenLine(line) && isExpenseLine(line);
+    return false;
+  }
+
+  function applyLineGroupOrder(order, group, ids) {
+    const pool = (order.lines || []).filter((line) => lineInTableGroup(line, group));
+    if (!ids.length || ids.length !== pool.length) return false;
+    const rest = pool.slice();
+    const next = [];
+    for (const id of ids) {
+      const i = rest.findIndex((line) => line.id === id);
+      if (i < 0) return false;
+      next.push(rest.splice(i, 1)[0]);
+    }
+    let i = 0;
+    order.lines = (order.lines || []).map((line) => (lineInTableGroup(line, group) ? next[i++] : line));
+    return true;
+  }
+
+  function removeOneLine(order, tr) {
+    const id = tr?.dataset.line;
+    if (!id) return null;
+    const group = lineTableGroup(tr);
+    const rows = [...(tr.closest("tbody")?.querySelectorAll("tr.line-row[data-line]") || [])].filter((row) => row.dataset.line === id);
+    const nth = Math.max(0, rows.indexOf(tr));
+    let seen = 0;
+    let removed = false;
+    const next = [];
+    for (const line of order.lines || []) {
+      if (!removed && line.id === id && lineInTableGroup(line, group) && seen++ === nth) {
+        removed = true;
+        continue;
+      }
+      next.push(line);
+    }
+    if (!removed) return null;
+    order.lines = next;
+    return !next.some((line) => line.id === id);
+  }
+
   /** Режим строки налога: «amount» — своя сумма, «gross» — % от выручки, «net» — % от выручки без затрат. */
   function taxMode(line) {
     const mode = String(line?.tax_mode || "amount");
