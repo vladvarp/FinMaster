@@ -216,7 +216,7 @@
 
   function historyCommit(label, meta) {
     clearTimeout(history.timer);
-    if (!state.doc || history.busy) return null;
+    if (!state.doc || history.busy || state.preview) return null;
     const snap = historySnapshot();
     if (snap == null) return null;
     const cur = history.stack[history.index];
@@ -346,6 +346,10 @@
   }
 
   function historyApplyIndex(next, { toastText } = {}) {
+    if (state.preview) {
+      toast("Резервная копия только для просмотра. Сохраните её как отчёт.");
+      return false;
+    }
     if (!state.doc || next < 0 || next >= history.stack.length) {
       toast(next < history.index ? "Отменять больше нечего" : "Повторять нечего");
       return false;
@@ -512,6 +516,101 @@
       toast("История удалена");
     } catch (err) {
       toast(`Не удалось удалить: ${err.message || err}`);
+    }
+  }
+
+  function renderBackupList(data) {
+    const box = $("backup-list");
+    const sum = $("backup-sum");
+    const make = $("backup-create");
+    if (make) make.disabled = !!data.preview || !state.path || String(state.path).toLowerCase().endsWith(".fbak");
+    if (sum) {
+      const n = (data.items || []).length;
+      const id = data.id ? String(data.id).slice(0, 8) : "нет номера";
+      sum.textContent = data.id
+        ? `${data.root || ""} · номер ${id} · ${n} ${n === 1 ? "копия" : "копий"}`
+        : "Сначала сохраните отчёт — копии привязываются к его номеру, а не к названию.";
+    }
+    if (!box) return;
+    const rows = data.items || [];
+    if (!data.id) {
+      box.innerHTML = `<div class="empty">У несохранённого отчёта копий ещё нет.</div>`;
+      return;
+    }
+    if (!rows.length) {
+      box.innerHTML = `<div class="empty">Копий пока нет. Нажмите «Создать копию».</div>`;
+      return;
+    }
+    box.innerHTML = `<table class="data hist-lib-table"><thead><tr>
+      <th>Когда</th><th>Название</th><th>Файл</th><th>Размер</th><th></th>
+    </tr></thead><tbody>${rows
+      .map(
+        (row) => `<tr>
+          <td>${esc(historyTime(row.at))}</td>
+          <td>${esc(row.title || "Отчёт")}</td>
+          <td class="hist-lib-path">${esc(row.name)}</td>
+          <td>${esc(fmtBytes(row.bytes))}</td>
+          <td class="backup-actions">
+            <button class="btn small" type="button" data-bak-open="${esc(row.path)}">Смотреть</button>
+            <button class="btn small danger" type="button" data-bak-del="${esc(row.name)}">Удалить</button>
+          </td>
+        </tr>`
+      )
+      .join("")}</tbody></table>`;
+  }
+
+  async function openBackupLibrary() {
+    toggleHistoryPanel(false);
+    if (!state.desktop) {
+      toast("Резервные копии доступны в программе на компьютере");
+      return;
+    }
+    if (!state.doc) return;
+    $("backup-modal")?.classList.add("open");
+    try {
+      const data = await apiPost("/api/backups", { path: state.path || "", document: state.doc });
+      if (data.id && state.doc && !state.preview && state.doc.id !== data.id) state.doc.id = data.id;
+      renderBackupList(data);
+    } catch (err) {
+      renderBackupList({ id: "", items: [] });
+      toast(err.message || String(err));
+    }
+  }
+
+  async function createReportBackup() {
+    if (state.preview) {
+      toast("Сначала сохраните эту копию как отчёт.");
+      return;
+    }
+    try {
+      const data = await apiPost("/api/backups/create", { path: state.path || "", document: state.doc });
+      if (data.id && state.doc) state.doc.id = data.id;
+      renderBackupList(data);
+      toast("Резервная копия создана");
+    } catch (err) {
+      toast(err.message || String(err));
+    }
+  }
+
+  async function deleteReportBackup(name) {
+    const ok = await askConfirm({
+      title: "Удалить резервную копию?",
+      text: `Файл «${name}» попадёт в корзину. Сам отчёт останется.`,
+      ok: "Удалить",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const data = await apiPost("/api/backups/delete", {
+        id: state.doc?.id || "",
+        name,
+        path: state.path || "",
+        document: state.doc,
+      });
+      renderBackupList(data);
+      toast("Копия удалена");
+    } catch (err) {
+      toast(err.message || String(err));
     }
   }
 

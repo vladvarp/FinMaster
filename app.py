@@ -13,6 +13,8 @@ from typing import Any
 from flask import Flask, g, jsonify, request, send_from_directory
 
 from backend import netlog, qr, runtime, storage
+from backend.backup import is_backup_path
+from backend import backup as report_backup
 from backend.dialogs import open_report_dialog, save_csv_dialog, save_pdf_dialog, save_png_dialog, save_report_dialog
 from backend.document import empty_document, normalize_document, now_iso
 from backend.remote import SESSION as REMOTE
@@ -273,8 +275,13 @@ def static_files(filename: str):
 
 def _recent_payload() -> list[dict[str, Any]]:
     cfg = storage.load_config()
+    raw = cfg.get("recent") or []
+    kept = [item for item in raw if not str(item.get("path") or "").lower().endswith(".fbak")]
+    if len(kept) != len(raw):
+        cfg["recent"] = kept
+        storage.save_config(cfg)
     recent = []
-    for item in cfg.get("recent", []):
+    for item in kept:
         path = item.get("path")
         if not path:
             continue
@@ -558,6 +565,53 @@ def api_history_limit():
     return jsonify({"ok": True, "history_limit": n})
 
 
+@app.post("/api/backups")
+def api_backups_list():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, **report_backup.describe(data.get("document") if isinstance(data.get("document"), dict) else {}, str(data.get("path") or ""))})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.post("/api/backups/create")
+def api_backups_create():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    document = data.get("document")
+    try:
+        doc = normalize_document(document)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    try:
+        info = report_backup.create_backup(doc, str(data.get("path") or ""))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, **info})
+
+
+@app.post("/api/backups/delete")
+def api_backups_delete():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        report_backup.delete_backup(str(data.get("id") or ""), str(data.get("name") or ""))
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    document = data.get("document") if isinstance(data.get("document"), dict) else {}
+    try:
+        info = report_backup.describe(document, str(data.get("path") or ""))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, **info})
+
+
 @app.post("/api/theme")
 def api_theme():
     data = request.get_json(silent=True) or {}
@@ -713,13 +767,17 @@ def _open_path(path: str) -> dict[str, Any]:
         raise FileNotFoundError("Файл отчёта не найден.")
     raw = json.loads(storage.read_text(path))
     doc = normalize_document(raw)
-    recent = storage.add_recent(path, doc.get("title") or "")
     abs_path = os.path.abspath(path)
+    preview = is_backup_path(abs_path)
+    if not preview:
+        report_backup.ensure_id(doc, abs_path)
+    recent = storage.add_recent(abs_path, doc.get("title") or "")
     return {
         "path": abs_path,
         "document": doc,
         "recent": recent,
         "cancelled": False,
+        "preview": preview,
         "history": storage.load_doc_history(abs_path),
         "history_limit": storage.history_limit(),
     }
@@ -752,8 +810,14 @@ def api_write():
     document = data.get("document")
     if not path:
         return jsonify({"error": "Не указан путь файла."}), 400
+    if is_backup_path(path):
+        return jsonify({"error": "Резервную копию нельзя изменять. Сохраните её как новый отчёт."}), 400
     doc = normalize_document(document)
     doc["modified_at"] = now_iso()
+    abs_path = os.path.abspath(path)
+    if data.get("new_id") and report_backup.refuses_overwrite(str(doc.get("id") or ""), abs_path):
+        return jsonify({"error": "Это файл исходного отчёта. Сохраните копию под другим именем."}), 400
+    report_backup.ensure_id(doc, abs_path, fresh=bool(data.get("new_id")))
     storage.atomic_write(path, json.dumps(doc, ensure_ascii=False, indent=2))
     recent = storage.add_recent(path, doc.get("title") or "")
     abs_path = os.path.abspath(path)

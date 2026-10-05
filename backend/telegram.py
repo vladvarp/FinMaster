@@ -522,6 +522,8 @@ def _recent_items() -> list[dict[str, Any]]:
     for item in storage.load_config().get("recent") or []:
         if not isinstance(item, dict) or not item.get("path"):
             continue
+        if str(item.get("path") or "").lower().endswith(".fbak"):
+            continue
         items.append({**item, "exists": os.path.exists(str(item.get("path")))})
     return items
 

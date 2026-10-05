@@ -211,6 +211,10 @@
           <button class="btn icon" type="button" id="btn-help" title="Горячие клавиши (F1)">?</button>
         </div>
       </header>
+      <div class="preview-banner" id="preview-banner" hidden>
+        <span>Это резервная копия. Её можно только смотреть. Сохраните как отчёт — у нового файла будет свой номер, и тогда его можно править.</span>
+        <button type="button" class="btn small primary" id="preview-save">Сохранить как отчёт</button>
+      </div>
       <section class="content">
         <div class="view active" id="view-dashboard">
           <div class="card dash-focus" id="dash-focus" hidden></div>
@@ -1337,6 +1341,7 @@
       <strong>История</strong>
       <label>Хранить <input type="number" id="history-limit" min="5" max="200" step="1" /></label>
     </div>
+    <button class="btn small history-manage" type="button" id="btn-history-backups">Резервные копии</button>
     <button class="btn small history-manage" type="button" id="btn-history-manage">Все истории отчётов</button>
     <div class="history-list" id="history-list"></div>
   </div>
@@ -1350,11 +1355,24 @@
       <div class="table-wrap" id="history-modal-list"></div>
     </div>
   </div>
+  <div class="modal" id="backup-modal">
+    <div class="modal-card history-modal">
+      <div class="modal-title-row">
+        <h3>Резервные копии</h3>
+        <div class="modal-title-actions">
+          <button class="btn small primary" type="button" id="backup-create">Создать копию</button>
+          <button class="btn" type="button" id="backup-close">Закрыть</button>
+        </div>
+      </div>
+      <p id="backup-sum">Копии лежат в Документы\FinMaster\backups — отдельная папка на номер отчёта. Одинаковые названия не смешиваются.</p>
+      <div class="table-wrap" id="backup-list"></div>
+    </div>
+  </div>
   <div class="line-menu" id="line-menu" hidden role="menu">
     <button type="button" class="btn" id="line-menu-freeze" role="menuitem">Заморозить позицию</button>
   </div>
   <div class="toast" id="toast"></div>
-  <input type="file" id="file-input" accept=".fmaster,.json" hidden />
+  <input type="file" id="file-input" accept=".fmaster,.fbak,.json" hidden />
 
   <script src="/charts.js"></script>
   <script src="/cloud.js"></script>

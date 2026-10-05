@@ -143,10 +143,19 @@ def save_config(data: dict[str, Any]) -> None:
                     pass
 
 
+def _without_backup_recent(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [item for item in items if not str(item.get("path") or "").lower().endswith(".fbak")]
+
+
 def add_recent(path: str, title: str = "") -> list[dict[str, Any]]:
     cfg = load_config()
     path = os.path.abspath(path)
-    recent = [item for item in cfg.get("recent", []) if item.get("path") != path]
+    recent = _without_backup_recent([item for item in cfg.get("recent", []) if item.get("path") != path])
+    if path.lower().endswith(".fbak"):
+        if recent != cfg.get("recent", []):
+            cfg["recent"] = recent
+            save_config(cfg)
+        return recent
     recent.insert(
         0,
         {

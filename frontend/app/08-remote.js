@@ -631,6 +631,7 @@
   }
 
   function applyRemoteDoc(doc, origin) {
+    if (state.preview) return;
     const active = document.activeElement;
     const typing = active && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName);
     if (typing) {

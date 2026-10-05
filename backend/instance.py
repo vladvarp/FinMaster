@@ -32,14 +32,19 @@ _pending_guard = threading.Lock()
 _cleanup_ready = False
 
 
+def is_report_path(path: str) -> bool:
+    low = str(path or "").lower()
+    return low.endswith(".fmaster") or low.endswith(".fbak")
+
+
 def requested_report() -> str:
-    """Путь .fmaster из аргумента запуска или из переменной, которую передаёт FinMaster.exe."""
+    """Путь отчёта или резервной копии из аргумента запуска или из переменной FinMaster.exe."""
     for raw in sys.argv[1:]:
         text = str(raw or "").strip().strip('"')
-        if text.lower().endswith(".fmaster"):
+        if is_report_path(text):
             return os.path.abspath(text)
     env = str(os.environ.get("FINMASTER_OPEN") or "").strip().strip('"')
-    if env.lower().endswith(".fmaster"):
+    if is_report_path(env):
         return os.path.abspath(env)
     return ""
 
@@ -208,7 +213,7 @@ def check_token(value: str) -> bool:
 
 def queue(path: str) -> None:
     text = str(path or "").strip().strip('"')
-    if not text.lower().endswith(".fmaster"):
+    if not is_report_path(text):
         return
     absolute = os.path.abspath(text)
     with _pending_guard:

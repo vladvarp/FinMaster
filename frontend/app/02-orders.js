@@ -203,6 +203,7 @@
     return {
       version: 1,
       title: "Новый отчёт",
+      id: uid(),
       created_at: new Date().toISOString(),
       modified_at: new Date().toISOString(),
       currency: "₽",
@@ -427,13 +428,17 @@
 
   function localRecent() {
     try {
-      return JSON.parse(localStorage.getItem(LS_RECENT) || "[]");
+      const list = JSON.parse(localStorage.getItem(LS_RECENT) || "[]");
+      const kept = list.filter((item) => !String(item?.path || "").toLowerCase().endsWith(".fbak"));
+      if (kept.length !== list.length) localStorage.setItem(LS_RECENT, JSON.stringify(kept));
+      return kept;
     } catch {
       return [];
     }
   }
 
   function pushLocalRecent(path, title) {
+    if (String(path || "").toLowerCase().endsWith(".fbak")) return;
     const list = localRecent().filter((x) => x.path !== path);
     list.unshift({ path, title, opened_at: new Date().toISOString(), exists: true });
     localStorage.setItem(LS_RECENT, JSON.stringify(list.slice(0, 15)));
@@ -502,7 +507,39 @@
     }, 800);
   }
 
+  let previewHold = "";
+  let previewLock = false;
+
+  function applyPreviewMode() {
+    const on = !!state.preview;
+    $("app-shell")?.classList.toggle("is-preview", on);
+    const banner = $("preview-banner");
+    if (banner) banner.hidden = !on;
+    const title = $("report-title");
+    if (title) title.readOnly = on;
+    const fileSave = $("btn-save");
+    if (fileSave) fileSave.textContent = on ? "Сохранить как отчёт" : "Сохранить";
+    const quick = $("btn-q-save");
+    if (quick) quick.title = on ? "Сохранить как отчёт" : "Сохранить (Ctrl+S)";
+    previewHold = on && state.doc ? JSON.stringify(state.doc) : "";
+  }
+
   function markDirty(label) {
+    if (state.preview) {
+      if (previewLock) return;
+      previewLock = true;
+      if (previewHold) {
+        try {
+          state.doc = JSON.parse(previewHold);
+        } catch {
+          /* снимок просмотра остаётся как есть */
+        }
+      }
+      toast("Резервная копия только для просмотра. Сохраните её как отчёт.");
+      renderAll();
+      previewLock = false;
+      return;
+    }
     if (!state.doc || history.busy) return;
     state.dirty = true;
     state.doc.modified_at = new Date().toISOString();
@@ -621,10 +658,12 @@
   }
 
   function discardOpenReport() {
+    state.preview = false;
     state.doc = emptyDoc();
     state.path = "";
     historyReset("Отчёт закрыт");
     setClean();
+    applyPreviewMode();
     showStart();
   }
 

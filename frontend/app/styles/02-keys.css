@@ -77,6 +77,25 @@ kbd {
   margin: 0 8px 6px;
   width: calc(100% - 16px);
 }
+.preview-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 18px 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, #d97706 45%, var(--line));
+  background: color-mix(in srgb, #d97706 16%, var(--card));
+  border-radius: 12px;
+  font-size: 13px;
+}
+.preview-banner[hidden] { display: none; }
+.preview-banner span { min-width: 0; }
+.backup-actions { white-space: nowrap; }
+#app-shell.is-preview .view :is(input, textarea, select, .line-drag, .item-drag, [data-act]) {
+  pointer-events: none;
+}
+#app-shell.is-preview #report-title { pointer-events: none; }
 .modal-card.history-modal { width: min(920px, calc(100vw - 32px)); }
 .hist-lib-table { width: 100%; }
 .hist-lib-table td, .hist-lib-table th { vertical-align: top; }

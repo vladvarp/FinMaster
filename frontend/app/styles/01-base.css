@@ -1522,6 +1522,7 @@ html[data-theme="dark"] .line-menu { background: #1b2538; border-color: var(--li
 .modal-card p { margin: 0 0 16px; color: var(--muted); }
 .modal-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 #confirm-modal { z-index: 72; }
+#confirm-modal.open { z-index: 10140 !important; }
 .modal-card.confirm-modal { width: min(440px, 100%); }
 
 .report-settings-modal {

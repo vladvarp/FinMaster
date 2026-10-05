@@ -131,7 +131,7 @@ def open_report_dialog(initial_dir: str = "") -> str | None:
         return _native_dialog(
             save=False,
             title="Открыть отчёт FinMaster",
-            pairs=[("Отчёты FinMaster", "*.fmaster"), ("JSON", "*.json"), ("Все файлы", "*.*")],
+            pairs=[("Отчёты FinMaster", "*.fmaster"), ("Резервные копии", "*.fbak"), ("JSON", "*.json"), ("Все файлы", "*.*")],
             initial_dir=initial_dir,
         )
     from tkinter import filedialog
@@ -144,6 +144,7 @@ def open_report_dialog(initial_dir: str = "") -> str | None:
                 "title": "Открыть отчёт FinMaster",
                 "filetypes": [
                     ("Отчёты FinMaster", "*.fmaster"),
+                    ("Резервные копии", "*.fbak"),
                     ("JSON", "*.json"),
                     ("Все файлы", "*.*"),
                 ],

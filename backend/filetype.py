@@ -1,4 +1,4 @@
-"""Привязка .fmaster к FinMaster.exe и иконке отчёта. Только для текущего пользователя."""
+"""Привязка .fmaster и .fbak к FinMaster.exe и их иконкам. Только для текущего пользователя."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ def _exe(root: str) -> str:
     return os.path.abspath(os.path.join(root, "FinMaster.exe"))
 
 
-def _icon(root: str) -> str:
-    return os.path.abspath(os.path.join(root, "frontend", "report.ico"))
+def _icon(root: str, name: str) -> str:
+    return os.path.abspath(os.path.join(root, "frontend", name))
 
 
 def _read(key: str) -> str:
@@ -56,22 +56,37 @@ def _notify() -> None:
     ctypes.windll.shell32.SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)
 
 
+def _register_kind(root: str, exe: str, ext: str, prog_id: str, description: str, icon_name: str, content_type: str) -> bool:
+    icon = _icon(root, icon_name)
+    icon_value = f'"{icon}",0' if os.path.isfile(icon) else f'"{exe}",0'
+    command = f'"{exe}" "%1"'
+    changed = False
+    changed |= _write(f"{_CLASSES}\\{ext}", prog_id, {"PerceivedType": "Document", "Content Type": content_type})
+    changed |= _write(f"{_CLASSES}\\{ext}\\OpenWithProgids", "", {prog_id: ""})
+    changed |= _write(f"{_CLASSES}\\{prog_id}", description)
+    changed |= _write(f"{_CLASSES}\\{prog_id}\\DefaultIcon", icon_value)
+    changed |= _write(f"{_CLASSES}\\{prog_id}\\shell\\open", "Открыть")
+    changed |= _write(f"{_CLASSES}\\{prog_id}\\shell\\open\\command", command)
+    return changed
+
+
 def register_reports(root: str) -> None:
-    """Сопоставить .fmaster с программой. Повторный запуск ничего не меняет, если запись уже верная."""
+    """Сопоставить отчёты и резервные копии с программой. Повторный запуск ничего не меняет, если запись уже верная."""
     if sys.platform != "win32":
         return
     exe = _exe(root)
     if not os.path.isfile(exe):
         return
-    icon = _icon(root)
-    icon_value = f'"{icon}",0' if os.path.isfile(icon) else f'"{exe}",0'
-    command = f'"{exe}" "%1"'
     changed = False
-    changed |= _write(f"{_CLASSES}\\{EXT}", PROG_ID, {"PerceivedType": "Document", "Content Type": "application/x-finmaster"})
-    changed |= _write(f"{_CLASSES}\\{EXT}\\OpenWithProgids", "", {PROG_ID: ""})
-    changed |= _write(f"{_CLASSES}\\{PROG_ID}", "Отчёт FinMaster")
-    changed |= _write(f"{_CLASSES}\\{PROG_ID}\\DefaultIcon", icon_value)
-    changed |= _write(f"{_CLASSES}\\{PROG_ID}\\shell\\open", "Открыть")
-    changed |= _write(f"{_CLASSES}\\{PROG_ID}\\shell\\open\\command", command)
+    changed |= _register_kind(root, exe, EXT, PROG_ID, "Отчёт FinMaster", "report.ico", "application/x-finmaster")
+    changed |= _register_kind(
+        root,
+        exe,
+        ".fbak",
+        "FinMaster.Backup",
+        "Резервная копия FinMaster",
+        "backup.ico",
+        "application/x-finmaster-backup",
+    )
     if changed:
         _notify()

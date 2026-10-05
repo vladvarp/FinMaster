@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -931,6 +932,7 @@ def empty_document(title: str = "Новый отчёт") -> dict[str, Any]:
     stamp = now_iso()
     return {
         "version": SCHEMA_VERSION,
+        "id": str(uuid.uuid4()),
         "title": title,
         "created_at": stamp,
         "modified_at": stamp,
@@ -972,6 +974,12 @@ def normalize_document(raw: Any) -> dict[str, Any]:
     except (TypeError, ValueError):
         decimals = 2
     base["money_decimals"] = max(0, min(4, decimals))
+    report_id = str(raw.get("id") or "").strip().lower()
+    parts = report_id.split("-")
+    if [len(part) for part in parts] == [8, 4, 4, 4, 12] and all(
+        ch in "0123456789abcdef" for part in parts for ch in part
+    ):
+        base["id"] = report_id
 
     statuses = raw.get("statuses")
     if isinstance(statuses, list) and statuses:

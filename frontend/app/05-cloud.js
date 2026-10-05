@@ -1114,8 +1114,10 @@
     persistCloudPrefs();
     persistChartPrefs();
     state.path = null;
+    state.preview = false;
     historyReset("Новый отчёт");
     setClean();
+    applyPreviewMode();
     showApp();
     setView("orders");
   }
@@ -1141,6 +1143,7 @@
     const next = view || (stay ? state.view : "dashboard");
     state.doc = res.document;
     state.path = res.path;
+    state.preview = !!res.preview;
     state.focusOrderId = null;
     state.focusLineId = null;
     cloudState().catalog = false;
@@ -1154,11 +1157,12 @@
     if (res.recent) renderRecent(res.recent);
     else if (res.path) pushLocalRecent(res.path, res.document.title);
     setClean();
+    applyPreviewMode();
     showApp();
     setView(next);
     if (next === "cloud") showCloudOverview();
     remotePublish();
-    toast("Отчёт открыт");
+    toast(state.preview ? "Резервная копия открыта только для просмотра" : "Отчёт открыт");
   }
 
   async function openPath(path, opts) {
@@ -1291,10 +1295,15 @@
 
   async function save({ as = false, silent = false } = {}) {
     if (!state.doc) return false;
+    const fromPreview = !!state.preview;
+    if (fromPreview) {
+      if (silent) return false;
+      as = true;
+    }
     persistCloudPrefs();
     try {
       if (state.desktop) {
-        let path = state.path;
+        let path = fromPreview ? "" : state.path;
         if (as || !path) {
           if (silent && !path) {
             if (!save._warned) {
@@ -1307,19 +1316,33 @@
           if (picked.cancelled || !picked.path) return false;
           path = picked.path;
         }
-        const res = await apiPost("/api/write", { path, document: state.doc, history: historyDiskPayload() });
+        const res = await apiPost("/api/write", {
+          path,
+          document: state.doc,
+          history: historyDiskPayload(),
+          new_id: fromPreview,
+        });
         state.doc = res.document;
         state.path = res.path;
+        state.preview = false;
         if (res.recent) renderRecent(res.recent);
         setClean();
-        if (!silent) toast("Отчёт сохранён");
+        applyPreviewMode();
+        if (!silent) {
+          toast(fromPreview ? "Отчёт сохранён. У него новый номер, исходные копии не изменились." : "Отчёт сохранён");
+        }
         return true;
       }
 
-      const payload = JSON.stringify(state.doc, null, 2);
+      const payload = JSON.stringify(fromPreview ? { ...state.doc, id: uid() } : state.doc, null, 2);
       if (as || !state.path) {
         downloadFile(`${state.doc.title || "Отчёт"}.fmaster`, payload);
         state.path = `${state.doc.title || "Отчёт"}.fmaster`;
+        if (fromPreview) {
+          state.doc.id = JSON.parse(payload).id;
+          state.preview = false;
+          applyPreviewMode();
+        }
         pushLocalRecent(state.path, state.doc.title);
         setClean();
         toast("Файл скачан. В отдельном окне FinMaster сохраняет напрямую на диск.");
@@ -2205,6 +2228,10 @@
         openHistoryLibrary();
         return;
       }
+      if (e.target.closest("#btn-history-backups")) {
+        openBackupLibrary();
+        return;
+      }
       const item = e.target.closest("[data-history-id]");
       if (item) historyJump(item.dataset.historyId);
     });
@@ -2219,8 +2246,28 @@
       const btn = e.target.closest("[data-hist-del]");
       if (btn) deleteHistoryFolder(btn.dataset.histDel);
     });
+    $("backup-close")?.addEventListener("click", () => $("backup-modal")?.classList.remove("open"));
+    $("backup-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("backup-modal")) $("backup-modal")?.classList.remove("open");
+    });
+    $("backup-create")?.addEventListener("click", () => createReportBackup());
+    $("preview-save")?.addEventListener("click", () => save({ as: true }));
+    $("backup-list")?.addEventListener("click", (e) => {
+      const openBtn = e.target.closest("[data-bak-open]");
+      if (openBtn) {
+        const path = openBtn.dataset.bakOpen;
+        confirmSwitchReport().then((ok) => {
+          if (!ok) return;
+          $("backup-modal")?.classList.remove("open");
+          openPath(path);
+        });
+        return;
+      }
+      const delBtn = e.target.closest("[data-bak-del]");
+      if (delBtn) deleteReportBackup(delBtn.dataset.bakDel);
+    });
     document.addEventListener("click", (e) => {
-      if (e.target.closest("#history-pop") || e.target.closest("#history-panel") || e.target.closest("#history-modal")) return;
+      if (e.target.closest("#history-pop") || e.target.closest("#history-panel") || e.target.closest("#history-modal") || e.target.closest("#backup-modal")) return;
       toggleHistoryPanel(false);
     });
     window.addEventListener("resize", placeHistoryPanel);
@@ -3173,6 +3220,11 @@
         if ($("pdf-modal")?.classList.contains("open")) {
           e.preventDefault();
           $("pdf-modal").classList.remove("open");
+          return;
+        }
+        if ($("backup-modal")?.classList.contains("open")) {
+          e.preventDefault();
+          $("backup-modal").classList.remove("open");
           return;
         }
         if ($("help-modal").classList.contains("open")) $("help-modal").classList.remove("open");
