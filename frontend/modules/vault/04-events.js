@@ -219,7 +219,9 @@
         if (!type) return;
         const view = $("view-vault");
         if (!view?.classList.contains("active")) return;
-        if (document.querySelector(".modal.open") || $("palette")?.classList.contains("open")) return;
+        const assistant = $("palette");
+        const assistantOpen = assistant?.classList.contains("open") && !assistant.classList.contains("is-min");
+        if (document.querySelector(".modal.open") || assistantOpen) return;
         e.preventDefault();
         e.stopPropagation();
         setDraftType(type);
