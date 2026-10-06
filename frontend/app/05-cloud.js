@@ -2087,6 +2087,16 @@
     $("orders-list").addEventListener("input", onOrderInput);
     $("orders-list").addEventListener("change", onOrderInput);
     $("orders-list").addEventListener("click", onOrderClick);
+    $("orders-list").addEventListener("dblclick", (e) => {
+      const cell = e.target.closest?.("td, .tax-percent");
+      const input = e.target.closest?.("input.is-calc-locked") || cell?.querySelector?.("input.is-calc-locked");
+      if (!input || input.dataset.calcLock !== "1") return;
+      const tr = input.closest("[data-line]");
+      const card = input.closest("[data-order]");
+      if (!tr || !card) return;
+      e.preventDefault();
+      if (window.FinCalc?.focusOrderField?.(card.dataset.order, tr.dataset.line, input.dataset.lk)) setView("calculator");
+    });
     $("orders-list").addEventListener("contextmenu", onLineContextMenu);
     $("orders-list").addEventListener("keydown", onOrderKeydown);
     document.addEventListener("click", (e) => {
@@ -3393,6 +3403,7 @@
             const line = order.lines.find((l) => l.id === tr.dataset.line);
             if (line) refreshComputed(card, tr, order, line);
           });
+          followEditedOrder(order.id);
           return;
         }
       } else if (g === "status" || g === "order_type") {
@@ -3442,6 +3453,7 @@
         }
       }
       markDirty();
+      followEditedOrder(order.id);
       return;
     }
     const tr = e.target.closest("[data-line]");
@@ -3517,6 +3529,7 @@
     if (statusSel && statusSel.value !== line.status) statusSel.value = line.status;
     markDirty();
     refreshComputed(card, tr, order, line);
+    followEditedOrder(order.id);
   }
 
   function refreshComputed(card, tr, order, line) {
@@ -3556,7 +3569,7 @@
   function onExprFocus(e) {
     const inp = e.target;
     const key = inp.dataset?.lk;
-    if (!EXPR_MAP[key]) return;
+    if (!EXPR_MAP[key] || inp.dataset.calcLock === "1" || inp.classList.contains("is-calc-locked")) return;
     if (inp.dataset.showing === "result") {
       inp.dataset.showing = "expr";
       inp.value = inp.dataset.expr || "";
@@ -3583,7 +3596,7 @@
   function onExprBlur(e) {
     const inp = e.target;
     const key = inp.dataset?.lk;
-    if (!EXPR_MAP[key]) return;
+    if (!EXPR_MAP[key] || inp.dataset.calcLock === "1" || inp.classList.contains("is-calc-locked")) return;
     const card = inp.closest("[data-order]");
     const tr = inp.closest("[data-line]");
     if (!card || !tr) return;

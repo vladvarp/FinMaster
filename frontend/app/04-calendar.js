@@ -1252,6 +1252,10 @@
     }
 
     const board = $("cal-board");
+    const selectedId = cal.selected || "";
+    const ganttRowsBefore = selectedId
+      ? [...board.querySelectorAll(".gantt-row[data-cal-id]:not(.is-line)")].findIndex((el) => el.dataset.calId === selectedId)
+      : -1;
     const keepY = board.scrollTop;
     const keepCols = {};
     board.querySelectorAll(".cal-col-body").forEach((el) => {
@@ -1276,6 +1280,11 @@
       if (reveal && cal.mode !== "timeline") {
         const cell = document.querySelector(`[data-cal-day="${cssEscape(dayKey(reveal))}"]`);
         cell?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+      if (ganttRowsBefore >= 0 && selectedId && calendarState().mode === "timeline") {
+        const rows = [...document.querySelectorAll("#gantt-scroll .gantt-row[data-cal-id]:not(.is-line)")];
+        const after = rows.findIndex((el) => el.dataset.calId === selectedId);
+        if (after >= 0 && after !== ganttRowsBefore) rows[after].scrollIntoView({ block: "nearest" });
       }
     });
   }

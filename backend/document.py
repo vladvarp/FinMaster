@@ -236,7 +236,7 @@ def _line_series_ui(raw: Any) -> dict[str, Any]:
 
 
 CALC_OPS = ("+", "-", "*", "/")
-CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group", "filter", "dashboard", "present")
+CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group", "filter", "dashboard", "present", "comment")
 CALC_MAX_BLUEPRINTS = 24
 CALC_MAX_NODES = 120
 CALC_MAX_LINKS = 400
@@ -502,6 +502,10 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         node["color"] = color
         node["w"] = _int_in_range(raw.get("w"), 320, 160, 4000)
         node["h"] = _int_in_range(raw.get("h"), 220, 120, 4000)
+    elif kind == "comment":
+        text = _clip_text(raw.get("text"), 2000)
+        if text:
+            node["text"] = text
     elif kind == "formula":
         letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         inputs = _calc_ports(
@@ -548,6 +552,8 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
             {"id": "c", "name": "C", "expr": "A+B"},
             {"id": "d", "name": "D", "expr": "(-40+A)*B"},
         ]
+        if raw.get("w") is not None:
+            node["w"] = _int_in_range(raw.get("w"), 360, 280, 1200)
     return node
 
 

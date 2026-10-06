@@ -8,10 +8,46 @@
     world.style.transform = `translate(${bp.x || 0}px, ${bp.y || 0}px) scale(${bp.zoom || 1})`;
   }
 
+  function frameBlueprintPoint(bp, x, y) {
+    const board = $("calc-board");
+    if (!board || !bp) return false;
+    const rect = board.getBoundingClientRect();
+    if (rect.width < 80 || rect.height < 80) return false;
+    const zoom = bp.zoom || 1;
+    bp.x = Math.round(rect.width / 2 - x * zoom);
+    bp.y = Math.round(rect.height / 2 - y * zoom);
+    applyWorld(bp);
+    return true;
+  }
+
+  function revealPendingFocus(bp) {
+    const pending = session.pendingFocus;
+    if (!pending || !bp) return;
+    const node = (bp.nodes || []).find((item) => item.id === pending.nodeId);
+    if (!node) {
+      session.pendingFocus = null;
+      return;
+    }
+    const el = findNodeEl(node.id);
+    const at = el && pending.portId ? portWorld(el, pending.portId, "in", bp) : null;
+    const size = nodeFootprint(node);
+    const x = (node.x || 0) + size.w / 2;
+    const y = at ? at.y : (node.y || 0) + size.h / 2;
+    if (!frameBlueprintPoint(bp, x, y)) return;
+    session.pendingFocus = null;
+  }
+
+  function formulaWidth(node) {
+    const n = Number(node?.w);
+    const raw = Number.isFinite(n) && n > 0 ? n : 360;
+    return Math.max(280, Math.min(1200, Math.round(raw)));
+  }
+
   function nodeFootprint(node) {
     const el = findNodeEl(node.id);
     if (el) return { w: Math.max(40, el.offsetWidth), h: Math.max(28, el.offsetHeight) };
-    if (node.type === "formula") return { w: 360, h: 160 };
+    if (node.type === "formula") return { w: formulaWidth(node), h: 160 };
+    if (node.type === "comment") return { w: 260, h: 150 };
     if (node.type === "order") return { w: 230, h: 140 };
     if (node.type === "scheme") return { w: 220, h: 100 };
     if (node.type === "result") return { w: 376, h: 120 };

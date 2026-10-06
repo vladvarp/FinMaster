@@ -36,6 +36,7 @@
         if (node.type === "const") return constNodeHtml(node, graph);
         if (node.type === "result") return resultNodeHtml(node, bp, graph);
         if (node.type === "formula") return formulaNodeHtml(node, bp, graph);
+        if (node.type === "comment") return commentNodeHtml(node);
         if (node.type === "scheme") return schemeNodeHtml(node, graph);
         if (node.type === "filter") return filterNodeHtml(node, graph);
         if (node.type === "dashboard") return dashboardNodeHtml(node, bp, graph);
@@ -163,7 +164,7 @@
       }
       return "order";
     }
-    if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme" || type === "group" || type === "filter" || type === "dashboard" || type === "present") return type;
+    if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme" || type === "group" || type === "filter" || type === "dashboard" || type === "present" || type === "comment") return type;
     return "order";
   }
 

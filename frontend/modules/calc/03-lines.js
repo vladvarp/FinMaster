@@ -111,6 +111,15 @@
     return "";
   }
 
+  function exprKeyToField(fieldOrExpr) {
+    if (fieldOrExpr === "qty_expr") return "qty";
+    if (fieldOrExpr === "price_expr") return "price";
+    if (fieldOrExpr === "discount_expr") return "discount";
+    if (fieldOrExpr === "paid_expr") return "paid";
+    if (fieldOrExpr === "tax_percent_expr") return "percent";
+    return fieldOrExpr || "";
+  }
+
   function formatCalcNumber(value) {
     if (!Number.isFinite(value)) return "";
     const rounded = Math.round(value * 1e6) / 1e6;

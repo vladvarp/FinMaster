@@ -86,6 +86,7 @@
           <button type="button" class="btn calc-tool" data-add-node="dashboard" draggable="true">Дашборд</button>
           <button type="button" class="btn calc-tool" data-add-node="result" draggable="true">Результат</button>
           <button type="button" class="btn calc-tool" data-add-node="group" draggable="true">Группа</button>
+          <button type="button" class="btn calc-tool" data-add-node="comment" draggable="true">Комментарий</button>
         </div>
       </details>
       <details class="calc-fold" data-fold="schemes" ${foldOpen("schemes") ? "open" : ""}>
@@ -480,7 +481,8 @@
               const tip = locked
                 ? `${orderFieldOwnerReason(owner, port.line, order, port.field)} · ПКМ — освободить`
                 : `${esc(port.name)} · вход задаёт значение в заказе`;
-              return `<div class="calc-row both is-${tone}${child}${fieldCls}${locked ? " is-locked" : ""}" title="${esc(tip)}">
+              const jumped = session.jump?.nodeId === node.id && session.jump?.portId === inId;
+              return `<div class="calc-row both is-${tone}${child}${fieldCls}${locked ? " is-locked" : ""}${jumped ? " is-jump" : ""}" title="${esc(tip)}">
               <i class="calc-port in ${locked ? "is-locked" : ""}" data-port="${esc(inId)}" data-io="in" data-line="${esc(port.line.id)}" data-field="${esc(port.field)}" data-order-lock="${locked ? "1" : ""}" title="${esc(tip)}"></i>
               <span class="calc-row-name" title="${esc(tip)}">${esc(port.name)}</span>
               <b>${esc(fmtShort(value))}</b>
@@ -644,7 +646,7 @@
     node.outputs = profile.outputs.slice(0, MATH_MAX).map((out) => ({
       id: uid(),
       name: take(out.name),
-      expr: String(out.expr || "0").slice(0, 200),
+      expr: sanitizeFormulaExpr(String(out.expr || "0")).slice(0, 200) || "0",
     }));
     if (!node.outputs.length) node.outputs = [{ id: uid(), name: take("C"), expr: "0" }];
   }
@@ -764,10 +766,43 @@
     });
   }
 
+  function formulaBadTitle(kind, bad) {
+    if (kind === "expr") return bad ? "Ошибка в этом выражении" : "Цифры, знаки и заглавные латинские буквы";
+    return bad ? "Ошибка: буква неверная или уже занята" : "Одна заглавная латинская буква";
+  }
+
+  function paintFormulaErrors(host, graph) {
+    if (!host) return;
+    host.querySelectorAll(".calc-node.is-formula").forEach((el) => {
+      const nodeId = el.dataset.node;
+      if (!nodeId) return;
+      const fields = new Set((graph.fields && graph.fields[nodeId]) || []);
+      el.classList.toggle("is-error", !!graph.errors?.has(nodeId));
+      el.querySelectorAll("[data-in-name]").forEach((input) => {
+        const on = fields.has(`in:${input.dataset.inName}`);
+        input.classList.toggle("is-bad", on);
+        input.title = formulaBadTitle("letter", on);
+      });
+      el.querySelectorAll("[data-out-name]").forEach((input) => {
+        const on = fields.has(`out:${input.dataset.outName}`);
+        input.classList.toggle("is-bad", on);
+        input.title = formulaBadTitle("letter", on);
+      });
+      el.querySelectorAll("[data-out-expr]").forEach((input) => {
+        const on = fields.has(`expr:${input.dataset.outExpr}`);
+        input.classList.toggle("is-bad", on);
+        input.title = formulaBadTitle("expr", on);
+      });
+    });
+  }
+
   function formulaNodeHtml(node, bp, graph) {
     const bad = graph.errors.has(node.id);
+    const badFields = new Set((graph.fields && graph.fields[node.id]) || []);
     const linked = usedInputPorts(node.id, bp.links);
-    return `<article class="calc-node is-formula ${bad ? "is-error" : ""} ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+    const w = formulaWidth(node);
+    const mark = (key) => (badFields.has(key) ? " is-bad" : "");
+    return `<article class="calc-node is-formula ${bad ? "is-error" : ""} ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;width:${w}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <span>Формула</span>
@@ -780,7 +815,7 @@
           .map(
             (port) => `<div class="calc-row in">
               <i class="calc-port in" data-port="${esc(port.id)}" data-io="in"></i>
-              <input class="calc-pname" data-in-name="${esc(port.id)}" value="${esc(port.name)}" maxlength="1" spellcheck="false" title="Одна заглавная латинская буква" />
+              <input class="calc-pname${mark(`in:${port.id}`)}" data-in-name="${esc(port.id)}" value="${esc(port.name)}" maxlength="1" spellcheck="false" title="${esc(formulaBadTitle("letter", badFields.has(`in:${port.id}`)))}" />
               ${linked.has(port.id) ? `<button type="button" class="calc-mini" data-del-in-link="${esc(port.id)}" title="Удалить связь">×</button>` : ""}
               <button type="button" class="calc-mini" data-del-in="${esc(port.id)}" title="Убрать вход">−</button>
             </div>`
@@ -791,11 +826,14 @@
         ${(node.outputs || [])
           .map((port) => {
             const value = graph.values[`${node.id}:${port.id}`];
-            const expr = String(port.expr || "").includes("=") ? splitAssign(port.expr).expr : port.expr || "";
+            const raw = String(port.expr || "");
+            const expr = sanitizeFormulaExpr(raw.includes("=") ? splitAssign(raw).expr : raw);
+            const exprBad = badFields.has(`expr:${port.id}`);
+            const nameBad = badFields.has(`out:${port.id}`);
             return `<div class="calc-row out formula">
-              <input class="calc-expr" data-out-expr="${esc(port.id)}" value="${esc(expr)}" spellcheck="false" />
+              <input class="calc-expr${mark(`expr:${port.id}`)}" data-out-expr="${esc(port.id)}" value="${esc(expr)}" spellcheck="false" title="${esc(formulaBadTitle("expr", exprBad))}" />
               <span class="calc-eq">=</span>
-              <input class="calc-pname" data-out-name="${esc(port.id)}" value="${esc(port.name)}" maxlength="1" spellcheck="false" title="Одна заглавная латинская буква" />
+              <input class="calc-pname${mark(`out:${port.id}`)}" data-out-name="${esc(port.id)}" value="${esc(port.name)}" maxlength="1" spellcheck="false" title="${esc(formulaBadTitle("letter", nameBad))}" />
               <b class="calc-out-val">${esc(fmtShort(value))}</b>
               <i class="calc-port out" data-port="${esc(port.id)}" data-io="out"></i>
               <button type="button" class="calc-mini" data-del-out="${esc(port.id)}" title="Убрать выход">−</button>
@@ -804,6 +842,7 @@
           .join("")}
         <button type="button" class="btn small calc-add" data-add-out="1">+ выход</button>
       </div>
+      <i class="calc-resize calc-resize-w" data-resize-formula="${esc(node.id)}" title="Ширина"></i>
     </article>`;
   }
 
@@ -935,6 +974,17 @@
       </header>
       <i class="calc-resize" data-resize-group="${esc(node.id)}" title="Изменить размер"></i>
     </div>`;
+  }
+
+  function commentNodeHtml(node) {
+    return `<article class="calc-node is-comment ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+      <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
+      <header class="calc-node-h">
+        <span>Комментарий</span>
+        <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
+      </header>
+      <textarea class="calc-comment" data-comment-text="${esc(node.id)}" rows="4" maxlength="2000" placeholder="Напишите комментарий…" spellcheck="true">${esc(node.text || "")}</textarea>
+    </article>`;
   }
 
   function filterNodeHtml(node, graph) {
@@ -1069,6 +1119,7 @@
         }
       }
     });
+    paintFormulaErrors(host, graph);
     fitScreenNodes();
     requestAnimationFrame(() => {
       drawWires(bp, graph);

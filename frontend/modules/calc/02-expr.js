@@ -1,3 +1,12 @@
+  function sanitizeFormulaExpr(raw) {
+    let out = "";
+    for (const ch of String(raw ?? "")) {
+      if (ch >= "a" && ch <= "z") out += ch.toUpperCase();
+      else if ((ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || "+-*/().,= \t".includes(ch)) out += ch;
+    }
+    return out;
+  }
+
   function tokenize(src) {
     const text = String(src || "").replace(/,/g, ".").replace(/\s+/g, "");
     const tokens = [];

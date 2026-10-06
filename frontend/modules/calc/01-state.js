@@ -70,6 +70,8 @@
     presentPanel: false,
     presentDrag: null,
     presentHover: "",
+    jump: null,
+    pendingFocus: null,
     presentListScroll: 0,
     filterMultiOpen: null,
     filterMultiLock: false,

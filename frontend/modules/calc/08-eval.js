@@ -86,38 +86,51 @@
     return [];
   }
 
-  function formulaConflict(node) {
-    const names = new Set();
-    let error = false;
-    for (const port of node.inputs || []) {
-      const name = String(port.name || "").trim();
-      if (!/^[A-Z]$/.test(name) || names.has(name)) error = true;
-      if (name) names.add(name);
-    }
+  function formulaFieldErrors(node) {
+    const bad = new Set();
+    const seen = new Map();
+    const take = (letter, key) => {
+      const name = String(letter || "").trim();
+      if (!/^[A-Z]$/.test(name)) {
+        bad.add(key);
+        return;
+      }
+      if (seen.has(name)) {
+        bad.add(key);
+        bad.add(seen.get(name));
+      } else seen.set(name, key);
+    };
+    for (const port of node.inputs || []) take(port.name, `in:${port.id}`);
     for (const port of node.outputs || []) {
       const name = String(port.name || "").trim();
-      if (!/^[A-Z]$/.test(name) || names.has(name)) error = true;
-      if (name) names.add(name);
-      const raw = String(port.expr || "").includes("=") ? port.expr : `${port.expr || "0"}=${port.name}`;
-      const parsed = splitAssign(raw);
-      if (parsed.out && parsed.out !== name) error = true;
+      take(name, `out:${port.id}`);
+      const raw = String(port.expr || "");
+      const body = raw.includes("=") ? splitAssign(raw).expr : raw;
+      const expr = sanitizeFormulaExpr(body);
+      const parsed = splitAssign(raw.includes("=") ? raw : `${expr}=${name}`);
+      if (parsed.out && parsed.out !== name) bad.add(`expr:${port.id}`);
       try {
-        evalExpr(parsed.expr || "0", {});
+        evalExpr(expr || "0", {});
       } catch {
-        error = true;
+        bad.add(`expr:${port.id}`);
       }
     }
-    return error;
+    return bad;
+  }
+
+  function formulaConflict(node) {
+    return formulaFieldErrors(node).size > 0;
   }
 
   function computeGraph(bp, stack) {
     const values = {};
     const errors = new Set();
+    const fields = {};
     const nodes = bp.nodes || [];
     const links = bp.links || [];
     if ((stack || []).includes(bp.id)) {
       nodes.forEach((node) => errors.add(node.id));
-      return { values, errors };
+      return { values, errors, fields };
     }
     const byId = Object.fromEntries(nodes.map((node) => [node.id, node]));
     const incoming = {};
@@ -247,7 +260,11 @@
         setVal(nodeId, "in", value);
         setVal(nodeId, "out", value);
       } else if (node.type === "formula") {
-        if (formulaConflict(node)) errors.add(nodeId);
+        const badFields = formulaFieldErrors(node);
+        if (badFields.size) {
+          errors.add(nodeId);
+          fields[nodeId] = [...badFields];
+        }
         const vars = {};
         (node.inputs || []).forEach((port) => {
           const link = (incoming[nodeId] || []).find((item) => item.toPort === port.id);
@@ -262,16 +279,20 @@
           setVal(nodeId, port.id, value);
         });
         (node.outputs || []).forEach((port) => {
-          const parsed = splitAssign(String(port.expr || "").includes("=") ? port.expr : `${port.expr || "0"}=${port.name}`);
-          const outName = String(port.name || parsed.out || "").trim();
+          const raw = String(port.expr || "");
+          const body = raw.includes("=") ? splitAssign(raw).expr : raw;
+          const expr = sanitizeFormulaExpr(body);
+          const outName = String(port.name || "").trim();
           try {
-            const value = evalExpr(parsed.expr || "0", vars);
+            const value = evalExpr(expr || "0", vars);
             setVal(nodeId, port.id, value);
             if (/^[A-Z]$/.test(outName) && value != null && Number.isFinite(value)) {
               vars[outName] = value;
             }
           } catch {
             errors.add(nodeId);
+            if (!fields[nodeId]) fields[nodeId] = [];
+            if (!fields[nodeId].includes(`expr:${port.id}`)) fields[nodeId].push(`expr:${port.id}`);
             setVal(nodeId, port.id, null);
           }
         });
@@ -322,6 +343,6 @@
     }
 
     nodes.forEach((node) => walk(node.id));
-    return { values, errors };
+    return { values, errors, fields };
   }
 

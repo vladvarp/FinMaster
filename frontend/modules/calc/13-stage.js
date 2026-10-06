@@ -35,6 +35,7 @@
     renderPresentPanel();
     requestAnimationFrame(() => {
       drawWires(bp, graph);
+      revealPendingFocus(bp);
       drawMinimap(bp);
     });
   }
@@ -257,6 +258,10 @@
   function onBoardPointerDown(e) {
     const bp = activeBlueprint();
     if (!bp) return;
+    if (session.jump) {
+      session.jump = null;
+      document.querySelectorAll(".calc-row.is-jump").forEach((el) => el.classList.remove("is-jump"));
+    }
     if (e.button === 1) {
       e.preventDefault();
       session.busy = true;
@@ -280,6 +285,26 @@
       return;
     }
     if (e.target.closest(".calc-refresh, .calc-chain-move, .calc-present-btn, .calc-present-panel, .calc-board-tools, .calc-bp-name, .calc-screen-copy, .calc-minimap, .calc-mini-toggle, .calc-mini-wrap, input, textarea, select")) return;
+    const resizeFormula = e.target.closest("[data-resize-formula]");
+    if (resizeFormula) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = resizeFormula.dataset.resizeFormula;
+      const item = bp.nodes.find((n) => n.id === id && n.type === "formula");
+      if (!item) return;
+      session.selected = id;
+      session.busy = true;
+      session.resize = {
+        id,
+        axis: "w",
+        dx: e.clientX,
+        w: formulaWidth(item),
+        min: 280,
+        max: 1200,
+      };
+      $("calc-board").setPointerCapture(e.pointerId);
+      return;
+    }
     const resize = e.target.closest("[data-resize-group]");
     if (resize) {
       e.preventDefault();
@@ -464,10 +489,15 @@
     }
     if (session.resize) {
       const zoom = bp.zoom || 1;
-      const item = bp.nodes.find((n) => n.id === session.resize.id && n.type === "group");
+      const item = bp.nodes.find((n) => n.id === session.resize.id);
       if (!item) return;
-      item.w = Math.max(160, Math.round(session.resize.w + (e.clientX - session.resize.dx) / zoom));
-      item.h = Math.max(120, Math.round(session.resize.h + (e.clientY - session.resize.dy) / zoom));
+      if (session.resize.axis === "w") {
+        const next = Math.round(session.resize.w + (e.clientX - session.resize.dx) / zoom);
+        item.w = Math.max(session.resize.min, Math.min(session.resize.max, next));
+      } else if (item.type === "group") {
+        item.w = Math.max(160, Math.round(session.resize.w + (e.clientX - session.resize.dx) / zoom));
+        item.h = Math.max(120, Math.round(session.resize.h + (e.clientY - session.resize.dy) / zoom));
+      } else return;
       applyNodeEl(item);
       drawMinimap(bp);
       return;
@@ -517,12 +547,12 @@
     }
 
     session.busy = false;
-    if (e.target.closest?.("input, textarea, select, .calc-bp-name, .calc-refresh, .calc-chain-move, .calc-board-tools")) return;
     if (resized) {
       dirty();
       if (bp) drawMinimap(bp);
       return;
     }
+    if (e.target.closest?.("input, textarea, select, .calc-bp-name, .calc-refresh, .calc-chain-move, .calc-board-tools")) return;
     if (linking) {
       const over = document.elementFromPoint(e.clientX, e.clientY)?.closest?.(".calc-port");
       const nodeId = over?.closest?.(".calc-node")?.dataset.node;
@@ -636,7 +666,7 @@
     e.preventDefault();
     const at = worldPoint(bp, e.clientX, e.clientY);
     if (presentBlock) addPresentNode(presentPage, presentBlock, at);
-    else if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "filter" || kind === "dashboard") addNode(kind, at);
+    else if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "comment" || kind === "filter" || kind === "dashboard") addNode(kind, at);
     else if (blueprintId && blueprintId !== bp.id) addNode("scheme", at, { blueprintId });
     else if (orderId && api.findOrder(orderId)) addNode("order", at, { orderId });
   }

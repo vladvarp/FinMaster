@@ -1638,12 +1638,11 @@
     const raw = exprRaw(line, exprKey);
     const formula = isFormula(raw);
     const locked = !!lockReason;
-    const lockAttr = locked
-      ? `readonly disabled data-calc-lock="1" title="${esc(lockReason)}"`
-      : extra;
+    const lockTitle = lockReason ? `${lockReason} Двойной клик — открыть ноду заказа в калькуляторе.` : "";
+    const lockAttr = locked ? `readonly data-calc-lock="1"` : extra;
     return `<input data-lk="${exprKey}" class="expr-field${locked ? " is-calc-locked" : ""}" inputmode="decimal" placeholder="1+2*6" ${lockAttr}
       value="${esc(shownExpr(line, exprKey))}" data-expr="${esc(raw)}" data-showing="${formula ? "result" : "expr"}"
-      title="${locked ? esc(lockReason) : "Можно формулу. Клик — правка, вне фокуса — результат."}" />`;
+      title="${locked ? esc(lockTitle) : "Можно формулу. Клик — правка, вне фокуса — результат."}" />`;
   }
 
   function calcLockFor(orderId, lineId, fieldOrExpr) {
@@ -1879,8 +1878,48 @@
         .join("")}</tbody></table>`;
   }
 
+  function orderCardBox(orderId) {
+    return [...($("orders-list")?.querySelectorAll(":scope > .order-card") || [])].find((el) => el.dataset.order === orderId) || null;
+  }
+
+  function orderInView(el) {
+    const scroller = document.querySelector(".content");
+    if (!el || !scroller) return false;
+    const view = scroller.getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    return box.bottom > view.top + 12 && box.top < view.bottom - 12;
+  }
+
+  function revealOrderCard(orderId) {
+    const card = orderCardBox(orderId);
+    if (!card || orderInView(card)) return;
+    const focus = document.activeElement;
+    const target = focus && card.contains(focus) ? focus : card;
+    target.scrollIntoView({ block: "nearest" });
+  }
+
+  /** Если правка сдвинула заказ в текущей сортировке — переставить карточку и догнать её прокруткой. */
+  function followEditedOrder(orderId) {
+    if (!orderId || state.view !== "orders") return;
+    const list = $("orders-list");
+    const cards = [...(list?.querySelectorAll(":scope > .order-card") || [])];
+    const card = cards.find((el) => el.dataset.order === orderId);
+    if (!card) return;
+    const nextIndex = filteredOrders().findIndex((o) => o.id === orderId);
+    if (nextIndex < 0) return;
+    const curIndex = cards.indexOf(card);
+    if (curIndex === nextIndex) return;
+    const others = cards.filter((el) => el !== card);
+    list.insertBefore(card, others[nextIndex] || null);
+    revealOrderCard(orderId);
+  }
+
   function renderOrders() {
     closeProductSuggest();
+    const editingId = document.activeElement?.closest?.(".order-card")?.dataset.order || "";
+    const beforeIndex = editingId
+      ? [...($("orders-list")?.querySelectorAll(":scope > .order-card") || [])].findIndex((el) => el.dataset.order === editingId)
+      : -1;
     const orders = filteredOrders();
     renderOrderChips();
     updateOrdersSummary();
@@ -1960,6 +1999,10 @@
         </article>`;
       })
       .join("");
+    if (editingId && beforeIndex >= 0) {
+      const afterIndex = [...$("orders-list").querySelectorAll(":scope > .order-card")].findIndex((el) => el.dataset.order === editingId);
+      if (afterIndex >= 0 && afterIndex !== beforeIndex) revealOrderCard(editingId);
+    }
   }
 
   function orderTotalsHtml(tot) {

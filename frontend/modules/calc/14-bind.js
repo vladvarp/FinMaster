@@ -495,9 +495,57 @@
         dirty();
         return;
       }
+      if (e.target.dataset?.commentText && node.type === "comment") {
+        node.text = String(e.target.value || "").slice(0, 2000);
+        dirty();
+        return;
+      }
+      if ((e.target.dataset?.inName || e.target.dataset?.outName) && node.type === "formula") {
+        const list = e.target.dataset.inName ? node.inputs : node.outputs;
+        const portId = e.target.dataset.inName || e.target.dataset.outName;
+        const port = (list || []).find((item) => item.id === portId);
+        if (port) {
+          let letter = "";
+          for (const ch of String(e.target.value || "")) {
+            if ((ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z")) letter = ch.toUpperCase();
+          }
+          if (e.target.value !== letter) {
+            e.target.value = letter;
+            try {
+              e.target.setSelectionRange(letter.length, letter.length);
+            } catch {
+              /* ignore */
+            }
+          }
+          port.name = letter;
+        }
+        dirty();
+        patchGraphLive();
+        return;
+      }
       if (e.target.dataset?.outExpr && node.type === "formula") {
         const port = (node.outputs || []).find((item) => item.id === e.target.dataset.outExpr);
-        if (port) port.expr = e.target.value;
+        if (port) {
+          const raw = e.target.value;
+          const next = sanitizeFormulaExpr(raw);
+          if (next !== raw) {
+            const pos = e.target.selectionStart ?? raw.length;
+            let kept = 0;
+            let seen = 0;
+            for (const ch of raw) {
+              if (seen >= pos) break;
+              seen += ch.length;
+              kept += sanitizeFormulaExpr(ch).length;
+            }
+            e.target.value = next;
+            try {
+              e.target.setSelectionRange(kept, kept);
+            } catch {
+              /* ignore */
+            }
+          }
+          port.expr = e.target.value;
+        }
         dirty();
         patchGraphLive();
       }
@@ -634,7 +682,10 @@
       }
       if (e.target.dataset.outExpr) {
         const port = node.outputs.find((item) => item.id === e.target.dataset.outExpr);
-        if (port) port.expr = e.target.value;
+        if (port) {
+          port.expr = sanitizeFormulaExpr(e.target.value);
+          e.target.value = port.expr;
+        }
       }
       dirty();
       render();
@@ -746,24 +797,33 @@
     orderFieldLock(orderId, lineId, fieldOrExpr) {
       try {
         const locks = collectOrderFieldLocks();
-        const field =
-          fieldOrExpr === "qty_expr"
-            ? "qty"
-            : fieldOrExpr === "price_expr"
-              ? "price"
-              : fieldOrExpr === "discount_expr"
-                ? "discount"
-                : fieldOrExpr === "paid_expr"
-                  ? "paid"
-                  : fieldOrExpr === "tax_percent_expr"
-                    ? "percent"
-                    : fieldOrExpr;
+        const field = exprKeyToField(fieldOrExpr);
         return (
           locks.find((item) => item.orderId === orderId && item.lineId === lineId && item.field === field) || null
         );
       } catch (err) {
         console.warn("calc orderFieldLock", err);
         return null;
+      }
+    },
+    focusOrderField(orderId, lineId, fieldOrExpr) {
+      try {
+        const field = exprKeyToField(fieldOrExpr);
+        const owner = orderFieldOwner(orderId, lineId, field);
+        if (!owner?.blueprint || !owner.node) return false;
+        const calc = ensureState();
+        if (!calc) return false;
+        calc.active = owner.blueprint.id;
+        session.selected = owner.node.id;
+        session.selectedLink = "";
+        const portId = lineInPortId(lineId, field);
+        session.jump = { nodeId: owner.node.id, portId };
+        session.pendingFocus = { nodeId: owner.node.id, portId };
+        dirty();
+        return true;
+      } catch (err) {
+        console.warn("calc focusOrderField", err);
+        return false;
       }
     },
     pruneOrderLinks(orderId, lineId) {

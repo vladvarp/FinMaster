@@ -38,6 +38,7 @@
         el.style.width = `${Math.max(160, node.w || 320)}px`;
         el.style.height = `${Math.max(120, node.h || 220)}px`;
       }
+      if (node.type === "formula") el.style.width = `${formulaWidth(node)}px`;
     }
     if (chrome) {
       chrome.style.left = `${node.x || 0}px`;
@@ -62,6 +63,7 @@
       dashboard: "#14b8a6",
       present: "#8b5cf6",
       group: "#94a3b8",
+      comment: "#d4a017",
     };
     return map[kind] || "#0d9488";
   }
@@ -335,6 +337,7 @@
       node.w = 320;
       node.h = 220;
     }
+    if (type === "comment") node.text = "";
     bp.nodes.push(node);
     session.selected = node.id;
     dirty();
@@ -391,7 +394,7 @@
       if (link.to) linked.add(link.to);
     });
     const before = (bp.nodes || []).length;
-    bp.nodes = (bp.nodes || []).filter((node) => node.type === "scheme" || node.type === "group" || linked.has(node.id));
+    bp.nodes = (bp.nodes || []).filter((node) => node.type === "scheme" || node.type === "group" || node.type === "comment" || linked.has(node.id));
     const removed = before - bp.nodes.length;
     if (!removed) return 0;
     const keep = new Set(bp.nodes.map((node) => node.id));
