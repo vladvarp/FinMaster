@@ -44,6 +44,7 @@ ASK_LINK = {
 ASK_NEW_LINK = {"новая ссылка", "/newlink", "/rotate", "new link"}
 ASK_REPORTS = {"отчёты", "отчеты", "/reports", "/files"}
 ASK_ORDERS = {"заказы", "/orders"}
+ASK_SNAP = {"снимок", "/snap"}
 ASK_MENU = {"/start", "/help", "меню", "start", "help"}
 
 PAGE = 6
@@ -81,14 +82,9 @@ def _pdf_opts(raw: Any = None) -> dict[str, Any]:
     return snapmod.normalize_pdf_opts(raw)
 
 
-def _saved_pdf_opts() -> dict[str, Any]:
-    raw = storage.ui_prefs().get("share_pdf")
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except json.JSONDecodeError:
-            raw = {}
-    return _pdf_opts(raw if isinstance(raw, dict) else {})
+def _default_pdf_opts() -> dict[str, Any]:
+    """Обычная вёрстка PDF. Поля, тема и заказы берутся из меню снимка в боте, не из окна на компьютере."""
+    return _pdf_opts(None)
 
 
 def _pdf_profiles() -> list[dict[str, Any]]:
@@ -209,10 +205,10 @@ def _menu_keyboard(app_url: str = "") -> dict[str, Any]:
     if app:
         second = [{"text": "Открыть", "web_app": {"url": app}}, {"text": "Ссылка"}, {"text": "Меню"}]
     return {
-        "keyboard": [[{"text": "Отчёты"}, {"text": "Заказы"}], second, [{"text": "Новая ссылка"}]],
+        "keyboard": [[{"text": "Отчёты"}, {"text": "Заказы"}, {"text": "Снимок"}], second, [{"text": "Новая ссылка"}]],
         "resize_keyboard": True,
         "is_persistent": True,
-        "input_field_placeholder": "Отчёты, заказы или поиск",
+        "input_field_placeholder": "Отчёты, заказы, снимок или поиск",
     }
 
 
@@ -233,6 +229,17 @@ def _open_btn(text: str, url: str) -> dict[str, Any]:
 
 _last_menu = ""
 _menu_lock = threading.Lock()
+_chat_tail: dict[str, int] = {}
+
+
+def _bump_tail(chat_id: str, message_id: int | None) -> None:
+    """Запоминает самое нижнее сообщение чата, чтобы меню не оставалось выше переписки."""
+    if message_id is None:
+        return
+    key = str(chat_id)
+    mid = int(message_id)
+    if mid > _chat_tail.get(key, 0):
+        _chat_tail[key] = mid
 
 
 def set_menu_button(token: str, url: str = "", force: bool = False, chat_id: str = "") -> None:
@@ -331,11 +338,13 @@ def send_html(
     data = _call(token, "sendMessage", payload)
     result = data.get("result") if isinstance(data.get("result"), dict) else {}
     mid = result.get("message_id")
-    return int(mid) if mid is not None else None
+    sent = int(mid) if mid is not None else (int(message_id) if message_id else None)
+    _bump_tail(chat_id, sent)
+    return sent
 
 
 def send_photo(token: str, chat_id: str, png: bytes, caption: str, filename: str) -> dict[str, Any]:
-    return _call_file(
+    data = _call_file(
         token,
         "sendPhoto",
         {"chat_id": chat_id, "caption": caption[:1024]},
@@ -344,6 +353,10 @@ def send_photo(token: str, chat_id: str, png: bytes, caption: str, filename: str
         png,
         "image/png",
     )
+    result = data.get("result") if isinstance(data.get("result"), dict) else {}
+    if result.get("message_id") is not None:
+        _bump_tail(chat_id, int(result["message_id"]))
+    return data
 
 
 def send_document(
@@ -357,7 +370,11 @@ def send_document(
     fields: dict[str, Any] = {"chat_id": chat_id}
     if caption:
         fields["caption"] = caption[:1024]
-    return _call_file(token, "sendDocument", fields, "document", filename, body, mime)
+    data = _call_file(token, "sendDocument", fields, "document", filename, body, mime)
+    result = data.get("result") if isinstance(data.get("result"), dict) else {}
+    if result.get("message_id") is not None:
+        _bump_tail(chat_id, int(result["message_id"]))
+    return data
 
 
 def _photo_file_id(data: dict[str, Any]) -> str:
@@ -433,7 +450,7 @@ def welcome_text(info: Any = None) -> str:
         "<b>FinMaster</b>\n"
         "отчёты, заказы и снимки прямо здесь\n\n"
         f"{channel_block(info)}\n\n"
-        "Кнопки внизу: <b>Отчёты</b>, <b>Заказы</b>, <b>Ссылка</b>, <b>Новая ссылка</b>.\n"
+        "Кнопки внизу: <b>Отчёты</b>, <b>Заказы</b>, <b>Снимок</b>, <b>Ссылка</b>, <b>Новая ссылка</b>.\n"
         "Если включён интернет — «Открыть» запускает приложение внутри Telegram.\n"
         "В списке заказов можно написать имя или номер — найду."
     )
@@ -508,6 +525,7 @@ def setup_bot(token: str) -> None:
                     {"command": "start", "description": "Меню"},
                     {"command": "reports", "description": "Отчёты"},
                     {"command": "orders", "description": "Заказы"},
+                    {"command": "snap", "description": "Снимок для заказчика"},
                     {"command": "link", "description": "Ссылка на телефон"},
                     {"command": "newlink", "description": "Новая ссылка на телефон"},
                 ]
@@ -594,9 +612,10 @@ class ChatSession:
             "hide_stamp": False,
             "title": "",
             "order_ids": [],
+            "extra_orders": [],
             "skip": {},
             "pay_filter": "all",
-            "pdf_opts": _saved_pdf_opts(),
+            "pdf_opts": _default_pdf_opts(),
             "ready": False,
         }
 
@@ -818,6 +837,8 @@ class TelegramBot:
             cid = chat.get("id")
             if cid is None:
                 return
+            if msg.get("message_id") is not None:
+                _bump_tail(str(cid), int(msg["message_id"]))
             text = str(msg.get("text") or "").strip()
             netlog.add(
                 "telegram",
@@ -864,12 +885,21 @@ class TelegramBot:
         if low in ASK_ORDERS:
             self._show(token, chat_id, "orders")
             return
+        if low in ASK_SNAP:
+            doc, _ = self._doc_of(session)
+            if not (session.path or _live_path() or doc.get("orders")):
+                send_html(token, chat_id, "Сначала выберите отчёт.", self._reply_kb(chat_id))
+                self._show(token, chat_id, "reports")
+                return
+            self._prepare_snap(session, reset=not bool(session.snap.get("ready")))
+            self._show(token, chat_id, "snap")
+            return
         if session.screen in {"orders", "order", "home"} and text:
             session.search = text
             session.opage = 0
             self._show(token, chat_id, "orders")
             return
-        send_html(token, chat_id, "Нажмите <b>Отчёты</b>, <b>Заказы</b> или <b>Меню</b>.", self._reply_kb(chat_id))
+        send_html(token, chat_id, "Нажмите <b>Отчёты</b>, <b>Заказы</b>, <b>Снимок</b> или <b>Меню</b>.", self._reply_kb(chat_id))
 
     def _on_callback(self, token: str, query: dict[str, Any]) -> None:
         qid = str(query.get("id") or "")
@@ -1094,7 +1124,7 @@ class TelegramBot:
         elif data == "SP":
             self._send_snap(token, chat_id, "png")
         elif data == "Sd":
-            session.snap["pdf_opts"] = _pdf_opts(session.snap.get("pdf_opts") or _saved_pdf_opts())
+            session.snap["pdf_opts"] = _pdf_opts(session.snap.get("pdf_opts") or _default_pdf_opts())
             self._show(token, chat_id, "pdf")
         elif data == "Sdp":
             self._send_snap(token, chat_id, "pdf")
@@ -1193,8 +1223,9 @@ class TelegramBot:
             session.snap["hide_stamp"] = False
             session.snap["title"] = ""
             session.snap["skip"] = {}
+            session.snap["extra_orders"] = []
             session.snap["pay_filter"] = "all"
-            session.snap["pdf_opts"] = _saved_pdf_opts()
+            session.snap["pdf_opts"] = _default_pdf_opts()
             if session.order_id:
                 session.snap["order_ids"] = [session.order_id]
             else:
@@ -1208,6 +1239,7 @@ class TelegramBot:
             ids = list(session.orders[:1])
         session.snap["order_ids"] = ids
         session.snap.setdefault("skip", {})
+        session.snap.setdefault("extra_orders", [])
         session.snap["fields"] = snapmod.normalize_fields(session.snap.get("fields"))
         session.snap["theme"] = snapmod.theme_key(str(session.snap.get("theme") or "teal"))
 
@@ -1235,6 +1267,7 @@ class TelegramBot:
     def _apply_pay_filter(self, session: ChatSession, mode: str) -> None:
         session.snap["pay_filter"] = mode if mode in {"all", "debt", "paid"} else "all"
         session.snap["skip"] = {}
+        session.snap["extra_orders"] = []
         if session.snap["pay_filter"] == "all":
             return
         doc, _ = self._doc_of(session)
@@ -1250,7 +1283,7 @@ class TelegramBot:
 
     def _apply_pdf_profile(self, session: ChatSession, index: int) -> None:
         if index < 0:
-            session.snap["pdf_opts"] = _saved_pdf_opts()
+            session.snap["pdf_opts"] = _default_pdf_opts()
             return
         profiles = _pdf_profiles()
         if index >= len(profiles):
@@ -1274,6 +1307,10 @@ class TelegramBot:
         """Позиции для снимка: без замороженных; налоги/затраты — только с полем «Налоги и затраты»; долг/оплата — по фильтру снимка."""
         with_expenses = "expenses" in snapmod.normalize_fields((session.snap if session else {}).get("fields"))
         pay = str((session.snap if session else {}).get("pay_filter") or "all")
+        order_id = str((order or {}).get("id") or "")
+        extras = {str(item) for item in ((session.snap if session else {}).get("extra_orders") or [])}
+        if order_id and order_id in extras:
+            pay = "all"
         types = type_index(doc)
         return [
             line
@@ -1376,16 +1413,43 @@ class TelegramBot:
         session.snap.pop("pick_error", None)
         self._show(token, chat_id, "snap")
 
+    def _order_matches_pay(self, session: ChatSession, doc: dict[str, Any], order: dict[str, Any]) -> bool:
+        """Есть ли у заказа позиции, которые текущий фильтр снимка (долг/оплата) оставляет."""
+        pay = str(session.snap.get("pay_filter") or "all")
+        if pay not in {"debt", "paid"}:
+            return True
+        with_expenses = "expenses" in snapmod.normalize_fields(session.snap.get("fields"))
+        types = type_index(doc)
+        for line in order.get("lines") or []:
+            if not isinstance(line, dict) or is_frozen(line):
+                continue
+            if not with_expenses and line_kind(line, types):
+                continue
+            if self._line_pay_match(line, order, types, pay):
+                return True
+        return False
+
     def _toggle_order(self, session: ChatSession, index: int) -> None:
-        if index < 0 or index >= len(session.orders):
+        picker = [str(item) for item in (session.snap.get("picker") or [])]
+        if index < 0 or index >= len(picker):
             return
-        order_id = session.orders[index]
+        order_id = picker[index]
         ids = list(session.snap.get("order_ids") or [])
+        extras = [str(item) for item in (session.snap.get("extra_orders") or [])]
         if order_id in ids:
             ids = [item for item in ids if item != order_id]
+            extras = [item for item in extras if item != order_id]
         else:
             ids.append(order_id)
+            doc, _ = self._doc_of(session)
+            order = self._find_order(doc, order_id)
+            if order and not self._order_matches_pay(session, doc, order):
+                if order_id not in extras:
+                    extras.append(order_id)
+            else:
+                extras = [item for item in extras if item != order_id]
         session.snap["order_ids"] = ids
+        session.snap["extra_orders"] = extras
 
     def _order_list_statuses(self, session: ChatSession, doc: dict[str, Any], orders: list[dict[str, Any]]) -> list[str]:
         seen: list[str] = []
@@ -1397,19 +1461,25 @@ class TelegramBot:
         return seen
 
     def _select_orders_all(self, session: ChatSession, on: bool) -> None:
+        picker = [str(item) for item in (session.snap.get("picker") or [])]
         if on:
-            session.snap["order_ids"] = list(session.orders)
+            session.snap["order_ids"] = picker
         else:
             session.snap["order_ids"] = []
+            session.snap["extra_orders"] = []
 
     def _invert_orders(self, session: ChatSession) -> None:
+        picker = [str(item) for item in (session.snap.get("picker") or [])]
         chosen = set(session.snap.get("order_ids") or [])
-        session.snap["order_ids"] = [oid for oid in session.orders if oid not in chosen]
+        session.snap["order_ids"] = [oid for oid in picker if oid not in chosen]
+        keep = set(session.snap["order_ids"])
+        session.snap["extra_orders"] = [oid for oid in (session.snap.get("extra_orders") or []) if oid in keep]
 
     def _select_orders_by_status(self, session: ChatSession, index: int) -> None:
         doc, _ = self._doc_of(session)
-        orders = self._filtered_orders(session, doc)
-        session.orders = [str(order.get("id") or "") for order in orders]
+        orders = self._filtered_orders(session, doc, filt="all", needle="")
+        picker = [str(order.get("id") or "") for order in orders]
+        session.snap["picker"] = picker
         statuses = self._order_list_statuses(session, doc, orders)
         if index < 0 or index >= len(statuses):
             return
@@ -1421,7 +1491,7 @@ class TelegramBot:
                 continue
             if any(str(line.get("status") or "").strip() == want for line in self._snap_lines(doc, order, session)):
                 chosen.add(oid)
-        session.snap["order_ids"] = [oid for oid in session.orders if oid in chosen]
+        session.snap["order_ids"] = [oid for oid in picker if oid in chosen]
 
     def _finish_orders(self, token: str, chat_id: str) -> None:
         session = self._chat(chat_id)
@@ -1454,17 +1524,21 @@ class TelegramBot:
                 return order
         return {}
 
-    def _filtered_orders(self, session: ChatSession, doc: dict[str, Any]) -> list[dict[str, Any]]:
+    def _filtered_orders(
+        self, session: ChatSession, doc: dict[str, Any], *, filt: str | None = None, needle: str | None = None
+    ) -> list[dict[str, Any]]:
         found: list[dict[str, Any]] = []
-        needle = (session.search or "").strip().lower()
+        mode = session.filter if filt is None else filt
+        query = (session.search or "") if needle is None else needle
+        needle = query.strip().lower()
         types = type_index(doc)
         for order in doc.get("orders") or []:
             if not isinstance(order, dict):
                 continue
             tot = order_totals(order, types)
-            if session.filter == "debt" and tot["unpaid"] <= 0.005:
+            if mode == "debt" and tot["unpaid"] <= 0.005:
                 continue
-            if session.filter == "paid" and tot["unpaid"] > 0.005:
+            if mode == "paid" and tot["unpaid"] > 0.005:
                 continue
             if needle:
                 blob = " ".join(
@@ -1528,7 +1602,7 @@ class TelegramBot:
                 )
                 send_photo(token, chat_id, png, caption, "finmaster-snapshot.png")
             elif kind == "pdf":
-                opts = _pdf_opts(session.snap.get("pdf_opts") or _saved_pdf_opts())
+                opts = _pdf_opts(session.snap.get("pdf_opts") or _default_pdf_opts())
                 payload = {
                     "blocks": [{"order": block["order"], "lines": block["lines"]} for block in blocks],
                     "fields": fields,
@@ -1556,12 +1630,15 @@ class TelegramBot:
         session.screen = screen
         session.awaiting = ""
         text, rows = self._screen(session, screen)
+        anchor = session.message_id
+        if anchor is not None and _chat_tail.get(str(chat_id), 0) > int(anchor):
+            anchor = None
         session.message_id = send_html(
             token,
             chat_id,
             text,
             _inline(rows) if rows else self._reply_kb(chat_id),
-            message_id=session.message_id,
+            message_id=anchor,
         )
 
     def _screen(self, session: ChatSession, screen: str) -> tuple[str, list[list[dict[str, str]]]]:
@@ -1806,9 +1883,22 @@ class TelegramBot:
         rows.append([_btn("К заказу", "D"), _btn("К заказам", "O")])
         return text, rows
 
+    def _snap_set_label(self, session: ChatSession) -> str:
+        fields = snapmod.normalize_fields(session.snap.get("fields"))
+        preset = next((key for key, ids in snapmod.PRESETS.items() if list(ids) == fields), "")
+        field_set = set(fields)
+        for profile in _share_profiles():
+            if (
+                set(profile["fields"]) == field_set
+                and bool(profile.get("hideLabels")) == bool(session.snap.get("hide_labels"))
+                and bool(profile.get("hideStamp")) == bool(session.snap.get("hide_stamp"))
+            ):
+                return str(profile["name"])
+        return snapmod.PRESET_LABELS.get(preset, "свой набор")
+
     def _screen_pdf(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
         profiles = _pdf_profiles()
-        opts = _pdf_opts(session.snap.get("pdf_opts") or _saved_pdf_opts())
+        opts = _pdf_opts(session.snap.get("pdf_opts") or _default_pdf_opts())
         session.snap["pdf_opts"] = opts
         active = ""
         for profile in profiles:
@@ -1817,21 +1907,24 @@ class TelegramBot:
                 break
         orient = "альбом" if opts.get("orient") == "landscape" else "книга"
         margin = {"narrow": "узкие", "normal": "обычные", "wide": "широкие"}.get(str(opts.get("margin")), "обычные")
+        theme = snapmod.theme_key(str(session.snap.get("theme") or "teal"))
         text = (
             "<b>PDF для заказчика</b>\n"
-            f"шаблон: {html_esc(active or 'текущие настройки с компьютера')}\n"
+            f"шаблон страницы: {html_esc(active or 'по умолчанию')}\n"
+            f"снимок: {html_esc(self._snap_set_label(session))} · "
+            f"тема {html_esc(snapmod.THEMES[theme]['label'])}\n"
             f"{orient} · поля {margin} · масштаб {int(opts.get('scale') or 100)}%"
             + (" · обрезка" if opts.get("crop") else "")
         )
         rows: list[list[dict[str, str]]] = []
         default_on = not active
-        rows.append([_btn(("· " if default_on else "") + "Как на компьютере", "Pf:-1")])
+        rows.append([_btn(("· " if default_on else "") + "По умолчанию", "Pf:-1")])
         if profiles:
             for i, profile in enumerate(profiles):
                 on = profile["name"] == active
                 rows.append([_btn(("· " if on else "") + _clip(profile["name"], 56), f"Pf:{i}")])
         else:
-            text += "\n\nСохранённых шаблонов PDF пока нет — используются настройки из окна PDF на компьютере."
+            text += "\n\nСохранённых шаблонов страницы пока нет. PDF соберётся из меню снимка."
         rows.append([_btn("Отправить PDF", "Sdp")])
         rows.append([_btn("Назад", "SB")])
         return text, rows
@@ -1944,8 +2037,8 @@ class TelegramBot:
         currency = str(doc.get("currency") or "₽")
         decimals = money_decimals(doc.get("money_decimals"))
         chosen = set(session.snap.get("order_ids") or [])
-        orders = self._filtered_orders(session, doc)
-        session.orders = [str(order.get("id") or "") for order in orders]
+        orders = self._filtered_orders(session, doc, filt="all", needle="")
+        session.snap["picker"] = [str(order.get("id") or "") for order in orders]
         types = type_index(doc)
         statuses = self._order_list_statuses(session, doc, orders)
         rows: list[list[dict[str, str]]] = [

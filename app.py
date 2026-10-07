@@ -867,6 +867,35 @@ def api_dialog_pdf():
     return jsonify({"path": path, "cancelled": False})
 
 
+_PDF_FONT_FILES = {
+    "segoeui.ttf",
+    "segoeuib.ttf",
+    "arial.ttf",
+    "arialbd.ttf",
+    "calibri.ttf",
+    "calibrib.ttf",
+    "georgia.ttf",
+    "georgiab.ttf",
+    "times.ttf",
+    "timesbd.ttf",
+}
+
+
+@app.get("/api/pdf-font/<name>")
+def api_pdf_font(name: str):
+    """Системный шрифт Windows для текстового PDF. Только локальное окно."""
+    if not _is_local():
+        return jsonify({"error": "Только в окне программы."}), 403
+    safe = os.path.basename(str(name or "")).lower()
+    if safe not in _PDF_FONT_FILES:
+        return jsonify({"error": "Неизвестный шрифт."}), 404
+    folder = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+    path = os.path.join(folder, safe)
+    if not os.path.isfile(path):
+        return jsonify({"error": "Шрифт не найден."}), 404
+    return send_from_directory(folder, safe, mimetype="font/ttf")
+
+
 @app.get("/api/desktop/pdf-job")
 def api_desktop_pdf_job():
     """Окно программы забирает задание PDF от Telegram-бота."""

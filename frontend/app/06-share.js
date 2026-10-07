@@ -28,7 +28,6 @@
   };
   const PDF_NUM_COLS = new Set(["quantity", "price", "discount", "total", "paid", "unpaid"]);
   const PDF_PREVIEW_SCALE = 1.6;
-  const PDF_EXPORT_SCALE = 2.6;
   let pdfOpts = { ...PDF_DEFAULTS };
   let pdfRenderFrame = 0;
 
@@ -384,7 +383,7 @@
       if (!hideStamp) text(M, fy, stamp, font(400, 7.5 * f), theme.note);
       if (o.pageNums) text(M + availW, fy, `Стр. ${i + 1} из ${total}`, font(400, 7.5 * f), theme.note, "right");
     });
-    return { W, H, pages, bg: theme.bg, title };
+    return { W, H, pages, bg: theme.bg, title, fontKey: o.font, fontFamily: fam };
   }
 
   function pdfRoundRect(ctx, x, y, w, h, r) {
@@ -529,12 +528,7 @@
     const layout = sharePdfLayout(pdfOptsSnapshot(opts || {}), ctx || null);
     if (!layout) throw new Error("Выберите заказы и строки для PDF");
     if (!window.FinPdf?.build) throw new Error("модуль PDF не загружен");
-    const pages = layout.pages.map((p) => ({
-      canvas: renderPdfPageCanvas(layout, p, PDF_EXPORT_SCALE),
-      widthPt: layout.W,
-      heightPt: p.h || layout.H,
-    }));
-    const bytes = await window.FinPdf.build(pages, { title: layout.title });
+    const bytes = await window.FinPdf.build(layout, { title: layout.title });
     return bytesToBase64(bytes);
   }
 
@@ -602,15 +596,10 @@
         btn.disabled = true;
         btn.textContent = "Сохраняю…";
       }
-      const pages = layout.pages.map((p) => ({
-        canvas: renderPdfPageCanvas(layout, p, PDF_EXPORT_SCALE),
-        widthPt: layout.W,
-        heightPt: p.h || layout.H,
-      }));
-      const bytes = await window.FinPdf.build(pages, { title: layout.title });
+      const bytes = await window.FinPdf.build(layout, { title: layout.title });
       if (state.desktop) {
         await apiPost("/api/write-bytes", { path, base64: bytesToBase64(bytes) });
-        toast(`PDF сохранён · страниц: ${pages.length}`);
+        toast(`PDF сохранён · страниц: ${layout.pages.length}`);
         return;
       }
       const blob = new Blob([bytes], { type: "application/pdf" });
@@ -619,7 +608,7 @@
       a.download = name;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      toast(`PDF скачан · страниц: ${pages.length}`);
+      toast(`PDF скачан · страниц: ${layout.pages.length}`);
     } catch (err) {
       toast(`Не удалось сохранить PDF: ${err.message || err}`);
     } finally {
