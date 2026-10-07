@@ -4,9 +4,11 @@
     if (mode === "years") viewY += dir * 12;
     else if (mode === "months") viewY += dir;
     else {
-      const total = viewY * 12 + viewM + dir;
-      viewY = Math.floor(total / 12);
-      viewM = total - viewY * 12;
+      const size = spanSize();
+      const start = spanStart(viewY, viewM, size);
+      const next = addMonths(start.y, start.m, dir * size);
+      viewY = next.y;
+      viewM = next.m;
     }
     render();
   }
@@ -14,6 +16,15 @@
   function onPopClick(e) {
     const btn = e.target.closest("button");
     if (!btn || btn.disabled || !input) return;
+    if (btn.dataset.dpSpan) {
+      const size = +btn.dataset.dpSpan;
+      if (size === 1 || size === 3 || size === 6 || size === 12) {
+        span = size;
+        mode = "days";
+        render();
+      }
+      return;
+    }
     if (btn.dataset.day) {
       commit(btn.dataset.day);
       return;

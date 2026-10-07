@@ -9,6 +9,7 @@
   let pop = null;
   let input = null;
   let mode = "days";
+  let span = 1;
   let viewY = 0;
   let viewM = 0;
   let cursor = "";

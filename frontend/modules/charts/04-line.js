@@ -6,9 +6,9 @@
     return Number.isFinite(n) ? n : null;
   }
 
-  function line(canvas, { labels = [], datasets = [], kind = "money", instant = false } = {}) {
+  function line(canvas, { labels = [], datasets = [], kind = "money", instant = false, onPick = null } = {}) {
     const inst = getInst(canvas, "line");
-    update(inst, datasets.map((d) => (d.values || []).map(lineNumber)), { labels, datasets, kind, instant });
+    update(inst, datasets.map((d) => (d.values || []).map(lineNumber)), { labels, datasets, kind, instant, onPick });
   }
 
   function lineSegments(pts) {

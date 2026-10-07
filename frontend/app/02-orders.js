@@ -938,7 +938,7 @@
   }
 
   function renderKpis() {
-    const rows = dashRows();
+    const rows = dashScopedRows();
     const s = summarize(rows);
     const active = rows.filter(({ line }) => !/отмен|аннул|черн/i.test(line.status));
     const as = summarize(active);
@@ -1000,7 +1000,7 @@
   function renderInsights() {
     const box = $("insights");
     if (!box) return;
-    const rows = dashRows();
+    const rows = dashScopedRows();
     if (!rows.length) {
       box.innerHTML = `<div class="empty">Добавьте первый заказ — здесь появятся выводы по выручке, долгам и заказчикам.</div>`;
       return;
@@ -1273,6 +1273,8 @@
   const LINE_ZOOM_PRESETS = {
     dash: [
       ["all", "Всё"],
+      ["365", "Год"],
+      ["180", "6 мес"],
       ["90", "3 мес"],
       ["30", "Месяц"],
       ["14", "2 нед"],
@@ -1285,7 +1287,7 @@
     ],
   };
   const lineZoom = {
-    dash: { preset: "14", fromKey: "", toKey: "" },
+    dash: { preset: "all", fromKey: "", toKey: "" },
     analytics: { preset: "all", fromKey: "", toKey: "" },
   };
   const lineZoomData = {};
@@ -1348,9 +1350,395 @@
           `<button type="button" class="chart-leg zoom-preset ${z.preset === id ? "on" : ""}" data-line-zoom="${chart}" data-zoom-preset="${id}">${label}</button>`
       )
       .join("");
-    el.innerHTML = `<div class="chart-zoom-presets">${presets}</div>
+    const custom = chart === "dash" && !z.preset && z.fromKey && z.toKey;
+    const rangeBtn =
+      chart === "dash"
+        ? `<button type="button" class="chart-leg zoom-preset zoom-range-btn ${custom ? "on" : ""}" data-zoom-range="dash" title="Выбрать свои даты">${custom ? esc(zoomRangeButtonText(z)) : "Период"}</button>`
+        : "";
+    el.innerHTML = `<div class="chart-zoom-presets">${presets}${rangeBtn}</div>
       <span class="chart-zoom-range">${esc(data.labels[range.from])} — ${esc(data.labels[range.to])} · ${range.to - range.from + 1} из ${n}</span>
-      <span class="chart-zoom-hint">колесо — масштаб · перетаскивание — сдвиг · двойной клик — всё</span>`;
+      <button type="button" class="info-btn chart-zoom-hint" title="Колесо — масштаб. Перетаскивание — сдвиг. Двойной клик — всё." aria-label="Как управлять графиком">i</button>`;
+    ensureZoomRange();
+    if (zoomRangeUi.open) {
+      const btn = el.querySelector("[data-zoom-range]");
+      if (btn) {
+        zoomRangeUi.anchor = btn;
+        positionZoomRange(btn, true);
+      }
+    }
+  }
+
+  const ZOOM_MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+  const ZOOM_MONTHS_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+  const zoomRangeUi = { open: false, anchor: null, viewY: 0, viewM: 0, start: "", end: "", hover: "", span: 1 };
+  let zoomRangeBound = false;
+  let zoomRangeApplying = false;
+
+  function zoomPad(n) {
+    return String(n).padStart(2, "0");
+  }
+
+  function zoomIsoFromDate(d) {
+    return `${d.getFullYear()}-${zoomPad(d.getMonth() + 1)}-${zoomPad(d.getDate())}`;
+  }
+
+  function zoomParseIso(value) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+    return m ? { y: +m[1], m: +m[2] - 1, d: +m[3] } : null;
+  }
+
+  function zoomShortDay(iso) {
+    const p = zoomParseIso(iso);
+    if (!p) return String(iso || "");
+    const nowY = new Date().getFullYear();
+    return p.y === nowY ? `${p.d} ${ZOOM_MONTHS_SHORT[p.m]}` : `${p.d} ${ZOOM_MONTHS_SHORT[p.m]} ${p.y}`;
+  }
+
+  function dashChartDates() {
+    return (lineZoomData.dash?.labels || []).map(zoomKeyDate).filter(Boolean).sort();
+  }
+
+  function dashChartDateSet() {
+    return new Set(dashChartDates());
+  }
+
+  function dashChartMonthIndex(iso) {
+    const p = zoomParseIso(iso);
+    return p ? p.y * 12 + p.m : null;
+  }
+
+  function dashChartMonthBounds() {
+    const dates = dashChartDates();
+    if (!dates.length) return null;
+    return { min: dashChartMonthIndex(dates[0]), max: dashChartMonthIndex(dates[dates.length - 1]) };
+  }
+  function zoomRangeButtonText(z) {
+    const a = zoomKeyDate(z.fromKey);
+    const b = zoomKeyDate(z.toKey);
+    if (!a || !b) return "Период";
+    return `${zoomShortDay(a)} — ${zoomShortDay(b)}`;
+  }
+
+  function zoomOrdered(a, b) {
+    return a <= b ? [a, b] : [b, a];
+  }
+
+  function zoomRangeCaption() {
+    const { start, end, hover } = zoomRangeUi;
+    if (start && !end) {
+      if (hover && hover !== start) {
+        const [a, b] = zoomOrdered(start, hover);
+        return `Будет <b>${esc(zoomShortDay(a))} — ${esc(zoomShortDay(b))}</b>. Нажмите последний день.`;
+      }
+      return `Начало <b>${esc(zoomShortDay(start))}</b>. Теперь нажмите последний день.`;
+    }
+    return "Нажмите первый день, затем последний. Промежуток подсвечивается сразу.";
+  }
+
+  function zoomSpanClass(iso) {
+    const { start, end, hover } = zoomRangeUi;
+    if (!start) return "";
+    const finish = end || hover;
+    if (!finish || finish === start) return iso === start ? "is-edge is-start is-end" : "";
+    const [a, b] = zoomOrdered(start, finish);
+    if (iso < a || iso > b) return "";
+    if (iso === a && iso === b) return "is-edge is-start is-end";
+    if (iso === a) return "is-edge is-start";
+    if (iso === b) return "is-edge is-end";
+    return "in-range";
+  }
+
+  function zoomRangePop() {
+    let pop = $("zoom-range-pop");
+    if (pop) return pop;
+    pop = document.createElement("div");
+    pop.id = "zoom-range-pop";
+    pop.className = "zoom-range-pop";
+    pop.hidden = true;
+    pop.setAttribute("role", "dialog");
+    pop.setAttribute("aria-label", "Свой период");
+    pop.addEventListener("click", (e) => {
+      const spanBtn = e.target.closest("[data-zr-span]");
+      if (spanBtn) {
+        const size = Number(spanBtn.dataset.zrSpan);
+        if (size === 1 || size === 3 || size === 6 || size === 12) {
+          zoomRangeUi.span = size;
+          renderZoomRangePop();
+          if (zoomRangeUi.anchor) positionZoomRange(zoomRangeUi.anchor, true);
+        }
+        return;
+      }
+      const nav = e.target.closest("[data-zr]");
+      if (nav?.dataset.zr === "prev") shiftZoomRangeMonth(-1);
+      else if (nav?.dataset.zr === "next") shiftZoomRangeMonth(1);
+      const day = e.target.closest("[data-zr-day]");
+      if (day) pickZoomRangeDay(day.dataset.zrDay);
+    });
+    pop.addEventListener("pointerover", (e) => {
+      const day = e.target.closest("[data-zr-day]");
+      if (!day || day.disabled || !zoomRangeUi.start || zoomRangeUi.end) return;
+      if (zoomRangeUi.hover === day.dataset.zrDay) return;
+      zoomRangeUi.hover = day.dataset.zrDay;
+      renderZoomRangePop();
+    });
+    document.body.appendChild(pop);
+    return pop;
+  }
+
+  function zoomRangeSpan() {
+    const size = zoomRangeUi.span;
+    return size === 3 || size === 6 || size === 12 ? size : 1;
+  }
+
+  function zoomSnap(y, m, size) {
+    if (size === 12) return { y, m: 0 };
+    if (size === 6) return { y, m: m < 6 ? 0 : 6 };
+    if (size === 3) return { y, m: Math.floor(m / 3) * 3 };
+    return { y, m };
+  }
+
+  function zoomShiftMonths(y, m, delta) {
+    const total = y * 12 + m + delta;
+    const ny = Math.floor(total / 12);
+    return { y: ny, m: total - ny * 12 };
+  }
+
+  function zoomWindowOverlaps(startIndex, size) {
+    const bounds = dashChartMonthBounds();
+    if (!bounds) return true;
+    return startIndex + size - 1 >= bounds.min && startIndex <= bounds.max;
+  }
+
+  function zoomSpanSwitch() {
+    const size = zoomRangeSpan();
+    const items = [
+      [1, "Месяц"],
+      [3, "3 мес"],
+      [6, "6 мес"],
+      [12, "Год"],
+    ];
+    return `<div class="zr-spans">${items
+      .map(([n, label]) => `<button type="button" class="zr-span${n === size ? " on" : ""}" data-zr-span="${n}">${label}</button>`)
+      .join("")}</div>`;
+  }
+
+  function zoomWeekRow() {
+    return `<div class="zr-week">${["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((name, i) => `<span class="${i >= 5 ? "wkend" : ""}">${name}</span>`).join("")}</div>`;
+  }
+
+  function zoomMonthGrid(y, m, bleed) {
+    const onChart = dashChartDateSet();
+    const today = zoomIsoFromDate(new Date());
+    const first = (new Date(y, m, 1).getDay() + 6) % 7;
+    const count = new Date(y, m + 1, 0).getDate();
+    const cells = [];
+    const pushDay = (d) => {
+      const value = zoomIsoFromDate(d);
+      const allowed = onChart.has(value);
+      const cls = [
+        "zr-day",
+        d.getMonth() !== m ? "out" : "",
+        (d.getDay() + 6) % 7 >= 5 ? "wkend" : "",
+        value === today ? "today" : "",
+        allowed ? "" : "is-off",
+        zoomSpanClass(value),
+      ]
+        .filter(Boolean)
+        .join(" ");
+      cells.push(`<button type="button" class="${cls}" data-zr-day="${value}" ${allowed ? "" : "disabled"}>${d.getDate()}</button>`);
+    };
+    if (bleed) {
+      for (let i = 0; i < 42; i += 1) pushDay(new Date(y, m, 1 - first + i));
+    } else {
+      for (let i = 0; i < first; i += 1) cells.push(`<span class="zr-day pad"></span>`);
+      for (let day = 1; day <= count; day += 1) pushDay(new Date(y, m, day));
+      for (let i = first + count; i < 42; i += 1) cells.push(`<span class="zr-day pad"></span>`);
+    }
+    return `<div class="zr-grid">${cells.join("")}</div>`;
+  }
+
+  function renderZoomRangePop() {
+    const pop = zoomRangePop();
+    const size = zoomRangeSpan();
+    const start = zoomSnap(zoomRangeUi.viewY, zoomRangeUi.viewM, size);
+    const startIndex = start.y * 12 + start.m;
+    const prevOff = !zoomWindowOverlaps(startIndex - size, size);
+    const nextOff = !zoomWindowOverlaps(startIndex + size, size);
+    const end = zoomShiftMonths(start.y, start.m, size - 1);
+    const label =
+      size === 1
+        ? `${ZOOM_MONTHS[zoomRangeUi.viewM]} ${zoomRangeUi.viewY}`
+        : size === 12
+          ? String(start.y)
+          : start.y === end.y
+            ? `${ZOOM_MONTHS_SHORT[start.m]} — ${ZOOM_MONTHS_SHORT[end.m]} ${start.y}`
+            : `${ZOOM_MONTHS_SHORT[start.m]} ${start.y} — ${ZOOM_MONTHS_SHORT[end.m]} ${end.y}`;
+    const prevTip = size === 12 ? "Предыдущий год" : size === 6 ? "Предыдущее полугодие" : size === 3 ? "Предыдущий квартал" : "Предыдущий месяц";
+    const nextTip = size === 12 ? "Следующий год" : size === 6 ? "Следующее полугодие" : size === 3 ? "Следующий квартал" : "Следующий месяц";
+    pop.classList.remove("span-3", "span-6", "span-12");
+    if (size > 1) pop.classList.add(`span-${size}`);
+    let boards = "";
+    if (size === 1) {
+      boards = `${zoomWeekRow()}${zoomMonthGrid(zoomRangeUi.viewY, zoomRangeUi.viewM, true)}`;
+    } else {
+      const blocks = [];
+      for (let i = 0; i < size; i += 1) {
+        const p = zoomShiftMonths(start.y, start.m, i);
+        blocks.push(`<section class="zr-month"><div class="zr-month-name">${ZOOM_MONTHS[p.m]}</div>${zoomWeekRow()}${zoomMonthGrid(p.y, p.m, false)}</section>`);
+      }
+      boards = `<div class="zr-boards span-${size}">${blocks.join("")}</div>`;
+    }
+    pop.hidden = false;
+    const scrollTop = pop.querySelector(".zr-scroll")?.scrollTop || 0;
+    pop.innerHTML = `${zoomSpanSwitch()}
+      <div class="zr-head">
+        <button type="button" class="zr-nav" data-zr="prev" title="${prevTip}" ${prevOff ? "disabled" : ""}>‹</button>
+        <b>${label}</b>
+        <button type="button" class="zr-nav" data-zr="next" title="${nextTip}" ${nextOff ? "disabled" : ""}>›</button>
+      </div>
+      <div class="zr-scroll"><div class="zr-cap">${zoomRangeCaption()}</div>${boards}</div>`;
+    const sc = pop.querySelector(".zr-scroll");
+    if (sc) sc.scrollTop = scrollTop;
+    if (zoomRangeUi.pinTop != null && zoomRangeUi.anchor) positionZoomRange(zoomRangeUi.anchor, true);
+  }
+
+  function positionZoomRange(anchor, keepTop) {
+    const pop = $("zoom-range-pop");
+    if (!pop || !anchor) return;
+    const margin = 8;
+    const rect = anchor.getBoundingClientRect();
+    const w = pop.offsetWidth || 280;
+    const left = Math.min(Math.max(margin, rect.left), Math.max(margin, window.innerWidth - w - margin));
+    const place = (top) => {
+      const limit = Math.max(160, window.innerHeight - top - margin);
+      pop.style.maxWidth = `${window.innerWidth - margin * 2}px`;
+      pop.style.maxHeight = `${limit}px`;
+      pop.style.left = `${Math.round(left)}px`;
+      pop.style.top = `${Math.round(top)}px`;
+      zoomRangeUi.pinTop = top;
+      const sc = pop.querySelector(".zr-scroll");
+      if (!sc) return;
+      let chrome = 0;
+      for (const child of pop.children) {
+        if (child !== sc) chrome += child.offsetHeight;
+      }
+      const cs = getComputedStyle(pop);
+      const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      sc.style.maxHeight = `${Math.max(96, limit - chrome - pad)}px`;
+    };
+    if (keepTop && zoomRangeUi.pinTop != null) {
+      place(Math.max(margin, zoomRangeUi.pinTop));
+      return;
+    }
+    pop.style.maxHeight = `${window.innerHeight - margin * 2}px`;
+    const h = Math.min(pop.offsetHeight || 340, window.innerHeight - margin * 2);
+    let top = rect.bottom + 6;
+    const below = window.innerHeight - margin - top;
+    const above = rect.top - margin - 6;
+    if (h > below && above > below) top = Math.max(margin, rect.top - 6 - h);
+    if (top < margin) top = margin;
+    place(top);
+  }
+
+  function shiftZoomRangeMonth(dir) {
+    const size = zoomRangeSpan();
+    const cur = zoomSnap(zoomRangeUi.viewY, zoomRangeUi.viewM, size);
+    const next = zoomShiftMonths(cur.y, cur.m, dir * size);
+    if (!zoomWindowOverlaps(next.y * 12 + next.m, size)) return;
+    zoomRangeUi.viewY = next.y;
+    zoomRangeUi.viewM = next.m;
+    renderZoomRangePop();
+    if (zoomRangeUi.anchor) positionZoomRange(zoomRangeUi.anchor, true);
+  }
+
+  function applyDashZoomRange(fromIso, toIso) {
+    const chart = "dash";
+    const data = lineZoomData[chart];
+    if (!data?.labels?.length) return false;
+    const [a, b] = zoomOrdered(fromIso, toIso);
+    const hits = [];
+    data.labels.forEach((key, i) => {
+      const iso = zoomKeyDate(key);
+      if (iso && iso >= a && iso <= b) hits.push(i);
+    });
+    if (!hits.length) return false;
+    let from = hits[0];
+    let to = hits[hits.length - 1];
+    const n = data.labels.length;
+    if (to - from < 2) {
+      to = Math.min(n - 1, from + 2);
+      from = Math.max(0, to - 2);
+    }
+    zoomRangeApplying = true;
+    try {
+      setLineZoom(chart, data.labels, from, to);
+      paintLineZoomed(chart);
+    } finally {
+      zoomRangeApplying = false;
+    }
+    return true;
+  }
+
+  function pickZoomRangeDay(iso) {
+    if (!dashChartDateSet().has(iso)) return;
+    if (!zoomRangeUi.start || zoomRangeUi.end) {
+      zoomRangeUi.start = iso;
+      zoomRangeUi.end = "";
+      zoomRangeUi.hover = "";
+      renderZoomRangePop();
+      return;
+    }
+    zoomRangeUi.end = iso;
+    zoomRangeUi.hover = "";
+    if (applyDashZoomRange(zoomRangeUi.start, iso)) closeZoomRange();
+  }
+
+  function openZoomRange(btn) {
+    if (zoomRangeUi.open) {
+      closeZoomRange();
+      return;
+    }
+    const data = lineZoomData.dash;
+    const endIso = data?.labels?.length ? zoomKeyDate(data.labels[lineZoomRange("dash", data.labels).to]) : "";
+    const seed = zoomParseIso(endIso) || zoomParseIso(zoomIsoFromDate(new Date()));
+    zoomRangeUi.open = true;
+    zoomRangeUi.anchor = btn;
+    zoomRangeUi.start = "";
+    zoomRangeUi.end = "";
+    zoomRangeUi.hover = "";
+    zoomRangeUi.viewY = seed.y;
+    zoomRangeUi.viewM = seed.m;
+    zoomRangeUi.pinTop = null;
+    renderZoomRangePop();
+    positionZoomRange(btn);
+  }
+
+  function closeZoomRange() {
+    zoomRangeUi.open = false;
+    zoomRangeUi.anchor = null;
+    zoomRangeUi.pinTop = null;
+    const pop = $("zoom-range-pop");
+    if (pop) pop.hidden = true;
+  }
+
+  function ensureZoomRange() {
+    if (zoomRangeBound) return;
+    zoomRangeBound = true;
+    document.addEventListener("pointerdown", (e) => {
+      if (!zoomRangeUi.open) return;
+      const pop = $("zoom-range-pop");
+      if (pop?.contains(e.target) || e.target.closest?.("[data-zoom-range]")) return;
+      closeZoomRange();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && zoomRangeUi.open) closeZoomRange();
+    });
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest?.("[data-zoom-range]");
+      if (!btn || btn.dataset.zoomRange !== "dash") return;
+      e.preventDefault();
+      openZoomRange(btn);
+    });
   }
 
   function paintLineZoomed(chart, { instant = false } = {}) {
@@ -1362,8 +1750,112 @@
       labels: data.labels.slice(range.from, range.to + 1),
       datasets: data.datasets.map((ds) => ({ ...ds, values: ds.values.slice(range.from, range.to + 1) })),
       instant,
+      onPick: chart === "dash" ? (_index, label) => scheduleDashDay(data.canvas, label) : null,
     });
     renderLineZoomBar(chart, range, n);
+    if (chart === "dash" && zoomRangeUi.open && !zoomRangeApplying) closeZoomRange();
+    if (chart === "dash") refreshDashScope();
+  }
+
+  /** Видимый отрезок графика «Выручка по дням». null — показан весь ряд. */
+  function dashChartWindow() {
+    const data = lineZoomData.dash;
+    if (!data?.labels?.length) return null;
+    const range = lineZoomRange("dash", data.labels);
+    if (range.from <= 0 && range.to >= data.labels.length - 1) return null;
+    const labels = data.labels.slice(range.from, range.to + 1);
+    const dates = labels.map(zoomKeyDate).filter(Boolean).sort();
+    return {
+      from: dates[0] || "",
+      to: dates[dates.length - 1] || "",
+      undated: labels.some((key) => !zoomKeyDate(key)),
+    };
+  }
+
+  function dashScopedRows() {
+    const rows = dashRows();
+    const win = dashChartWindow();
+    if (!win) return rows;
+    return rows.filter(({ line }) => {
+      const dt = dateDay(line.order_date);
+      if (!dt) return win.undated;
+      if (win.from && dt < win.from) return false;
+      if (win.to && dt > win.to) return false;
+      return true;
+    });
+  }
+
+  function dashScopeNote() {
+    const win = dashChartWindow();
+    const range = win?.from && win?.to ? `${win.from} — ${win.to}` : "";
+    const order = focusedOrder();
+    if (order) {
+      const base = `только заказ №${order.number || "—"}`;
+      return range ? `${base} · ${range}` : base;
+    }
+    if (remoteStatsActive()) {
+      const base = `фильтры сводки: ${remoteStatsLabel()}`;
+      return range ? `${base} · ${range}` : base;
+    }
+    return range || "считаются по всем заказам отчёта";
+  }
+
+  function refreshDashScope() {
+    const sub = $("insights-sub");
+    if (sub && state.view === "dashboard") sub.textContent = dashScopeNote();
+    renderKpis();
+    renderInsights();
+    const rows = dashScopedRows();
+    const byStatus = {};
+    rows.forEach(({ line, totals }) => {
+      const name = line.status || "Без статуса";
+      byStatus[name] = (byStatus[name] || 0) + totals.after;
+    });
+    FinCharts.doughnut(
+      $("chart-dash-pie"),
+      Object.entries(byStatus).map(([label, value]) => ({ label, value, color: statusMeta(label).color }))
+    );
+
+    const alerts = rows.filter(({ totals, line }) => totals.unpaid > 0 || /черн/i.test(line.status)).slice(0, 8);
+    const alertsEl = $("alerts");
+    if (alertsEl) {
+      alertsEl.innerHTML = alerts.length
+        ? alerts
+            .map(({ order, line, totals }) => {
+              const msg = /черн/i.test(line.status) ? "чёрный список" : `долг ${money(totals.unpaid)}`;
+              return `<div class="alert-row"><span class="pill" style="background:${statusMeta(line.status).color}">${esc(line.status)}</span>
+              <div><b>${esc(order.number)}</b> · ${esc(order.name) || "без названия"} · ${esc(line.product) || "без продукта"}</div>
+              <div style="margin-left:auto;color:#dc2626">${esc(msg)}</div></div>`;
+            })
+            .join("")
+        : `<div class="empty">Пока нет долгов и стоп-листов — отличный знак.</div>`;
+    }
+
+    const recentEl = $("recent-orders");
+    if (!recentEl) return;
+    const sums = new Map();
+    rows.forEach(({ order, totals }) => {
+      const cur = sums.get(order.id) || { order, after: 0 };
+      if (!totals.expense) cur.after += totals.after;
+      sums.set(order.id, cur);
+    });
+    const focus = focusedOrder();
+    let last = [];
+    if (focus) last = [{ order: focus, after: sums.get(focus.id)?.after ?? 0 }];
+    else {
+      const ids = new Set();
+      for (const { order } of [...rows].reverse()) {
+        if (ids.has(order.id)) continue;
+        ids.add(order.id);
+        last.push(sums.get(order.id));
+        if (last.length >= 8) break;
+      }
+    }
+    recentEl.innerHTML = last.length
+      ? `<table class="data"><thead><tr><th>№</th><th>Заказчик</th><th>Название</th><th>Итог</th></tr></thead><tbody>${last
+          .map(({ order: o, after }) => `<tr><td>${esc(o.number)}</td><td>${esc(o.customer)}</td><td>${esc(o.name)}</td><td class="num">${esc(money(after))}</td></tr>`)
+          .join("")}</tbody></table>`
+      : `<div class="empty">Заказов ещё нет</div>`;
   }
 
   /** Колесо, перетаскивание и двойной клик. Отступы — как у FinCharts.line. */
@@ -1395,8 +1887,9 @@
     let drag = null;
     canvas.addEventListener("pointerdown", (e) => {
       const data = lineZoomData[chart];
+      canvas._lineDown = { x: e.clientX, y: e.clientY };
       if (e.button !== 0 || !data || lineZoom[chart].preset === "all") return;
-      drag = { x: e.clientX, ...lineZoomRange(chart, data.labels) };
+      drag = { x: e.clientX, y: e.clientY, ...lineZoomRange(chart, data.labels) };
       canvas.setPointerCapture?.(e.pointerId);
       canvas.classList.add("is-panning");
     });
@@ -1412,65 +1905,113 @@
       setLineZoom(chart, data.labels, nf, nf + span);
       paintLineZoomed(chart, { instant: true });
     });
-    const stop = () => {
+    const stop = (e) => {
+      const down = canvas._lineDown;
+      if (down && e && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) canvas._linePan = true;
       drag = null;
       canvas.classList.remove("is-panning");
     };
     canvas.addEventListener("pointerup", stop);
     canvas.addEventListener("pointercancel", stop);
     canvas.addEventListener("dblclick", () => {
+      clearTimeout(dashDayTimer);
       lineZoom[chart].preset = "all";
       paintLineZoomed(chart, { instant: true });
     });
   }
 
-  function renderDashboard() {
-    renderDashFocus();
-    renderKpis();
-    renderInsights();
-    const rows = dashRows();
-    paintTrendLine($("chart-dash-line"), rows, "day", "order_date");
-    const byStatus = {};
-    rows.forEach(({ line, totals }) => {
-      const name = line.status || "Без статуса";
-      byStatus[name] = (byStatus[name] || 0) + totals.after;
-    });
-    FinCharts.doughnut(
-      $("chart-dash-pie"),
-      Object.entries(byStatus).map(([label, value]) => ({ label, value, color: statusMeta(label).color }))
-    );
+  const ZOOM_MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+  let dashDayTimer = 0;
 
-    const alerts = rows.filter(({ totals, line }) => totals.unpaid > 0 || /черн/i.test(line.status)).slice(0, 8);
-    $("alerts").innerHTML = alerts.length
-      ? alerts
+  function scheduleDashDay(canvas, label) {
+    if (canvas?._linePan) {
+      canvas._linePan = false;
+      return;
+    }
+    clearTimeout(dashDayTimer);
+    dashDayTimer = setTimeout(() => openDashDay(label), 240);
+  }
+
+  function dashDayTitle(label) {
+    const p = zoomParseIso(zoomKeyDate(label));
+    if (!p) return "Без даты заказа";
+    return `${p.d} ${ZOOM_MONTHS_GEN[p.m]} ${p.y}`;
+  }
+
+  function dashRowsForLabel(label) {
+    const iso = zoomKeyDate(label);
+    return dashRows().filter(({ line }) => {
+      const dt = dateDay(line.order_date);
+      return iso ? dt === iso : !dt;
+    });
+  }
+
+  function dashDayModal() {
+    let el = $("dash-day-modal");
+    if (el) return el;
+    el = document.createElement("div");
+    el.id = "dash-day-modal";
+    el.className = "modal";
+    el.innerHTML = `<div class="modal-card dash-day-modal" role="dialog" aria-modal="true" aria-labelledby="dash-day-title">
+      <div class="modal-title-row">
+        <h3 id="dash-day-title"></h3>
+        <button type="button" class="btn small" id="dash-day-close">Закрыть</button>
+      </div>
+      <div class="dash-day-sums" id="dash-day-sums"></div>
+      <div class="table-wrap dash-day-table" id="dash-day-table"></div>
+    </div>`;
+    el.addEventListener("click", (e) => {
+      if (e.target === el || e.target.closest("#dash-day-close")) el.classList.remove("open");
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") el.classList.remove("open");
+    });
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function openDashDay(label) {
+    closeZoomRange();
+    const rows = dashRowsForLabel(label);
+    const s = summarize(rows);
+    const modal = dashDayModal();
+    $("dash-day-title").textContent = dashDayTitle(label);
+    const chips = [
+      ["Заказов", String(s.orderCount)],
+      ["Позиций", String(s.count + s.costCount)],
+      ["К оплате", money(s.after)],
+      ["Оплачено", money(s.paid)],
+      ["Долг", money(s.unpaid)],
+    ];
+    if (s.cost) chips.push(["Расход", `−${money(s.cost)}`], ["Чистыми", money(s.net)]);
+    $("dash-day-sums").innerHTML = chips.map(([name, value]) => `<span><small>${esc(name)}</small><b>${esc(value)}</b></span>`).join("");
+    const body = rows.length
+      ? rows
           .map(({ order, line, totals }) => {
-            const msg = /черн/i.test(line.status) ? "чёрный список" : `долг ${money(totals.unpaid)}`;
-            return `<div class="alert-row"><span class="pill" style="background:${statusMeta(line.status).color}">${esc(line.status)}</span>
-              <div><b>${esc(order.number)}</b> · ${esc(order.name) || "без названия"} · ${esc(line.product) || "без продукта"}</div>
-              <div style="margin-left:auto;color:#dc2626">${esc(msg)}</div></div>`;
+            const amount = totals.expense ? `−${money(totals.cost)}` : money(totals.after);
+            const debt = totals.expense || totals.unpaid <= 0.005 ? "—" : money(totals.unpaid);
+            const status = totals.expense
+              ? kindLabel(totals.kind)
+              : line.status || "—";
+            return `<tr>
+              <td>${esc(order.number || "—")}</td>
+              <td>${esc(order.customer || "—")}</td>
+              <td>${esc(line.product || line.order_type || "—")}</td>
+              <td class="num">${esc(amount)}</td>
+              <td class="num">${esc(debt)}</td>
+              <td>${esc(status)}</td>
+            </tr>`;
           })
           .join("")
-      : `<div class="empty">Пока нет долгов и стоп-листов — отличный знак.</div>`;
+      : `<tr><td colspan="6">В этот день нет позиций</td></tr>`;
+    $("dash-day-table").innerHTML = `<table class="data"><thead><tr><th>№</th><th>Заказчик</th><th>Позиция</th><th class="num">Итог</th><th class="num">Долг</th><th>Статус</th></tr></thead><tbody>${body}</tbody></table>`;
+    modal.classList.add("open");
+  }
 
-    const focus = focusedOrder();
-    const last = focus
-      ? [focus]
-      : (() => {
-          const seen = [];
-          const ids = new Set();
-          for (const { order } of [...rows].reverse()) {
-            if (ids.has(order.id)) continue;
-            ids.add(order.id);
-            seen.push(order);
-            if (seen.length >= 8) break;
-          }
-          return seen.length ? seen : [...(state.doc.orders || [])].slice(-8).reverse();
-        })();
-    $("recent-orders").innerHTML = last.length
-      ? `<table class="data"><thead><tr><th>№</th><th>Заказчик</th><th>Название</th><th>Итог</th></tr></thead><tbody>${last
-          .map((o) => `<tr><td>${esc(o.number)}</td><td>${esc(o.customer)}</td><td>${esc(o.name)}</td><td class="num">${esc(money(orderTotals(o).after))}</td></tr>`)
-          .join("")}</tbody></table>`
-      : `<div class="empty">Заказов ещё нет</div>`;
+  function renderDashboard() {
+    renderDashFocus();
+    paintTrendLine($("chart-dash-line"), dashRows(), "day", "order_date");
+    refreshDashScope();
   }
 
   function renderDashFocus() {

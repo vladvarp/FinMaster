@@ -29,6 +29,14 @@
       }
       hideTip(inst);
     });
+    canvas.addEventListener("click", (e) => {
+      if (inst.type !== "line" || typeof inst.opts?.onPick !== "function") return;
+      const rect = canvas.getBoundingClientRect();
+      inst.pointer = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      hitTest(inst);
+      if (inst.hover == null) return;
+      inst.opts.onPick(inst.hover, inst.opts.labels?.[inst.hover]);
+    });
     if (window.ResizeObserver) {
       const ro = new ResizeObserver(() => {
         if (inst.opts) draw(inst);
