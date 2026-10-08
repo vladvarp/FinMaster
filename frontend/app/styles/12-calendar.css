@@ -398,14 +398,48 @@
   color: var(--muted);
 }
 .cal-line .cal-note { margin-top: 3px; }
-.cal-line.is-pause i { color: #7c3aed; }
 .cal-line.is-selected span { color: var(--accent); }
+.cal-chip i.role-start,
+.cal-line i.role-start,
+.cal-col-sec.role-start,
+.cal-chip i.role-done,
+.cal-line i.role-done,
+.cal-col-sec.role-done,
+.cal-chip i.role-both,
+.cal-line i.role-both { color: #15803d; }
+.cal-chip i.role-now,
+.cal-line i.role-now,
+.cal-col-sec.role-now { color: #0369a1; }
+.cal-chip i.role-was,
+.cal-line i.role-was,
+.cal-col-sec.role-was { color: #4f46e5; }
+.cal-chip i.role-plan,
+.cal-line i.role-plan,
+.cal-col-sec.role-plan { color: #b45309; }
+.cal-chip i.role-pause,
+.cal-line i.role-pause,
+.cal-col-sec.role-pause { color: #dc2626; }
+.cal-chip i[class*="role-"],
+.cal-line i[class*="role-"],
+.cal-col-sec[class*="role-"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+}
+.cal-chip i[class*="role-"] svg,
+.cal-line i[class*="role-"] svg,
+.cal-col-sec[class*="role-"] svg {
+  width: 11px;
+  height: 11px;
+  flex: none;
+}
 .cal-chip.tone-now { background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
 .cal-chip.tone-warn { background: color-mix(in srgb, var(--danger) 10%, var(--card)); }
 .cal-chip.tone-ok { background: color-mix(in srgb, var(--ok) 10%, var(--card)); }
-.cal-chip.tone-pause { background: color-mix(in srgb, #7c3aed 14%, var(--card)); }
-.cal-chip.tone-pause i { color: #7c3aed; font-weight: 700; }
-.cal-chip.has-deadline i { color: #d97706; font-weight: 700; }
+.cal-chip.tone-pause { background: color-mix(in srgb, #dc2626 14%, var(--card)); }
+.cal-chip.tone-pause i:not([class*="role-"]) { color: #dc2626; font-weight: 700; }
+.cal-chip.has-deadline i:not([class*="role-"]) { color: #d97706; font-weight: 700; }
 .cal-chip.is-selected {
   background: color-mix(in srgb, var(--accent-2) 28%, var(--card));
   box-shadow:
@@ -952,7 +986,12 @@
 .cal-load i { display: block; height: 100%; background: var(--accent); }
 .cal-col-sec { font-size: 10px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }
 .cal-sel { margin-bottom: 14px; }
-.cal-sel.idle { color: var(--muted); font-size: 13px; line-height: 1.45; }
+.cal-sel.idle { position: relative; }
+.cal-sel.idle .hint-i-pop {
+  top: calc(100% + 8px);
+  bottom: auto;
+  width: min(280px, 100%);
+}
 .cal-sel-head { display: flex; align-items: center; gap: 8px; }
 .cal-sel-name { font-weight: 700; margin-top: 4px; }
 .cal-sel-sub { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
@@ -985,6 +1024,26 @@
 .cal-block .cal-chip { margin-bottom: 4px; }
 html[data-theme="dark"] .cal-cell,
 html[data-theme="dark"] .cal-col { background: #151d2e; }
+html[data-theme="dark"] .cal-chip i.role-start,
+html[data-theme="dark"] .cal-line i.role-start,
+html[data-theme="dark"] .cal-col-sec.role-start,
+html[data-theme="dark"] .cal-chip i.role-done,
+html[data-theme="dark"] .cal-line i.role-done,
+html[data-theme="dark"] .cal-col-sec.role-done,
+html[data-theme="dark"] .cal-chip i.role-both,
+html[data-theme="dark"] .cal-line i.role-both { color: #4ade80; }
+html[data-theme="dark"] .cal-chip i.role-now,
+html[data-theme="dark"] .cal-line i.role-now,
+html[data-theme="dark"] .cal-col-sec.role-now { color: #7dd3fc; }
+html[data-theme="dark"] .cal-chip i.role-was,
+html[data-theme="dark"] .cal-line i.role-was,
+html[data-theme="dark"] .cal-col-sec.role-was { color: #a5b4fc; }
+html[data-theme="dark"] .cal-chip i.role-plan,
+html[data-theme="dark"] .cal-line i.role-plan,
+html[data-theme="dark"] .cal-col-sec.role-plan { color: #fbbf24; }
+html[data-theme="dark"] .cal-chip i.role-pause,
+html[data-theme="dark"] .cal-line i.role-pause,
+html[data-theme="dark"] .cal-col-sec.role-pause { color: #f87171; }
 html[data-theme="dark"] .cal-chip { background: #1b2538; }
 html[data-theme="dark"] .cal-chip.is-selected {
   background: color-mix(in srgb, var(--accent-2) 34%, #1b2538);
