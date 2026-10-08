@@ -718,7 +718,67 @@
 
   function orderMarksDay(order, day) {
     if (isWeekend(day)) return false;
-    return isPaused(order, day) || orderCoversDay(order, day);
+    const d = dayStart(day);
+    if (d > dayStart(new Date()) && Array.isArray(order?.lines)) {
+      return calendarWorkLines(order).some((line) => positionCoversFutureDay(order, line, day));
+    }
+    return isPaused(order, day) || boardCoversDay(order, day);
+  }
+
+  /** work или pause, если таймлайн в этот день рисует полосу. Пусто — полосы нет, даже если пауза «открыта вперёд». */
+  function timelinePaintKind(proxy, day, today = dayStart(new Date())) {
+    const d = dayStart(day);
+    if (!d) return "";
+    const span = orderDrawSpan(proxy, today);
+    if (!span || d < span.from || d > span.till) return "";
+    if (splitWorkSegments(span.from, span.till, proxy).some((seg) => d >= seg.from && d <= seg.till)) return "work";
+    if (orderPauseSegments(proxy, span.from, span.till, today).some((seg) => d >= seg.from && d <= seg.till)) return "pause";
+    return "";
+  }
+
+  /** День после сегодня: как полоса на таймлайне. Завтра добавляется только у позиции, которая сегодня идёт и не закрыта. */
+  function lineFutureKind(order, line, day) {
+    const d = dayStart(day);
+    const today = dayStart(new Date());
+    if (!d || d <= today || isWeekend(d)) return "";
+    const proxy = lineWorkProxy(order, line);
+    const painted = timelinePaintKind(proxy, d, today);
+    if (painted) return painted;
+    if (dateDay(proxy.work_end) || futureOpenPauses(proxy, today).length || isPaused(proxy, today) || isPaused(proxy, d)) return "";
+    if (workStatus(proxy, today) !== "now") return "";
+    return dayKey(d) === dayKey(addDays(today, 1)) ? "work" : "";
+  }
+
+  function orderPauseHidden(order, day) {
+    if (!hidePausedOnBoard()) return false;
+    const active = calendarWorkLines(order).map((line) => lineActiveOnDay(order, line, day)).filter(Boolean);
+    if (active.length && active.every((kind) => kind === "pause")) return true;
+    if (!isPaused(order, day)) return false;
+    return !active.some((kind) => kind === "work");
+  }
+
+  function positionCoversFutureDay(order, line, day) {
+    return !!lineFutureKind(order, line, day);
+  }
+
+  function boardCoversDay(target, day) {
+    if (isWeekend(day) || isPaused(target, day)) return false;
+    const { start, end } = workSpan(target);
+    if (!start && !end) return false;
+    const d = dayStart(day);
+    if (start && end) return d >= start && d <= end;
+    if (!start && end) return d <= end;
+    if (!start || d < start) return false;
+    const today = dayStart(new Date());
+    if (d <= today) return true;
+    if (Array.isArray(target.lines)) {
+      return calendarWorkLines(target).some((line) => positionCoversFutureDay(target, line, day));
+    }
+    if (!dateDay(target.work_end) && (futureOpenPauses(target, today).length || isPaused(target, d))) return false;
+    if (!dateDay(target.work_end) && workStatus(target, today) === "now" && dayKey(d) === dayKey(addDays(today, 1))) return true;
+    const resume = resumeDrawTill(target, today);
+    if (resume && dayKey(d) === dayKey(resume)) return true;
+    return start > today && dayKey(d) === dayKey(start);
   }
 
   function splitWorkSegments(from, till, order) {
@@ -1068,7 +1128,8 @@
     let peakKey = "";
     days.forEach((day) => {
       const key = dayKey(day);
-      const n = orders.filter((order) => orderCoversDay(order, day) && workStatus(order) !== "cancelled").length;
+      const covers = calendarState().mode === "timeline" ? orderCoversDay : boardCoversDay;
+      const n = orders.filter((order) => covers(order, day) && workStatus(order) !== "cancelled").length;
       map[key] = n;
       if (n > peak) {
         peak = n;
@@ -1146,6 +1207,64 @@
     return "в работе";
   }
 
+  /** Роль дня на неделе и в месяце: не путает прошедшее, сегодня и дни после сегодня. */
+  function boardRole(target, day) {
+    if (!target || !day) return "";
+    const key = dayKey(dayStart(day));
+    const today = dayKey(dayStart(new Date()));
+    const start = dateDay(target.work_start);
+    const end = dateDay(target.work_end);
+    if (start && end && start === end && start === key) return "старт и финиш";
+    if (isPaused(target, day)) return "пауза";
+    if (start === key) return "старт";
+    if (end && end === key) return "финиш";
+    if (key === today) return "выполняется";
+    if (key < today) return "выполнялось";
+    return "запланировано";
+  }
+
+  function boardRoleClass(role) {
+    return {
+      "старт": "role-start",
+      "пауза": "role-pause",
+      "выполнялось": "role-was",
+      "выполняется": "role-now",
+      "финиш": "role-done",
+      "старт и финиш": "role-both",
+      "запланировано": "role-plan",
+    }[role] || "";
+  }
+
+  function boardRoleIcon(roleClass) {
+    const icons = {
+      "role-start": `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.2v9.6L13 8z" fill="currentColor"/></svg>`,
+      "role-done": `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.4 6.3 11.5 12.8 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+      "role-both": `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.6 4.4v7.2L7.6 8z" fill="currentColor"/><path d="M9 5.6 12.8 8 9 10.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+      "role-pause": `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.2 3h2.2v10H4.2zm5.4 0h2.2v10H9.6z" fill="currentColor"/></svg>`,
+      "role-now": `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.1" fill="currentColor"/></svg>`,
+      "role-was": `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.7V8l2.1 1.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+      "role-plan": `<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3.4" width="10" height="9.2" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3 6.6h10M6 2.6v2.2M10 2.6v2.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+    };
+    return icons[roleClass] || "";
+  }
+
+  function boardRoleLabel(role) {
+    const cls = boardRoleClass(role);
+    return `<i class="${cls}">${boardRoleIcon(cls)}<span>${esc(role)}</span></i>`;
+  }
+
+  function boardRoleSec(cls, text) {
+    return `<div class="cal-col-sec ${cls}">${boardRoleIcon(cls)}<span>${esc(text)}</span></div>`;
+  }
+
+  function weekColumnHeads(day) {
+    const key = dayKey(day);
+    const today = dayKey(dayStart(new Date()));
+    if (key < today) return { mid: "Выполнялось", midClass: "role-was", pause: "Пауза" };
+    if (key > today) return { mid: "Запланировано", midClass: "role-plan", pause: "Пауза" };
+    return { mid: "Выполняется", midClass: "role-now", pause: "Пауза" };
+  }
+
   function orderNum(order) {
     return String(order?.number || "—").replace(/^№+\s*/, "") || "—";
   }
@@ -1156,32 +1275,33 @@
 
   function calChipHtml(order, day, opts = {}) {
     const meta = workStatusMeta(order, day);
-    const role = day ? calendarRole(order, day) : meta.label;
     const due = orderDeadline(order);
-    const dueText = due && meta.id !== "paused" ? `до ${calFmtDay(due)}` : "";
+    const role = day ? boardRole(order, day) : meta.label;
     const note = opts.week ? String(order.notes || "").trim() : "";
-    const title = `${orderNum(order)} ${orderTitle(order)} · ${meta.label}${due ? ` · дедлайн ${calFmtDay(due, true)}` : ""}`;
+    const title = `${orderNum(order)} ${orderTitle(order)} · ${role}${due ? ` · дедлайн ${calFmtDay(due, true)}` : ""}`;
     const picked = calendarState().selected === order.id ? "is-selected" : "";
     if (opts.week) {
       return `<button type="button" class="cal-chip is-week tone-${meta.tone} ${due ? "has-deadline" : ""} ${picked}" data-cal-id="${esc(order.id)}" title="${esc(title)}" style="--bar:${esc(calendarBarColor(order))}">
         <span class="cal-chip-title"><b>${esc(orderNum(order))}</b> ${esc(orderTitle(order))}</span>
-        <i>${esc(dueText || role)}</i>
+        ${boardRoleLabel(role)}
         ${note ? `<em class="cal-note">${esc(note)}</em>` : ""}
       </button>`;
     }
     return `<button type="button" class="cal-chip tone-${meta.tone} ${due ? "has-deadline" : ""} ${picked}" data-cal-id="${esc(order.id)}" title="${esc(title)}" style="--bar:${esc(calendarBarColor(order))}">
       <b>${esc(orderNum(order))}</b>
       <span>${esc(orderTitle(order))}</span>
-      <i>${esc(dueText || role)}</i>
+      ${boardRoleLabel(role)}
     </button>`;
   }
 
   function lineActiveOnDay(order, line, day) {
     if (/отмен|аннул|черн/i.test(line?.status || "")) return "";
+    const d = dayStart(day);
+    if (d > dayStart(new Date())) return lineFutureKind(order, line, day);
     const proxy = lineWorkProxy(order, line);
     if (!dateDay(proxy.work_start) && !dateDay(proxy.work_end)) return "";
     if (isPaused(proxy, day)) return "pause";
-    if (orderCoversDay(proxy, day)) return "work";
+    if (boardCoversDay(proxy, day)) return "work";
     return "";
   }
 
@@ -1194,9 +1314,11 @@
     return `<div class="cal-lines">${rows
       .map(({ line, index, kind }) => {
         const note = String(line.notes || "").trim();
+        const proxy = lineWorkProxy(order, line);
+        const label = boardRole(proxy, day);
         return `<button type="button" class="cal-line ${kind === "pause" ? "is-pause" : ""} ${calSelectedClass(order.id, line.id)}" data-cal-id="${esc(order.id)}" data-cal-line="${esc(line.id)}">
           <span>${esc(lineWorkName(line, index))}</span>
-          <i>${kind === "pause" ? "На паузе" : "в работе"}</i>
+          ${boardRoleLabel(label)}
           ${note ? `<em class="cal-note">${esc(note)}</em>` : ""}
         </button>`;
       })
@@ -1757,7 +1879,7 @@
     for (let d = win.gridFrom; d <= win.gridTo; d = addDays(d, 1)) {
       const key = dayKey(d);
       const inMonth = d.getMonth() === win.from.getMonth();
-      const items = list.filter((order) => orderMarksDay(order, d) && !(hidePausedOnBoard() && isPaused(order, d)));
+      const items = list.filter((order) => orderMarksDay(order, d) && !orderPauseHidden(order, d));
       const selectedId = calendarState().selected;
       const hit = selectedId ? items.find((order) => order.id === selectedId) : null;
       let shown = items.slice(0, 3);
@@ -1781,15 +1903,20 @@
       .map((day) => {
         const key = dayKey(day);
         const items = list.filter((order) => orderMarksDay(order, day));
-        const shown = hidePausedOnBoard() ? items.filter((order) => !isPaused(order, day)) : items;
+        const shown = items.filter((order) => !orderPauseHidden(order, day));
         const starts = shown.filter((order) => dateDay(order.work_start) === key && !isPaused(order, day));
-        const ends = shown.filter((order) => dateDay(order.work_end) === key && !isPaused(order, day));
+        const ends = shown.filter((order) => {
+          const end = dateDay(order.work_end);
+          const start = dateDay(order.work_start);
+          return end === key && end !== start && !isPaused(order, day);
+        });
         const paused = shown.filter((order) => isPaused(order, day));
         const running = shown.filter((order) => !isPaused(order, day) && dateDay(order.work_start) !== key && dateDay(order.work_end) !== key);
         const n = load.map[key] || 0;
         const pct = Math.min(100, (n / Math.max(CAL_HOT_LOAD, load.peak || 1)) * 100);
         const note = dayNote(key);
-        const chip = (order) => calChipHtml(order, day, { week: true });
+        const heads = weekColumnHeads(day);
+        const chip = (order) => `${calChipHtml(order, day, { week: true })}${weekLinesHtml(order, day)}`;
         return `<div class="cal-col ${dayToneClass(day)} ${note ? "has-note" : ""} ${key === dayKey(win.today) ? "is-today" : ""} ${calendarState().pick === key ? "is-pick" : ""} ${n >= CAL_HOT_LOAD ? "is-hot" : ""}" data-cal-day="${key}">
           <div class="cal-col-pin">
             <div class="cal-col-head">
@@ -1801,10 +1928,10 @@
             ${note ? `<div class="cal-day-memo cal-note">${esc(note)}</div>` : ""}
           </div>
           <div class="cal-col-body">
-            ${starts.length ? `<div class="cal-col-sec">Старт</div>${starts.map(chip).join("")}` : ""}
-            ${running.length ? `<div class="cal-col-sec">В работе</div>${running.map((order) => `${chip(order)}${weekLinesHtml(order, day)}`).join("")}` : ""}
-            ${paused.length ? `<div class="cal-col-sec">На паузе</div>${paused.map(chip).join("")}` : ""}
-            ${ends.length ? `<div class="cal-col-sec">Финиш</div>${ends.map(chip).join("")}` : ""}
+            ${starts.length ? `${boardRoleSec("role-start", "Старт")}${starts.map(chip).join("")}` : ""}
+            ${running.length ? `${boardRoleSec(heads.midClass, heads.mid)}${running.map(chip).join("")}` : ""}
+            ${paused.length ? `${boardRoleSec("role-pause", heads.pause)}${paused.map(chip).join("")}` : ""}
+            ${ends.length ? `${boardRoleSec("role-done", "Финиш")}${ends.map(chip).join("")}` : ""}
             ${shown.length ? "" : `<div class="cal-col-empty">пусто</div>`}
           </div>
         </div>`;
@@ -1828,7 +1955,7 @@
     const nodate = all.filter((order) => workStatus(order) === "nodate");
     const pick = cal.pick ? parseDay(cal.pick) : null;
     const pickItems = pick
-      ? all.filter((order) => orderMarksDay(order, pick) && !(hidePausedOnBoard() && isPaused(order, pick)))
+      ? all.filter((order) => orderMarksDay(order, pick) && !orderPauseHidden(order, pick))
       : [];
     const selectedLine = selected && cal.selectedLine ? findCalendarLine(selected, cal.selectedLine) : null;
     const workTarget = selectedLine ? lineWorkProxy(selected, selectedLine) : selected;
@@ -1902,7 +2029,7 @@
             <button type="button" class="btn small" data-cal-act="open">Открыть заказ</button>
           </div>
         </div>`
-      : `<div class="cal-sel idle">Выберите заказ на доске — здесь можно поставить старт и финиш, сдвинуть или открыть карточку. Паузы правят у позиций; у заказа они собираются сами. Стрелка на таймлайне раскрывает позиции.</div>`;
+      : "";
     const pickOff = pick ? isWeekend(pick) : false;
     const pickKey = pick ? dayKey(pick) : "";
     const offSets = calendarOffSettings();
@@ -1939,12 +2066,16 @@
       ? `<button type="button" class="btn small" data-cal-act="fill-all">Подставить даты с позиций всем без дат</button>`
       : "";
     const pauseBlock = hidePausedOnBoard() ? "" : listBlock("На паузе", pausedNow, "Нет заказов на паузе.");
-    return `${sel}${pickBlock}
+    return `<div class="cal-side-body">${sel}${pickBlock}
       ${pauseBlock}
       ${listBlock("В работе", now, "Нет заказов в работе — поставьте дату начала.")}
       <div class="cal-block"><h3>Без дат <span>${nodate.length}</span></h3>${fillAll}${
         nodate.length ? nodate.map((order) => calChipHtml(order)).join("") : `<div class="cal-col-empty">Все заказы размечены.</div>`
-      }</div>`;
+      }</div></div>
+      <div class="cal-side-hint hint-i">
+        <button type="button" class="info-btn" aria-label="Подсказка по доске">i</button>
+        <div class="hint-i-pop" role="tooltip">Выберите заказ на доске — здесь можно поставить старт и финиш, сдвинуть или открыть карточку. Паузы правят у позиций; у заказа они собираются сами. Стрелка на таймлайне раскрывает позиции.</div>
+      </div>`;
   }
 
   function weekendMenuHtml() {

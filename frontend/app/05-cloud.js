@@ -1088,6 +1088,7 @@
       $("calc-present-btn")?.classList.remove("is-on");
     }
     state.view = name;
+    rememberReportView(state.path, name);
     document.querySelectorAll(".nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
     document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
     if (name === "analytics" && !$("c-a-from").value && !$("c-b-from").value) {
@@ -1140,7 +1141,7 @@
 
   function applyLoaded(res, { keepView = false, view = "" } = {}) {
     const stay = keepView && !!state.view && $("app-shell") && !$("app-shell").hidden;
-    const next = view || (stay ? state.view : "dashboard");
+    const next = view || (stay ? state.view : reportViewFor(res.path) || "dashboard");
     state.doc = res.document;
     state.path = res.path;
     state.preview = !!res.preview;
@@ -1218,7 +1219,7 @@
       setTimeout(() => orderCloud?.fit(), 40);
       return;
     }
-    await openPath(path, { keepView: !fromStart && !!state.doc && !$("app-shell")?.hidden, view: "cloud" });
+    await openPath(path, { keepView: !fromStart && !!state.doc && !$("app-shell")?.hidden, view: fromStart ? "" : "cloud" });
   }
 
   function applyStartView(mode) {
@@ -1325,6 +1326,7 @@
         state.doc = res.document;
         state.path = res.path;
         state.preview = false;
+        rememberReportView(state.path, state.view);
         if (res.recent) renderRecent(res.recent);
         setClean();
         applyPreviewMode();

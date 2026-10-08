@@ -336,6 +336,36 @@
     return Promise.all(Object.keys(prefTimers).map((lsKey) => sendPref(lsKey)));
   }
 
+  function reportViewKey(path) {
+    return String(path || "").replace(/\//g, "\\").toLowerCase();
+  }
+
+  function readReportViews() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(LS_REPORT_VIEWS) || "{}");
+      return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function reportViewFor(path) {
+    const view = readReportViews()[reportViewKey(path)];
+    return REPORT_VIEWS.has(view) ? view : "";
+  }
+
+  function rememberReportView(path, view) {
+    const key = reportViewKey(path);
+    if (!key || !REPORT_VIEWS.has(view)) return;
+    const map = readReportViews();
+    if (map[key] === view) return;
+    delete map[key];
+    map[key] = view;
+    const keys = Object.keys(map);
+    while (keys.length > 40) delete map[keys.shift()];
+    persistPref(LS_REPORT_VIEWS, JSON.stringify(map));
+  }
+
   /** При запуске: значения из config.json главнее; то, чего там нет, переносится из localStorage. */
   function hydratePrefs(serverPrefs) {
     const prefs = serverPrefs && typeof serverPrefs === "object" ? serverPrefs : {};
@@ -368,6 +398,7 @@
   }
 
   async function flushPendingSaves() {
+    rememberReportView(state.path, state.view);
     await flushPrefs();
     clearTimeout(state.autosaveTimer);
     clearTimeout(history.persistTimer);
