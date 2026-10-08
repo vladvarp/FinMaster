@@ -13,6 +13,7 @@
   align-items: center;
   justify-content: center;
 }
+.cal-ico[hidden] { display: none; }
 .cal-ico svg,
 .cal-filter > .btn svg {
   display: block;

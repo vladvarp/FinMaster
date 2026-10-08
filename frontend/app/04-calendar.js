@@ -811,6 +811,7 @@
         viewFrom: null,
         viewDays: TL_DEFAULT_DAYS,
         followOrder: readCalFollow(),
+        hidePause: readCalHidePause(),
       };
     }
     if (!state.calendar.openLines || typeof state.calendar.openLines !== "object") state.calendar.openLines = {};
@@ -831,6 +832,23 @@
     }
     const saved = state.doc?.ui?.calendar?.follow_order;
     return typeof saved === "boolean" ? saved : true;
+  }
+
+  function readCalHidePause() {
+    try {
+      const raw = localStorage.getItem(LS_CAL_HIDE_PAUSE);
+      if (raw === "false" || raw === "0") return false;
+      if (raw === "true" || raw === "1") return true;
+    } catch {
+      /* ignore */
+    }
+    return true;
+  }
+
+  /** Неделя и месяц: заказы и позиции «На паузе» спрятаны, пока включена кнопка. Таймлайн не трогает. */
+  function hidePausedOnBoard() {
+    const cal = calendarState();
+    return cal.mode !== "timeline" && cal.hidePause !== false;
   }
 
   function persistCalendar() {
@@ -1168,9 +1186,10 @@
   }
 
   function weekLinesHtml(order, day) {
+    const hidePause = hidePausedOnBoard();
     const rows = calendarWorkLines(order)
       .map((line, index) => ({ line, index, kind: lineActiveOnDay(order, line, day) }))
-      .filter((row) => row.kind);
+      .filter((row) => row.kind && !(hidePause && row.kind === "pause"));
     if (!rows.length) return "";
     return `<div class="cal-lines">${rows
       .map(({ line, index, kind }) => {
@@ -1236,6 +1255,13 @@
     const followOn = cal.followOrder !== false;
     followBtn?.classList.toggle("active", followOn);
     followBtn?.setAttribute("aria-pressed", String(followOn));
+    const hidePauseBtn = $("cal-hide-pause");
+    const hidePauseOn = cal.hidePause !== false;
+    if (hidePauseBtn) {
+      hidePauseBtn.hidden = cal.mode === "timeline";
+      hidePauseBtn.classList.toggle("active", hidePauseOn);
+      hidePauseBtn.setAttribute("aria-pressed", String(hidePauseOn));
+    }
     if (weekendMenu) {
       weekendMenu.innerHTML = weekendMenuHtml();
       weekendMenu.hidden = !weekendOpen;
@@ -1731,7 +1757,7 @@
     for (let d = win.gridFrom; d <= win.gridTo; d = addDays(d, 1)) {
       const key = dayKey(d);
       const inMonth = d.getMonth() === win.from.getMonth();
-      const items = list.filter((order) => orderMarksDay(order, d));
+      const items = list.filter((order) => orderMarksDay(order, d) && !(hidePausedOnBoard() && isPaused(order, d)));
       const selectedId = calendarState().selected;
       const hit = selectedId ? items.find((order) => order.id === selectedId) : null;
       let shown = items.slice(0, 3);
@@ -1755,10 +1781,11 @@
       .map((day) => {
         const key = dayKey(day);
         const items = list.filter((order) => orderMarksDay(order, day));
-        const starts = items.filter((order) => dateDay(order.work_start) === key && !isPaused(order, day));
-        const ends = items.filter((order) => dateDay(order.work_end) === key && !isPaused(order, day));
-        const paused = items.filter((order) => isPaused(order, day));
-        const running = items.filter((order) => !isPaused(order, day) && dateDay(order.work_start) !== key && dateDay(order.work_end) !== key);
+        const shown = hidePausedOnBoard() ? items.filter((order) => !isPaused(order, day)) : items;
+        const starts = shown.filter((order) => dateDay(order.work_start) === key && !isPaused(order, day));
+        const ends = shown.filter((order) => dateDay(order.work_end) === key && !isPaused(order, day));
+        const paused = shown.filter((order) => isPaused(order, day));
+        const running = shown.filter((order) => !isPaused(order, day) && dateDay(order.work_start) !== key && dateDay(order.work_end) !== key);
         const n = load.map[key] || 0;
         const pct = Math.min(100, (n / Math.max(CAL_HOT_LOAD, load.peak || 1)) * 100);
         const note = dayNote(key);
@@ -1778,7 +1805,7 @@
             ${running.length ? `<div class="cal-col-sec">В работе</div>${running.map((order) => `${chip(order)}${weekLinesHtml(order, day)}`).join("")}` : ""}
             ${paused.length ? `<div class="cal-col-sec">На паузе</div>${paused.map(chip).join("")}` : ""}
             ${ends.length ? `<div class="cal-col-sec">Финиш</div>${ends.map(chip).join("")}` : ""}
-            ${items.length ? "" : `<div class="cal-col-empty">пусто</div>`}
+            ${shown.length ? "" : `<div class="cal-col-empty">пусто</div>`}
           </div>
         </div>`;
       })
@@ -1800,7 +1827,9 @@
     const now = all.filter((order) => workStatus(order) === "now" && !orderIsPausedNow(order, today));
     const nodate = all.filter((order) => workStatus(order) === "nodate");
     const pick = cal.pick ? parseDay(cal.pick) : null;
-    const pickItems = pick ? all.filter((order) => orderMarksDay(order, pick)) : [];
+    const pickItems = pick
+      ? all.filter((order) => orderMarksDay(order, pick) && !(hidePausedOnBoard() && isPaused(order, pick)))
+      : [];
     const selectedLine = selected && cal.selectedLine ? findCalendarLine(selected, cal.selectedLine) : null;
     const workTarget = selectedLine ? lineWorkProxy(selected, selectedLine) : selected;
     const due = workTarget ? orderDeadline(workTarget, today) : null;
@@ -1909,8 +1938,9 @@
     const fillAll = nodate.some((order) => lineDateRange(order))
       ? `<button type="button" class="btn small" data-cal-act="fill-all">Подставить даты с позиций всем без дат</button>`
       : "";
+    const pauseBlock = hidePausedOnBoard() ? "" : listBlock("На паузе", pausedNow, "Нет заказов на паузе.");
     return `${sel}${pickBlock}
-      ${listBlock("На паузе", pausedNow, "Нет заказов на паузе.")}
+      ${pauseBlock}
       ${listBlock("В работе", now, "Нет заказов в работе — поставьте дату начала.")}
       <div class="cal-block"><h3>Без дат <span>${nodate.length}</span></h3>${fillAll}${
         nodate.length ? nodate.map((order) => calChipHtml(order)).join("") : `<div class="cal-col-empty">Все заказы размечены.</div>`
@@ -2152,6 +2182,13 @@
       const cal = calendarState();
       cal.followOrder = cal.followOrder === false;
       persistPref(LS_CAL_FOLLOW, JSON.stringify(cal.followOrder !== false), { now: true });
+      renderCalendar();
+      return;
+    }
+    if (e.target.closest("#cal-hide-pause")) {
+      const cal = calendarState();
+      cal.hidePause = cal.hidePause === false;
+      persistPref(LS_CAL_HIDE_PAUSE, JSON.stringify(cal.hidePause !== false), { now: true });
       renderCalendar();
       return;
     }

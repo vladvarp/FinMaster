@@ -351,7 +351,10 @@
         /* ignore */
       }
     });
-    if (state.calendar) state.calendar.followOrder = readCalFollow();
+    if (state.calendar) {
+      state.calendar.followOrder = readCalFollow();
+      state.calendar.hidePause = readCalHidePause();
+    }
   }
 
   let dirtySyncChain = Promise.resolve();

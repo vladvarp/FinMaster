@@ -44,6 +44,7 @@
   const LS_CHARTS = "finmaster.charts";
   /** localStorage окна программы не переживает перезапуск — эти ключи дублируются в config.json. */
   const LS_CAL_FOLLOW = "finmaster.calFollow";
+  const LS_CAL_HIDE_PAUSE = "finmaster.calHidePause";
   const SYNCED_PREFS = {
     "finmaster.shareProfiles": "share_profiles",
     "finmaster.pdfProfiles": "pdf_profiles",
@@ -51,6 +52,7 @@
     "finmaster.shareGrand": "share_grand",
     "finmaster.formulaProfiles": "formula_profiles",
     [LS_CAL_FOLLOW]: "cal_follow",
+    [LS_CAL_HIDE_PAUSE]: "cal_hide_pause",
   };
   const prefTimers = {};
   const CLOUD_LAYOUTS = ["galaxy", "orbit", "timeline", "constellation"];
