@@ -247,7 +247,9 @@
         return;
       }
       if (from && till && from <= till) {
-        items.push(open ? { start: from, end: merge ? "" : till, open: true } : { start: from, end: till });
+        const item = open ? { start: from, end: merge ? "" : till, open: true } : { start: from, end: till };
+        if (!open && pause.resumeNext) item.resumeNext = true;
+        items.push(item);
       }
     });
     items.sort((a, b) => a.start.localeCompare(b.start) || String(a.end || envEnd).localeCompare(String(b.end || envEnd)));
@@ -266,10 +268,14 @@
         if (pause.open || last.open) {
           last.end = "";
           last.open = true;
+          delete last.resumeNext;
         } else if (pause.end > last.end) last.end = pause.end;
+        if (!last.open && pause.resumeNext) last.resumeNext = true;
         return;
       }
-      merged.push(pause.open ? { start: pause.start, end: "", open: true } : { start: pause.start, end: pause.end });
+      const kept = pause.open ? { start: pause.start, end: "", open: true } : { start: pause.start, end: pause.end };
+      if (!pause.open && pause.resumeNext) kept.resumeNext = true;
+      merged.push(kept);
     });
     order.work_pauses = merged;
     return order;
@@ -299,7 +305,7 @@
         if (!till || todayKey < from || todayKey > till) return pause;
         if (pauseIsOpen(proxy, pause)) {
           changed = true;
-          return { start: from, end: todayKey };
+          return { start: from, end: todayKey, resumeNext: true };
         }
         if (till === todayKey) {
           changed = true;
@@ -943,9 +949,11 @@
     if (dateDay(order?.work_end)) return null;
     const todayKey = dayKey(today);
     const tomorrow = addDays(today, 1);
-    if (!isPaused(order, today) || isPaused(order, tomorrow)) return null;
-    const closedToday = workPauses(order).some((pause) => dateDay(pause.end) === todayKey && !pauseIsOpen(order, pause));
-    if (!closedToday) return null;
+    if (isPaused(order, tomorrow)) return null;
+    // Обычная пауза на сегодня (Shift по дню или кнопка) завтра не планирует.
+    // Завтра рисуется только после явного Shift по краю: пауза закрыта с пометкой resumeNext.
+    const explicit = workPauses(order).some((pause) => pause.resumeNext && dateDay(pause.end) === todayKey && !pauseIsOpen(order, pause));
+    if (!explicit) return null;
     let day = tomorrow;
     const cap = addDays(day, 8);
     while (day <= cap && isWeekend(day)) day = addDays(day, 1);
@@ -1207,6 +1215,19 @@
     return "в работе";
   }
 
+  /** Позиции, которые в этот день реально стоят на календаре. */
+  function dayLineKinds(order, day) {
+    if (!Array.isArray(order?.lines)) return [];
+    return calendarWorkLines(order).map((line) => lineActiveOnDay(order, line, day)).filter(Boolean);
+  }
+
+  /** Пауза со следующего дня не делает заказ «запланированным»: день пауза, пока Shift по краю явно не снимет её. */
+  function boardDayPaused(order, day) {
+    if (isPaused(order, day)) return true;
+    const kinds = dayLineKinds(order, day);
+    return kinds.length > 0 && kinds.every((kind) => kind === "pause");
+  }
+
   /** Роль дня на неделе и в месяце: не путает прошедшее, сегодня и дни после сегодня. */
   function boardRole(target, day) {
     if (!target || !day) return "";
@@ -1215,7 +1236,7 @@
     const start = dateDay(target.work_start);
     const end = dateDay(target.work_end);
     if (start && end && start === end && start === key) return "старт и финиш";
-    if (isPaused(target, day)) return "пауза";
+    if (boardDayPaused(target, day)) return "пауза";
     if (start === key) return "старт";
     if (end && end === key) return "финиш";
     if (key === today) return "выполняется";
@@ -1904,14 +1925,14 @@
         const key = dayKey(day);
         const items = list.filter((order) => orderMarksDay(order, day));
         const shown = items.filter((order) => !orderPauseHidden(order, day));
-        const starts = shown.filter((order) => dateDay(order.work_start) === key && !isPaused(order, day));
+        const starts = shown.filter((order) => dateDay(order.work_start) === key && !boardDayPaused(order, day));
         const ends = shown.filter((order) => {
           const end = dateDay(order.work_end);
           const start = dateDay(order.work_start);
-          return end === key && end !== start && !isPaused(order, day);
+          return end === key && end !== start && !boardDayPaused(order, day);
         });
-        const paused = shown.filter((order) => isPaused(order, day));
-        const running = shown.filter((order) => !isPaused(order, day) && dateDay(order.work_start) !== key && dateDay(order.work_end) !== key);
+        const paused = shown.filter((order) => boardDayPaused(order, day));
+        const running = shown.filter((order) => !boardDayPaused(order, day) && dateDay(order.work_start) !== key && dateDay(order.work_end) !== key);
         const n = load.map[key] || 0;
         const pct = Math.min(100, (n / Math.max(CAL_HOT_LOAD, load.peak || 1)) * 100);
         const note = dayNote(key);
