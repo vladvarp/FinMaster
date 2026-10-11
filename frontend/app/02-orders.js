@@ -529,6 +529,7 @@
     if (persist && state.desktop) {
       apiPost("/api/theme", { theme: t }).catch(() => {});
     }
+    if (typeof applyCalColors === "function") applyCalColors();
     if (state.doc) renderAll();
   }
 

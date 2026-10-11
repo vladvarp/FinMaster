@@ -45,6 +45,7 @@
   /** localStorage окна программы не переживает перезапуск — эти ключи дублируются в config.json. */
   const LS_CAL_FOLLOW = "finmaster.calFollow";
   const LS_CAL_HIDE_PAUSE = "finmaster.calHidePause";
+  const LS_CAL_COLORS = "finmaster.calColors";
   const LS_REPORT_VIEWS = "finmaster.reportViews";
   const REPORT_VIEWS = new Set(["orders", "dashboard", "analytics", "cashflow", "forecast", "calendar", "calculator", "presentation", "cloud", "vault", "customers", "catalogs"]);
   const SYNCED_PREFS = {
@@ -55,6 +56,7 @@
     "finmaster.formulaProfiles": "formula_profiles",
     [LS_CAL_FOLLOW]: "cal_follow",
     [LS_CAL_HIDE_PAUSE]: "cal_hide_pause",
+    [LS_CAL_COLORS]: "cal_colors",
     [LS_REPORT_VIEWS]: "report_views",
   };
   const prefTimers = {};

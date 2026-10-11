@@ -185,7 +185,7 @@ def set_theme(theme: str) -> str:
     return value
 
 
-UI_PREF_KEYS = ("share_profiles", "pdf_profiles", "share_pdf", "share_grand", "formula_profiles", "cal_follow", "cal_hide_pause", "report_views")
+UI_PREF_KEYS = ("share_profiles", "pdf_profiles", "share_pdf", "share_grand", "formula_profiles", "cal_follow", "cal_hide_pause", "cal_colors", "report_views")
 UI_PREF_MAX_BYTES = 256 * 1024
 
 

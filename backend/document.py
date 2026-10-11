@@ -61,7 +61,7 @@ def _work_pauses(raw: Any, start: str, end: str) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
         return []
     today = date.today().isoformat()
-    items: list[tuple[str, str, bool]] = []
+    items: list[tuple[str, str, bool, bool]] = []
     for item in raw:
         if not isinstance(item, dict):
             continue
@@ -93,14 +93,16 @@ def _work_pauses(raw: Any, start: str, end: str) -> list[dict[str, Any]]:
             continue
         if end and a > end:
             continue
+        # Закрытая пауза с resumeNext: следующий рабочий день снова в плане, а не на паузе.
+        resume_next = bool(item.get("resumeNext")) and explicit_end and not open_pause
         if not end and open_pause and a > today:
-            items.append((a, "", True))
+            items.append((a, "", True, False))
             continue
         if a and (open_pause or (b and a <= b)):
-            items.append((a, "" if open_pause else b, open_pause))
+            items.append((a, "" if open_pause else b, open_pause, resume_next))
     items.sort(key=lambda row: (row[0], row[1] or today))
     merged: list[dict[str, Any]] = []
-    for a, b, open_pause in items:
+    for a, b, open_pause, resume_next in items:
         if merged:
             last = merged[-1]
             last_end = str(last.get("end") or today)
@@ -109,13 +111,18 @@ def _work_pauses(raw: Any, start: str, end: str) -> list[dict[str, Any]]:
                 if open_pause or last.get("open"):
                     last["end"] = ""
                     last["open"] = True
+                    last.pop("resumeNext", None)
                 elif b and b > last_end:
                     last["end"] = b
+                if resume_next and not last.get("open"):
+                    last["resumeNext"] = True
                 continue
         entry: dict[str, Any] = {"start": a, "end": b}
         if open_pause:
             entry["open"] = True
             entry["end"] = ""
+        elif resume_next:
+            entry["resumeNext"] = True
         merged.append(entry)
     return merged
 

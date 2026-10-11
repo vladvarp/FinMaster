@@ -27,6 +27,615 @@
   const CAL_BAR_DEBT = "#d97706";
   const CAL_BAR_DUE = "#dc2626";
   const CAL_BAR_PLANNED = "#0284c8";
+  const CAL_COLOR_GROUPS = [
+    {
+      title: "Линии",
+      hint: "Полосы заказов и позиций",
+      items: [
+        ["paid", "Оплачено"],
+        ["debt", "Долг"],
+        ["due", "Закрыт с долгом"],
+        ["planned", "Запланировано"],
+        ["work", "В работе"],
+        ["finished", "Завершено"],
+        ["stripe", "Штрих паузы"],
+      ],
+    },
+    {
+      title: "Статусы",
+      hint: "Подписи таймлайна и роли недели",
+      items: [
+        ["edge", "Старт и финиш"],
+        ["now", "Выполняется"],
+        ["was", "Выполнялось"],
+        ["plan", "План"],
+        ["pause", "Пауза"],
+      ],
+    },
+  ];
+  const CAL_COLOR_KEYS = CAL_COLOR_GROUPS.flatMap((group) => group.items.map(([key]) => key));
+  const CAL_SWATCHES = {
+    light: ["#166534", "#15803d", "#059669", "#0f766e", "#0d9488", "#155e75", "#1d4ed8", "#0369a1", "#0284c8", "#0891b2", "#4f46e5", "#6d28d9", "#7c3aed", "#a16207", "#b45309", "#d97706", "#c2410c", "#9a3412", "#b91c1c", "#dc2626", "#be123c", "#9d174d", "#334155", "#475569"],
+    dark: ["#4ade80", "#86efac", "#34d399", "#2dd4bf", "#5eead4", "#67e8f9", "#7dd3fc", "#38bdf8", "#22d3ee", "#93c5fd", "#a5b4fc", "#c4b5fd", "#e9d5ff", "#fde68a", "#fbbf24", "#fcd34d", "#fdba74", "#fb923c", "#fca5a5", "#f87171", "#fda4af", "#f9a8d4", "#e2e8f0", "#cbd5e1"],
+  };
+  function calPalette(partial) {
+    const base = {
+      paid: CAL_BAR_PAID,
+      debt: CAL_BAR_DEBT,
+      due: CAL_BAR_DUE,
+      planned: CAL_BAR_PLANNED,
+      work: "#0f766e",
+      finished: "#166534",
+      stripe: "#64748b",
+      edge: "#15803d",
+      now: "#0369a1",
+      was: "#4f46e5",
+      plan: "#b45309",
+      pause: "#dc2626",
+    };
+    return Object.assign(base, partial || {});
+  }
+  const CAL_COLOR_PRESETS = [
+    {
+      id: "current",
+      name: "Текущая",
+      light: calPalette(),
+      dark: calPalette({
+        stripe: "#94a3b8",
+        finished: "#86efac",
+        edge: "#4ade80",
+        now: "#7dd3fc",
+        was: "#a5b4fc",
+        plan: "#fbbf24",
+        pause: "#f87171",
+      }),
+    },
+    {
+      id: "sea",
+      name: "Море",
+      light: calPalette({ paid: "#0d9488", planned: "#0891b2", work: "#0e7490", edge: "#0f766e", now: "#0369a1", was: "#1d4ed8", plan: "#0e7490", pause: "#be123c" }),
+      dark: calPalette({ paid: "#2dd4bf", debt: "#fbbf24", due: "#fb7185", planned: "#38bdf8", work: "#67e8f9", finished: "#86efac", edge: "#5eead4", now: "#7dd3fc", was: "#93c5fd", plan: "#22d3ee", pause: "#fda4af" }),
+    },
+    {
+      id: "forest",
+      name: "Лес",
+      light: calPalette({ paid: "#15803d", debt: "#a16207", due: "#b45309", planned: "#4d7c0f", work: "#166534", edge: "#166534", now: "#3f6212", was: "#4d7c0f", plan: "#65a30d", pause: "#9f1239" }),
+      dark: calPalette({ paid: "#4ade80", debt: "#fcd34d", due: "#fdba74", planned: "#bef264", work: "#86efac", finished: "#bbf7d0", edge: "#86efac", now: "#bbf7d0", was: "#d9f99d", plan: "#bef264", pause: "#fda4af" }),
+    },
+    {
+      id: "sunset",
+      name: "Закат",
+      light: calPalette({ paid: "#ea580c", debt: "#a16207", due: "#9f1239", planned: "#d97706", work: "#c2410c", finished: "#9a3412", edge: "#b45309", now: "#c2410c", was: "#9a3412", plan: "#d97706", pause: "#be123c" }),
+      dark: calPalette({ paid: "#fb923c", debt: "#fbbf24", due: "#fb7185", planned: "#fcd34d", work: "#fdba74", finished: "#fed7aa", edge: "#fdba74", now: "#fb923c", was: "#fcd34d", plan: "#fde68a", pause: "#fda4af" }),
+    },
+    {
+      id: "ink",
+      name: "Чернила",
+      light: calPalette({ paid: "#4f46e5", debt: "#7c3aed", planned: "#4338ca", work: "#3730a3", edge: "#4f46e5", now: "#4338ca", was: "#6d28d9", plan: "#7c3aed", pause: "#be123c" }),
+      dark: calPalette({ paid: "#a5b4fc", debt: "#c4b5fd", due: "#fda4af", planned: "#818cf8", work: "#c7d2fe", finished: "#e0e7ff", edge: "#c4b5fd", now: "#a5b4fc", was: "#ddd6fe", plan: "#c4b5fd", pause: "#fda4af" }),
+    },
+    {
+      id: "berry",
+      name: "Ягода",
+      light: calPalette({ paid: "#be123c", debt: "#a21caf", due: "#881337", planned: "#db2777", work: "#9f1239", edge: "#be123c", now: "#9d174d", was: "#a21caf", plan: "#db2777", pause: "#881337" }),
+      dark: calPalette({ paid: "#fb7185", debt: "#f0abfc", due: "#fda4af", planned: "#f472b6", work: "#fb7185", finished: "#fecdd3", edge: "#fda4af", now: "#f9a8d4", was: "#e9d5ff", plan: "#f472b6", pause: "#fecdd3" }),
+    },
+    {
+      id: "sand",
+      name: "Песок",
+      light: calPalette({ paid: "#a16207", debt: "#92400e", due: "#9a3412", planned: "#b45309", work: "#78716c", edge: "#a16207", now: "#92400e", was: "#57534e", plan: "#b45309", pause: "#9f1239" }),
+      dark: calPalette({ paid: "#fcd34d", debt: "#fbbf24", due: "#fdba74", planned: "#fde68a", work: "#d6d3d1", finished: "#e7e5e4", edge: "#fde68a", now: "#fcd34d", was: "#e7e5e4", plan: "#fbbf24", pause: "#fda4af" }),
+    },
+    {
+      id: "north",
+      name: "Север",
+      light: calPalette({ paid: "#0369a1", debt: "#475569", due: "#b91c1c", planned: "#0284c8", work: "#334155", edge: "#0369a1", now: "#075985", was: "#334155", plan: "#0284c8", pause: "#b91c1c" }),
+      dark: calPalette({ paid: "#7dd3fc", debt: "#cbd5e1", due: "#fca5a5", planned: "#38bdf8", work: "#e2e8f0", finished: "#f8fafc", edge: "#7dd3fc", now: "#bae6fd", was: "#cbd5e1", plan: "#7dd3fc", pause: "#fca5a5" }),
+    },
+    {
+      id: "contrast",
+      name: "Контраст",
+      light: calPalette({ paid: "#059669", debt: "#d97706", due: "#dc2626", planned: "#2563eb", work: "#0f766e", edge: "#15803d", now: "#1d4ed8", was: "#6d28d9", plan: "#a16207", pause: "#be123c" }),
+      dark: calPalette({ paid: "#34d399", debt: "#fbbf24", due: "#f87171", planned: "#60a5fa", work: "#2dd4bf", finished: "#86efac", edge: "#4ade80", now: "#93c5fd", was: "#c4b5fd", plan: "#fde68a", pause: "#fb7185" }),
+    },
+  ];
+  let calColorSlot = "paid";
+  let calColorTheme = "";
+  let calColorName = "";
+
+  const CAL_DEBT_ALPHA = 0.4;
+
+  function calHex(value, fallback) {
+    const hex = String(value || "").trim().toLowerCase();
+    return /^#[0-9a-f]{6}$/.test(hex) ? hex : fallback;
+  }
+
+  function colorRgb(value) {
+    const hex = String(value || "").trim().toLowerCase();
+    return /^#[0-9a-f]{6}/.test(hex) ? hex.slice(0, 7) : "";
+  }
+
+  function colorAlpha(value) {
+    const hex = String(value || "").trim().toLowerCase();
+    if (/^#[0-9a-f]{8}$/.test(hex)) return parseInt(hex.slice(7, 9), 16) / 255;
+    return 1;
+  }
+
+  function alphaByte(alpha) {
+    const n = Math.max(0, Math.min(1, Number(alpha)));
+    return Math.round((Number.isFinite(n) ? n : 1) * 255).toString(16).padStart(2, "0");
+  }
+
+  function packCalColor(rgb, alpha) {
+    return `${calHex(rgb, "#000000")}${alphaByte(alpha)}`;
+  }
+
+  function slotAlpha(key) {
+    if (key === "debt") return CAL_DEBT_ALPHA;
+    if (key === "stripe") return 0.55;
+    return 1;
+  }
+
+  function parseCalColor(value, key, fallback) {
+    const raw = String(value || "").trim().toLowerCase();
+    const fb = calHex(fallback, "#64748b");
+    if (/^#[0-9a-f]{8}$/.test(raw)) return raw;
+    if (/^#[0-9a-f]{6}$/.test(raw)) return packCalColor(raw, slotAlpha(key));
+    return packCalColor(fb, slotAlpha(key));
+  }
+
+  function calPreset(id) {
+    return CAL_COLOR_PRESETS.find((item) => item.id === id) || CAL_COLOR_PRESETS[0];
+  }
+
+  function blankCalSide() {
+    return { id: "current", colors: null };
+  }
+
+  function normalizeCalSide(raw) {
+    const side = raw && typeof raw === "object" ? raw : {};
+    const preset = calPreset(side.id);
+    const customOk = String(side.id || "").startsWith("c_");
+    const id = customOk ? String(side.id) : preset.id;
+    if (!side.colors || typeof side.colors !== "object") return { id, colors: null };
+    const colors = {};
+    const base = preset.light;
+    CAL_COLOR_KEYS.forEach((key) => {
+      colors[key] = parseCalColor(side.colors[key], key, base[key]);
+    });
+    return { id, colors };
+  }
+
+  function defaultCalColorStore() {
+    return { light: blankCalSide(), dark: blankCalSide(), custom: [] };
+  }
+
+  function normalizeCalColorStore(raw) {
+    const store = defaultCalColorStore();
+    if (!raw || typeof raw !== "object") return store;
+    store.light = normalizeCalSide(raw.light);
+    store.dark = normalizeCalSide(raw.dark);
+    const custom = Array.isArray(raw.custom) ? raw.custom : [];
+    store.custom = custom.slice(0, 24).map((item) => {
+      const id = String(item?.id || "");
+      if (!id.startsWith("c_")) return null;
+      const name = String(item.name || "Своя").trim().slice(0, 32) || "Своя";
+      const light = {};
+      const dark = {};
+      CAL_COLOR_KEYS.forEach((key) => {
+        light[key] = parseCalColor(item.light?.[key], key, calPreset("current").light[key]);
+        dark[key] = parseCalColor(item.dark?.[key], key, calPreset("current").dark[key]);
+      });
+      return { id, name, light, dark };
+    }).filter(Boolean);
+    ["light", "dark"].forEach((theme) => {
+      const id = store[theme].id;
+      if (id.startsWith("c_") && !store.custom.some((item) => item.id === id)) store[theme] = blankCalSide();
+    });
+    return store;
+  }
+
+  function readCalColorStore() {
+    try {
+      return normalizeCalColorStore(JSON.parse(localStorage.getItem(LS_CAL_COLORS) || "null"));
+    } catch {
+      return defaultCalColorStore();
+    }
+  }
+
+  function writeCalColorStore(store, { now = true } = {}) {
+    persistPref(LS_CAL_COLORS, JSON.stringify(normalizeCalColorStore(store)), { now });
+  }
+
+  function hexToRgb(hex) {
+    const h = (colorRgb(hex) || "#000000").slice(1);
+    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  }
+
+  function rgbToHex(r, g, b) {
+    const c = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
+    return `#${c(r)}${c(g)}${c(b)}`;
+  }
+
+  function rgbToHsv(r, g, b) {
+    const rn = r / 255;
+    const gn = g / 255;
+    const bn = b / 255;
+    const max = Math.max(rn, gn, bn);
+    const min = Math.min(rn, gn, bn);
+    const d = max - min;
+    let h = 0;
+    if (d) {
+      if (max === rn) h = ((gn - bn) / d) % 6;
+      else if (max === gn) h = (bn - rn) / d + 2;
+      else h = (rn - gn) / d + 4;
+      h *= 60;
+      if (h < 0) h += 360;
+    }
+    return { h, s: max === 0 ? 0 : d / max, v: max };
+  }
+
+  function hsvToHex(h, s, v) {
+    const hue = ((h % 360) + 360) % 360;
+    const c = v * s;
+    const x = c * (1 - Math.abs((hue / 60) % 2 - 1));
+    const m = v - c;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    if (hue < 60) [r, g, b] = [c, x, 0];
+    else if (hue < 120) [r, g, b] = [x, c, 0];
+    else if (hue < 180) [r, g, b] = [0, c, x];
+    else if (hue < 240) [r, g, b] = [0, x, c];
+    else if (hue < 300) [r, g, b] = [x, 0, c];
+    else [r, g, b] = [c, 0, x];
+    return rgbToHex((r + m) * 255, (g + m) * 255, (b + m) * 255);
+  }
+
+  let calPickerDrag = null;
+  let calPickerBlockClick = false;
+  let calColorDrag = null;
+  let calColorPos = null;
+
+  function paintCalSlot(hex, { now = true, theme = calColorEditorTheme(), key = calColorSlot, alpha = null } = {}) {
+    const rgb = calHex(String(hex || "").slice(0, 7), "");
+    if (!rgb) return "";
+    const store = readCalColorStore();
+    const mode = theme === "dark" ? "dark" : "light";
+    const next = resolvedCalColors(mode);
+    const prevA = colorAlpha(next[key]);
+    const a = alpha == null ? prevA : Math.max(0, Math.min(1, Number(alpha)));
+    const clean = packCalColor(rgb, Number.isFinite(a) ? a : prevA);
+    next[key] = clean;
+    store[mode] = { id: store[mode].id, colors: next };
+    writeCalColorStore(store, { now });
+    applyCalColors();
+    return clean;
+  }
+
+  function syncCalPicker(hex) {
+    const hsv = rgbToHsv(...hexToRgb(hex));
+    const sv = document.querySelector("#cal-color-menu [data-cal-sv]");
+    const hueBar = document.querySelector("#cal-color-menu [data-cal-hue]");
+    if (sv) {
+      sv.style.backgroundColor = `hsl(${hsv.h} 100% 50%)`;
+      const dot = sv.querySelector("i");
+      if (dot) {
+        dot.style.left = `${hsv.s * 100}%`;
+        dot.style.top = `${(1 - hsv.v) * 100}%`;
+      }
+    }
+    if (hueBar) {
+      const knob = hueBar.querySelector("i");
+      if (knob) knob.style.left = `${(hsv.h / 360) * 100}%`;
+    }
+    const rgb = colorRgb(hex) || hex;
+    const input = $("cal-color-hex");
+    if (input && document.activeElement !== input) input.value = rgb;
+    const row = document.querySelector(`#cal-color-menu [data-cal-color-slot="${calColorSlot}"] > i`);
+    if (row) row.style.setProperty("--swatch", hex);
+    const chip = document.querySelector("#cal-color-menu .cal-picker-hex > i");
+    if (chip) chip.style.setProperty("--swatch", hex);
+    const alphaBar = document.querySelector("#cal-color-menu [data-cal-alpha]");
+    if (alphaBar) {
+      alphaBar.style.setProperty("--pick", rgb);
+      const knob = alphaBar.querySelector("i");
+      if (knob) knob.style.left = `${colorAlpha(hex) * 100}%`;
+    }
+    const pct = $("cal-color-alpha");
+    if (pct) pct.textContent = `${Math.round(colorAlpha(hex) * 100)}%`;
+    document.querySelectorAll("#cal-color-menu .cal-swatch").forEach((btn) => {
+      btn.classList.toggle("is-on", btn.dataset.calColorSwatch === rgb);
+    });
+  }
+
+  function pickerRatio(el, e) {
+    const rect = el.getBoundingClientRect();
+    const x = rect.width ? (e.clientX - rect.left) / rect.width : 0;
+    const y = rect.height ? (e.clientY - rect.top) / rect.height : 0;
+    return { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
+  }
+
+  function placeCalColorMenu() {
+    const menu = $("cal-color-menu");
+    if (!menu || !calColorPos) return;
+    const w = menu.offsetWidth || 770;
+    const h = menu.offsetHeight || 320;
+    const x = Math.max(8, Math.min(window.innerWidth - w - 8, calColorPos.x));
+    const y = Math.max(8, Math.min(window.innerHeight - h - 8, calColorPos.y));
+    calColorPos = { x, y };
+    menu.style.position = "fixed";
+    menu.style.right = "auto";
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    menu.style.zIndex = "40";
+  }
+
+  function onCalColorHeadDown(e) {
+    const head = e.target.closest(".cal-color-head");
+    if (!head || !head.closest("#cal-color-menu") || e.target.closest("button, input, a")) return false;
+    const menu = $("cal-color-menu");
+    if (!menu) return false;
+    const rect = menu.getBoundingClientRect();
+    calColorDrag = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
+    menu.classList.add("is-moving");
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+  }
+
+  function moveCalPicker(e) {
+    if (calColorDrag) {
+      calColorPos = { x: e.clientX - calColorDrag.dx, y: e.clientY - calColorDrag.dy };
+      placeCalColorMenu();
+      return;
+    }
+    if (!calPickerDrag) return;
+    const currentHex = resolvedCalColors(calColorEditorTheme())[calColorSlot];
+    const current = rgbToHsv(...hexToRgb(currentHex));
+    let hex = "";
+    let alpha = null;
+    if (calPickerDrag.kind === "sv") {
+      const el = document.querySelector("#cal-color-menu [data-cal-sv]");
+      if (!el) return;
+      const { x, y } = pickerRatio(el, e);
+      hex = hsvToHex(current.h, x, 1 - y);
+    } else if (calPickerDrag.kind === "hue") {
+      const el = document.querySelector("#cal-color-menu [data-cal-hue]");
+      if (!el) return;
+      const { x } = pickerRatio(el, e);
+      hex = hsvToHex(x * 359.99, current.s || 1, current.v === 0 ? 1 : current.v);
+    } else {
+      const el = document.querySelector("#cal-color-menu [data-cal-alpha]");
+      if (!el) return;
+      alpha = pickerRatio(el, e).x;
+      hex = colorRgb(currentHex) || "#000000";
+    }
+    const clean = paintCalSlot(hex, { now: false, alpha });
+    if (clean) syncCalPicker(clean);
+  }
+
+  function onCalPickerDown(e) {
+    const sv = e.target.closest("[data-cal-sv]");
+    const hueBar = e.target.closest("[data-cal-hue]");
+    const alphaBar = e.target.closest("[data-cal-alpha]");
+    if (!sv && !hueBar && !alphaBar) return;
+    e.preventDefault();
+    e.stopPropagation();
+    calPickerDrag = { kind: sv ? "sv" : hueBar ? "hue" : "alpha" };
+    try {
+      (sv || hueBar || alphaBar).setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    moveCalPicker(e);
+  }
+
+  function onCalPickerUp() {
+    if (calColorDrag) {
+      calColorDrag = null;
+      $("cal-color-menu")?.classList.remove("is-moving");
+      calPickerBlockClick = true;
+      return;
+    }
+    if (!calPickerDrag) return;
+    calPickerDrag = null;
+    calPickerBlockClick = true;
+    writeCalColorStore(readCalColorStore(), { now: true });
+    renderCalendar();
+  }
+
+  function calProfile(store, id) {
+    return store.custom.find((item) => item.id === id) || calPreset(id);
+  }
+
+  function resolvedCalColors(theme) {
+    const mode = theme === "dark" ? "dark" : "light";
+    const store = readCalColorStore();
+    const side = store[mode];
+    const profile = calProfile(store, side.id);
+    const base = profile[mode] || profile.light;
+    const raw = side.colors ? Object.assign({}, base, side.colors) : base;
+    const out = {};
+    const builtin = (calPreset("current")[mode] || calPreset("current").light);
+    CAL_COLOR_KEYS.forEach((key) => {
+      out[key] = parseCalColor(raw[key], key, base[key] || builtin[key]);
+    });
+    return out;
+  }
+
+  function calPaint(key) {
+    return resolvedCalColors(currentTheme())[key] || calPreset("current").light[key];
+  }
+
+  function applyCalColors() {
+    const colors = resolvedCalColors(currentTheme());
+    CAL_COLOR_KEYS.forEach((key) => {
+      document.documentElement.style.setProperty(`--cal-${key}`, colors[key]);
+    });
+  }
+
+  function calColorEditorTheme() {
+    return calColorTheme === "dark" || calColorTheme === "light" ? calColorTheme : currentTheme();
+  }
+
+  function paintCalColor(theme, key, hex) {
+    paintCalSlot(hex, { theme, key });
+  }
+
+  function assignCalProfile(theme, id) {
+    const store = readCalColorStore();
+    const mode = theme === "dark" ? "dark" : "light";
+    if (id.startsWith("c_") && !store.custom.some((item) => item.id === id)) return;
+    if (!id.startsWith("c_") && !CAL_COLOR_PRESETS.some((item) => item.id === id)) return;
+    store[mode] = { id, colors: null };
+    writeCalColorStore(store);
+    applyCalColors();
+  }
+
+  function saveCalProfile(name) {
+    const title = String(name || "").trim().slice(0, 32);
+    if (!title) return "";
+    const store = readCalColorStore();
+    const profile = {
+      id: `c_${uid().replace(/-/g, "").slice(0, 8)}`,
+      name: title,
+      light: resolvedCalColors("light"),
+      dark: resolvedCalColors("dark"),
+    };
+    store.custom.push(profile);
+    const mode = calColorEditorTheme();
+    store[mode] = { id: profile.id, colors: null };
+    writeCalColorStore(store);
+    applyCalColors();
+    calColorName = "";
+    return profile.id;
+  }
+
+  function updateCalProfile(id) {
+    const store = readCalColorStore();
+    const profile = store.custom.find((item) => item.id === id);
+    if (!profile) return false;
+    profile.light = resolvedCalColors("light");
+    profile.dark = resolvedCalColors("dark");
+    ["light", "dark"].forEach((theme) => {
+      if (store[theme].id === id) store[theme] = { id, colors: null };
+    });
+    writeCalColorStore(store);
+    applyCalColors();
+    return true;
+  }
+
+  function deleteCalProfile(id) {
+    const store = readCalColorStore();
+    store.custom = store.custom.filter((item) => item.id !== id);
+    ["light", "dark"].forEach((theme) => {
+      if (store[theme].id === id) store[theme] = blankCalSide();
+    });
+    writeCalColorStore(store);
+    applyCalColors();
+  }
+
+  function resetCalTheme(theme) {
+    const store = readCalColorStore();
+    const mode = theme === "dark" ? "dark" : "light";
+    store[mode] = { id: store[mode].id, colors: null };
+    writeCalColorStore(store);
+    applyCalColors();
+  }
+
+  function calColorMenuHtml() {
+    if (!CAL_COLOR_KEYS.includes(calColorSlot)) calColorSlot = "finished";
+    const store = readCalColorStore();
+    const theme = calColorEditorTheme();
+    const side = store[theme];
+    const colors = resolvedCalColors(theme);
+    const swatches = CAL_SWATCHES[theme];
+    const edited = !!side.colors;
+    const customOn = side.id.startsWith("c_");
+    const profileBtn = (item) => {
+      const ink = item[theme] || item.light;
+      const on = side.id === item.id;
+      const dots = ["paid", "now", "pause"].map((key) => `<i style="--swatch:${esc(ink[key])}"></i>`).join("");
+      return `<button type="button" class="cal-color-profile ${on ? "is-on" : ""}" data-cal-color-profile="${esc(item.id)}" title="${esc(item.name)}">
+        <span class="cal-color-dots">${dots}</span><b>${esc(item.name)}</b>
+      </button>`;
+    };
+    const rows = CAL_COLOR_GROUPS.map((group) => {
+      const lines = group.items.map(([key, label]) => `<button type="button" class="cal-color-row ${calColorSlot === key ? "is-on" : ""}" data-cal-color-slot="${key}">
+          <i style="--swatch:${esc(colors[key])}"></i><span>${esc(label)}</span>
+        </button>`).join("");
+      return `<section class="cal-color-block">
+        <div class="cal-color-block-h"><b>${esc(group.title)}</b><span>${esc(group.hint)}</span></div>
+        <div class="cal-color-rows">${lines}</div>
+      </section>`;
+    }).join("");
+    const palette = swatches.map((hex) => `<button type="button" class="cal-swatch ${colorRgb(colors[calColorSlot]) === hex ? "is-on" : ""}" data-cal-color-swatch="${hex}" style="background:${hex}" title="${hex}" aria-label="${hex}"></button>`).join("");
+    const slotColor = colors[calColorSlot];
+    const slotRgb = colorRgb(slotColor) || "#000000";
+    const slotAlpha = colorAlpha(slotColor);
+    const hsv = rgbToHsv(...hexToRgb(slotColor));
+    const slotName = CAL_COLOR_GROUPS.flatMap((group) => group.items).find(([key]) => key === calColorSlot)?.[1] || "";
+    const custom = store.custom.length
+      ? `<div class="cal-color-profiles is-custom">${store.custom.map((item) => `<span class="cal-color-custom ${side.id === item.id ? "is-on" : ""}">
+          ${profileBtn(item)}
+          <button type="button" class="cal-color-x" data-cal-color-del="${esc(item.id)}" title="Удалить профиль" aria-label="Удалить профиль">×</button>
+        </span>`).join("")}</div>`
+      : "";
+    const note = theme === currentTheme()
+      ? "Эта схема сейчас на экране."
+      : "Включится вместе со " + (theme === "dark" ? "тёмной темой." : "светлой темой.");
+    return `<div class="cal-color-head">
+        <div class="cal-color-title" title="Перетащите, чтобы передвинуть окно">
+          <b>Цвета календаря</b>
+          <span class="cal-color-note">${note}</span>
+        </div>
+        <div class="cal-color-head-side">
+          <div class="cal-color-themes" role="tablist">
+            <button type="button" class="${theme === "light" ? "is-on" : ""}" data-cal-color-theme="light">Светлая</button>
+            <button type="button" class="${theme === "dark" ? "is-on" : ""}" data-cal-color-theme="dark">Тёмная</button>
+          </div>
+          <button type="button" class="cal-color-x" data-cal-color-close title="Закрыть" aria-label="Закрыть">×</button>
+        </div>
+      </div>
+      <section class="cal-color-block">
+        <div class="cal-color-block-h"><b>Профили</b><span>9 встроенных и свои</span></div>
+        <div class="cal-color-profiles">${CAL_COLOR_PRESETS.map(profileBtn).join("")}</div>
+        ${custom}
+        <div class="cal-color-save">
+          <input id="cal-color-name" class="cal-color-name" maxlength="32" placeholder="Имя новой схемы" value="${esc(calColorName)}" spellcheck="false" />
+          <button type="button" class="btn small" data-cal-color-save>Сохранить</button>
+          ${customOn ? `<button type="button" class="btn small" data-cal-color-update="${esc(side.id)}">Обновить</button>` : ""}
+          ${edited ? `<button type="button" class="btn small" data-cal-color-reset>Вернуть</button>` : ""}
+        </div>
+      </section>
+      <div class="cal-color-stage">
+        ${rows}
+        <section class="cal-color-block cal-color-editor">
+          <div class="cal-color-block-h"><b>Свой цвет</b><span>${esc(slotName)}</span></div>
+          <div class="cal-picker">
+            <div class="cal-picker-sv" data-cal-sv style="background-color:hsl(${hsv.h} 100% 50%)">
+              <i style="left:${hsv.s * 100}%;top:${(1 - hsv.v) * 100}%"></i>
+            </div>
+            <div class="cal-picker-hue" data-cal-hue>
+              <i style="left:${(hsv.h / 360) * 100}%"></i>
+            </div>
+            <div class="cal-picker-alpha" data-cal-alpha style="--pick:${esc(slotRgb)}">
+              <i style="left:${slotAlpha * 100}%"></i>
+            </div>
+            <label class="cal-picker-hex">
+              <i style="--swatch:${esc(slotColor)}"></i>
+              <input id="cal-color-hex" maxlength="9" spellcheck="false" value="${esc(slotRgb)}" aria-label="Код цвета" />
+              <b id="cal-color-alpha">${Math.round(slotAlpha * 100)}%</b>
+            </label>
+          </div>
+        </section>
+      </div>
+      <section class="cal-color-block">
+        <div class="cal-color-block-h"><b>Образцы</b><span>быстрый выбор для «${esc(slotName)}»</span></div>
+        <div class="cal-swatches">${palette}</div>
+      </section>`;
+  }
   const LINE_DRAG_HORIZON_DAYS = 730;
   const DEFAULT_WEEKENDS = [5, 6];
   let calDrag = null;
@@ -1228,24 +1837,64 @@
     return { map, peak, peakKey };
   }
 
-  function calendarBarColor(order) {
+  function barVars(base, veil) {
+    const raw = String(base || "").trim().toLowerCase();
+    const rgb = colorRgb(raw) || "#0f766e";
+    const alpha = /^#[0-9a-f]{8}$/.test(raw) ? colorAlpha(raw) : 1;
+    const veilRaw = String(veil || "").trim().toLowerCase();
+    const veilCss = /^#[0-9a-f]{6}/.test(veilRaw) ? veilRaw.slice(0, 9) : "transparent";
+    return `--bar:${rgb};--a:${Math.round(alpha * 100)}%;--veil:${veilCss};--ink:${rgb}${alphaByte(alpha)}`;
+  }
+
+  function pauseBarVars() {
+    return barVars(calPaint("stripe"), "");
+  }
+
+  function calendarBarPaint(order) {
     const tot = orderTotals(order);
-    if (tot.unpaid > 0.005) return workStatus(order) === "done" ? CAL_BAR_DUE : CAL_BAR_DEBT;
-    if (tot.after > 0.005) return CAL_BAR_PAID;
-    const first = (order.lines || []).find((line) => !isFrozenLine(line) && !isExpenseLine(line));
-    return statusColor(first?.status) || "#0f766e";
+    const status = workStatus(order);
+    const unpaid = tot.unpaid > 0.005;
+    const ahead = tot.after > 0.005;
+    let base;
+    if (status === "done" && unpaid) base = calPaint("due");
+    else if (unpaid && status === "planned") base = calPaint("planned");
+    else if (unpaid) base = calPaint("work");
+    else if (ahead) base = calPaint("paid");
+    else {
+      const first = (order.lines || []).find((line) => !isFrozenLine(line) && !isExpenseLine(line));
+      base = statusColor(first?.status) || calPaint("work");
+    }
+    const veil = unpaid && status !== "done" ? calPaint("debt") : "";
+    return { base, veil };
+  }
+
+  function calendarLineBarPaint(order, line) {
+    if (!line || isFrozenLine(line) || isExpenseLine(line)) return calendarBarPaint(order);
+    const proxy = lineWorkProxy(order, line);
+    const status = workStatus(proxy);
+    const t = lineTotals(line, order);
+    const unpaid = t.unpaid > 0.005;
+    const ahead = t.after > 0.005;
+    const orderDone = workStatus(order) === "done";
+    if (status === "planned") return { base: calPaint("planned"), veil: unpaid && !orderDone ? calPaint("debt") : "" };
+    if (status === "done") {
+      if (unpaid && orderDone) return { base: calPaint("due"), veil: "" };
+      return { base: calPaint("finished"), veil: unpaid ? calPaint("debt") : "" };
+    }
+    if (orderDone && unpaid) return { base: calPaint("due"), veil: "" };
+    if (!unpaid && ahead) return { base: calPaint("paid"), veil: "" };
+    const paid = paidStatus();
+    if (!unpaid && paid && line.status === paid.name) return { base: calPaint("paid"), veil: "" };
+    if (!unpaid) return { base: statusColor(line.status) || calendarBarPaint(order).base, veil: "" };
+    return { base: statusColor(line.status) || calPaint("work"), veil: calPaint("debt") };
+  }
+
+  function calendarBarColor(order) {
+    return calendarBarPaint(order).base;
   }
 
   function calendarLineBarColor(order, line) {
-    if (!line || isFrozenLine(line) || isExpenseLine(line)) return calendarBarColor(order);
-    const proxy = lineWorkProxy(order, line);
-    if (workStatus(proxy) === "planned") return CAL_BAR_PLANNED;
-    const t = lineTotals(line, order);
-    if (t.unpaid > 0.005) return workStatus(order) === "done" ? CAL_BAR_DUE : CAL_BAR_DEBT;
-    if (t.after > 0.005) return CAL_BAR_PAID;
-    const paid = paidStatus();
-    if (paid && line.status === paid.name) return CAL_BAR_PAID;
-    return statusColor(line.status) || calendarBarColor(order);
+    return calendarLineBarPaint(order, line).base;
   }
 
   function setWorkToday(order, which) {
@@ -1393,15 +2042,16 @@
     const role = day ? boardRole(order, day) : meta.label;
     const note = opts.week ? String(order.notes || "").trim() : "";
     const title = `${orderNum(order)} ${orderTitle(order)} · ${role}${due ? ` · дедлайн ${calFmtDay(due, true)}` : ""}`;
+    const paint = calendarBarPaint(order);
     const picked = calendarState().selected === order.id ? "is-selected" : "";
     if (opts.week) {
-      return `<button type="button" class="cal-chip is-week tone-${meta.tone} ${due ? "has-deadline" : ""} ${picked}" data-cal-id="${esc(order.id)}" title="${esc(title)}" style="--bar:${esc(calendarBarColor(order))}">
+      return `<button type="button" class="cal-chip is-week tone-${meta.tone} ${due ? "has-deadline" : ""} ${picked}" data-cal-id="${esc(order.id)}" title="${esc(title)}" style="${barVars(paint.base, paint.veil)}">
         <span class="cal-chip-title"><b>${esc(orderNum(order))}</b> ${esc(orderTitle(order))}</span>
         ${boardRoleLabel(role)}
         ${note ? `<em class="cal-note">${esc(note)}</em>` : ""}
       </button>`;
     }
-    return `<button type="button" class="cal-chip tone-${meta.tone} ${due ? "has-deadline" : ""} ${picked}" data-cal-id="${esc(order.id)}" title="${esc(title)}" style="--bar:${esc(calendarBarColor(order))}">
+    return `<button type="button" class="cal-chip tone-${meta.tone} ${due ? "has-deadline" : ""} ${picked}" data-cal-id="${esc(order.id)}" title="${esc(title)}" style="${barVars(paint.base, paint.veil)}">
       <b>${esc(orderNum(order))}</b>
       <span>${esc(orderTitle(order))}</span>
       ${boardRoleLabel(role)}
@@ -1441,6 +2091,7 @@
 
   function renderCalendar() {
     if (!state.doc || !$("cal-board")) return;
+    applyCalColors();
     (state.doc.orders || []).forEach((order) => syncOrderPausesFromLines(order));
     const cal = calendarState();
     const win = calendarWindow();
@@ -1501,6 +2152,20 @@
     if (weekendMenu) {
       weekendMenu.innerHTML = weekendMenuHtml();
       weekendMenu.hidden = !weekendOpen;
+    }
+    const colorBtn = $("btn-cal-colors");
+    const colorMenu = $("cal-color-menu");
+    const colorOpen = colorMenu && !colorMenu.hidden;
+    const colorStore = readCalColorStore();
+    const colorSide = colorStore[currentTheme()];
+    colorBtn?.classList.toggle("active", colorSide.id !== "current" || !!colorSide.colors);
+    colorBtn?.setAttribute("aria-expanded", String(!!colorOpen));
+    if (colorMenu) {
+      const keepName = document.activeElement === $("cal-color-name");
+      colorMenu.innerHTML = calColorMenuHtml();
+      colorMenu.hidden = !colorOpen;
+      if (keepName) $("cal-color-name")?.focus();
+      placeCalColorMenu();
     }
     const stats = $("cal-stats-pop");
     if (stats) {
@@ -1670,6 +2335,7 @@
         const segs = splitWorkSegments(span.from, span.till, proxy);
         const pauses = orderPauseSegments(proxy, span.from, span.till, today);
         if (!segs.length && !pauses.length) return;
+        const linePaint = calendarLineBarPaint(block.order, line);
         items.push({
           order: block.order,
           line,
@@ -1677,7 +2343,8 @@
           segs,
           pauses,
           kind: "line",
-          color: calendarLineBarColor(block.order, line),
+          color: linePaint.base,
+          veil: linePaint.veil,
         });
       });
     });
@@ -1702,7 +2369,7 @@
     return items.map((item) => ({ ...item, lane: laneOf.get(item) || 0, lanes }));
   }
 
-  function ganttBarsHtml(target, win, { order, lineId = "", label = "", color = "", meta, hasNote = false, noteText = "" } = {}) {
+  function ganttBarsHtml(target, win, { order, lineId = "", label = "", color = "", veil = "", meta, hasNote = false, noteText = "" } = {}) {
     const status = meta || workStatusMeta(target);
     const segs = orderWorkSegments(target, win.from, win.to, win.today);
     const pauses = orderPauseSegments(target, win.from, win.to, win.today);
@@ -1764,7 +2431,7 @@
         const showStart = isOrderBar ? edgeStart?.kind === "work" && edgeStart.i === i : first;
         const showEnd = isOrderBar ? edgeEnd?.kind === "work" && edgeEnd.i === i : last;
         const cut = `${first ? "" : " is-cut-start"}${last ? "" : " is-cut-end"}`;
-        return `<div class="gantt-bar tone-${status.tone} ${status.id === "now" ? "is-live" : ""} ${planned ? "is-planned" : ""} ${due && showEnd ? "has-deadline" : ""} ${showOpenEnd ? "is-open-end" : ""}${cut}" data-cal-id="${id}"${lineAttr} data-cal-drag="move" style="--from:${left};--span:${span};--bar:${esc(color)}" title="${esc(tip)}">
+        return `<div class="gantt-bar tone-${status.tone} ${status.id === "now" ? "is-live" : ""} ${planned ? "is-planned" : ""} ${due && showEnd ? "has-deadline" : ""} ${showOpenEnd ? "is-open-end" : ""}${cut}" data-cal-id="${id}"${lineAttr} data-cal-drag="move" style="--from:${left};--span:${span};${barVars(color, veil)}" title="${esc(tip)}">
           ${noteMark("work", i)}
           ${showStart ? `<i class="gantt-h start" data-cal-drag="start"></i>` : ""}
           ${showEnd ? `<i class="gantt-h end" data-cal-drag="end"${!isOrderBar && openEnd && showOpenEnd ? ` title="Shift+клик — пауза или работа со следующего дня"` : ""}></i>` : ""}
@@ -1789,7 +2456,7 @@
             ? `${showOrderStart ? `<i class="gantt-h start" data-cal-drag="start"></i>` : ""}${showOrderEnd ? `<i class="gantt-h end" data-cal-drag="end"></i>` : ""}`
             : `${seg.showStart ? `<i class="gantt-h start" data-cal-drag="pause-start"></i>` : "<i></i>"}
             ${seg.showEnd ? `<i class="gantt-h end" data-cal-drag="pause-end"></i>` : "<i></i>"}`;
-          return `<div class="gantt-bar is-pause ${ahead ? "is-ahead" : ""} ${showOpenEnd ? "is-open-end" : ""} ${derived ? "is-derived" : ""} ${showOrderStart || showOrderEnd ? "has-len-h" : ""}" data-cal-id="${id}"${lineAttr} data-pause-i="${seg.index}" ${derived ? "" : `data-cal-drag="pause-move"`} style="--from:${left};--span:${span};--bar:${esc(color)}" title="${esc(pauseTip)}">
+          return `<div class="gantt-bar is-pause ${ahead ? "is-ahead" : ""} ${showOpenEnd ? "is-open-end" : ""} ${derived ? "is-derived" : ""} ${showOrderStart || showOrderEnd ? "has-len-h" : ""}" data-cal-id="${id}"${lineAttr} data-pause-i="${seg.index}" ${derived ? "" : `data-cal-drag="pause-move"`} style="--from:${left};--span:${span};${pauseBarVars()}" title="${esc(pauseTip)}">
             ${noteMark("pause", i)}
             ${orderLenHandles}
           </div>`;
@@ -1836,7 +2503,9 @@
             .concat((item.pauses || []).map((seg, i) => ({ kind: "pause", i, till: seg.till.getTime() })));
           openEndAt = marks.reduce((best, cur) => (!best || cur.till >= best.till ? cur : best), null);
         }
-        const color = item.color || calendarBarColor(item.order);
+        const paint = item.color ? { base: item.color, veil: item.veil || "" } : calendarBarPaint(item.order);
+        const color = paint.base;
+        const veil = paint.veil;
         const lineAttr = item.line ? ` data-cal-line="${esc(item.line.id)}"` : "";
         const lineClass = item.kind === "line" ? " is-line" : "";
         return item.segs.map((seg, i) => {
@@ -1847,7 +2516,7 @@
           const last = i === item.segs.length - 1;
           const showOpenEnd = openEndAt?.kind === "work" && openEndAt.i === i;
           const cut = `${i ? " is-cut-start" : ""}${last ? "" : " is-cut-end"}`;
-          return `<div class="tl-nav-bar ${due ? "has-deadline" : ""}${showOpenEnd ? " is-open-end" : ""}${workStatus(target) === "planned" ? " is-planned" : ""}${lineClass}${cut}" data-cal-id="${esc(item.order.id)}"${lineAttr} style="--lane:${item.lane};--from:${from};--len:${len};--span:${full.span};--bar:${esc(color)}" title="${esc(title)}${due ? ` · до ${calFmtDay(due, true)}` : openEnd ? " · выполняется" : ""}"></div>`;
+          return `<div class="tl-nav-bar ${due ? "has-deadline" : ""}${showOpenEnd ? " is-open-end" : ""}${workStatus(target) === "planned" ? " is-planned" : ""}${lineClass}${cut}" data-cal-id="${esc(item.order.id)}"${lineAttr} style="--lane:${item.lane};--from:${from};--len:${len};--span:${full.span};${barVars(color, veil)}" title="${esc(title)}${due ? ` · до ${calFmtDay(due, true)}` : openEnd ? " · выполняется" : ""}"></div>`;
         }).concat(
           (item.pauses || []).map((seg, i) => {
             const from = Math.max(0, dayDiff(full.from, seg.from));
@@ -1855,7 +2524,7 @@
             if (till < from) return "";
             const len = till - from + 1;
             const showOpenEnd = openEndAt?.kind === "pause" && openEndAt.i === i;
-            return `<div class="tl-nav-bar is-pause${showOpenEnd ? " is-open-end" : ""}${lineClass}" data-cal-id="${esc(item.order.id)}"${lineAttr} style="--lane:${item.lane};--from:${from};--len:${len};--span:${full.span};--bar:${esc(color)}" title="${esc(title)} · пауза${openEnd ? " · выполняется" : ""}"></div>`;
+            return `<div class="tl-nav-bar is-pause${showOpenEnd ? " is-open-end" : ""}${lineClass}" data-cal-id="${esc(item.order.id)}"${lineAttr} style="--lane:${item.lane};--from:${from};--len:${len};--span:${full.span};${pauseBarVars()}" title="${esc(title)} · пауза${openEnd ? " · выполняется" : ""}"></div>`;
           })
         );
       })
@@ -1894,12 +2563,13 @@
         const pausedNow = orderIsPausedNow(order, win.today);
         const due = orderDeadline(order, win.today);
         const label = `${orderNum(order)} ${orderTitle(order)}`.trim();
-        const color = calendarBarColor(order);
+        const paint = calendarBarPaint(order);
         const workLines = calendarWorkLines(order);
         const bars = ganttBarsHtml(order, win, {
           order,
           label,
-          color,
+          color: paint.base,
+          veil: paint.veil,
           hasNote: lineHasNote(order),
           noteText: String(order.notes || "").trim(),
         });
@@ -1915,11 +2585,13 @@
                 const lineMeta = lineWorkMeta(order, line);
                 const linePaused = orderIsPausedNow(proxy, win.today);
                 const lineLabel = lineWorkName(line, index);
+                const linePaint = calendarLineBarPaint(order, line);
                 const lineBars = ganttBarsHtml(proxy, win, {
                   order,
                   lineId: line.id,
                   label: `${label} · ${lineLabel}`,
-                  color: calendarLineBarColor(order, line),
+                  color: linePaint.base,
+                  veil: linePaint.veil,
                   meta: lineMeta,
                   hasNote: lineHasNote(line),
                   noteText: String(line.notes || "").trim(),
@@ -2351,6 +3023,10 @@
   }
 
   function onCalClick(e) {
+    if (calPickerBlockClick) {
+      calPickerBlockClick = false;
+      return;
+    }
     const onTools = e.target.closest(".cal-tools");
     if (calSkipClick) {
       calSkipClick = false;
@@ -2375,6 +3051,72 @@
       const open = menu.hidden;
       menu.hidden = !open;
       btn?.setAttribute("aria-expanded", String(open));
+      return;
+    }
+    if (e.target.closest("#btn-cal-colors")) {
+      const menu = $("cal-color-menu");
+      const btn = $("btn-cal-colors");
+      if (!menu) return;
+      closeCalFilter();
+      closeWeekendMenu();
+      if (!menu.hidden) return;
+      menu.hidden = false;
+      btn?.setAttribute("aria-expanded", "true");
+      calColorTheme = currentTheme();
+      menu.innerHTML = calColorMenuHtml();
+      placeCalColorMenu();
+      return;
+    }
+    if (e.target.closest("#cal-color-menu")) {
+      if (e.target.closest("[data-cal-color-close]")) {
+        closeColorMenu();
+        return;
+      }
+      const themeBtn = e.target.closest("[data-cal-color-theme]");
+      if (themeBtn) {
+        calColorTheme = themeBtn.dataset.calColorTheme === "dark" ? "dark" : "light";
+        renderCalendar();
+        return;
+      }
+      const profileBtn = e.target.closest("[data-cal-color-profile]");
+      if (profileBtn && !e.target.closest("[data-cal-color-del]")) {
+        assignCalProfile(calColorEditorTheme(), profileBtn.dataset.calColorProfile);
+        renderCalendar();
+        return;
+      }
+      const delBtn = e.target.closest("[data-cal-color-del]");
+      if (delBtn) {
+        deleteCalProfile(delBtn.dataset.calColorDel);
+        renderCalendar();
+        return;
+      }
+      const slotBtn = e.target.closest("[data-cal-color-slot]");
+      if (slotBtn) {
+        calColorSlot = slotBtn.dataset.calColorSlot || "paid";
+        renderCalendar();
+        return;
+      }
+      const swatch = e.target.closest("[data-cal-color-swatch]");
+      if (swatch) {
+        paintCalColor(calColorEditorTheme(), calColorSlot, swatch.dataset.calColorSwatch);
+        renderCalendar();
+        return;
+      }
+      if (e.target.closest("[data-cal-color-save]")) {
+        saveCalProfile(calColorName || $("cal-color-name")?.value);
+        renderCalendar();
+        return;
+      }
+      if (e.target.closest("[data-cal-color-update]")) {
+        updateCalProfile(e.target.closest("[data-cal-color-update]").dataset.calColorUpdate);
+        renderCalendar();
+        return;
+      }
+      if (e.target.closest("[data-cal-color-reset]")) {
+        resetCalTheme(calColorEditorTheme());
+        renderCalendar();
+        return;
+      }
       return;
     }
     if (e.target.closest("#btn-cal-weekends")) {
@@ -3189,6 +3931,12 @@
     $("btn-cal-weekends")?.setAttribute("aria-expanded", "false");
   }
 
+  function closeColorMenu() {
+    const menu = $("cal-color-menu");
+    if (menu) menu.hidden = true;
+    $("btn-cal-colors")?.setAttribute("aria-expanded", "false");
+  }
+
   function closeCalMenus() {
     closeCalFilter();
     closeWeekendMenu();
@@ -3198,7 +3946,34 @@
     $("view-calendar")?.addEventListener("click", onCalClick);
     $("view-calendar")?.addEventListener("contextmenu", onCalContextMenu);
     $("view-calendar")?.addEventListener("change", onCalChange);
+    $("view-calendar")?.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      if (e.target.id === "cal-color-name") {
+        e.preventDefault();
+        saveCalProfile(calColorName);
+        renderCalendar();
+        return;
+      }
+      if (e.target.id === "cal-color-hex") {
+        e.preventDefault();
+        renderCalendar();
+      }
+    });
     $("view-calendar")?.addEventListener("input", (e) => {
+      if (e.target.id === "cal-color-name") {
+        calColorName = String(e.target.value || "").slice(0, 32);
+        return;
+      }
+      if (e.target.id === "cal-color-hex") {
+        let raw = String(e.target.value || "").trim();
+        if (/^[0-9a-fA-F]{6}$/.test(raw) || /^[0-9a-fA-F]{8}$/.test(raw)) raw = `#${raw}`;
+        const eight = /^#[0-9a-fA-F]{8}$/.test(raw);
+        const hex = calHex(eight ? raw.slice(0, 7) : raw, "");
+        if (!hex) return;
+        const clean = paintCalSlot(hex, { now: false, alpha: eight ? parseInt(raw.slice(7), 16) / 255 : null });
+        if (clean) syncCalPicker(clean);
+        return;
+      }
       const cal = calendarState();
       const order = findOrder(cal.selected);
       if (!order) return;
@@ -3214,6 +3989,22 @@
         markDirty();
       }
     });
+    $("view-calendar")?.addEventListener("pointerdown", (e) => {
+      if (onCalColorHeadDown(e)) return;
+      onCalPickerDown(e);
+    });
+    window.addEventListener("pointermove", moveCalPicker);
+    window.addEventListener("pointerup", onCalPickerUp);
+    window.addEventListener("pointercancel", onCalPickerUp);
+    $("view-calendar")?.addEventListener("focusout", (e) => {
+      if (e.target.id !== "cal-color-hex") return;
+      setTimeout(() => {
+        if (calPickerDrag) return;
+        const active = document.activeElement;
+        if (active && active.closest && active.closest("#cal-color-menu")) return;
+        if ($("cal-color-menu") && !$("cal-color-menu").hidden) renderCalendar();
+      }, 0);
+    });
     $("cal-board")?.addEventListener("pointerdown", onCalPointerDown);
     $("cal-board")?.addEventListener("pointermove", onGanttDayHover);
     $("cal-board")?.addEventListener("pointerleave", onGanttDayHover);
@@ -3222,7 +4013,7 @@
     window.addEventListener("pointerup", onCalPointerUp);
     window.addEventListener("pointercancel", onCalPointerUp);
     document.addEventListener("click", (e) => {
-      if (e.target.closest("#cal-filter") || e.target.closest("#cal-weekends")) return;
+      if (e.target.closest("#cal-filter") || e.target.closest("#cal-weekends") || e.target.closest("#cal-colors")) return;
       closeCalMenus();
     });
   }
