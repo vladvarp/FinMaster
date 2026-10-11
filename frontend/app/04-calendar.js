@@ -194,7 +194,25 @@
     return dateDay(pause?.end);
   }
 
-  function isPaused(order, day) {
+  function previousWorkDay(day) {
+    const start = day instanceof Date ? dayStart(day) : parseDay(day);
+    if (!start) return null;
+    let d = addDays(start, -1);
+    const cap = addDays(start, -21);
+    while (d >= cap && isWeekend(d)) d = addDays(d, -1);
+    return d >= cap && !isWeekend(d) ? d : null;
+  }
+
+  function followingWorkDay(day) {
+    const start = day instanceof Date ? dayStart(day) : parseDay(day);
+    if (!start) return null;
+    let d = addDays(start, 1);
+    const cap = addDays(start, 21);
+    while (d <= cap && isWeekend(d)) d = addDays(d, 1);
+    return d <= cap && !isWeekend(d) ? d : null;
+  }
+
+  function pauseOnDay(order, day) {
     const key = typeof day === "string" ? String(day).slice(0, 10) : dayKey(dayStart(day));
     const todayKey = dayKey(dayStart(new Date()));
     return workPauses(order).some((pause) => {
@@ -205,6 +223,46 @@
       const till = pauseEndKey(order, pause, dayStart(new Date()));
       return !!(till && key <= till);
     });
+  }
+
+  /** Выходной не снимает паузу: если последний рабочий день ещё в паузе, выходные тоже. */
+  function isPaused(order, day) {
+    if (pauseOnDay(order, day)) return true;
+    const key = typeof day === "string" ? String(day).slice(0, 10) : dayKey(dayStart(day));
+    const d = typeof day === "string" ? parseDay(key) : dayStart(day);
+    if (!d || !isWeekend(d)) return false;
+    const prev = previousWorkDay(d);
+    if (!prev || !pauseOnDay(order, prev)) return false;
+    const prevKey = dayKey(prev);
+    const resumed = workPauses(order).some((pause) => {
+      if (!pause.resumeNext || pauseIsOpen(order, pause)) return false;
+      const end = dateDay(pause.end);
+      return !!end && end >= prevKey && end <= key;
+    });
+    return !resumed;
+  }
+
+  /** Пауза кончилась до выходного, а Shift уже поставил возобновление со следующего рабочего дня. */
+  function carriedResume(order, today) {
+    if (!isWeekend(today)) return null;
+    const todayKey = dayKey(today);
+    const prev = previousWorkDay(today);
+    if (!prev) return null;
+    const prevKey = dayKey(prev);
+    return (
+      workPauses(order).find((pause) => {
+        if (!pause.resumeNext || pauseIsOpen(order, pause)) return false;
+        const end = dateDay(pause.end);
+        return !!end && end >= prevKey && end < todayKey;
+      }) || null
+    );
+  }
+
+  function explicitResumePause(order, today) {
+    const carried = carriedResume(order, today);
+    if (carried) return carried;
+    const todayKey = dayKey(today);
+    return workPauses(order).find((pause) => pause.resumeNext && dateDay(pause.end) === todayKey && !pauseIsOpen(order, pause)) || null;
   }
 
   function clampDay(day, min, max) {
@@ -296,6 +354,17 @@
       normalizeWorkPauses(proxy);
       return "Пауза со следующего дня снята";
     }
+    const carried = carriedResume(proxy, today);
+    if (carried) {
+      const start = dateDay(carried.start);
+      const end = dateDay(carried.end);
+      proxy.work_pauses = workPauses(proxy).map((pause) => {
+        if (!pause.resumeNext || dateDay(pause.start) !== start || dateDay(pause.end) !== end) return pause;
+        return { start: pause.start, end: pause.end };
+      });
+      normalizeWorkPauses(proxy);
+      return "С завтра снова на паузе";
+    }
     if (isPaused(proxy, today)) {
       let changed = false;
       proxy.work_pauses = workPauses(proxy).map((pause) => {
@@ -313,12 +382,24 @@
         }
         return pause;
       });
+      if (!changed && isWeekend(today)) {
+        const prev = previousWorkDay(today);
+        const prevKey = prev ? dayKey(prev) : "";
+        proxy.work_pauses = workPauses(proxy).map((pause) => {
+          const from = dateDay(pause.start);
+          const till = pauseIsOpen(proxy, pause) ? todayKey : dateDay(pause.end);
+          if (!from || !till || !prevKey || prevKey < from || prevKey > till || pause.resumeNext) return pause;
+          changed = true;
+          return { start: from, end: pauseIsOpen(proxy, pause) ? prevKey : till, resumeNext: true };
+        });
+      }
       if (!changed) return "";
       normalizeWorkPauses(proxy);
       return isPaused(proxy, addDays(today, 1)) ? "С завтра снова на паузе" : "С завтрашнего дня без паузы";
     }
-    const key = dayKey(addDays(today, 1));
-    proxy.work_pauses = workPauses(proxy).concat({ start: key, end: "", open: true });
+    let next = addDays(today, 1);
+    if (isWeekend(next)) next = followingWorkDay(today) || next;
+    proxy.work_pauses = workPauses(proxy).concat({ start: dayKey(next), end: "", open: true });
     normalizeWorkPauses(proxy);
     return "С завтрашнего дня позиция на паузе";
   }
@@ -947,16 +1028,16 @@
 
   function resumeDrawTill(order, today) {
     if (dateDay(order?.work_end)) return null;
-    const todayKey = dayKey(today);
-    const tomorrow = addDays(today, 1);
-    if (isPaused(order, tomorrow)) return null;
     // Обычная пауза на сегодня (Shift по дню или кнопка) завтра не планирует.
-    // Завтра рисуется только после явного Shift по краю: пауза закрыта с пометкой resumeNext.
-    const explicit = workPauses(order).some((pause) => pause.resumeNext && dateDay(pause.end) === todayKey && !pauseIsOpen(order, pause));
-    if (!explicit) return null;
-    let day = tomorrow;
-    const cap = addDays(day, 8);
+    // Следующий рабочий день рисуется только после явного Shift по краю: пауза закрыта с пометкой resumeNext.
+    // Если Shift нажали в выходной, пауза кончается последним рабочим днём, а полоса работы — после выходных.
+    const hit = explicitResumePause(order, today);
+    if (!hit) return null;
+    let day = addDays(parseDay(dateDay(hit.end)), 1);
+    const cap = addDays(today, 21);
     while (day <= cap && isWeekend(day)) day = addDays(day, 1);
+    if (!day || day <= today || isWeekend(day)) return null;
+    if (pauseOnDay(order, day)) return null;
     return day;
   }
 
