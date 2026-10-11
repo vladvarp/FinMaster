@@ -1958,12 +1958,25 @@
     return kinds.length > 0 && kinds.every((kind) => kind === "pause");
   }
 
+  /** Первый день, когда полоса уже не на паузе. Старт на неделе — он, а не дата начала паузы. */
+  function firstWorkDayKey(target) {
+    const startKey = dateDay(target?.work_start);
+    const start = parseDay(startKey);
+    if (!start) return "";
+    const end = parseDay(dateDay(target?.work_end));
+    const cap = end || addDays(start, 90);
+    for (let d = start; d <= cap; d = addDays(d, 1)) {
+      if (!isPaused(target, d)) return dayKey(d);
+    }
+    return startKey;
+  }
+
   /** Роль дня на неделе и в месяце: не путает прошедшее, сегодня и дни после сегодня. */
   function boardRole(target, day) {
     if (!target || !day) return "";
     const key = dayKey(dayStart(day));
     const today = dayKey(dayStart(new Date()));
-    const start = dateDay(target.work_start);
+    const start = firstWorkDayKey(target);
     const end = dateDay(target.work_end);
     if (start && end && start === end && start === key) return "старт и финиш";
     if (boardDayPaused(target, day)) return "пауза";
@@ -2690,14 +2703,14 @@
         const key = dayKey(day);
         const items = list.filter((order) => orderMarksDay(order, day));
         const shown = items.filter((order) => !orderPauseHidden(order, day));
-        const starts = shown.filter((order) => dateDay(order.work_start) === key && !boardDayPaused(order, day));
+        const starts = shown.filter((order) => firstWorkDayKey(order) === key && !boardDayPaused(order, day));
         const ends = shown.filter((order) => {
           const end = dateDay(order.work_end);
-          const start = dateDay(order.work_start);
+          const start = firstWorkDayKey(order);
           return end === key && end !== start && !boardDayPaused(order, day);
         });
         const paused = shown.filter((order) => boardDayPaused(order, day));
-        const running = shown.filter((order) => !boardDayPaused(order, day) && dateDay(order.work_start) !== key && dateDay(order.work_end) !== key);
+        const running = shown.filter((order) => !boardDayPaused(order, day) && firstWorkDayKey(order) !== key && dateDay(order.work_end) !== key);
         const n = load.map[key] || 0;
         const pct = Math.min(100, (n / Math.max(CAL_HOT_LOAD, load.peak || 1)) * 100);
         const note = dayNote(key);
