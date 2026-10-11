@@ -744,7 +744,18 @@
   padding: 2px 4px 2px 8px;
   box-shadow: inset 3px 0 0 var(--ink, var(--bar, var(--accent)));
 }
-.cal-line.is-selected span { color: var(--accent); }
+.cal-line.is-selected {
+  border-radius: 7px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent-2) 50%, transparent),
+    0 0 10px color-mix(in srgb, var(--accent-2) 42%, transparent);
+}
+.cal-line.has-tone.is-selected {
+  box-shadow:
+    inset 3px 0 0 var(--ink, var(--bar, var(--accent))),
+    0 0 0 1px color-mix(in srgb, var(--accent-2) 50%, transparent),
+    0 0 10px color-mix(in srgb, var(--accent-2) 42%, transparent);
+}
 .cal-chip i.role-start,
 .cal-line i.role-start,
 .cal-col-sec.role-start,
@@ -792,15 +803,16 @@
 .cal-chip.tone-pause i:not([class*="role-"]) { color: var(--cal-pause, #dc2626); font-weight: 700; }
 .cal-chip.has-deadline i:not([class*="role-"]) { color: #d97706; font-weight: 700; }
 .cal-chip.is-selected {
-  background: color-mix(in srgb, var(--accent-2) 28%, var(--card));
   box-shadow:
     inset 3px 0 0 var(--ink, var(--bar, var(--accent))),
     inset 0 0 0 999px var(--veil, transparent),
-    0 0 0 2px var(--accent-2),
-    0 0 16px color-mix(in srgb, var(--accent-2) 55%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--accent-2) 70%, transparent),
+    0 0 12px color-mix(in srgb, var(--accent-2) 45%, transparent);
 }
 .cal-board:has(.cal-chip.is-selected) .cal-chip:not(.is-selected),
-.cal-board:has(.cal-chip.is-selected) .cal-chip:not(.is-selected) + .cal-lines {
+.cal-board:has(.cal-chip.is-selected) .cal-chip:not(.is-selected) + .cal-lines,
+.cal-board:has(.cal-line.is-selected) .cal-chip:has(+ .cal-lines .cal-line.is-selected) + .cal-lines .cal-line:not(.is-selected),
+.cal-board:has(.cal-line.is-selected) .cal-chip:not(:has(+ .cal-lines .cal-line.is-selected)) {
   opacity: 0.38;
 }
 .cal-cell.is-out:has(.cal-chip.is-selected) { opacity: 1; }
@@ -1390,9 +1402,6 @@ html[data-theme="dark"] .cal-color-themes button.is-on { background: #243044; }
 html[data-theme="dark"] .cal-color-name,
 html[data-theme="dark"] .cal-picker-hex input { background: var(--control-bg, #1b2538); }
 html[data-theme="dark"] .cal-chip { background: #1b2538; }
-html[data-theme="dark"] .cal-chip.is-selected {
-  background: color-mix(in srgb, var(--accent-2) 34%, #1b2538);
-}
 html[data-theme="dark"] .cal-note {
   color: #f5f3ff;
   background: color-mix(in srgb, #a78bfa 32%, #121826);

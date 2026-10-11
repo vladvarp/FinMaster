@@ -2067,7 +2067,7 @@
     const note = opts.week ? String(order.notes || "").trim() : "";
     const title = `${orderNum(order)} ${orderTitle(order)} · ${role}${due ? ` · дедлайн ${calFmtDay(due, true)}` : ""}`;
     const paint = calendarBarPaint(order);
-    const picked = calendarState().selected === order.id ? "is-selected" : "";
+    const picked = calSelectedClass(order.id);
     if (opts.week) {
       return `<button type="button" class="cal-chip is-week tone-${meta.tone} ${due ? "has-deadline" : ""} ${picked}" data-cal-id="${esc(order.id)}" title="${esc(title)}" style="${barVars(paint.base, paint.veil)}">
         <span class="cal-chip-title"><b>${esc(orderNum(order))}</b> ${esc(orderTitle(order))}</span>
