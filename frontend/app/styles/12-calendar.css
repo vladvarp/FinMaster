@@ -666,7 +666,6 @@
 }
 .gantt-row.is-selected { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .gantt-row.is-open { background: color-mix(in srgb, var(--accent) 4%, transparent); }
-.gantt-row.is-paused .gantt-label small { color: #7c3aed; }
 .gantt-head {
   display: flex;
   align-items: stretch;
@@ -932,6 +931,12 @@
 }
 .gantt-bar.is-pause .gantt-h { background: color-mix(in srgb, var(--bar, var(--accent)) 55%, #fff); }
 .gantt-label small { color: var(--muted); }
+.gantt-label small .gantt-status { font-weight: 700; }
+.gantt-label small .gantt-status.role-now { color: #0369a1; }
+.gantt-label small .gantt-status.role-pause { color: #dc2626; }
+.gantt-label small .gantt-status.role-plan { color: #b45309; }
+.gantt-label small .gantt-status.role-done { color: #15803d; }
+.gantt-label small .gantt-status.role-warn { color: #c2410c; }
 .gantt-row.has-deadline .gantt-label small { color: color-mix(in srgb, #d97706 55%, var(--muted)); }
 .gantt-bar.is-drag { cursor: grabbing; opacity: 0.9; }
 .gantt-bar.is-pause.is-derived {
@@ -1064,6 +1069,11 @@ html[data-theme="dark"] .cal-col-sec.role-plan { color: #fbbf24; }
 html[data-theme="dark"] .cal-chip i.role-pause,
 html[data-theme="dark"] .cal-line i.role-pause,
 html[data-theme="dark"] .cal-col-sec.role-pause { color: #f87171; }
+html[data-theme="dark"] .gantt-label small .gantt-status.role-now { color: #7dd3fc; }
+html[data-theme="dark"] .gantt-label small .gantt-status.role-pause { color: #f87171; }
+html[data-theme="dark"] .gantt-label small .gantt-status.role-plan { color: #fbbf24; }
+html[data-theme="dark"] .gantt-label small .gantt-status.role-done { color: #4ade80; }
+html[data-theme="dark"] .gantt-label small .gantt-status.role-warn { color: #fdba74; }
 html[data-theme="dark"] .cal-chip { background: #1b2538; }
 html[data-theme="dark"] .cal-chip.is-selected {
   background: color-mix(in srgb, var(--accent-2) 34%, #1b2538);

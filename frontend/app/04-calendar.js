@@ -1337,6 +1337,18 @@
     }[role] || "";
   }
 
+  /** Подпись статуса в таймлайне красится как роль недели: идёт сейчас, пауза, план, финиш. */
+  function ganttStatusHtml(meta) {
+    const role = {
+      now: "role-now",
+      paused: "role-pause",
+      planned: "role-plan",
+      done: "role-done",
+      overdue: "role-warn",
+    }[meta?.id] || "";
+    return `<span class="gantt-status${role ? ` ${role}` : ""}">${esc(meta?.label || "")}</span>`;
+  }
+
   function boardRoleIcon(roleClass) {
     const icons = {
       "role-start": `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.2v9.6L13 8z" fill="currentColor"/></svg>`,
@@ -1917,7 +1929,7 @@
           <div class="gantt-head">
             <button type="button" class="gantt-label" data-cal-id="${esc(order.id)}" data-cal-line="${esc(line.id)}">
               <b>${esc(lineLabel)}</b>
-              <small>${esc(lineMeta.label)}${days ? ` · ${days} дн.` : ""}</small>
+              <small>${ganttStatusHtml(lineMeta)}${days ? ` · ${days} дн.` : ""}</small>
             </button>
           </div>
           <div class="gantt-track" data-cal-track="${esc(order.id)}" data-cal-line="${esc(line.id)}">${lineBars}</div>
@@ -1930,7 +1942,7 @@
             ${expand}
             <button type="button" class="gantt-label" data-cal-id="${esc(order.id)}">
               <b>${esc(orderNum(order))} ${esc(orderTitle(order))}</b>
-              <small>${esc(order.customer || "без заказчика")} · ${esc(meta.label)}${workDurationDays(order) ? ` · ${workDurationDays(order)} дн.` : ""}${due ? ` · до ${calFmtDay(due)}` : ""}${workLines.length ? ` · ${workLines.length} поз.` : ""}</small>
+              <small>${esc(order.customer || "без заказчика")} · ${ganttStatusHtml(meta)}${workDurationDays(order) ? ` · ${workDurationDays(order)} дн.` : ""}${due ? ` · до ${calFmtDay(due)}` : ""}${workLines.length ? ` · ${workLines.length} поз.` : ""}</small>
             </button>
           </div>
           <div class="gantt-track" data-cal-track="${esc(order.id)}">${bars}</div>
