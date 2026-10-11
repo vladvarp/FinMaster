@@ -37,6 +37,7 @@
         ["due", "Закрыт с долгом"],
         ["planned", "Запланировано"],
         ["work", "В работе"],
+        ["live", "Выполняется"],
         ["finished", "Завершено"],
         ["stripe", "Штрих паузы"],
       ],
@@ -65,6 +66,7 @@
       due: CAL_BAR_DUE,
       planned: CAL_BAR_PLANNED,
       work: "#0f766e",
+      live: "#0369a1",
       finished: "#166534",
       stripe: "#64748b",
       edge: "#15803d",
@@ -73,7 +75,9 @@
       plan: "#b45309",
       pause: "#dc2626",
     };
-    return Object.assign(base, partial || {});
+    const out = Object.assign(base, partial || {});
+    if (partial && partial.live == null && partial.now) out.live = partial.now;
+    return out;
   }
   const CAL_COLOR_PRESETS = [
     {
@@ -566,7 +570,7 @@
           <i style="--swatch:${esc(colors[key])}"></i><span>${esc(label)}</span>
         </button>`).join("");
       return `<section class="cal-color-block">
-        <div class="cal-color-block-h"><b>${esc(group.title)}</b><span>${esc(group.hint)}</span></div>
+        <div class="cal-color-block-h"><b>${esc(group.title)}</b><button type="button" class="cal-color-info" title="${esc(group.hint)}" aria-label="${esc(group.hint)}">i</button></div>
         <div class="cal-color-rows">${lines}</div>
       </section>`;
     }).join("");
@@ -1881,6 +1885,13 @@
       if (unpaid && orderDone) return { base: calPaint("due"), veil: "" };
       return { base: calPaint("finished"), veil: unpaid ? calPaint("debt") : "" };
     }
+    if (status === "now") {
+    if (orderDone && unpaid) return { base: calPaint("due"), veil: "" };
+    if (!unpaid && ahead) return { base: calPaint("paid"), veil: "" };
+    const paidNow = paidStatus();
+    if (!unpaid && paidNow && line.status === paidNow.name) return { base: calPaint("paid"), veil: "" };
+    return { base: calPaint("live"), veil: unpaid ? calPaint("debt") : "" };
+    }
     if (orderDone && unpaid) return { base: calPaint("due"), veil: "" };
     if (!unpaid && ahead) return { base: calPaint("paid"), veil: "" };
     const paid = paidStatus();
@@ -2093,7 +2104,9 @@
         const note = String(line.notes || "").trim();
         const proxy = lineWorkProxy(order, line);
         const label = boardRole(proxy, day);
-        return `<button type="button" class="cal-line ${kind === "pause" ? "is-pause" : ""} ${calSelectedClass(order.id, line.id)}" data-cal-id="${esc(order.id)}" data-cal-line="${esc(line.id)}">
+        const going = kind !== "pause" && workStatus(proxy) === "now" && !isPaused(proxy, day);
+        const tone = going ? ` style="${barVars(calPaint("live"), "")}"` : "";
+        return `<button type="button" class="cal-line ${going ? "has-tone" : ""} ${kind === "pause" ? "is-pause" : ""} ${calSelectedClass(order.id, line.id)}" data-cal-id="${esc(order.id)}" data-cal-line="${esc(line.id)}"${tone}>
           <span>${esc(lineWorkName(line, index))}</span>
           ${boardRoleLabel(label)}
           ${note ? `<em class="cal-note">${esc(note)}</em>` : ""}
