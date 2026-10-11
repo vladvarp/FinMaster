@@ -305,8 +305,8 @@
     const totalsFont = font(o.bold ? 700 : 600, 11 * f);
 
     blocks.forEach(({ order, lines }, bi) => {
-      const sub = blocks.length > 1 ? `Заказ ${bi + 1} из ${blocks.length}` : "";
-      const label = `Заказ ${order.number || "—"}`;
+      const sub = blocks.length > 1 ? `${bi + 1} из ${blocks.length}` : "";
+      const label = `${order.number || "—"}`;
       pageTitle =
         o.orderTitles && blocks.length > 1
           ? [String(order.number || "").trim(), String(order.name || "").trim()].filter(Boolean).join(" · ") || title
