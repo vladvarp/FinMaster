@@ -1137,7 +1137,7 @@
       return span && d >= span.from && d <= span.till;
     });
     if (!covering.length) return true;
-    return covering.every((line) => isPaused(lineWorkProxy(order, line), d));
+    return covering.every((line) => pauseOnDay(lineWorkProxy(order, line), d));
   }
 
   function syncOrderPausesFromLines(order) {
@@ -1160,13 +1160,6 @@
     const items = [];
     let run = null;
     for (let d = span.from; d <= span.till; d = addDays(d, 1)) {
-      if (isWeekend(d)) {
-        if (run) {
-          items.push(run);
-          run = null;
-        }
-        continue;
-      }
       if (dayIsOrderDerivedPause(order, d, today)) {
         if (!run) run = { start: dayKey(d), end: dayKey(d) };
         else run.end = dayKey(d);
@@ -1391,25 +1384,14 @@
     return String(a.number).localeCompare(String(b.number), "ru", { numeric: true });
   }
 
-  function firstWorkOnOrAfter(day, limit) {
-    const cap = dayStart(limit || addDays(day, 16));
-    for (let d = dayStart(day); d <= cap; d = addDays(d, 1)) {
-      if (!isWeekend(d)) return d;
-    }
-    return null;
-  }
-
   function orderCoversDay(order, day) {
-    if (isWeekend(day) || isPaused(order, day)) return false;
+    if (isPaused(order, day)) return false;
     const { start, end } = workSpan(order);
     if (!start && !end) return false;
     const d = dayStart(day);
     const today = dayStart(new Date());
     if (start && !end) {
-      if (start > today) {
-        const shown = isWeekend(start) ? firstWorkOnOrAfter(start) : start;
-        return shown && dayKey(d) === dayKey(shown);
-      }
+      if (start > today) return dayKey(d) === dayKey(start);
       return d >= start && d <= today;
     }
     if (!start && end) return d <= end;
@@ -1417,7 +1399,6 @@
   }
 
   function orderMarksDay(order, day) {
-    if (isWeekend(day)) return false;
     const d = dayStart(day);
     if (d > dayStart(new Date()) && Array.isArray(order?.lines)) {
       return calendarWorkLines(order).some((line) => positionCoversFutureDay(order, line, day));
@@ -1440,7 +1421,7 @@
   function lineFutureKind(order, line, day) {
     const d = dayStart(day);
     const today = dayStart(new Date());
-    if (!d || d <= today || isWeekend(d)) return "";
+    if (!d || d <= today) return "";
     const proxy = lineWorkProxy(order, line);
     const painted = timelinePaintKind(proxy, d, today);
     if (painted) return painted;
@@ -1462,7 +1443,7 @@
   }
 
   function boardCoversDay(target, day) {
-    if (isWeekend(day) || isPaused(target, day)) return false;
+    if (isPaused(target, day)) return false;
     const { start, end } = workSpan(target);
     if (!start && !end) return false;
     const d = dayStart(day);
@@ -1487,7 +1468,7 @@
     let segStart = null;
     let prev = null;
     for (let d = dayStart(from); d <= till; d = addDays(d, 1)) {
-      if (!isWeekend(d) && !(order && isPaused(order, d))) {
+      if (!(order && pauseOnDay(order, d))) {
         if (!segStart) segStart = d;
         prev = d;
       } else if (segStart) {
@@ -1659,7 +1640,7 @@
     if (!start && !end) return null;
     if (start && !end) {
       if (start > today) {
-        const from = isWeekend(start) ? firstWorkOnOrAfter(start) : start;
+        const from = start;
         if (!from) return null;
         let till = from;
         if (Array.isArray(order?.lines)) {
