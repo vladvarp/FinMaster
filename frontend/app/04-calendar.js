@@ -790,6 +790,7 @@
 
   function pauseIsOpen(order, pause) {
     if (!pause || dateDay(order.work_end)) return false;
+    if (pause.resumeNext) return false;
     if (pause.open) return true;
     const till = dateDay(pause.end);
     if (!till) return !!dateDay(pause.start);

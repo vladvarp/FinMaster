@@ -312,6 +312,7 @@
 
   function pauseIsOpen(order, pause) {
     if (!pause || dateValue(order.work_end)) return false;
+    if (pause.resumeNext) return false;
     if (pause.open) return true;
     const till = dateValue(pause.end);
     if (!till) return !!dateValue(pause.start);
