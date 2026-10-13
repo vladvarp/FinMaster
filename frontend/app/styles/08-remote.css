@@ -140,7 +140,21 @@
   background: color-mix(in srgb, var(--ink) 8%, transparent);
   color: var(--ink);
 }
-#net-console-clear { margin-left: auto; }
+.net-console-cal {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  font-family: var(--sans);
+}
+.net-console-cal-day {
+  min-width: 4.5em;
+  padding: 0 6px;
+  font: 650 11px var(--mono);
+  color: var(--accent);
+}
+.net-console-cal-day:empty { display: none; }
+#net-console-clear { margin-left: 0; }
 .net-console-body {
   flex: 1;
   min-height: 0;

@@ -154,6 +154,9 @@
   function bindNetConsole() {
     $("remote-console-open")?.addEventListener("click", () => toggleNetConsole(true));
     $("net-console-close")?.addEventListener("click", () => closeNetConsole());
+    $("net-console-cal-next")?.addEventListener("click", () => applyClockOffset(clockOffsetDays + 1));
+    $("net-console-cal-reset")?.addEventListener("click", () => applyClockOffset(0));
+    paintClockOffset();
     $("net-console-clear")?.addEventListener("click", async () => {
       try {
         await apiPost("/api/remote/log/clear", {});

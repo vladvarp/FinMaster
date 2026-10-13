@@ -796,7 +796,7 @@
     return false;
   }
 
-  function pauseEndKey(order, pause, today = dayStart(new Date())) {
+  function pauseEndKey(order, pause, today = clockToday()) {
     if (pauseIsOpen(order, pause)) {
       const startKey = dateDay(pause.start);
       const todayKey = dayKey(today);
@@ -827,13 +827,13 @@
 
   function pauseOnDay(order, day) {
     const key = typeof day === "string" ? String(day).slice(0, 10) : dayKey(dayStart(day));
-    const todayKey = dayKey(dayStart(new Date()));
+    const todayKey = dayKey(clockToday());
     return workPauses(order).some((pause) => {
       const from = dateDay(pause.start);
       if (!from || key < from) return false;
       // Пауза без конца, которая начинается позже сегодня, закрывает все дни вперёд.
       if (pauseIsOpen(order, pause) && from > todayKey) return true;
-      const till = pauseEndKey(order, pause, dayStart(new Date()));
+      const till = pauseEndKey(order, pause, clockToday());
       return !!(till && key <= till);
     });
   }
@@ -892,13 +892,13 @@
       return order;
     }
     const envStart = start;
-    const envEnd = end || (start ? dayKey(dayStart(new Date())) : "");
+    const envEnd = end || (start ? dayKey(clockToday()) : "");
     const items = [];
     workPauses(order).forEach((pause) => {
       if (!pause || typeof pause !== "object") return;
       let from = dateDay(pause.start);
       let till = dateDay(pause.end);
-      const todayKey = envEnd && !end ? envEnd : dayKey(dayStart(new Date()));
+      const todayKey = envEnd && !end ? envEnd : dayKey(clockToday());
       const explicitEnd = !pause.open && !!dateDay(pause.end);
       const wasOpen = !!(pause.open || !till);
       let open = !end && !explicitEnd && (wasOpen || (till && envEnd && till >= envEnd));
@@ -958,7 +958,7 @@
   }
 
   function toggleLineFromNextDay(proxy) {
-    const today = dayStart(new Date());
+    const today = clockToday();
     if (dateDay(proxy?.work_end)) return "";
     if (workStatus(proxy, today) !== "now") return "";
     const todayKey = dayKey(today);
@@ -1116,7 +1116,7 @@
   }
 
   /** Срок позиции без расширения по sibling-линиям заказа. */
-  function lineOwnDrawSpan(order, line, today = dayStart(new Date())) {
+  function lineOwnDrawSpan(order, line, today = clockToday()) {
     const floor = lineDateFloor(line);
     let start = dateDay(line?.work_start) || dateDay(order?.work_start);
     let end = dateDay(line?.work_end) || dateDay(order?.work_end);
@@ -1127,7 +1127,7 @@
     return orderDrawSpan({ work_start: start || "", work_end: end || "", work_pauses: [] }, today);
   }
 
-  function dayIsOrderDerivedPause(order, day, today = dayStart(new Date())) {
+  function dayIsOrderDerivedPause(order, day, today = clockToday()) {
     const lines = calendarWorkLines(order);
     if (!lines.length) return false;
     const d = dayStart(typeof day === "string" ? parseDay(day) : day);
@@ -1151,7 +1151,7 @@
       order.work_pauses = [];
       return order;
     }
-    const today = dayStart(new Date());
+    const today = clockToday();
     const span = orderDrawSpan(order, today);
     if (!span) {
       order.work_pauses = [];
@@ -1258,7 +1258,7 @@
       return { from, till: oEnd };
     }
     // Без конца у заказа позицию можно увести в будущее — полоса заказа удлинится.
-    return { from, till: addDays(dayStart(new Date()), LINE_DRAG_HORIZON_DAYS) };
+    return { from, till: addDays(clockToday(), LINE_DRAG_HORIZON_DAYS) };
   }
 
   function clampLineProxy(order, proxy, drag) {
@@ -1327,13 +1327,13 @@
     };
   }
 
-  function orderDeadline(order, today = dayStart(new Date())) {
+  function orderDeadline(order, today = clockToday()) {
     const end = parseDay(order.work_end);
     if (!end || end <= today) return null;
     return end;
   }
 
-  function workStatus(order, today = dayStart(new Date())) {
+  function workStatus(order, today = clockToday()) {
     if (orderIsOff(order)) return "cancelled";
     const { start, end } = workSpan(order);
     if (!start && !end) return "nodate";
@@ -1350,7 +1350,7 @@
     return "now";
   }
 
-  function orderIsPausedNow(order, today = dayStart(new Date())) {
+  function orderIsPausedNow(order, today = clockToday()) {
     const st = workStatus(order, today);
     if (st === "cancelled" || st === "nodate") return false;
     return isPaused(order, today);
@@ -1389,7 +1389,7 @@
     const { start, end } = workSpan(order);
     if (!start && !end) return false;
     const d = dayStart(day);
-    const today = dayStart(new Date());
+    const today = clockToday();
     if (start && !end) {
       if (start > today) return dayKey(d) === dayKey(start);
       return d >= start && d <= today;
@@ -1400,14 +1400,14 @@
 
   function orderMarksDay(order, day) {
     const d = dayStart(day);
-    if (d > dayStart(new Date()) && Array.isArray(order?.lines)) {
+    if (d > clockToday() && Array.isArray(order?.lines)) {
       return calendarWorkLines(order).some((line) => positionCoversFutureDay(order, line, day));
     }
     return isPaused(order, day) || boardCoversDay(order, day);
   }
 
   /** work или pause, если таймлайн в этот день рисует полосу. Пусто — полосы нет, даже если пауза «открыта вперёд». */
-  function timelinePaintKind(proxy, day, today = dayStart(new Date())) {
+  function timelinePaintKind(proxy, day, today = clockToday()) {
     const d = dayStart(day);
     if (!d) return "";
     const span = orderDrawSpan(proxy, today);
@@ -1420,7 +1420,7 @@
   /** День после сегодня: как полоса на таймлайне. Завтра добавляется только у позиции, которая сегодня идёт и не закрыта. */
   function lineFutureKind(order, line, day) {
     const d = dayStart(day);
-    const today = dayStart(new Date());
+    const today = clockToday();
     if (!d || d <= today) return "";
     const proxy = lineWorkProxy(order, line);
     const painted = timelinePaintKind(proxy, d, today);
@@ -1450,7 +1450,7 @@
     if (start && end) return d >= start && d <= end;
     if (!start && end) return d <= end;
     if (!start || d < start) return false;
-    const today = dayStart(new Date());
+    const today = clockToday();
     if (d <= today) return true;
     if (Array.isArray(target.lines)) {
       return calendarWorkLines(target).some((line) => positionCoversFutureDay(target, line, day));
@@ -1481,7 +1481,7 @@
     return segments;
   }
 
-  function orderWorkSegments(order, clipFrom, clipTo, today = dayStart(new Date())) {
+  function orderWorkSegments(order, clipFrom, clipTo, today = clockToday()) {
     const span = orderDrawSpan(order, today);
     if (!span) return [];
     let from = span.from;
@@ -1492,7 +1492,7 @@
     return splitWorkSegments(from, till, order);
   }
 
-  function orderPauseSegments(order, clipFrom, clipTo, today = dayStart(new Date())) {
+  function orderPauseSegments(order, clipFrom, clipTo, today = clockToday()) {
     const span = orderDrawSpan(order, today);
     if (!span) return [];
     return workPauses(order)
@@ -1548,7 +1548,7 @@
         selectedLine: "",
         openLines: {},
         pick: "",
-        anchor: dayStart(new Date()),
+        anchor: clockToday(),
         viewFrom: null,
         viewDays: TL_DEFAULT_DAYS,
         followOrder: readCalFollow(),
@@ -1558,7 +1558,7 @@
     if (!state.calendar.openLines || typeof state.calendar.openLines !== "object") state.calendar.openLines = {};
     if (typeof state.calendar.selectedLine !== "string") state.calendar.selectedLine = "";
     if (!(state.calendar.anchor instanceof Date) || Number.isNaN(state.calendar.anchor.getTime())) {
-      state.calendar.anchor = dayStart(new Date());
+      state.calendar.anchor = clockToday();
     }
     return state.calendar;
   }
@@ -1635,7 +1635,7 @@
     return day;
   }
 
-  function orderDrawSpan(order, today = dayStart(new Date())) {
+  function orderDrawSpan(order, today = clockToday()) {
     const { start, end } = workSpan(order);
     if (!start && !end) return null;
     if (start && !end) {
@@ -1671,7 +1671,7 @@
   }
 
   function timelineFullRange() {
-    const today = dayStart(new Date());
+    const today = clockToday();
     let from = today;
     let to = today;
     calendarOrders().forEach((order) => {
@@ -1719,13 +1719,13 @@
   }
 
   function goTimelineToday() {
-    goCalendarDay(new Date());
+    goCalendarDay(clockToday());
   }
 
   function calendarWindow() {
     const cal = calendarState();
-    const anchor = dayStart(cal.anchor || new Date());
-    const today = dayStart(new Date());
+    const anchor = dayStart(cal.anchor || clockNow());
+    const today = clockToday();
     if (cal.mode === "classic") {
       const from = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
       const to = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
@@ -1755,13 +1755,13 @@
 
   function calendarShift(dir, unit = "period") {
     const cal = calendarState();
-    if (!(cal.anchor instanceof Date) || Number.isNaN(cal.anchor.getTime())) cal.anchor = dayStart(new Date());
+    if (!(cal.anchor instanceof Date) || Number.isNaN(cal.anchor.getTime())) cal.anchor = clockToday();
     if (cal.mode === "classic") {
       if (unit === "year") cal.anchor = new Date(cal.anchor.getFullYear() + dir, cal.anchor.getMonth(), 1);
       else cal.anchor = new Date(cal.anchor.getFullYear(), cal.anchor.getMonth() + dir, 1);
     } else if (cal.mode === "timeline") {
       const step = Math.max(1, Math.floor((cal.viewDays || TL_DEFAULT_DAYS) / 2));
-      cal.viewFrom = addDays(cal.viewFrom || dayStart(new Date()), dir * step);
+      cal.viewFrom = addDays(cal.viewFrom || clockToday(), dir * step);
       clampTimelineView();
       cal.anchor = cal.viewFrom;
     } else cal.anchor = addDays(mondayOf(cal.anchor), dir * 7);
@@ -1769,7 +1769,7 @@
   }
 
   function calendarYearOptions(year) {
-    const now = new Date().getFullYear();
+    const now = clockNow().getFullYear();
     const from = Math.min(year, now) - 15;
     const to = Math.max(year, now) + 10;
     let html = "";
@@ -1890,7 +1890,7 @@
   }
 
   function setWorkToday(order, which) {
-    const today = dayKey(dayStart(new Date()));
+    const today = dayKey(clockToday());
     if (which === "start") {
       order.work_start = today;
       if (order.work_end && order.work_end < today) order.work_end = "";
@@ -1906,7 +1906,7 @@
     if (start) order.work_start = dayKey(addDays(start, days));
     if (end) order.work_end = dayKey(addDays(end, days));
     if (!start && !end) {
-      const today = dayStart(new Date());
+      const today = clockToday();
       order.work_start = dayKey(addDays(today, days));
     }
     order.work_pauses = workPauses(order).map((pause) => ({
@@ -1967,7 +1967,7 @@
   function boardRole(target, day) {
     if (!target || !day) return "";
     const key = dayKey(dayStart(day));
-    const today = dayKey(dayStart(new Date()));
+    const today = dayKey(clockToday());
     const start = firstWorkDayKey(target);
     const end = dateDay(target.work_end);
     if (start && end && start === end && start === key) return "старт и финиш";
@@ -2027,7 +2027,7 @@
 
   function weekColumnHeads(day) {
     const key = dayKey(day);
-    const today = dayKey(dayStart(new Date()));
+    const today = dayKey(clockToday());
     if (key < today) return { mid: "Выполнялось", midClass: "role-was", pause: "Пауза" };
     if (key > today) return { mid: "Запланировано", midClass: "role-plan", pause: "Пауза" };
     return { mid: "Выполняется", midClass: "role-now", pause: "Пауза" };
@@ -2066,7 +2066,7 @@
   function lineActiveOnDay(order, line, day) {
     if (/отмен|аннул|черн/i.test(line?.status || "")) return "";
     const d = dayStart(day);
-    if (d > dayStart(new Date())) return lineFutureKind(order, line, day);
+    if (d > clockToday()) return lineFutureKind(order, line, day);
     const proxy = lineWorkProxy(order, line);
     if (!dateDay(proxy.work_start) && !dateDay(proxy.work_end)) return "";
     if (isPaused(proxy, day)) return "pause";
@@ -3386,7 +3386,7 @@
   function onCalChange(e) {
     if (e.target.id === "cal-month-pick" || e.target.id === "cal-year-pick") {
       const cal = calendarState();
-      if (!(cal.anchor instanceof Date) || Number.isNaN(cal.anchor.getTime())) cal.anchor = dayStart(new Date());
+      if (!(cal.anchor instanceof Date) || Number.isNaN(cal.anchor.getTime())) cal.anchor = clockToday();
       const month = Number($("cal-month-pick")?.value ?? cal.anchor.getMonth());
       const year = Number($("cal-year-pick")?.value ?? cal.anchor.getFullYear());
       cal.anchor = new Date(year, month, 1);
@@ -3478,7 +3478,7 @@
     const line = lineId ? findCalendarLine(order, lineId) : null;
     if (e.shiftKey && (mode === "end" || mode === "pause-end") && line) {
       const proxy = lineWorkProxy(order, line);
-      const today = dayStart(new Date());
+      const today = clockToday();
       if (!dateDay(proxy.work_end) && workStatus(proxy, today) === "now") {
         e.preventDefault();
         e.stopPropagation();
@@ -3644,7 +3644,7 @@
     if (!bar || !days.length) return;
     const winFrom = days[0];
     const winTo = days[days.length - 1];
-    const span = orderDrawSpan(target, dayStart(new Date()));
+    const span = orderDrawSpan(target, clockToday());
     if (!span) return;
     const from = span.from < winFrom ? winFrom : span.from;
     const till = span.till > winTo ? winTo : span.till;

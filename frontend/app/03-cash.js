@@ -57,6 +57,41 @@
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
 
+  let clockOffsetDays = 0;
+
+  function clockNow() {
+    const d = new Date();
+    const n = Number(clockOffsetDays) || 0;
+    if (n) d.setDate(d.getDate() + n);
+    return d;
+  }
+
+  function clockToday() {
+    return dayStart(clockNow());
+  }
+
+  function paintClockOffset() {
+    const el = $("net-console-cal-day");
+    if (!el) return;
+    const n = Number(clockOffsetDays) || 0;
+    if (!n) {
+      el.textContent = "";
+      el.removeAttribute("title");
+      return;
+    }
+    el.textContent = clockToday().toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+    el.title = `Тестовая «сегодня»: +${n} дн.`;
+  }
+
+  function applyClockOffset(days) {
+    clockOffsetDays = Math.max(0, Math.round(Number(days) || 0));
+    paintClockOffset();
+    if (state.doc) {
+      goTimelineToday();
+      renderCalendar();
+    }
+  }
+
   function keyToDay(key) {
     const [y, m, d] = String(key).split("-").map(Number);
     if (!y || !m || !d) return null;
