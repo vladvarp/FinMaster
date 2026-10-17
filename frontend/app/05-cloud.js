@@ -3914,7 +3914,7 @@
     if (!fields.includes("totals") || shareNeedsMoneyFooter(cols)) return "";
     const tot = linesTotals(lines);
     const bits = [];
-    if (fields.includes("total") || fields.includes("price") || !cols.length) bits.push(`Итого ${money(tot.after)}`);
+    if (fields.includes("total") || !cols.length) bits.push(`Итого ${money(tot.after)}`);
     if (tot.cost > 0.005) {
       bits.push(`расходы −${money(tot.cost)}`);
       bits.push(`к оплате ${money(tot.net)}`);
@@ -3924,7 +3924,7 @@
     return bits.length ? bits.join(" · ") : `Позиций: ${lines.length}`;
   }
 
-  const SHARE_MONEY_COLS = new Set(["price", "total", "paid", "unpaid"]);
+  const SHARE_MONEY_COLS = new Set(["total", "paid", "unpaid"]);
 
   function shareNeedsMoneyFooter(cols) {
     return (cols || []).some((c) => SHARE_MONEY_COLS.has(c.id));
@@ -3932,7 +3932,6 @@
 
   function shareFooterValue(colId, lines) {
     const tot = linesTotals(lines);
-    if (colId === "price") return money(tot.total);
     if (colId === "total") return tot.cost > 0.005 ? money(tot.net) : money(tot.after);
     if (colId === "paid") return money(tot.paid);
     if (colId === "unpaid") return money(tot.unpaid);

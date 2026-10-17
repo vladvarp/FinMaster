@@ -91,7 +91,7 @@
     },
   };
 
-  const SNAP_MONEY_COLS = new Set(["price", "total", "paid", "unpaid"]);
+  const SNAP_MONEY_COLS = new Set(["total", "paid", "unpaid"]);
 
   function loadSnapPrefs() {
     try {
@@ -226,7 +226,6 @@
     if (colId === "total") return money(tot.cost > 0.005 ? tot.net : tot.after);
     if (colId === "paid") return money(tot.paid);
     if (colId === "unpaid") return money(tot.unpaid);
-    if (colId === "price") return "Итого";
     return "";
   }
 
