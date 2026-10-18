@@ -207,7 +207,6 @@ def _menu_keyboard(app_url: str = "") -> dict[str, Any]:
     return {
         "keyboard": [[{"text": "Отчёты"}, {"text": "Заказы"}, {"text": "Снимок"}], second, [{"text": "Новая ссылка"}]],
         "resize_keyboard": True,
-        "is_persistent": True,
         "input_field_placeholder": "Отчёты, заказы, снимок или поиск",
     }
 
