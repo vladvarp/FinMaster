@@ -600,6 +600,14 @@
       payload.filter = state.stats.filter || "all";
       payload.status = state.stats.status || "";
     }
+    if (view === "calendar") {
+      const cal = state.cal;
+      const anchor = cal.anchor instanceof Date && !Number.isNaN(cal.anchor.getTime()) ? dayKey(dayStart(cal.anchor)) : "";
+      payload.cal_mode = cal.mode === "extended" || cal.mode === "day" ? cal.mode : "classic";
+      payload.cal_day = anchor;
+      payload.cal_pick = cal.pick || "";
+      payload.cal_filter = cal.filter || "all";
+    }
     api("/api/remote/nav", { method: "POST", body: JSON.stringify(payload) }).catch(() => {});
   }
 

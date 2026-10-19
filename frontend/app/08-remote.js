@@ -258,7 +258,6 @@
     if (data.url) remote.url = data.url;
     if (data.ip) remote.ip = data.ip;
     if (data.ips) remote.ips = data.ips;
-    if (typeof data.version === "number") remote.version = data.version;
     if (Array.isArray(data.clients)) remote.clients = data.clients;
     if (Array.isArray(data.devices)) remote.devices = data.devices;
     if (typeof data.autostart === "boolean") remote.autostart = data.autostart;
@@ -627,6 +626,7 @@
     cal.hidePause = next;
     persistPref(LS_CAL_HIDE_PAUSE, JSON.stringify(next), { now: true });
     if (state.view === "calendar" && state.doc) renderCalendar();
+    if (state.phoneCalNav && $("phone-cal-modal")?.classList.contains("open")) applyPhoneCalendar(state.phoneCalNav);
   }
 
   function applyRemoteAutosave(enabled) {
@@ -676,8 +676,113 @@
     orderCloud.fit();
   }
 
+  function closePhoneCal() {
+    $("phone-cal-modal")?.classList.remove("open");
+  }
+
+  function phoneCalModal() {
+    let el = $("phone-cal-modal");
+    if (el) return el;
+    el = document.createElement("div");
+    el.id = "phone-cal-modal";
+    el.className = "modal";
+    el.innerHTML = `<div class="modal-card phone-cal-modal" role="dialog" aria-modal="true" aria-labelledby="phone-cal-title">
+      <div class="modal-title-row">
+        <h3 id="phone-cal-title">Календарь с телефона</h3>
+        <button type="button" class="btn small" id="phone-cal-close">Закрыть</button>
+      </div>
+      <div class="phone-cal-sub" id="phone-cal-sub"></div>
+      <div class="phone-cal-board" id="phone-cal-board"></div>
+    </div>`;
+    el.addEventListener("click", (e) => {
+      if (e.target !== el && !e.target.closest("#phone-cal-close")) return;
+      state.phoneCalDismissed = state.phoneCalSeq || 0;
+      el.classList.remove("open");
+    });
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function phoneCalWindow(mode, day) {
+    const anchor = dayStart(day || clockToday());
+    const today = clockToday();
+    if (mode === "classic") {
+      const from = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+      const to = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
+      const gridFrom = mondayOf(from);
+      let gridTo = addDays(gridFrom, 41);
+      while (gridTo < to) gridTo = addDays(gridTo, 7);
+      return {
+        from,
+        to,
+        days: rangeDays(from, to),
+        gridFrom,
+        gridTo,
+        today,
+        title: `${RU_MONTHS_NOM[from.getMonth()]} ${from.getFullYear()}`,
+      };
+    }
+    if (mode === "day") return { from: anchor, to: anchor, days: [anchor], today, title: calFmtDay(anchor) };
+    const from = mondayOf(anchor);
+    const to = addDays(from, 6);
+    return { from, to, days: rangeDays(from, to), today, title: calFmtRange(from, to) };
+  }
+
+  function phoneCalLoad(orders, days) {
+    const map = {};
+    let peak = 0;
+    days.forEach((day) => {
+      const key = dayKey(day);
+      const n = orders.filter((order) => boardCoversDay(order, day) && workStatus(order) !== "cancelled").length;
+      map[key] = n;
+      if (n > peak) peak = n;
+    });
+    return { map, peak, peakKey: "" };
+  }
+
+  function applyPhoneCalendar(nav) {
+    if (!state.doc) return;
+    const phoneMode = nav.cal_mode === "extended" || nav.cal_mode === "day" || nav.cal_mode === "classic" ? nav.cal_mode : "classic";
+    const allowed = new Set(["all", "now", "planned", "done", "nodate"]);
+    const filter = allowed.has(nav.cal_filter) ? nav.cal_filter : "all";
+    const day = parseDay(nav.cal_day) || clockToday();
+    const pick = /^\d{4}-\d{2}-\d{2}$/.test(String(nav.cal_pick || "")) ? nav.cal_pick : "";
+    const seq = Number(nav.seq) || 0;
+    state.phoneCalSeq = seq;
+    state.phoneCalNav = nav;
+    const win = phoneCalWindow(phoneMode, day);
+    const list = calendarOrders(filter);
+    const span = phoneMode === "classic" ? rangeDays(win.gridFrom, win.gridTo) : win.days;
+    const load = phoneCalLoad(list, span);
+    const cal = calendarState();
+    cal.mirrorPick = pick;
+    cal.mirrorHidePause = true;
+    let board = "";
+    try {
+      if (filter === "nodate") {
+        board = list.length
+          ? list.map((order) => `<div class="phone-cal-row"><b>${esc(order.number || "—")}</b> ${esc(order.name || "без названия")}</div>`).join("")
+          : `<div class="empty">Нет заказов без дат.</div>`;
+      } else if (phoneMode === "classic") board = renderClassicCalendar(win, list, load);
+      else board = renderExtendedCalendar(win, list, load);
+    } finally {
+      delete cal.mirrorPick;
+      delete cal.mirrorHidePause;
+    }
+    const modal = phoneCalModal();
+    const modeLabel = phoneMode === "day" ? "День" : phoneMode === "extended" ? "Неделя" : "Месяц";
+    const filterLabel = (CALENDAR_FILTERS.find(([id]) => id === filter) || CALENDAR_FILTERS[0])[1];
+    const picked = pick ? ` · выделен ${calFmtDay(parseDay(pick))}` : "";
+    $("phone-cal-sub").textContent = `${modeLabel} · ${win.title}${picked} · ${filterLabel}`;
+    const boardEl = $("phone-cal-board");
+    boardEl.classList.toggle("is-day", phoneMode === "day");
+    boardEl.innerHTML = board;
+    if (state.phoneCalDismissed !== seq) modal.classList.add("open");
+  }
+
   function applyRemoteNav(nav) {
     if (!nav || !nav.view) return;
+    if (nav.view !== "calendar") closePhoneCal();
     if (nav.view === "files") {
       showGalaxyCatalog();
       if (!state.doc || $("app-shell")?.hidden) renderStartLists();
@@ -696,33 +801,13 @@
     const hadFocus = !!state.focusOrderId;
     if (nav.view === "calendar") {
       state.remoteStats = null;
-      setView("calendar");
+      if (state.view !== "calendar") setView("calendar");
+      applyPhoneCalendar(nav);
       return;
     }
-    if (state.view === "cloud") {
-      if (cloudState().catalog) {
-        cloudState().catalog = false;
-        renderCloud();
-      }
-      if (nav.view === "stats") {
-        const next = {
-          period: nav.period || "all",
-          filter: nav.filter || "all",
-          status: nav.status || "",
-        };
-        const changed = JSON.stringify(state.remoteStats) !== JSON.stringify(next);
-        state.remoteStats = next;
-        showCloudOverview();
-        if (changed && remoteStatsActive()) toast(`Сводка с телефона: ${remoteStatsLabel()}`);
-        return;
-      }
-      showCloudOverview();
-      state.remoteStats = null;
-      return;
-    }
-    state.focusOrderId = null;
-    state.focusLineId = null;
     if (nav.view === "stats") {
+      state.focusOrderId = null;
+      state.focusLineId = null;
       const next = {
         period: nav.period || "all",
         filter: nav.filter || "all",
@@ -735,9 +820,19 @@
       if (changed && remoteStatsActive()) toast(`Сводка с телефона: ${remoteStatsLabel()}`);
       return;
     }
+    if (state.view === "cloud") {
+      if (cloudState().catalog) {
+        cloudState().catalog = false;
+        renderCloud();
+      }
+      showCloudOverview();
+      state.remoteStats = null;
+      return;
+    }
+    state.focusOrderId = null;
+    state.focusLineId = null;
     state.remoteStats = null;
-    if (nav.view === "calendar") setView("calendar");
-    else if (nav.view === "orders") setView("orders");
+    if (nav.view === "orders") setView("orders");
     else if (nav.view === "snapshot") setView("dashboard");
     else if (hadFocus && state.view === "dashboard") renderDashboard();
     else if (state.view === "dashboard") renderDashboard();
@@ -1119,6 +1214,22 @@
     }
   }
 
+  async function openStartupReport(recent) {
+    try {
+      const pending = await apiGet("/api/instance/pending");
+      const queued = (pending.paths || []).filter(Boolean);
+      if (queued.length) {
+        for (const path of queued) await openPath(path);
+        return;
+      }
+    } catch {
+      /* окно ещё поднимается */
+    }
+    if (state.doc) return;
+    const last = (recent || []).find((item) => item?.path && item.exists !== false);
+    if (last) await openPath(last.path);
+  }
+
   async function boot() {
     try {
       bind();
@@ -1133,6 +1244,7 @@
       hydratePrefs(bootData.ui_prefs);
       applyTheme(bootData.theme || "light", false);
       await renderStartLists(bootData);
+      await openStartupReport(bootData.recent);
       libraryWatchLoop();
       await apiPost("/api/dirty", { dirty: false });
       if (bootData.remote) {
@@ -1142,7 +1254,6 @@
       }
       watchRemoteAccess();
       watchDesktopPdfJobs();
-      acceptExternalOpens();
       setInterval(acceptExternalOpens, 800);
     } catch {
       state.desktop = false;

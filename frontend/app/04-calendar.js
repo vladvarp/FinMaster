@@ -1590,6 +1590,7 @@
   /** Неделя и месяц: заказы и позиции «На паузе» спрятаны, пока включена кнопка. Таймлайн не трогает. */
   function hidePausedOnBoard() {
     const cal = calendarState();
+    if (cal.mirrorHidePause) return cal.hidePause !== false;
     return cal.mode !== "timeline" && cal.hidePause !== false;
   }
 
@@ -2669,6 +2670,11 @@
     </div>`;
   }
 
+  function shownCalPick() {
+    const cal = calendarState();
+    return "mirrorPick" in cal ? cal.mirrorPick : cal.pick;
+  }
+
   function renderClassicCalendar(win, list, load) {
     const cells = [];
     for (let d = win.gridFrom; d <= win.gridTo; d = addDays(d, 1)) {
@@ -2682,7 +2688,7 @@
       const more = items.length - shown.length;
       const hot = (load.map[key] || 0) >= CAL_HOT_LOAD;
       const note = dayNote(key);
-      cells.push(`<div class="cal-cell ${inMonth ? "" : "is-out"} ${dayToneClass(d)} ${note ? "has-note" : ""} ${key === dayKey(win.today) ? "is-today" : ""} ${calendarState().pick === key ? "is-pick" : ""} ${hot ? "is-hot" : ""}" data-cal-day="${key}">
+      cells.push(`<div class="cal-cell ${inMonth ? "" : "is-out"} ${dayToneClass(d)} ${note ? "has-note" : ""} ${key === dayKey(win.today) ? "is-today" : ""} ${shownCalPick() === key ? "is-pick" : ""} ${hot ? "is-hot" : ""}" data-cal-day="${key}">
         <div class="cal-cell-n">${d.getDate()}${items.length ? `<b>${items.length}</b>` : ""}</div>
         ${note ? `<div class="cal-day-memo cal-note">${esc(note)}</div>` : ""}
         ${shown.map((order) => calChipHtml(order, d)).join("")}
@@ -2712,7 +2718,7 @@
         const note = dayNote(key);
         const heads = weekColumnHeads(day);
         const chip = (order) => `${calChipHtml(order, day, { week: true })}${weekLinesHtml(order, day)}`;
-        return `<div class="cal-col ${dayToneClass(day)} ${note ? "has-note" : ""} ${key === dayKey(win.today) ? "is-today" : ""} ${calendarState().pick === key ? "is-pick" : ""} ${n >= CAL_HOT_LOAD ? "is-hot" : ""}" data-cal-day="${key}">
+        return `<div class="cal-col ${dayToneClass(day)} ${note ? "has-note" : ""} ${key === dayKey(win.today) ? "is-today" : ""} ${shownCalPick() === key ? "is-pick" : ""} ${n >= CAL_HOT_LOAD ? "is-hot" : ""}" data-cal-day="${key}">
           <div class="cal-col-pin">
             <div class="cal-col-head">
               <strong>${RU_WEEKDAYS[(day.getDay() + 6) % 7]}</strong>

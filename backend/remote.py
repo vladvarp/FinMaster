@@ -97,6 +97,13 @@ def lan_candidates() -> list[str]:
     return unique or ["127.0.0.1"]
 
 
+def _iso_day(value: str) -> str:
+    text = str(value or "")
+    if len(text) == 10 and text[4] == "-" and text[7] == "-" and text[:4].isdigit() and text[5:7].isdigit() and text[8:].isdigit():
+        return text
+    return ""
+
+
 def lan_ip() -> str:
     return lan_candidates()[0]
 
@@ -225,10 +232,16 @@ class RemoteSession:
         order_filter: str = "",
         status: str = "",
         line_id: str = "",
+        cal_mode: str = "",
+        cal_day: str = "",
+        cal_pick: str = "",
+        cal_filter: str = "",
     ) -> int:
         """Телефон сообщает, какой экран и какие фильтры сводки открыты."""
         periods = {"all", "today", "week", "month", "year"}
         filters = {"all", "debt", "paid"}
+        cal_modes = {"classic", "extended", "day"}
+        cal_filters = {"all", "now", "planned", "done", "nodate"}
         with self._cond:
             self._nav_seq += 1
             self.nav = {
@@ -240,6 +253,10 @@ class RemoteSession:
                 "period": period if period in periods else "all",
                 "filter": order_filter if order_filter in filters else "all",
                 "status": str(status or "")[:80],
+                "cal_mode": cal_mode if cal_mode in cal_modes else "",
+                "cal_day": _iso_day(cal_day),
+                "cal_pick": _iso_day(cal_pick),
+                "cal_filter": cal_filter if cal_filter in cal_filters else "",
             }
             self.version += 1
             self._cond.notify_all()

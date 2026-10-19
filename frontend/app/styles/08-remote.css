@@ -34,6 +34,27 @@
 }
 
 .modal-card.remote-modal { width: min(920px, calc(100vw - 32px)); max-width: 920px; }
+.modal-card.phone-cal-modal {
+  width: min(1100px, calc(100vw - 32px));
+  max-width: 1100px;
+  height: min(86vh, 860px);
+  max-height: min(86vh, 860px);
+  display: flex;
+  flex-direction: column;
+}
+.phone-cal-sub { margin: 0 0 10px; color: var(--muted); font-size: 13px; }
+.phone-cal-board { overflow: auto; min-height: 0; flex: 1 1 auto; }
+.phone-cal-board .cal-week { min-height: 240px; }
+.phone-cal-board.is-day { display: flex; flex-direction: column; overflow: hidden; }
+.phone-cal-board.is-day .cal-week {
+  grid-template-columns: minmax(0, 1fr);
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+}
+.phone-cal-board.is-day .cal-col { height: 100%; width: 100%; max-width: none; }
+.phone-cal-row { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.phone-cal-row b { margin-right: 6px; }
 .remote-layout {
   display: grid;
   grid-template-columns: 260px 1fr;

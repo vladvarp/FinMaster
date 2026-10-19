@@ -1418,6 +1418,10 @@ def api_remote_nav():
         order_filter=str(data.get("filter") or ""),
         status=str(data.get("status") or ""),
         line_id=str(data.get("line_id") or ""),
+        cal_mode=str(data.get("cal_mode") or ""),
+        cal_day=str(data.get("cal_day") or ""),
+        cal_pick=str(data.get("cal_pick") or ""),
+        cal_filter=str(data.get("cal_filter") or ""),
     )
     return jsonify({"ok": True, "version": version})
 

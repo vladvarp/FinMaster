@@ -399,6 +399,7 @@
       ${board}
     `;
     syncMcalDock();
+    reportCalNav();
     if (cal.revealPick) {
       cal.revealPick = false;
       const key = cal.pick;
@@ -408,6 +409,17 @@
         })));
       }
     }
+  }
+
+  function reportCalNav() {
+    if (state.view !== "calendar") return;
+    const cal = state.cal;
+    const anchor = cal.anchor instanceof Date && !Number.isNaN(cal.anchor.getTime()) ? dayKey(dayStart(cal.anchor)) : "";
+    const sig = `${cal.mode}|${cal.filter}|${anchor}|${cal.pick || ""}`;
+    if (sig === cal.navSig) return;
+    if (state.stopped || !state.token) return;
+    cal.navSig = sig;
+    navReport();
   }
 
   function syncMcalDock() {
