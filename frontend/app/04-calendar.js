@@ -1695,7 +1695,8 @@
     cal.viewDays = Math.max(TL_MIN_DAYS, Math.min(full.span, Math.round(cal.viewDays)));
     if (!(cal.viewFrom instanceof Date) || Number.isNaN(cal.viewFrom.getTime())) {
       const today = full.today < full.from ? full.from : dayStart(full.today);
-      cal.viewFrom = addDays(today, -Math.floor((cal.viewDays - 1) / 2));
+      const ahead = Math.min(2, Math.max(0, cal.viewDays - 1));
+      cal.viewFrom = addDays(today, -(cal.viewDays - 1 - ahead));
     } else {
       cal.viewFrom = dayStart(cal.viewFrom);
     }
