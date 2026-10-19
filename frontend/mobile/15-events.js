@@ -268,7 +268,14 @@
       }
       const calMode = e.target.closest("[data-cal-mode]");
       if (calMode) {
-        state.cal.mode = calMode.dataset.calMode;
+        const next = calMode.dataset.calMode;
+        if (next === "day" && state.cal.mode !== "day") state.cal.anchor = dayStart(new Date());
+        state.cal.mode = next;
+        renderCalendar();
+        return;
+      }
+      if (e.target.closest("#mcal-hide-pause")) {
+        state.cal.hidePause = state.cal.hidePause === false;
         renderCalendar();
         return;
       }
@@ -298,6 +305,7 @@
         if (!state.cal.anchor) state.cal.anchor = dayStart(new Date());
         if (dir === 0) state.cal.anchor = dayStart(new Date());
         else if (state.cal.mode === "classic") state.cal.anchor = new Date(state.cal.anchor.getFullYear(), state.cal.anchor.getMonth() + dir, 1);
+        else if (state.cal.mode === "day") state.cal.anchor = addDays(dayStart(state.cal.anchor), dir);
         else state.cal.anchor = addDays(mondayOf(state.cal.anchor), dir * 7);
         renderCalendar();
         return;

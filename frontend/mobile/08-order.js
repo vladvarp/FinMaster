@@ -20,6 +20,7 @@
       <div class="lr-main">
         <strong>${esc(line.product || "Без названия")}</strong>
         <small>${esc(parts.filter(Boolean).join(" · "))}</small>
+        ${String(line.notes || "").trim() ? `<span class="lr-note">${esc(String(line.notes).trim())}</span>` : ""}
         <span class="lr-status" style="background:${esc(meta.color)}">${esc(line.status || "—")}</span>
       </div>
       <div class="lr-right">
@@ -42,6 +43,7 @@
       <div class="lr-main">
         <strong>${esc(line.product || line.order_type || "Расход")}</strong>
         <small>${esc([line.order_type, calc].filter(Boolean).join(" · "))}</small>
+        ${String(line.notes || "").trim() ? `<span class="lr-note">${esc(String(line.notes).trim())}</span>` : ""}
         <span class="lr-status cost-kind ${esc(t.kind)}">${esc(kindLabel(t.kind))}</span>
       </div>
       <div class="lr-right">

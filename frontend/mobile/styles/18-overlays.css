@@ -502,6 +502,35 @@
   cursor: pointer;
 }
 .mcal-daylist { margin-top: 12px; }
+.mcal-day { display: flex; flex-direction: column; gap: 8px; }
+.mcal-pause {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+.mcal-pause.active { background: color-mix(in srgb, var(--accent) 16%, var(--card)); border-color: var(--accent); }
+.mcal-day-order { margin-bottom: 8px; }
+.mcal-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-left: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 50%, var(--line));
+}
+.mcal-line b { display: block; font-size: 13px; }
+.mcal-line em {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
 
 @media (min-width: 620px) {
   .screen { padding: 16px 20px 32px; max-width: 760px; margin: 0 auto; }

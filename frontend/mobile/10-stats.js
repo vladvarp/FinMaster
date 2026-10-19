@@ -138,11 +138,70 @@
     });
   }
 
+  function mcalWorkLines(order) {
+    return (order.lines || []).filter((line) => !isFrozenLine(line) && !isExpenseLine(line));
+  }
+
+  function mcalDayOrder(order, day) {
+    const note = String(order.notes || "").trim();
+    const lines = mcalWorkLines(order)
+      .map((line) => {
+        const text = String(line.notes || "").trim();
+        return `<div class="mcal-line"><b>${esc(line.product || "Без названия")}</b>${text ? `<em>${esc(text)}</em>` : ""}</div>`;
+      })
+      .join("");
+    return `<article class="card mcal-day-order" data-open="${esc(order.id)}">
+      <div class="oi-top"><span class="oi-num">${esc(order.number || "—")}</span><span class="oi-sep">—</span><span class="oi-customer">${esc(order.name || "без названия")}</span></div>
+      <div class="mcal-role">${esc(calendarRole(order, day))}</div>
+      ${note ? `<div class="oi-note">${esc(note)}</div>` : ""}
+      ${lines ? `<div class="mcal-lines">${lines}</div>` : ""}
+    </article>`;
+  }
+
+  function mcalDayBoard(list, day, cal) {
+    const key = dayKey(day);
+    const todayKey = dayKey(dayStart(new Date()));
+    const hidePause = cal.hidePause !== false;
+    const items = list.filter((order) => orderMarksDay(order, day));
+    const paused = items.filter((order) => isPaused(order, day));
+    const active = items.filter((order) => !isPaused(order, day));
+    const starts = active.filter((order) => dateValue(order.work_start) === key);
+    const ends = active.filter((order) => {
+      const end = dateValue(order.work_end);
+      return end === key && end !== dateValue(order.work_start);
+    });
+    const running = active.filter((order) => dateValue(order.work_start) !== key && dateValue(order.work_end) !== key);
+    const mid = key < todayKey ? "Выполнялось" : key > todayKey ? "Запланировано" : "Выполняется";
+    const block = (title, rows) =>
+      rows.length ? `<div class="mcal-sec">${esc(title)}</div>${rows.map((order) => mcalDayOrder(order, day)).join("")}` : "";
+    const shown = (hidePause ? active : items).length;
+    const empty = shown
+      ? ""
+      : paused.length && hidePause
+        ? `<div class="empty">На паузе скрыто: ${paused.length}</div>`
+        : `<div class="empty">В этот день никто не отмечен.</div>`;
+    return `<div class="mcal-day">
+      <button type="button" class="btn mcal-pause ${hidePause ? "active" : ""}" id="mcal-hide-pause" aria-pressed="${hidePause}" title="${hidePause ? "Показать паузы" : "Скрыть паузы"}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6.5v11M15 6.5v11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        ${hidePause ? "Паузы скрыты" : "Паузы видны"}
+      </button>
+      <div class="mcal-col ${dayToneClass(day)} ${key === todayKey ? "is-today" : ""}">
+        <div class="mcal-col-h"><b>${RU_WEEKDAYS[(day.getDay() + 6) % 7]}</b><span>${esc(calFmtDay(day))}</span><i>${shown}</i></div>
+        <label class="mcal-note">Заметка<textarea rows="2" data-cal-note="${esc(key)}" placeholder="Что в этот день">${esc(dayNote(key))}</textarea></label>
+        ${block("Старт", starts)}
+        ${block(mid, running)}
+        ${hidePause ? "" : block("Пауза", paused)}
+        ${block("Финиш", ends)}
+        ${empty}
+      </div>
+    </div>`;
+  }
+
   function renderCalendar() {
     if (!requireDocument()) return;
     const cal = state.cal;
     if (!cal.anchor) cal.anchor = dayStart(new Date());
-    if (cal.mode !== "classic") cal.mode = "extended";
+    if (cal.mode !== "classic" && cal.mode !== "day") cal.mode = "extended";
     const today = dayStart(new Date());
     const all = orders();
     const list = cal.filter === "all" ? all : all.filter((order) => workStatus(order) === cal.filter);
@@ -151,6 +210,7 @@
     const modes = [
       ["classic", "Классический — сетка месяца"],
       ["extended", "Неделя — старты, в работе и финиши"],
+      ["day", "День — как столбец недели на компьютере"],
     ];
     const filters = [
       ["all", "Все"],
@@ -162,7 +222,9 @@
     const modeIcon = (id) =>
       id === "classic"
         ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 9.5h16M8 5v3M16 5v3M8 13h.01M12 13h.01M16 13h.01M8 16.5h.01M12 16.5h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`
-        : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 9v8M8.5 6v11M12 8v9M15.5 7v10M19 10v7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+        : id === "day"
+          ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="7" y="3.5" width="10" height="17" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M7 8h10" stroke="currentColor" stroke-width="1.8"/><path d="M12 12.2v4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12.2" r="1.5" fill="currentColor"/></svg>`
+          : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 9v8M8.5 6v11M12 8v9M15.5 7v10M19 10v7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
     const filterMeta = filters.find(([id]) => id === cal.filter) || filters[0];
     let title = "";
     let board = "";
@@ -227,6 +289,10 @@
         })
         .join("")}</div>`
         : `<div class="empty">На этой неделе нет рабочих дней.</div>`;
+    } else if (cal.mode === "day") {
+      const day = dayStart(cal.anchor);
+      title = `${RU_WEEKDAYS[(day.getDay() + 6) % 7]} · ${calFmtDay(day)}`;
+      board = mcalDayBoard(list, day, cal);
     }
     const year = cal.anchor.getFullYear();
     const month = cal.anchor.getMonth();

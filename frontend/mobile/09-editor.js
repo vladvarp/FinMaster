@@ -192,6 +192,11 @@
       ${head}
       ${t.expense ? costOnly : money_}
 
+      <div class="field">
+        <label>Комментарий</label>
+        <textarea rows="3" maxlength="2000" placeholder="Комментарий к позиции" ${a("notes")}>${esc(line.notes || "")}</textarea>
+      </div>
+
       <div class="ed-sums" id="ed-sums">${editorSumsHtml(t)}</div>
 
       <div class="stack">

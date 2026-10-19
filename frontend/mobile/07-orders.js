@@ -27,7 +27,10 @@
   }
 
   function statusDotsHtml(lines) {
-    const items = (lines || []).map((l) => `<i class="dot" style="background:${esc(statusMeta(l.status).color)}"></i>`);
+    const items = (lines || []).map((l) => {
+      const note = String(l.notes || "").trim();
+      return `<i class="dot${note ? " has-note" : ""}" style="background:${esc(statusMeta(l.status).color)}"${note ? ` title="${esc(note)}"` : ""}></i>`;
+    });
     if (!items.length) return "";
     const inner = items.join("");
     if (items.length <= 10) return `<span class="dots">${inner}</span>`;
@@ -72,6 +75,7 @@
             <span class="oi-customer">${esc(order.name || "без названия")}</span>
           </div>
           <div class="oi-name">${esc(order.customer || "Без заказчика")} · ${live.length} поз.</div>
+          ${String(order.notes || "").trim() ? `<div class="oi-note">${esc(String(order.notes).trim())}</div>` : ""}
           <div class="oi-foot">
             <span class="sum">${esc(money(t.after))}</span>
             ${debt ? `<span class="sum debt">долг ${esc(money(t.unpaid))}</span>` : `<span class="sum paid">оплачено</span>`}
