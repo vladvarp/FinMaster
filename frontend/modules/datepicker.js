@@ -1,3 +1,55 @@
+/* Свой выбор даты вместо системного окна Windows — для всех input[type=date] интерфейса компьютера. */
+(function () {
+  "use strict";
+
+  const MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+  const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+  const WEEK = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+
+  let pop = null;
+  let input = null;
+  let mode = "days";
+  let span = 1;
+  let viewY = 0;
+  let viewM = 0;
+  let cursor = "";
+
+  const pad = (n) => String(n).padStart(2, "0");
+  const iso = (y, m, d) => `${String(y).padStart(4, "0")}-${pad(m + 1)}-${pad(d)}`;
+
+  function parse(value) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+    return m ? { y: +m[1], m: +m[2] - 1, d: +m[3] } : null;
+  }
+
+  function todayIso() {
+    const d = new Date();
+    return iso(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
+  function daysIn(y, m) {
+    return new Date(y, m + 1, 0).getDate();
+  }
+
+  function shiftIso(value, { days = 0, months = 0 } = {}) {
+    const p = parse(value) || parse(todayIso());
+    if (months) {
+      const total = p.y * 12 + p.m + months;
+      const y = Math.floor(total / 12);
+      const m = total - y * 12;
+      return iso(y, m, Math.min(p.d, daysIn(y, m)));
+    }
+    const d = new Date(p.y, p.m, p.d + days);
+    return iso(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
+  function allowed(value) {
+    if (!input) return true;
+    if (input.min && value < input.min) return false;
+    if (input.max && value > input.max) return false;
+    return true;
+  }
+
   function ensurePop() {
     if (pop) return pop;
     pop = document.createElement("div");
@@ -246,3 +298,155 @@
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  function step(dir) {
+    if (mode === "years") viewY += dir * 12;
+    else if (mode === "months") viewY += dir;
+    else {
+      const size = spanSize();
+      const start = spanStart(viewY, viewM, size);
+      const next = addMonths(start.y, start.m, dir * size);
+      viewY = next.y;
+      viewM = next.m;
+    }
+    render();
+  }
+
+  function onPopClick(e) {
+    const btn = e.target.closest("button");
+    if (!btn || btn.disabled || !input) return;
+    if (btn.dataset.dpSpan) {
+      const size = +btn.dataset.dpSpan;
+      if (size === 1 || size === 3 || size === 6 || size === 12) {
+        span = size;
+        mode = "days";
+        render();
+      }
+      return;
+    }
+    if (btn.dataset.day) {
+      commit(btn.dataset.day);
+      return;
+    }
+    if (btn.dataset.month) {
+      viewM = +btn.dataset.month;
+      mode = "days";
+      render();
+      return;
+    }
+    if (btn.dataset.year) {
+      viewY = +btn.dataset.year;
+      mode = "months";
+      render();
+      return;
+    }
+    const act = btn.dataset.dp;
+    if (act === "prev") step(-1);
+    else if (act === "next") step(1);
+    else if (act === "months") {
+      mode = "months";
+      render();
+    } else if (act === "years") {
+      mode = "years";
+      render();
+    } else if (act === "today") commit(todayIso());
+    else if (act === "clear") commit("");
+  }
+
+  function onWheel(e) {
+    if (!input || !e.target.closest(".dp-grid")) return;
+    e.preventDefault();
+    step(e.deltaY > 0 ? 1 : -1);
+  }
+
+  function moveCursor(opts) {
+    cursor = shiftIso(cursor || input.value || todayIso(), opts);
+    mode = "days";
+    setView(cursor);
+    render();
+  }
+
+  function isDateInput(el) {
+    return el instanceof HTMLInputElement && el.type === "date";
+  }
+
+  document.addEventListener(
+    "click",
+    (e) => {
+      if (isDateInput(e.target)) open(e.target);
+    },
+    true
+  );
+
+  document.addEventListener(
+    "mousedown",
+    (e) => {
+      if (!pop?.classList.contains("open")) return;
+      if (pop.contains(e.target) || e.target === input) return;
+      close();
+    },
+    true
+  );
+
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      const el = e.target;
+      if (!isDateInput(el)) return;
+      if ((e.altKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) || e.key === "F4") {
+        e.preventDefault();
+        if (input === el && pop?.classList.contains("open")) close();
+        else open(el);
+        return;
+      }
+      if (input !== el || !pop?.classList.contains("open")) return;
+      const keys = {
+        ArrowLeft: { days: -1 },
+        ArrowRight: { days: 1 },
+        ArrowUp: { days: -7 },
+        ArrowDown: { days: 7 },
+        PageUp: e.shiftKey ? { months: -12 } : { months: -1 },
+        PageDown: e.shiftKey ? { months: 12 } : { months: 1 },
+      };
+      if (keys[e.key]) {
+        e.preventDefault();
+        moveCursor(keys[e.key]);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        commit(cursor || todayIso());
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+      } else if (e.key === "Tab") close();
+    },
+    true
+  );
+
+  document.addEventListener(
+    "input",
+    (e) => {
+      if (e.target !== input || !pop?.classList.contains("open")) return;
+      if (parse(input.value)) {
+        cursor = input.value;
+        mode = "days";
+        setView(cursor);
+        render();
+      }
+    },
+    true
+  );
+
+  document.addEventListener(
+    "focusout",
+    (e) => {
+      if (e.target === input) setTimeout(() => document.activeElement !== input && close(), 0);
+    },
+    true
+  );
+
+  window.addEventListener("resize", position);
+  document.addEventListener("scroll", () => pop?.classList.contains("open") && position(), true);
+
+  window.FinDatePicker = { open, close };
+})();
