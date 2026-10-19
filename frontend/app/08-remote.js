@@ -15,6 +15,8 @@
     deferred: null,
     deferredOrigin: "",
     clients: [],
+    deskLocked: false,
+    deskBeat: 0,
   };
 
   const NET_KIND = {
@@ -274,6 +276,7 @@
     if ("telegram_chat_id" in data) remote.telegramChatId = data.telegram_chat_id || "";
     if (typeof data.telegram_listening === "boolean") remote.telegramListening = data.telegram_listening;
     if ("telegram_error" in data) remote.telegramError = data.telegram_error || "";
+    if (data.desk) applyPcDeskLock(data.desk);
   }
 
   function renderRemoteIps() {
@@ -465,12 +468,35 @@
     $("device-info-modal")?.classList.add("open");
   }
 
+  function remoteDeskUrl() {
+    return String(remote.url || "").includes("/m?") ? remote.url.replace("/m?", "/desk?") : "";
+  }
+
+  async function copyRemoteLink(text, okText) {
+    if (!text) return;
+    try {
+      if (state.desktop) await apiPost("/api/clipboard-text", { text });
+      else await navigator.clipboard.writeText(text);
+      toast(okText);
+    } catch {
+      toast("Не удалось скопировать ссылку");
+    }
+  }
+
   function renderRemoteModal(data) {
     applyRemotePayload(data);
     const qrBox = $("remote-qr");
     if (remote.qr) qrBox.innerHTML = remote.qr;
     else if (!remote.enabled) qrBox.innerHTML = '<div class="remote-qr-empty">Сессия не запущена</div>';
     $("remote-url").textContent = remote.url || "—";
+    const deskLink = remoteDeskUrl();
+    const deskEl = $("remote-desk-url");
+    const copyDesk = $("remote-copy-desk");
+    if (copyDesk) copyDesk.hidden = !deskLink;
+    if (deskEl) {
+      deskEl.hidden = !deskLink;
+      deskEl.textContent = deskLink ? `Интерфейс ПК: ${deskLink}` : "";
+    }
     renderRemoteIps();
     const auto = $("remote-autostart");
     if (auto) auto.checked = !!remote.autostart;
@@ -535,6 +561,8 @@
   }
 
   function remotePublish() {
+    if (window.FM_DESK) return;
+    if (remote.deskLocked) return;
     if (!remote.enabled || !state.desktop || !state.doc || remote.applying) return;
     clearTimeout(remote.publishTimer);
     remote.publishTimer = setTimeout(async () => {
@@ -553,6 +581,7 @@
   }
 
   function watchRemoteAccess() {
+    if (window.FM_DESK) return;
     if (remote.accessWatch) return;
     remote.accessWatch = true;
     const tick = async () => {
@@ -578,6 +607,7 @@
   }
 
   async function remotePoll() {
+    if (window.FM_DESK) return;
     if (remote.polling) return;
     remote.polling = true;
     while (remote.enabled) {
@@ -604,6 +634,7 @@
           remote.docVersion = data.doc_version || 0;
           applyRemoteDoc(data.document, data.origin);
         }
+        if (data.desk) applyPcDeskLock(data.desk);
         if (typeof data.autosave === "boolean") applyRemoteAutosave(data.autosave);
         if (data.nav && data.nav.seq > remote.lastNav) {
           remote.lastNav = data.nav.seq;
@@ -630,6 +661,7 @@
   }
 
   function applyRemoteAutosave(enabled) {
+    if (window.FM_DESK) return;
     if (typeof enabled !== "boolean") return;
     const el = $("autosave");
     if (el) el.checked = enabled;
@@ -645,6 +677,86 @@
     return true;
   }
 
+  function pcDeskNote(text) {
+    ensurePcDeskLock();
+    const el = $("fm-pc-sync");
+    if (!el) return;
+    el.hidden = !text;
+    el.textContent = text || "";
+    clearTimeout(pcDeskNote.timer);
+    if (text) pcDeskNote.timer = setTimeout(() => { el.hidden = true; }, 2600);
+  }
+
+  function applyPcDeskLock(desk) {
+    if (window.FM_DESK || !state.desktop || !desk) return;
+    const holder = String(desk.holder || "");
+    const locked = !!holder && holder !== "pc";
+    remote.deskLocked = locked;
+    ensurePcDeskLock();
+    const card = $("fm-pc-lock");
+    const text = $("fm-pc-lock-text");
+    if (card) card.hidden = !locked;
+    document.documentElement.classList.toggle("fm-pc-locked", locked);
+    if (text && locked) {
+      const who = desk.name ? ` «${desk.name}»` : "";
+      text.textContent = `Управление перехвачено${who}. Файлы остаются на этом компьютере.`;
+    }
+    if (locked) clearTimeout(state.autosaveTimer);
+    if (holder === "pc") startPcDeskBeat();
+    else stopPcDeskBeat();
+  }
+
+  function ensurePcDeskLock() {
+    if ($("fm-pc-lock")) return;
+    const lock = document.createElement("div");
+    lock.id = "fm-pc-lock";
+    lock.hidden = true;
+    lock.innerHTML = `<div class="fm-pc-card"><h2>Управление заблокировано</h2><p id="fm-pc-lock-text"></p><button type="button" id="fm-pc-take">Перехватить управление</button></div>`;
+    const note = document.createElement("div");
+    note.id = "fm-pc-sync";
+    note.hidden = true;
+    document.body.append(lock, note);
+    $("fm-pc-take")?.addEventListener("click", () => {
+      pcDeskTake().catch((err) => toast(err.message || "Не удалось перехватить управление"));
+    });
+    document.addEventListener("keydown", (e) => {
+      if (!remote.deskLocked) return;
+      if (e.target && e.target.closest && e.target.closest("#fm-pc-lock")) return;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+  }
+
+  function startPcDeskBeat() {
+    if (remote.deskBeat) return;
+    const beat = () => {
+      fetch("/api/remote/desk/beat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-FM-Desk": "pc" },
+        body: JSON.stringify({ name: "Компьютер" }),
+      }).catch(() => {});
+    };
+    beat();
+    remote.deskBeat = setInterval(beat, 3000);
+  }
+
+  function stopPcDeskBeat() {
+    if (!remote.deskBeat) return;
+    clearInterval(remote.deskBeat);
+    remote.deskBeat = 0;
+  }
+
+  async function pcDeskTake() {
+    const res = await fetch("/api/remote/desk/take", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-FM-Desk": "pc" },
+      body: JSON.stringify({ name: "Компьютер" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Не удалось перехватить управление");
+    applyPcDeskLock(data);
+  }
+
   function applyRemoteDoc(doc, origin) {
     if (state.preview) return;
     const active = document.activeElement;
@@ -652,6 +764,26 @@
     if (typing) {
       remote.deferred = doc;
       remote.deferredOrigin = origin;
+      return;
+    }
+    const fromDesk = String(origin || "").startsWith("web:") || origin === "desk" || (remote.clients || []).some((c) => c.id === origin && c.kind === "desk");
+    if (fromDesk) {
+      clearTimeout(state.autosaveTimer);
+      remote.applying = true;
+      remote.origin = origin || "";
+      state.doc = doc;
+      showApp();
+      renderAll();
+      setClean();
+      remote.applying = false;
+      if (state.path) {
+        apiPost("/api/history", { path: state.path, read: true }).then((res) => {
+          if (res.history && Array.isArray(res.history.items) && res.history.items.length) {
+            adoptHistory(res.history, res.history_limit);
+          }
+        }).catch(() => {});
+      }
+      pcDeskNote("Пришли изменения из WEB");
       return;
     }
     historyCommit();
@@ -960,6 +1092,17 @@
   async function libraryWatchLoop() {
     if (!state.desktop || state.libraryWatching) return;
     state.libraryWatching = true;
+    if (window.FM_DESK) {
+      while (state.desktop) {
+        await new Promise((r) => setTimeout(r, 4000));
+        try {
+          applyRemoteLists({ library: await apiGet("/api/library"), recent: state.recentItems });
+        } catch {
+          /* список обновится следующим запросом */
+        }
+      }
+      return;
+    }
     let version = 0;
     while (state.desktop) {
       try {
@@ -1181,22 +1324,15 @@
         toast(`Не удалось забыть устройство: ${err.message || err}`);
       }
     });
-    $("remote-copy")?.addEventListener("click", async () => {
-      if (!remote.url) return;
-      try {
-        if (state.desktop) await apiPost("/api/clipboard-text", { text: remote.url });
-        else await navigator.clipboard.writeText(remote.url);
-        toast("Ссылка скопирована");
-      } catch {
-        toast("Не удалось скопировать ссылку");
-      }
-    });
+    $("remote-copy")?.addEventListener("click", () => copyRemoteLink(remote.url, "Ссылка на телефон скопирована"));
+    $("remote-copy-desk")?.addEventListener("click", () => copyRemoteLink(remoteDeskUrl(), "Ссылка на интерфейс ПК скопирована"));
     document.addEventListener("focusout", () => setTimeout(flushRemoteDoc, 150));
   }
 
   let externalOpenBusy = false;
 
   async function acceptExternalOpens() {
+    if (window.FM_DESK) return;
     if (!state.desktop || externalOpenBusy) return;
     externalOpenBusy = true;
     try {
@@ -1237,10 +1373,11 @@
     } catch (err) {
       console.error(err);
     }
+    window.FM_DESK_READY?.();
     try {
       const bootData = await apiGet("/api/bootstrap");
       state.desktop = true;
-      state.autosave = !!bootData.autosave;
+      state.autosave = window.FM_DESK ? false : !!bootData.autosave;
       hydratePrefs(bootData.ui_prefs);
       applyTheme(bootData.theme || "light", false);
       await renderStartLists(bootData);
@@ -1257,7 +1394,7 @@
       setInterval(acceptExternalOpens, 800);
     } catch {
       state.desktop = false;
-      state.autosave = localStorage.getItem(LS_AUTOSAVE) === "true";
+      state.autosave = window.FM_DESK ? false : localStorage.getItem(LS_AUTOSAVE) === "true";
       applyTheme(localStorage.getItem(LS_THEME) || "light", false);
       await renderRecent();
     }

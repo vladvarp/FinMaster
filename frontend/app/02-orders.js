@@ -534,6 +534,8 @@
   }
 
   function scheduleAutosave() {
+    if (window.FM_DESK && !state.autosave) return;
+    if (remote.deskLocked) return;
     if (!state.autosave || !state.doc) return;
     clearTimeout(state.autosaveTimer);
     state.autosaveTimer = setTimeout(() => {

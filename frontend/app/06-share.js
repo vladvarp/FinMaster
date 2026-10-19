@@ -572,7 +572,7 @@
   }
 
   function watchDesktopPdfJobs() {
-    if (!state.desktop || pdfJobTimer) return;
+    if (window.FM_DESK || !state.desktop || pdfJobTimer) return;
     pdfJobTimer = setInterval(() => {
       pollDesktopPdfJob();
     }, 900);

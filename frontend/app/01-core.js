@@ -192,13 +192,18 @@
     return String(client?.name || "").trim() || "Телефон";
   }
 
+  function localActor() {
+    return window.FM_DESK ? { source: "web", device: "WEB" } : { source: "pc", device: "ПК" };
+  }
+
   function historyItem(json, label, meta) {
+    const actor = localActor();
     return {
       id: uid(),
       at: new Date().toISOString(),
       label: label || "Правка",
-      source: meta?.source || "pc",
-      device: meta?.device || "ПК",
+      source: meta?.source || actor.source,
+      device: meta?.device || actor.device,
       json,
     };
   }
@@ -208,7 +213,7 @@
     history.pending = false;
     history.pendingLabel = "";
     const snap = state.doc ? historySnapshot() : null;
-    history.stack = snap ? [historyItem(snap, label, { source: "pc", device: "ПК" })] : [];
+    history.stack = snap ? [historyItem(snap, label, localActor())] : [];
     history.index = history.stack.length - 1;
     updateHistoryButtons();
     if (opts.persist !== false) persistHistorySoon();
@@ -221,7 +226,7 @@
     }
   }
 
-  function historyCommit(label, meta) {
+  function historyCommit(label, meta, opts = {}) {
     clearTimeout(history.timer);
     if (!state.doc || history.busy || state.preview) return null;
     const snap = historySnapshot();
@@ -233,7 +238,7 @@
       return null;
     }
     const text = label || history.pendingLabel || (cur ? historyGuessLabel(cur.json, snap) : "Правка");
-    const src = meta || (remote.applying ? { source: "mobile", device: remoteDeviceName(remote.origin) } : { source: "pc", device: "ПК" });
+    const src = meta || (remote.applying ? { source: "mobile", device: remoteDeviceName(remote.origin) } : localActor());
     history.stack = history.stack.slice(0, history.index + 1);
     history.stack.push(historyItem(snap, text, src));
     historyTrim();
@@ -241,7 +246,7 @@
     history.pending = false;
     history.pendingLabel = "";
     updateHistoryButtons();
-    persistHistorySoon();
+    if (opts.persist !== false) persistHistorySoon();
     return history.stack[history.index];
   }
 
@@ -270,6 +275,24 @@
   }
 
   function historyDiskPayload() {
+    if (window.FM_DESK) {
+      const snap = history.stack[history.index];
+      return {
+        append: true,
+        index: history.index,
+        items: history.stack.map((item) => ({
+          id: item.id,
+          at: item.at,
+          label: item.label,
+          source: item.source,
+          device: item.device,
+          file: item.file || undefined,
+        })),
+        snap: snap
+          ? { id: snap.id, at: snap.at, label: snap.label, source: snap.source, device: snap.device }
+          : null,
+      };
+    }
     return {
       index: history.index,
       items: history.stack.map((item) => {
@@ -286,6 +309,7 @@
 
   function persistHistorySoon() {
     renderHistoryPanel();
+    if (window.FM_DESK) return;
     if (!state.desktop || !state.path) return;
     clearTimeout(history.persistTimer);
     history.persistTimer = setTimeout(() => {
@@ -300,6 +324,33 @@
   function adoptHistory(payload, limit) {
     if (limit != null) history.limit = clampHistoryLimit(limit);
     const items = Array.isArray(payload?.items) ? payload.items : [];
+    if (payload?.meta) {
+      const labels = items.filter((item) => item && item.id).map((item) => ({
+        id: item.id || uid(),
+        file: item.file ? String(item.file) : undefined,
+        at: item.at || new Date().toISOString(),
+        label: item.label || "Правка",
+        source: item.source === "mobile" || item.source === "desk" || item.source === "web" ? item.source : "pc",
+        device: item.device || (item.source === "mobile" ? "Телефон" : item.source === "web" ? "WEB" : item.source === "desk" ? "Браузер" : "ПК"),
+        json: "",
+      }));
+      if (!labels.length) {
+        historyReset(state.path ? "Открыт отчёт" : "Новый отчёт", { persist: false });
+        return;
+      }
+      history.stack = labels;
+      historyTrim();
+      let index = Number(payload.index);
+      if (!Number.isInteger(index) || index < 0 || index >= history.stack.length) index = history.stack.length - 1;
+      if (state.doc && history.stack[index]) {
+        try { history.stack[index].json = JSON.stringify(state.doc); } catch { /* экран уже показывает отчёт */ }
+      }
+      history.index = index;
+      history.pending = false;
+      history.pendingLabel = "";
+      updateHistoryButtons();
+      return;
+    }
     const restored = [];
     items.forEach((item) => {
       if (!item || !item.doc || typeof item.doc !== "object") return;
@@ -309,8 +360,8 @@
           file: item.file ? String(item.file) : undefined,
           at: item.at || new Date().toISOString(),
           label: item.label || "Правка",
-          source: item.source === "mobile" ? "mobile" : "pc",
-          device: item.device || (item.source === "mobile" ? "Телефон" : "ПК"),
+          source: item.source === "mobile" || item.source === "desk" || item.source === "web" ? item.source : "pc",
+          device: item.device || (item.source === "mobile" ? "Телефон" : item.source === "web" ? "WEB" : item.source === "desk" ? "Браузер" : "ПК"),
           json: JSON.stringify(item.doc),
         });
       } catch {
@@ -362,6 +413,10 @@
       return false;
     }
     if (next === history.index && !history.pending) return false;
+    if (!history.stack[next].json) {
+      toast("Снимок остаётся на главном компьютере");
+      return false;
+    }
     let doc;
     try {
       doc = JSON.parse(history.stack[next].json);
@@ -636,7 +691,7 @@
         const i = history.stack.indexOf(item);
         return `<button type="button" class="history-item ${i === history.index ? "active" : ""}" data-history-id="${esc(item.id)}">
           <span class="history-item-top"><b>${esc(item.label || "Правка")}</b><time>${esc(historyTime(item.at))}</time></span>
-          <small>${esc(item.device || (item.source === "mobile" ? "Телефон" : "ПК"))}</small>
+          <small>${esc(item.device || (item.source === "mobile" ? "Телефон" : item.source === "web" ? "WEB" : item.source === "desk" ? "Браузер" : "ПК"))}</small>
         </button>`;
       })
       .join("");

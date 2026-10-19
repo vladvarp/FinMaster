@@ -185,6 +185,7 @@
   color: var(--ink);
   text-align: left;
 }
+.menu-history > b { flex: 0 0 auto; width: 22px; text-align: center; font-size: 18px; font-weight: 650; }
 .menu-history svg { flex: 0 0 auto; }
 .menu-history span {
   display: flex;

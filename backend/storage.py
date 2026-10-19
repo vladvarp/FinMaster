@@ -411,10 +411,32 @@ def _clean_history_item(item: dict[str, Any]) -> dict[str, Any] | None:
         "id": item_id,
         "at": str(item.get("at") or ""),
         "label": str(item.get("label") or "Правка"),
-        "source": "mobile" if item.get("source") == "mobile" else "pc",
-        "device": str(item.get("device") or ("Телефон" if item.get("source") == "mobile" else "ПК")),
+        "source": str(item.get("source") or "") if str(item.get("source") or "") in {"mobile", "web", "desk", "pc"} else "pc",
+        "device": str(item.get("device") or {"mobile": "Телефон", "web": "WEB", "desk": "Браузер"}.get(str(item.get("source") or ""), "ПК")),
         "file": _snap_name(item.get("file") or item_id),
     }
+
+
+def load_history_meta(report_path: str) -> dict[str, Any]:
+    """Подписи снимков без их содержимого. Сами снимки остаются на диске."""
+    folder = find_history_folder(report_path)
+    if not folder:
+        return {"index": -1, "items": [], "meta": True}
+    meta = _read_history_meta(folder)
+    raw_items = meta.get("items") if isinstance(meta.get("items"), list) else []
+    items = []
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        info = _clean_history_item(raw)
+        if info:
+            items.append(info)
+    index = int(meta.get("index") if meta.get("index") is not None else len(items) - 1)
+    if items and (index < 0 or index >= len(items)):
+        index = len(items) - 1
+    if not items:
+        index = -1
+    return {"index": index, "items": items, "folder": os.path.basename(folder), "meta": True}
 
 
 def load_doc_history(report_path: str) -> dict[str, Any]:
@@ -454,9 +476,95 @@ def load_doc_history(report_path: str) -> dict[str, Any]:
     return {"index": index, "items": items, "folder": os.path.basename(folder)}
 
 
+def _append_doc_history(report_path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Дописывает снимок и подписи. Тела старых снимков клиент не присылает."""
+    if not report_path:
+        return {"index": -1, "items": []}
+    title = str(payload.get("title") or "")
+    folder = _alloc_history_folder(report_path, title)
+    old_meta = _read_history_meta(folder)
+    old_items = [item for item in (old_meta.get("items") or []) if isinstance(item, dict) and item.get("id")]
+    old_by = {str(item.get("id")): item for item in old_items}
+    old_ids = set(old_by)
+    raw_items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    keep = []
+    seen: set[str] = set()
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        prev = old_by.get(str(raw.get("id") or ""))
+        merged = {**(prev or {}), **raw}
+        info = _clean_history_item(merged)
+        if not info or info["id"] in seen:
+            continue
+        if prev and prev.get("file") and os.path.isfile(os.path.join(folder, str(prev.get("file")))):
+            info["file"] = str(prev.get("file"))
+        keep.append(info)
+        seen.add(info["id"])
+    snap = payload.get("snap") if isinstance(payload.get("snap"), dict) else None
+    snap_doc = snap.get("doc") if isinstance(snap, dict) else None
+    if isinstance(snap, dict) and isinstance(snap_doc, dict):
+        info = _clean_history_item({**(old_by.get(str(snap.get("id") or "")) or {}), **snap})
+        if info:
+            prev = old_by.get(info["id"])
+            if prev and prev.get("file"):
+                info["file"] = str(prev.get("file"))
+            try:
+                with open(os.path.join(folder, info["file"]), "w", encoding="utf-8") as fh:
+                    json.dump(snap_doc, fh, ensure_ascii=False)
+            except OSError:
+                info = None
+            if info:
+                for index, item in enumerate(keep):
+                    if item["id"] == info["id"]:
+                        keep[index] = info
+                        break
+                else:
+                    keep.append(info)
+    new_ids = {item["id"] for item in keep}
+    if old_ids and new_ids.isdisjoint(old_ids) and len(keep) < max(1, len(old_items)):
+        return load_doc_history(report_path)
+    keep_files = {HISTORY_META, *(item["file"] for item in keep)}
+    limit = history_limit()
+    if len(keep) > limit:
+        extra = len(keep) - limit
+        for gone in keep[:extra]:
+            keep_files.discard(gone["file"])
+        keep = keep[extra:]
+        index = max(-1, int(payload.get("index") or -1) - extra)
+    else:
+        index = int(payload.get("index") if payload.get("index") is not None else len(keep) - 1)
+    if keep and (index < 0 or index >= len(keep)):
+        index = len(keep) - 1
+    try:
+        for name in os.listdir(folder):
+            if name in keep_files:
+                continue
+            path = os.path.join(folder, name)
+            if os.path.isfile(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    _write_history_meta(
+        folder,
+        {
+            "path": os.path.abspath(report_path),
+            "title": title or os.path.splitext(os.path.basename(report_path))[0],
+            "index": index,
+            "items": keep,
+        },
+    )
+    return load_doc_history(report_path)
+
+
 def save_doc_history(report_path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not report_path:
         return {"index": -1, "items": []}
+    if isinstance(payload, dict) and payload.get("append"):
+        return _append_doc_history(report_path, payload)
     title = ""
     if isinstance(payload, dict):
         title = str(payload.get("title") or "")

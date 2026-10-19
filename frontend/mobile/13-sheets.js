@@ -103,6 +103,13 @@
             <small>синхронно с компьютером</small>
           </span>
         </label>
+        <button type="button" class="menu-history" data-menu="desk">
+          <b>▣</b>
+          <span>
+            <strong>Интерфейс ПК</strong>
+            <small>тот же экран, что на компьютере</small>
+          </span>
+        </button>
         <button type="button" class="menu-history" data-menu="history">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.8"/>
@@ -190,6 +197,7 @@
     } else if (value === "snapshot") openSnapshot();
     else if (value === "new") await createNewReport();
     else if (value === "link") copyLink();
+    else if (value === "desk") openDesk();
     else if (value === "device") setView("files");
   }
 
@@ -220,6 +228,16 @@
       state.pinging = false;
       document.querySelector('[data-menu="ping"]')?.classList.remove("busy");
     }
+  }
+
+  function openDesk() {
+    if (!state.token) {
+      toast("Нет сессии");
+      return;
+    }
+    const url = new URL("/desk", location.origin);
+    url.searchParams.set("t", state.token);
+    location.assign(url.href);
   }
 
   function copyLink() {

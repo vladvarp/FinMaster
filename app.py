@@ -76,7 +76,156 @@ def _is_public_asset(path: str) -> bool:
 
 
 def _remote_token() -> str:
-    return str(request.headers.get("X-FM-Token") or request.args.get("t") or "")
+    return str(request.headers.get("X-FM-Token") or request.args.get("t") or request.cookies.get("fm_desk") or "")
+
+
+def _desk_cid() -> str:
+    return str(request.headers.get("X-FM-Desk") or "").strip()[:80]
+
+
+def _is_desk_call() -> bool:
+    return bool(_desk_cid())
+
+
+_DESK_FILES = {
+    "/app.js",
+    "/styles.css",
+    "/charts.js",
+    "/cloud.js",
+    "/calc.js",
+    "/presentation.js",
+    "/pdf.js",
+    "/vault.js",
+    "/datepicker.js",
+}
+_DESK_DENY = {
+    "/api/quit",
+    "/api/open-folder",
+    "/api/dialog/open",
+    "/api/dialog/save",
+    "/api/dialog/export",
+    "/api/dialog/png",
+    "/api/dialog/pdf",
+    "/api/instance/open",
+    "/api/instance/pending",
+    "/api/clipboard-text",
+    "/api/clipboard-png",
+    "/api/window/fullscreen",
+    "/api/desktop/pdf-job",
+    "/api/runtime/mode",
+    "/api/runtime/install",
+}
+_DESK_VIEW_POST = {
+    "/api/open-path",
+    "/api/backups",
+    "/api/remote/desk/take",
+    "/api/remote/desk/beat",
+    "/api/remote/desk/leave",
+}
+
+
+def _desk_page(path: str) -> bool:
+    return path == "/desk" or path.startswith("/web-app/")
+
+
+def _desk_asset(path: str) -> bool:
+    if path in _DESK_FILES or path.startswith("/api/pdf-font/"):
+        return True
+    name = path.rsplit("/", 1)[-1].lower()
+    return name.startswith("favicon") or name.startswith("apple-touch-icon")
+
+
+def _desk_auth_fail():
+    if not REMOTE.enabled:
+        return jsonify({"error": "Удалённый доступ выключен на компьютере."}), 403
+    if not REMOTE.check(_remote_token()):
+        return jsonify({"error": "Сессия недействительна — откройте ссылку заново."}), 401
+    return None
+
+
+def _desk_reader() -> bool:
+    return _is_desk_call() and REMOTE.enabled and REMOTE.check(_remote_token())
+
+
+def _desk_holds() -> bool:
+    return _desk_reader() and REMOTE.desk_holds(_desk_cid())
+
+
+def _desk_editor() -> bool:
+    """Править можно, пока управление никто не забрал или оно у этого окна."""
+    if not _desk_reader():
+        return False
+    snap = REMOTE.desk_snapshot(_desk_cid())
+    return bool(snap.get("free") or snap.get("mine"))
+
+
+def _under_dir(root: str, path: str) -> bool:
+    base = os.path.normcase(os.path.abspath(root))
+    full = os.path.normcase(os.path.abspath(path))
+    if not base.endswith(os.sep):
+        base += os.sep
+    return full.startswith(base)
+
+
+def _desk_in_recent(path: str) -> bool:
+    full = os.path.abspath(path)
+    for item in storage.load_config().get("recent") or []:
+        if storage.same_path(full, str(item.get("path") or "")):
+            return True
+    return False
+
+
+def _desk_can_read(path: str) -> bool:
+    full = os.path.abspath(path or "")
+    if not full.lower().endswith((".fmaster", ".fbak")):
+        return False
+    return _under_dir(storage.default_reports_dir(), full) or _desk_in_recent(full)
+
+
+def _desk_can_write(path: str, exts: tuple[str, ...]) -> bool:
+    full = os.path.abspath(path or "")
+    if not full.lower().endswith(exts):
+        return False
+    parent = os.path.normcase(os.path.dirname(full))
+    root = os.path.normcase(os.path.abspath(storage.default_reports_dir()))
+    if parent == root:
+        return True
+    return full.lower().endswith(".fmaster") and _desk_in_recent(full)
+
+
+def _desk_unique(suggested: str, ext: str) -> str:
+    folder = storage.default_reports_dir()
+    stem = storage.safe_report_title(os.path.splitext(os.path.basename(str(suggested or "")))[0])
+    path = os.path.join(folder, stem + ext)
+    number = 2
+    while os.path.exists(path) and number < 300:
+        path = os.path.join(folder, f"{stem} {number}{ext}")
+        number += 1
+    return os.path.abspath(path)
+
+
+def _desk_denied(message: str, status: int = 403):
+    body = (
+        "<!DOCTYPE html><html lang=\"ru\"><meta charset=\"utf-8\"><title>FinMaster</title>"
+        "<body style=\"font:16px/1.45 sans-serif;background:#0f172a;color:#e2e8f0;"
+        "display:grid;place-items:center;min-height:100vh;margin:0\">"
+        f"<p style=\"max-width:28rem\">{message}</p></body></html>"
+    )
+    return app.response_class(body, status=status, mimetype="text/html")
+
+
+def _guard_desk_api():
+    fail = _desk_auth_fail()
+    if fail:
+        return fail
+    path = request.path
+    if path in _DESK_DENY or path.startswith("/api/runtime/"):
+        return jsonify({"error": "Это действие доступно только в окне главного компьютера."}), 403
+    if request.method == "GET" or path in _DESK_VIEW_POST:
+        return None
+    if not _desk_editor():
+        return jsonify({"error": "Управление у другого окна. Перехватите его.", "locked": True}), 423
+    return None
 
 
 def _device_info() -> dict[str, Any]:
@@ -104,11 +253,35 @@ def _net_peer() -> str:
 
 @app.before_request
 def guard_remote_clients():
-    """Телефон видит только мобильный интерфейс и только с действующим токеном."""
+    """Чужой адрес видит телефон и интерфейс компьютера только с токеном сессии."""
+    path = request.path
+    if _is_local() and _desk_cid() == "pc" and path.startswith("/api/remote/desk"):
+        return None
+    if path == "/api/remote/desk/leave":
+        return _desk_auth_fail()
+    if _is_desk_call():
+        return _guard_desk_api()
+    if _desk_page(path):
+        fail = _desk_auth_fail()
+        if not fail:
+            return None
+        if path != "/desk":
+            return fail
+        resp, status = fail if isinstance(fail, tuple) else (fail, 403)
+        message = "Нет доступа."
+        try:
+            message = (resp.get_json() or {}).get("error") or message
+        except Exception:
+            pass
+        return _desk_denied(message, status)
     if _is_local():
         return None
-    path = request.path
     if _is_public_asset(path):
+        return None
+    if _desk_asset(path):
+        fail = _desk_auth_fail()
+        if fail:
+            return fail
         return None
     if path.startswith("/api/remote/"):
         if not REMOTE.enabled:
@@ -168,6 +341,39 @@ def _no_cache(response):
 @app.get("/m")
 def mobile_index():
     return _no_cache(send_from_directory(FRONTEND, "mobile.html"))
+
+
+@app.get("/desk")
+def desk_index():
+    """Тот же интерфейс, что у окна программы, для браузера, Telegram и телефона."""
+    path = os.path.join(FRONTEND, "index.html")
+    with open(path, "rb") as fh:
+        html = fh.read()
+    html = html.replace(
+        b"</head>",
+        b'  <link rel="stylesheet" href="/web-app/desk.css" />\n</head>',
+        1,
+    )
+    html = html.replace(
+        b"<body>",
+        (
+            "<body>\n"
+            '  <div id="fm-desk-load" role="status" aria-live="polite">'
+            "<div><span class=\"fm-desk-spin\"></span><strong>Загрузка интерфейса…</strong></div></div>\n"
+            '  <script src="/web-app/boot.js"></script>\n'
+        ).encode("utf-8"),
+        1,
+    )
+    response = _no_cache(app.response_class(html, mimetype="text/html"))
+    response.set_cookie("fm_desk", REMOTE.token, samesite="Lax", httponly=True, path="/", max_age=60 * 60 * 24 * 400)
+    return response
+
+
+@app.get("/web-app/<name>")
+def web_app_file(name: str):
+    if name not in {"boot.js", "desk.css"}:
+        return jsonify({"error": "Нет такого файла."}), 404
+    return _no_cache(send_from_directory(os.path.join(FRONTEND, "web app"), name))
 
 
 @app.get("/favicon.ico")
@@ -552,6 +758,11 @@ def api_history():
     path = str(data.get("path") or "")
     if not path:
         return jsonify({"error": "Нет пути файла."}), 400
+    if _is_desk_call() and not _desk_can_read(path):
+        return jsonify({"error": "История только для отчётов главного компьютера."}), 403
+    if data.get("read"):
+        saved = storage.load_doc_history(path)
+        return jsonify({"ok": True, "history": saved, "history_limit": storage.history_limit()})
     saved = storage.save_doc_history(path, data)
     return jsonify({"ok": True, "history": saved, "history_limit": storage.history_limit()})
 
@@ -583,7 +794,7 @@ def api_history_limit():
 
 @app.post("/api/backups")
 def api_backups_list():
-    if not _is_local():
+    if not _is_local() and not _desk_reader():
         return jsonify({"error": "Только на этом компьютере."}), 403
     data = request.get_json(silent=True) or {}
     try:
@@ -594,7 +805,7 @@ def api_backups_list():
 
 @app.post("/api/backups/create")
 def api_backups_create():
-    if not _is_local():
+    if not _is_local() and not _desk_editor():
         return jsonify({"error": "Только на этом компьютере."}), 403
     data = request.get_json(silent=True) or {}
     document = data.get("document")
@@ -611,7 +822,7 @@ def api_backups_create():
 
 @app.post("/api/backups/delete")
 def api_backups_delete():
-    if not _is_local():
+    if not _is_local() and not _desk_editor():
         return jsonify({"error": "Только на этом компьютере."}), 403
     data = request.get_json(silent=True) or {}
     try:
@@ -673,7 +884,7 @@ def _ensure_library_watch() -> None:
 
 @app.get("/api/library/watch")
 def api_library_watch():
-    if not _is_local():
+    if not _is_local() and not _desk_reader():
         return jsonify({"error": "Список папки можно слушать только на компьютере."}), 403
     _ensure_library_watch()
     since = request.args.get("since", type=int) or 0
@@ -708,7 +919,7 @@ def _delete_library_file(path: str) -> dict[str, Any]:
 
 @app.post("/api/library/delete")
 def api_library_delete():
-    if not _is_local():
+    if not _is_local() and not _desk_editor():
         return jsonify({"error": "Удалять с телефона можно через сессию."}), 403
     data = request.get_json(silent=True) or {}
     try:
@@ -770,12 +981,15 @@ def api_instance_pending():
 def api_open_path():
     data = request.get_json(silent=True) or {}
     path = data.get("path") or ""
+    if _is_desk_call() and not _desk_can_read(str(path)):
+        return jsonify({"error": "Файл можно открыть только из папки главного компьютера."}), 403
     try:
-        return jsonify(_open_path(path))
+        payload = _open_path(path)
     except FileNotFoundError as exc:
         return jsonify({"error": str(exc)}), 404
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
+    return jsonify(payload)
 
 
 def _open_path(path: str) -> dict[str, Any]:
@@ -794,7 +1008,7 @@ def _open_path(path: str) -> dict[str, Any]:
         "recent": recent,
         "cancelled": False,
         "preview": preview,
-        "history": storage.load_doc_history(abs_path),
+        "history": storage.load_history_meta(abs_path) if _is_desk_call() else storage.load_doc_history(abs_path),
         "history_limit": storage.history_limit(),
     }
 
@@ -819,6 +1033,95 @@ def api_dialog_export():
     return jsonify({"path": path, "cancelled": False})
 
 
+def _apply_lines_patch(lines: list, patch: dict) -> list:
+    items = [dict(line) for line in lines if isinstance(line, dict)]
+    by_id = {str(line.get("id")): line for line in items if line.get("id") is not None}
+    for line in patch.get("upsert") or []:
+        if isinstance(line, dict) and line.get("id") is not None:
+            by_id[str(line.get("id"))] = line
+    for line_id in patch.get("delete") or []:
+        by_id.pop(str(line_id), None)
+    order = patch.get("order")
+    if isinstance(order, list) and order:
+        return [by_id[str(line_id)] for line_id in order if str(line_id) in by_id]
+    seen: set[str] = set()
+    out = []
+    for line in items:
+        line_id = str(line.get("id"))
+        if line_id in by_id and line_id not in seen:
+            out.append(by_id[line_id])
+            seen.add(line_id)
+    for line_id, line in by_id.items():
+        if line_id not in seen:
+            out.append(line)
+    return out
+
+
+def _merge_order(prev: dict, item: dict) -> dict:
+    merged = dict(prev)
+    for key, value in item.items():
+        if key == "lines_patch":
+            continue
+        merged[key] = value
+    lines_patch = item.get("lines_patch")
+    if isinstance(lines_patch, dict) and "lines" not in item:
+        merged["lines"] = _apply_lines_patch(list(prev.get("lines") or []), lines_patch)
+    return merged
+
+
+def _apply_orders_patch(orders: list, patch: dict) -> list:
+    if isinstance(patch.get("replace"), list):
+        return patch["replace"]
+    items = [order for order in orders if isinstance(order, dict)]
+    by_id = {str(order.get("id")): order for order in items if order.get("id") is not None}
+    for item in patch.get("upsert") or []:
+        if not isinstance(item, dict) or item.get("id") is None:
+            continue
+        order_id = str(item.get("id"))
+        prev = by_id.get(order_id)
+        by_id[order_id] = item if prev is None else _merge_order(prev, item)
+    for order_id in patch.get("delete") or []:
+        by_id.pop(str(order_id), None)
+    order = patch.get("order")
+    if isinstance(order, list) and order:
+        return [by_id[str(order_id)] for order_id in order if str(order_id) in by_id]
+    seen: set[str] = set()
+    out = []
+    for item in items:
+        order_id = str(item.get("id"))
+        if order_id in by_id and order_id not in seen:
+            out.append(by_id[order_id])
+            seen.add(order_id)
+    for order_id, item in by_id.items():
+        if order_id not in seen:
+            out.append(item)
+    return out
+
+
+def _apply_doc_patch(current: dict, patch: dict) -> dict:
+    doc = json.loads(json.dumps(current))
+    raw_set = patch.get("set") if isinstance(patch.get("set"), dict) else {}
+    for key, value in raw_set.items():
+        if key == "modified_at":
+            continue
+        doc[key] = value
+    orders = patch.get("orders")
+    if isinstance(orders, dict):
+        doc["orders"] = _apply_orders_patch(list(doc.get("orders") or []), orders)
+    return doc
+
+
+def _history_for_client(saved: dict) -> dict:
+    if not _is_desk_call():
+        return saved
+    items = []
+    for item in saved.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        items.append({key: item.get(key) for key in ("id", "at", "label", "source", "device", "file")})
+    return {"index": saved.get("index"), "items": items, "folder": saved.get("folder")}
+
+
 @app.post("/api/write")
 def api_write():
     data = request.get_json(silent=True) or {}
@@ -826,8 +1129,22 @@ def api_write():
     document = data.get("document")
     if not path:
         return jsonify({"error": "Не указан путь файла."}), 400
+    if _is_desk_call() and not _desk_can_write(str(path), (".fmaster",)):
+        return jsonify({"error": "Сохранять можно только в папку FinMaster на главном компьютере."}), 403
     if is_backup_path(path):
         return jsonify({"error": "Резервную копию нельзя изменять. Сохраните её как новый отчёт."}), 400
+    patch = data.get("patch")
+    if _is_desk_call() and isinstance(patch, dict) and not isinstance(document, dict):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                current = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            current = None
+        if not isinstance(current, dict):
+            return jsonify({"error": "Файл отчёта не найден.", "stale": True}), 409
+        document = _apply_doc_patch(current, patch)
+    if not isinstance(document, dict):
+        return jsonify({"error": "Нет данных отчёта."}), 400
     doc = normalize_document(document)
     doc["modified_at"] = now_iso()
     abs_path = os.path.abspath(path)
@@ -840,16 +1157,25 @@ def api_write():
     history = data.get("history")
     if isinstance(history, dict):
         history = {**history, "title": doc.get("title") or history.get("title") or ""}
+        snap = history.get("snap")
+        if history.get("append") and isinstance(snap, dict) and not isinstance(snap.get("doc"), dict):
+            history = {**history, "snap": {**snap, "doc": doc}}
         storage.save_doc_history(abs_path, history)
-    return jsonify(
-        {
-            "path": abs_path,
-            "document": doc,
-            "recent": recent,
-            "history": storage.load_doc_history(abs_path),
-            "history_limit": storage.history_limit(),
-        }
-    )
+    desk_patch = _is_desk_call() and isinstance(data.get("patch"), dict)
+    saved_history = storage.load_history_meta(abs_path) if _is_desk_call() else storage.load_doc_history(abs_path)
+    if _is_desk_call() and REMOTE.enabled and storage.same_path(abs_path, REMOTE.path):
+        REMOTE.publish(doc, abs_path, f"web:{_desk_cid() or 'desk'}", False)
+    payload = {
+        "path": abs_path,
+        "recent": recent,
+        "history": saved_history if _is_desk_call() else _history_for_client(saved_history),
+        "history_limit": storage.history_limit(),
+    }
+    if desk_patch:
+        payload["modified_at"] = doc.get("modified_at") or ""
+    else:
+        payload["document"] = doc
+    return jsonify(payload)
 
 
 @app.post("/api/write-text")
@@ -859,6 +1185,8 @@ def api_write_text():
     content = data.get("content") or ""
     if not path:
         return jsonify({"error": "Не указан путь файла."}), 400
+    if _is_desk_call() and not _desk_can_write(str(path), (".csv", ".txt")):
+        return jsonify({"error": "Файл можно записать только в папку FinMaster на главном компьютере."}), 403
     storage.atomic_write(path, content)
     return jsonify({"ok": True})
 
@@ -900,7 +1228,7 @@ _PDF_FONT_FILES = {
 @app.get("/api/pdf-font/<name>")
 def api_pdf_font(name: str):
     """Системный шрифт Windows для текстового PDF. Только локальное окно."""
-    if not _is_local():
+    if not _is_local() and not _desk_reader():
         return jsonify({"error": "Только в окне программы."}), 403
     safe = os.path.basename(str(name or "")).lower()
     if safe not in _PDF_FONT_FILES:
@@ -954,6 +1282,8 @@ def api_write_bytes():
     payload = data.get("base64") or ""
     if not path:
         return jsonify({"error": "Не указан путь файла."}), 400
+    if _is_desk_call() and not _desk_can_write(str(path), (".png", ".pdf")):
+        return jsonify({"error": "Файл можно записать только в папку FinMaster на главном компьютере."}), 403
     raw = base64.b64decode(payload)
     directory = os.path.dirname(os.path.abspath(path)) or "."
     os.makedirs(directory, exist_ok=True)
@@ -1001,7 +1331,7 @@ def api_clipboard_png():
 @app.post("/api/remote/windows-login")
 def api_remote_windows_login():
     """Тумблер автозагрузки: программа открывается при входе в Windows."""
-    if not _is_local():
+    if not _is_local() and not _desk_editor():
         return jsonify({"error": "Только в окне программы."}), 403
     data = request.get_json(silent=True) or {}
     try:
@@ -1083,7 +1413,7 @@ def api_remote_ngrok():
 @app.post("/api/remote/telegram")
 def api_remote_telegram():
     """Сохраняет токен бота и шлёт актуальную ссылку в Telegram."""
-    if not _is_local():
+    if not _is_local() and not _desk_editor():
         return jsonify({"error": "Доступ запрещён."}), 403
     data = request.get_json(silent=True) or {}
     updates: dict[str, Any] = {}
@@ -1175,9 +1505,92 @@ def api_remote_forget():
     return jsonify({"ok": True, "devices": devices})
 
 
+def _desk_name_from(data: dict[str, Any]) -> str:
+    return str(data.get("name") or request.args.get("name") or "Браузер")[:80]
+
+
+@app.get("/api/remote/desk")
+def api_desk_state():
+    cid = _desk_cid()
+    name = _desk_name_from({})
+    if cid and cid != "pc":
+        REMOTE.touch(cid, "desk", name)
+    return jsonify(REMOTE.desk_snapshot(cid))
+
+
+@app.post("/api/remote/desk/beat")
+def api_desk_beat():
+    data = request.get_json(silent=True) or {}
+    cid = _desk_cid()
+    name = _desk_name_from(data)
+    if cid and cid != "pc":
+        REMOTE.touch(cid, "desk", name)
+    return jsonify(REMOTE.desk_beat(cid, name))
+
+
+@app.post("/api/remote/desk/take")
+def api_desk_take():
+    data = request.get_json(silent=True) or {}
+    cid = _desk_cid()
+    if not cid:
+        return jsonify({"error": "Нет окна."}), 400
+    name = _desk_name_from(data)
+    if cid != "pc":
+        REMOTE.touch(cid, "desk", name)
+    g.netlog_skip = True
+    return jsonify(REMOTE.desk_take(cid, name))
+
+
+@app.post("/api/remote/desk/leave")
+def api_desk_leave():
+    data = request.get_json(silent=True) or {}
+    cid = _desk_cid() or str(data.get("cid") or "")[:80]
+    REMOTE.desk_leave(cid)
+    g.netlog_skip = True
+    return jsonify({"ok": True})
+
+
+@app.post("/api/remote/desk/path")
+def api_desk_path():
+    data = request.get_json(silent=True) or {}
+    ext = str(data.get("ext") or ".fmaster").lower()
+    if ext not in {".fmaster", ".csv", ".png", ".pdf"}:
+        return jsonify({"error": "Такой файл сюда не записывается."}), 400
+    path = _desk_unique(str(data.get("suggested") or "Отчёт"), ext)
+    return jsonify({"path": path, "cancelled": False})
+
+
+@app.post("/api/remote/desk/import")
+def api_desk_import():
+    data = request.get_json(silent=True) or {}
+    raw = data.get("content")
+    if not isinstance(raw, str) or not raw.strip():
+        return jsonify({"error": "Пустой файл."}), 400
+    if len(raw) > 15_000_000:
+        return jsonify({"error": "Файл слишком большой."}), 400
+    try:
+        doc = normalize_document(json.loads(raw))
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return jsonify({"error": "Это не файл отчёта FinMaster."}), 400
+    path = _desk_unique(str(data.get("name") or doc.get("title") or "Отчёт"), ".fmaster")
+    doc["modified_at"] = now_iso()
+    storage.atomic_write(path, json.dumps(doc, ensure_ascii=False, indent=2))
+    report_backup.ensure_id(doc, path)
+    storage.add_recent(path, str(doc.get("title") or ""))
+    if REMOTE.enabled:
+        REMOTE.notify()
+    g.netlog_text = "Браузер добавил отчёт на компьютер"
+    g.netlog_level = "ok"
+    g.netlog_key = "desk-import"
+    try:
+        return jsonify(_open_path(path))
+    except (OSError, ValueError, FileNotFoundError) as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
 @app.get("/api/remote/log")
 def api_remote_log():
-    if not _is_local():
+    if not _is_local() and not _desk_reader():
         return jsonify({"error": "Только в окне программы."}), 403
     since = request.args.get("since", type=int) or 0
     return jsonify(netlog.since(since))
@@ -1185,7 +1598,7 @@ def api_remote_log():
 
 @app.post("/api/remote/log/clear")
 def api_remote_log_clear():
-    if not _is_local():
+    if not _is_local() and not _desk_editor():
         return jsonify({"error": "Только в окне программы."}), 403
     return jsonify(netlog.clear())
 
@@ -1205,7 +1618,7 @@ def api_remote_info():
 @app.post("/api/remote/check")
 def api_remote_check():
     """Явная проверка ngrok или Telegram: запрос в сервис и свежие индикаторы."""
-    if not _is_local():
+    if not _is_local() and not _desk_editor():
         return jsonify({"error": "Только в окне программы."}), 403
     data = request.get_json(silent=True) or {}
     kind = str(data.get("kind") or "")

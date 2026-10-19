@@ -16,6 +16,7 @@ from backend import netlog
 
 CLIENT_TTL = 45.0
 POLL_TIMEOUT = 25.0
+DESK_TTL = 20.0
 
 
 def _history_payload(raw: Any) -> dict[str, Any]:
@@ -29,8 +30,8 @@ def _history_payload(raw: Any) -> dict[str, Any]:
                 "id": str(item.get("id") or ""),
                 "at": str(item.get("at") or ""),
                 "label": str(item.get("label") or "Правка"),
-                "source": "mobile" if item.get("source") == "mobile" else "pc",
-                "device": str(item.get("device") or ("Телефон" if item.get("source") == "mobile" else "ПК")),
+                "source": item.get("source") if item.get("source") in {"mobile", "desk", "web"} else "pc",
+                "device": str(item.get("device") or {"mobile": "Телефон", "web": "WEB", "desk": "Браузер"}.get(str(item.get("source") or ""), "ПК")),
             }
         )
     try:
@@ -125,6 +126,9 @@ class RemoteSession:
         self._command_id = 0
         self._nav_seq = 0
         self._clients: dict[str, dict[str, Any]] = {}
+        self._desk_id = ""
+        self._desk_name = ""
+        self._desk_seen = 0.0
 
     # ---------- управление сессией ----------
 
@@ -133,6 +137,7 @@ class RemoteSession:
             self.enabled = True
             self.token = str(token or self.token or secrets.token_urlsafe(12))
             self._clients = {}
+            self._desk_clear_locked()
             self.command = None
             self.nav = {"seq": 0, "view": "", "order_id": "", "line_id": "", "cid": "", "period": "", "filter": "", "status": ""}
             self.version += 1
@@ -146,6 +151,7 @@ class RemoteSession:
             self.doc = None
             self.path = ""
             self._clients = {}
+            self._desk_clear_locked()
             self.command = None
             self.nav = {"seq": 0, "view": "", "order_id": "", "line_id": "", "cid": "", "period": "", "filter": "", "status": ""}
             self.version += 1
@@ -181,7 +187,8 @@ class RemoteSession:
             self.doc_version += 1
             self.version += 1
             self._cond.notify_all()
-            who = "компьютер" if str(origin or "") == "desktop" else str(origin or "телефон")
+            origin_s = str(origin or "")
+            who = "WEB" if origin_s.startswith("web:") else "компьютер" if origin_s == "desktop" else origin_s or "телефон"
             netlog.add("sync", f"Отчёт обновлён ({who})", source=who, key=f"pub-{origin or 'x'}")
             return self.version
 
@@ -307,6 +314,72 @@ class RemoteSession:
             if is_new or pruned:
                 self._bump()
 
+    def _desk_clear_locked(self) -> None:
+        self._desk_id = ""
+        self._desk_name = ""
+        self._desk_seen = 0.0
+
+    def _desk_expire_locked(self) -> None:
+        if self._desk_id and time.time() - self._desk_seen > DESK_TTL:
+            name = self._desk_name or self._desk_id
+            self._desk_clear_locked()
+            netlog.add("session", f"Браузер отпустил управление: {name}", level="warn", key="desk-expire")
+
+    def _desk_view(self, cid: str) -> dict[str, Any]:
+        self._desk_expire_locked()
+        holder = self._desk_id
+        return {
+            "holder": holder,
+            "name": self._desk_name if holder else "",
+            "mine": bool(cid and cid == holder),
+            "free": not holder,
+        }
+
+    def desk_snapshot(self, cid: str) -> dict[str, Any]:
+        with self._cond:
+            return self._desk_view(cid)
+
+    def desk_holds(self, cid: str) -> bool:
+        return bool(self.desk_snapshot(cid).get("mine"))
+
+    def desk_beat(self, cid: str, name: str = "") -> dict[str, Any]:
+        with self._cond:
+            self._desk_expire_locked()
+            if cid and cid == self._desk_id:
+                self._desk_seen = time.time()
+                if name:
+                    self._desk_name = str(name)[:80]
+            return self._desk_view(cid)
+
+    def desk_take(self, cid: str, name: str = "") -> dict[str, Any]:
+        label = str(name or "Браузер")[:80]
+        with self._cond:
+            prev = self._desk_name
+            stolen = bool(self._desk_id and self._desk_id != cid)
+            self._desk_id = cid
+            self._desk_name = label
+            self._desk_seen = time.time()
+            self._bump()
+            where = "компьютере" if cid == "pc" else "браузере"
+        if stolen:
+            netlog.add("session", f"Управление перехвачено: {label}", level="warn", detail=prev, key="desk-take")
+        else:
+            netlog.add("session", f"Управление на {where}: {label}", level="ok", key="desk-take")
+        return self.desk_snapshot(cid)
+
+    def desk_leave(self, cid: str) -> None:
+        if not cid:
+            return
+        released = ""
+        with self._cond:
+            if self._desk_id == cid:
+                released = self._desk_name or cid
+                self._desk_clear_locked()
+                self._bump()
+        if released:
+            netlog.add("session", f"Браузер закрыл управление: {released}", level="warn", key="desk-leave")
+        self.drop(cid)
+
     def drop(self, cid: str) -> None:
         with self._cond:
             gone = self._clients.pop(cid, None)
@@ -336,6 +409,7 @@ class RemoteSession:
     # ---------- синхронизация ----------
 
     def _snapshot(self, with_doc: bool) -> dict[str, Any]:
+        self._desk_expire_locked()
         data: dict[str, Any] = {
             "enabled": self.enabled,
             "version": self.version,
@@ -347,6 +421,11 @@ class RemoteSession:
             "history": self.history,
             "doc_version": self.doc_version,
             "clients": self._live_clients(),
+            "desk": {
+                "holder": self._desk_id,
+                "name": self._desk_name if self._desk_id else "",
+                "free": not bool(self._desk_id),
+            },
         }
         if with_doc:
             data["document"] = self.doc
@@ -361,6 +440,10 @@ class RemoteSession:
         with self._cond:
             while self.version <= since and self.enabled:
                 if self._prune_locked():
+                    self._bump()
+                    break
+                if self._desk_id and time.time() - self._desk_seen > DESK_TTL:
+                    self._desk_expire_locked()
                     self._bump()
                     break
                 left = deadline - time.time()

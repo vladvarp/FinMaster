@@ -479,3 +479,63 @@ html[data-theme="dark"] .token-dot.err {
   .remote-layout { grid-template-columns: 1fr; }
 }
 
+html.fm-pc-locked #start-screen,
+html.fm-pc-locked #app-shell,
+html.fm-pc-locked .modal,
+html.fm-pc-locked .palette {
+  pointer-events: none !important;
+}
+
+#fm-pc-lock {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.46);
+}
+
+#fm-pc-lock[hidden] { display: none !important; }
+
+#fm-pc-lock .fm-pc-card {
+  width: min(440px, 100%);
+  padding: 22px 22px 18px;
+  border-radius: 18px;
+  background: var(--panel, #fff);
+  color: var(--text, #0f172a);
+  border: 1px solid var(--line, #e2e8f0);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+}
+
+#fm-pc-lock h2 { margin: 0 0 8px; font-size: 20px; }
+#fm-pc-lock p { margin: 0; color: var(--muted, #64748b); line-height: 1.45; }
+
+#fm-pc-lock button {
+  margin-top: 16px;
+  width: 100%;
+  height: 42px;
+  border: 0;
+  border-radius: 12px;
+  background: #0f766e;
+  color: #fff;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+#fm-pc-sync {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  z-index: 70;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
+  font: 650 13px sans-serif;
+}
+
+#fm-pc-sync[hidden] { display: none !important; }
+

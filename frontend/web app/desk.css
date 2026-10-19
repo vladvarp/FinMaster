@@ -1,0 +1,141 @@
+html.fm-desk-locked #start-screen,
+html.fm-desk-locked #app-shell,
+html.fm-desk-locked .modal,
+html.fm-desk-locked .palette {
+  pointer-events: none !important;
+}
+
+#fm-desk-lock {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.46);
+}
+
+#fm-desk-lock[hidden] {
+  display: none !important;
+}
+
+#fm-desk-lock .fm-desk-card {
+  width: min(440px, 100%);
+  padding: 22px 22px 18px;
+  border-radius: 18px;
+  background: var(--panel, #fff);
+  color: var(--text, #0f172a);
+  border: 1px solid var(--line, #e2e8f0);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+}
+
+#fm-desk-lock h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+#fm-desk-lock p {
+  margin: 0;
+  color: var(--muted, #64748b);
+  line-height: 1.45;
+}
+
+#fm-desk-lock button {
+  margin-top: 16px;
+  width: 100%;
+  height: 42px;
+  border: 0;
+  border-radius: 12px;
+  background: #0f766e;
+  color: #fff;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+#fm-desk-load {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483640;
+  display: grid;
+  place-items: center;
+  background: #0f172a;
+  color: #e2e8f0;
+  font: 16px/1.4 sans-serif;
+}
+
+#fm-desk-load div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.fm-desk-spin {
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #5eead4;
+  border-radius: 50%;
+  animation: fm-desk-spin 0.7s linear infinite;
+}
+
+@keyframes fm-desk-spin {
+  to { transform: rotate(360deg); }
+}
+
+#fm-desk-note {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  z-index: 2147483000;
+  max-width: min(420px, calc(100% - 24px));
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: rgba(15, 118, 110, 0.94);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.35;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+#fm-desk-note[hidden] {
+  display: none !important;
+}
+
+#fm-desk-seize {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147482500;
+  height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 12px;
+  background: #0f766e;
+  color: #fff;
+  font: 650 14px sans-serif;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+#fm-desk-seize[hidden] {
+  display: none !important;
+}
+
+#fm-desk-sync {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  z-index: 2147482500;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
+  font: 650 13px sans-serif;
+  white-space: nowrap;
+}
+
+#fm-desk-sync[hidden] {
+  display: none !important;
+}

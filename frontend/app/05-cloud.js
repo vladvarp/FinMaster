@@ -1139,6 +1139,19 @@
     $("file-input").click();
   }
 
+  function rememberDeskBase(doc, path) {
+    if (!window.FM_DESK || !doc) return;
+    try {
+      window.FM_DESK_BASE = {
+        path: path || "",
+        modified: String(doc.modified_at || ""),
+        doc: JSON.parse(JSON.stringify(doc)),
+      };
+    } catch {
+      window.FM_DESK_BASE = null;
+    }
+  }
+
   function applyLoaded(res, { keepView = false, view = "" } = {}) {
     const stay = keepView && !!state.view && $("app-shell") && !$("app-shell").hidden;
     const next = view || (stay ? state.view : reportViewFor(res.path) || "dashboard");
@@ -1150,7 +1163,9 @@
     cloudState().catalog = false;
     adoptCloudFromDocument();
     adoptChartsFromDocument();
-    if (res.history && Array.isArray(res.history.items) && res.history.items.length) {
+    if (res.history?.meta) {
+      adoptHistory(res.history, res.history_limit);
+    } else if (res.history && Array.isArray(res.history.items) && res.history.items.length) {
       adoptHistory(res.history, res.history_limit);
     } else {
       historyReset("Открыт отчёт", { persist: !res.history?.folder });
@@ -1163,11 +1178,12 @@
     setView(next);
     if (next === "cloud") showCloudOverview();
     remotePublish();
+    rememberDeskBase(state.doc, state.path);
     toast(state.preview ? "Резервная копия открыта только для просмотра" : "Отчёт открыт");
   }
 
   async function openPath(path, opts) {
-    if (state.desktop) {
+    if (state.desktop || window.FM_DESK) {
       try {
         applyLoaded(await apiPost("/api/open-path", { path }), opts);
       } catch (err) {
@@ -1303,7 +1319,7 @@
     }
     persistCloudPrefs();
     try {
-      if (state.desktop) {
+      if (state.desktop || window.FM_DESK) {
         let path = fromPreview ? "" : state.path;
         if (as || !path) {
           if (silent && !path) {
@@ -1317,18 +1333,47 @@
           if (picked.cancelled || !picked.path) return false;
           path = picked.path;
         }
-        const res = await apiPost("/api/write", {
-          path,
-          document: state.doc,
-          history: historyDiskPayload(),
-          new_id: fromPreview,
-        });
-        state.doc = res.document;
+        const history = historyDiskPayload();
+        let body = { path, document: state.doc, history, new_id: fromPreview };
+        if (window.FM_DESK && window.FM_DESK_BASE && window.FM_DESK_BASE.path === path && typeof window.FM_DESK_PATCH === "function") {
+          let patch = null;
+          try {
+            patch = window.FM_DESK_PATCH(window.FM_DESK_BASE.doc, state.doc);
+          } catch {
+            patch = null;
+          }
+          if (patch && patch.empty && !state.dirty) {
+            setClean();
+            return true;
+          }
+          if (patch && (patch.set || patch.orders)) {
+            body = {
+              path,
+              patch: {},
+              base_modified: window.FM_DESK_BASE.modified,
+              history,
+              new_id: fromPreview,
+            };
+            if (patch.set) body.patch.set = patch.set;
+            if (patch.orders) body.patch.orders = patch.orders;
+          }
+        }
+        let res;
+        try {
+          res = await apiPost("/api/write", body);
+        } catch (err) {
+          if (!body.patch || !/изменён/i.test(String(err && err.message || ""))) throw err;
+          res = await apiPost("/api/write", { path, document: state.doc, history, new_id: fromPreview });
+        }
+        if (res.skipped) return false;
+        if (res.document) state.doc = res.document;
+        else if (res.modified_at && state.doc) state.doc.modified_at = res.modified_at;
         state.path = res.path;
         state.preview = false;
         rememberReportView(state.path, state.view);
         if (res.recent) renderRecent(res.recent);
         setClean();
+        rememberDeskBase(state.doc, state.path);
         applyPreviewMode();
         if (!silent) {
           toast(fromPreview ? "Отчёт сохранён. У него новый номер, исходные копии не изменились." : "Отчёт сохранён");
@@ -2073,6 +2118,11 @@
     $("order-sort").addEventListener("change", () => renderOrders());
     $("autosave")?.addEventListener("change", async (e) => {
       state.autosave = e.target.checked;
+      if (window.FM_DESK) {
+        if (!state.autosave) clearTimeout(state.autosaveTimer);
+        toast(state.autosave ? "Автосохранение в браузере включено" : "В браузере автосохранение выключено. Данные уйдут по кнопке «Сохранить».");
+        return;
+      }
       if (state.desktop) {
         try {
           await apiPost("/api/autosave", { enabled: state.autosave });
