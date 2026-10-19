@@ -347,50 +347,58 @@
            <select class="mcal-pick" data-cal-year aria-label="Год">${yearOpts}</select>`
         : `<strong>${esc(title)}</strong>`;
     const todayIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 9.5h16M8 5v3M16 5v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="15" r="2.3" fill="currentColor"/></svg>`;
+    const pauseIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6.5v11M15 6.5v11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+    const quickBtns = (dock) =>
+      `<button type="button" class="btn mcal-ico" data-cal-nav="0" title="Сегодня" aria-label="Сегодня">${todayIcon}</button>
+       <button type="button" class="btn mcal-ico ${hidePause ? "active" : ""}" ${dock ? "" : `id="mcal-hide-pause"`} data-cal-pause title="Скрывать на паузе" aria-label="Скрывать на паузе" aria-pressed="${hidePause}">${pauseIcon}</button>`;
+    const modeBtns = modes
+      .map(
+        ([id, label]) =>
+          `<button type="button" class="chip ${cal.mode === id ? "active" : ""}" data-cal-mode="${id}" title="${esc(label)}" aria-label="${esc(label)}">${modeIcon(id)}</button>`
+      )
+      .join("");
+    const filterMenu = filters
+      .map(
+        ([id, label]) =>
+          `<button type="button" class="btn ${cal.filter === id ? "active" : ""}" data-cal-filter="${id}" role="menuitem">${esc(label)}<span>${id === "all" ? all.length : all.filter((order) => workStatus(order) === id).length}</span></button>`
+      )
+      .join("");
+    const filterIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5h16l-6.2 7.4v5.1L10.2 19v-6.6L4 5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
+    const datesNav =
+      cal.filter === "nodate"
+        ? ""
+        : `<div class="mcal-nav-dates">
+          <button type="button" class="btn" data-cal-nav="-1">‹</button>
+          ${titleHtml}
+          <button type="button" class="btn" data-cal-nav="1">›</button>
+        </div>`;
+    const calBar = (dock) => `<div class="mcal-top">
+        <div class="mcal-tools">
+          <div class="mcal-modes">${modeBtns}</div>
+          <div class="mcal-quick">${quickBtns(dock)}</div>
+        </div>
+        <div class="mcal-filter">
+          <button type="button" class="btn ${cal.filter !== "all" ? "active" : ""}" ${dock ? "" : `id="btn-mcal-filter" aria-controls="mcal-filter-menu"`} title="Фильтр заказов: ${esc(filterMeta[1])}" aria-haspopup="menu" aria-expanded="false">
+            ${filterIcon}
+            <span>${esc(filterMeta[1])}</span>
+          </button>
+          <div class="mcal-filter-menu" ${dock ? "" : `id="mcal-filter-menu"`} hidden role="menu">${filterMenu}</div>
+        </div>
+      </div>
+      <div class="mcal-nav">${datesNav}</div>`;
     $("calendar-body").innerHTML = `
       <div class="mcal-kpis">
         <div><span>Идёт</span><b>${now.length}</b></div>
         <div><span>Без дат</span><b>${nodate.length}</b></div>
       </div>
-      <div class="mcal-top">
-        <div class="mcal-modes">${modes
-          .map(
-            ([id, label]) =>
-              `<button type="button" class="chip ${cal.mode === id ? "active" : ""}" data-cal-mode="${id}" title="${esc(label)}" aria-label="${esc(label)}">${modeIcon(id)}</button>`
-          )
-          .join("")}</div>
-        <div class="mcal-filter">
-          <button type="button" class="btn ${cal.filter !== "all" ? "active" : ""}" id="btn-mcal-filter" title="Фильтр заказов: ${esc(filterMeta[1])}" aria-haspopup="menu" aria-expanded="false" aria-controls="mcal-filter-menu">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M4 5h16l-6.2 7.4v5.1L10.2 19v-6.6L4 5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-            </svg>
-            <span>${esc(filterMeta[1])}</span>
-          </button>
-          <div class="mcal-filter-menu" id="mcal-filter-menu" hidden role="menu">${filters
-            .map(
-              ([id, label]) =>
-                `<button type="button" class="btn ${cal.filter === id ? "active" : ""}" data-cal-filter="${id}" role="menuitem">${esc(label)}<span>${id === "all" ? all.length : all.filter((order) => workStatus(order) === id).length}</span></button>`
-            )
-            .join("")}</div>
-        </div>
-      </div>
-      <div class="mcal-nav">
-        <button type="button" class="btn mcal-ico" data-cal-nav="0" title="Сегодня" aria-label="Сегодня">${todayIcon}</button>
-        <button type="button" class="btn mcal-ico ${hidePause ? "active" : ""}" id="mcal-hide-pause" title="Скрывать на паузе" aria-label="Скрывать на паузе" aria-pressed="${hidePause}">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6.5v11M15 6.5v11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        </button>
-        ${
-          cal.filter === "nodate"
-            ? ""
-            : `<div class="mcal-nav-dates">
-          <button type="button" class="btn" data-cal-nav="-1">‹</button>
-          ${titleHtml}
-          <button type="button" class="btn" data-cal-nav="1">›</button>
-        </div>`
-        }
-      </div>
+      <button type="button" class="mcal-dock-tab ${cal.dockOpen ? "open" : ""}" id="mcal-dock-tab" hidden aria-label="Кнопки календаря" aria-expanded="${cal.dockOpen ? "true" : "false"}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9.5 12 15.5 18 9.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="mcal-dock" id="mcal-dock" hidden>${calBar(true)}</div>
+      <div class="mcal-bar">${calBar(false)}</div>
       ${board}
     `;
+    syncMcalDock();
     if (cal.revealPick) {
       cal.revealPick = false;
       const key = cal.pick;
@@ -400,6 +408,20 @@
         })));
       }
     }
+  }
+
+  function syncMcalDock() {
+    const tab = $("mcal-dock-tab");
+    const panel = $("mcal-dock");
+    const quick = document.querySelector(".mcal-bar");
+    if (!tab || !panel) return;
+    const limit = $("sync-bar")?.getBoundingClientRect().bottom || 58;
+    const away = state.view === "calendar" && !!quick && quick.getBoundingClientRect().bottom <= limit + 1;
+    if (!away) state.cal.dockOpen = false;
+    tab.hidden = !away;
+    panel.hidden = !away || !state.cal.dockOpen;
+    tab.classList.toggle("open", !!state.cal.dockOpen && away);
+    tab.setAttribute("aria-expanded", String(!!state.cal.dockOpen && away));
   }
 
   function rangeDays(from, to) {

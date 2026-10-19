@@ -135,7 +135,10 @@
       } catch (_) {}
       return true;
     };
-    const calSwipeIgnore = (el) => (el.closest(".mcal-cell") ? false : swipeIgnore(el));
+    const calSwipeIgnore = (el) => (el.closest(".mcal-cell") ? false : el.closest(".mcal-dock, .mcal-dock-tab") ? true : swipeIgnore(el));
+    window.addEventListener("scroll", () => {
+      if (state.view === "calendar") syncMcalDock();
+    }, { passive: true });
     bindSwipeNav(
       $("screen-calendar"),
       () => state.view === "calendar" && state.cal.filter !== "nodate" && $("sheet").hidden && $("editor").hidden,
@@ -207,8 +210,9 @@
       if (e.target.id === "device-name" || e.target.id === "snap-title" || e.target.id === "search") return;
       if (e.target.dataset.calMonth != null || e.target.dataset.calYear != null) {
         if (!state.cal.anchor) state.cal.anchor = dayStart(new Date());
-        const monthEl = document.querySelector("[data-cal-month]");
-        const yearEl = document.querySelector("[data-cal-year]");
+        const row = e.target.closest(".mcal-nav-dates") || document;
+        const monthEl = row.querySelector("[data-cal-month]");
+        const yearEl = row.querySelector("[data-cal-year]");
         const month = monthEl ? Number(monthEl.value) : state.cal.anchor.getMonth();
         const year = yearEl ? Number(yearEl.value) : state.cal.anchor.getFullYear();
         state.cal.anchor = new Date(year, month, 1);
@@ -317,7 +321,12 @@
         renderCalendar();
         return;
       }
-      if (e.target.closest("#mcal-hide-pause")) {
+      if (e.target.closest("#mcal-dock-tab")) {
+        state.cal.dockOpen = !state.cal.dockOpen;
+        syncMcalDock();
+        return;
+      }
+      if (e.target.closest("[data-cal-pause]")) {
         const next = state.cal.hidePause === false;
         state.cal.hidePause = next;
         state.cal.hidePauseGen = (state.cal.hidePauseGen || 0) + 1;
@@ -334,13 +343,19 @@
           });
         return;
       }
-      if (e.target.closest("#btn-mcal-filter")) {
-        const menu = $("mcal-filter-menu");
-        const btn = $("btn-mcal-filter");
+      const filterBtn = e.target.closest(".mcal-filter > .btn");
+      if (filterBtn) {
+        const menu = filterBtn.parentElement?.querySelector(".mcal-filter-menu");
         if (!menu) return;
         const open = menu.hidden;
+        document.querySelectorAll(".mcal-filter-menu").forEach((el) => {
+          if (el !== menu) el.hidden = true;
+        });
+        document.querySelectorAll(".mcal-filter > .btn").forEach((el) => {
+          if (el !== filterBtn) el.setAttribute("aria-expanded", "false");
+        });
         menu.hidden = !open;
-        btn?.setAttribute("aria-expanded", String(open));
+        filterBtn.setAttribute("aria-expanded", String(open));
         return;
       }
       const calFilter = e.target.closest("[data-cal-filter]");
@@ -349,10 +364,11 @@
         renderCalendar();
         return;
       }
-      const filterMenu = $("mcal-filter-menu");
-      if (filterMenu && !filterMenu.hidden && !e.target.closest(".mcal-filter")) {
-        filterMenu.hidden = true;
-        $("btn-mcal-filter")?.setAttribute("aria-expanded", "false");
+      if (!e.target.closest(".mcal-filter")) {
+        document.querySelectorAll(".mcal-filter-menu").forEach((el) => {
+          el.hidden = true;
+        });
+        document.querySelectorAll(".mcal-filter > .btn").forEach((el) => el.setAttribute("aria-expanded", "false"));
       }
       const calNav = e.target.closest("[data-cal-nav]");
       if (calNav) {

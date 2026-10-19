@@ -301,9 +301,11 @@
   letter-spacing: 0.04em;
   color: var(--muted);
 }
-.mcal-top, .mcal-modes, .mcal-nav { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mcal-top, .mcal-modes, .mcal-nav, .mcal-tools, .mcal-quick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .mcal-top { justify-content: space-between; margin-bottom: 10px; }
+.mcal-tools { flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; }
 .mcal-modes { margin-bottom: 0; }
+.mcal-quick { margin-left: 10px; }
 .mcal-modes .chip {
   width: 40px;
   min-width: 40px;
@@ -503,6 +505,48 @@
 }
 .mcal-daylist { margin-top: 12px; }
 .mcal-ico.active { background: color-mix(in srgb, var(--accent) 16%, var(--card)); border-color: var(--accent); }
+.mcal-dock-tab {
+  position: fixed;
+  z-index: 28;
+  top: calc(var(--top) + var(--sat));
+  left: 50%;
+  transform: translateX(-50%);
+  width: 52px;
+  height: 26px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 14px 14px;
+  background: var(--card);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+}
+.mcal-dock-tab svg { display: block; transition: transform 0.16s ease; }
+.mcal-dock-tab.open svg { transform: rotate(180deg); }
+.mcal-dock-tab[hidden], .mcal-dock[hidden] { display: none; }
+.mcal-dock {
+  position: fixed;
+  z-index: 28;
+  top: calc(var(--top) + var(--sat) + 30px);
+  left: 10px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+}
+.mcal-dock .mcal-top,
+.mcal-dock .mcal-nav { margin: 0; width: 100%; }
+body:has(.sync-bar.show) .mcal-dock-tab { top: calc(var(--top) + var(--sat) + 22px); }
+body:has(.sync-bar.show) .mcal-dock { top: calc(var(--top) + var(--sat) + 52px); }
 .mcal-day .mcal-col-h { flex-direction: column; align-items: flex-start; gap: 1px; margin-bottom: 6px; }
 .mcal-day .mcal-col-h strong { text-transform: capitalize; font-size: 15px; }
 .mcal-day .mcal-col-h em { color: var(--muted); font-style: normal; font-size: 12px; }
