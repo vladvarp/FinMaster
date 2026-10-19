@@ -142,18 +142,60 @@
     return (order.lines || []).filter((line) => !isFrozenLine(line) && !isExpenseLine(line));
   }
 
+  function mcalRoleBits(role) {
+    const cls = {
+      "старт": "role-start",
+      "финиш": "role-done",
+      "старт и финиш": "role-both",
+      "пауза": "role-pause",
+      "выполняется": "role-now",
+      "выполнялось": "role-was",
+      "запланировано": "role-plan",
+    }[role] || "";
+    const icons = {
+      "role-start": `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.2v9.6L13 8z" fill="currentColor"/></svg>`,
+      "role-done": `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.4 6.3 11.5 12.8 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+      "role-both": `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.6 4.4v7.2L7.6 8z" fill="currentColor"/><path d="M9 5.6 12.8 8 9 10.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+      "role-pause": `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.2 3h2.2v10H4.2zm5.4 0h2.2v10H9.6z" fill="currentColor"/></svg>`,
+      "role-now": `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.1" fill="currentColor"/></svg>`,
+      "role-was": `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.7V8l2.1 1.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+      "role-plan": `<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3.4" width="10" height="9.2" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3 6.6h10M6 2.6v2.2M10 2.6v2.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+    };
+    return { cls, icon: icons[cls] || "" };
+  }
+
+  function mcalRoleHtml(role) {
+    const { cls, icon } = mcalRoleBits(role);
+    return `<i class="mcal-role-i ${cls}">${icon}<span>${esc(role)}</span></i>`;
+  }
+
+  function mcalDayRole(order, day) {
+    const key = dayKey(dayStart(day));
+    const today = dayKey(dayStart(new Date()));
+    const start = dateValue(order.work_start);
+    const end = dateValue(order.work_end);
+    if (start && end && start === end && start === key) return "старт и финиш";
+    if (isPaused(order, day)) return "пауза";
+    if (start === key) return "старт";
+    if (end && end === key) return "финиш";
+    if (key === today) return "выполняется";
+    if (key < today) return "выполнялось";
+    return "запланировано";
+  }
+
   function mcalDayOrder(order, day) {
-    const note = String(order.notes || "").trim();
+    const role = mcalDayRole(order, day);
+    const meta = workStatusMeta(order, day);
     const lines = mcalWorkLines(order)
       .map((line) => {
-        const text = String(line.notes || "").trim();
-        return `<div class="mcal-line"><b>${esc(line.product || "Без названия")}</b>${text ? `<em>${esc(text)}</em>` : ""}</div>`;
+        const lineRole = dateValue(line.work_start) || dateValue(line.work_end) ? mcalDayRole(line, day) : role;
+        return `<div class="mcal-line"><span>${esc(line.product || "Без названия")}</span>${mcalRoleHtml(lineRole)}${noteBoxHtml(line.notes)}</div>`;
       })
       .join("");
-    return `<article class="card mcal-day-order" data-open="${esc(order.id)}">
-      <div class="oi-top"><span class="oi-num">${esc(order.number || "—")}</span><span class="oi-sep">—</span><span class="oi-customer">${esc(order.name || "без названия")}</span></div>
-      <div class="mcal-role">${esc(calendarRole(order, day))}</div>
-      ${note ? `<div class="oi-note">${esc(note)}</div>` : ""}
+    return `<article class="mcal-chip" data-open="${esc(order.id)}" style="--tint:${esc(meta.color)}">
+      <div class="mcal-chip-title"><b>${esc(order.number || "—")}</b> ${esc(order.name || "без названия")}</div>
+      ${mcalRoleHtml(role)}
+      ${noteBoxHtml(order.notes)}
       ${lines ? `<div class="mcal-lines">${lines}</div>` : ""}
     </article>`;
   }
@@ -162,37 +204,35 @@
     const key = dayKey(day);
     const todayKey = dayKey(dayStart(new Date()));
     const hidePause = cal.hidePause !== false;
-    const items = list.filter((order) => orderMarksDay(order, day));
-    const paused = items.filter((order) => isPaused(order, day));
-    const active = items.filter((order) => !isPaused(order, day));
-    const starts = active.filter((order) => dateValue(order.work_start) === key);
-    const ends = active.filter((order) => {
+    const items = list.filter((order) => orderMarksDay(order, day) && !(hidePause && isPaused(order, day)));
+    const starts = items.filter((order) => dateValue(order.work_start) === key && !isPaused(order, day));
+    const ends = items.filter((order) => {
       const end = dateValue(order.work_end);
-      return end === key && end !== dateValue(order.work_start);
+      return end === key && end !== dateValue(order.work_start) && !isPaused(order, day);
     });
-    const running = active.filter((order) => dateValue(order.work_start) !== key && dateValue(order.work_end) !== key);
-    const mid = key < todayKey ? "Выполнялось" : key > todayKey ? "Запланировано" : "Выполняется";
-    const block = (title, rows) =>
-      rows.length ? `<div class="mcal-sec">${esc(title)}</div>${rows.map((order) => mcalDayOrder(order, day)).join("")}` : "";
-    const shown = (hidePause ? active : items).length;
-    const empty = shown
-      ? ""
-      : paused.length && hidePause
-        ? `<div class="empty">На паузе скрыто: ${paused.length}</div>`
-        : `<div class="empty">В этот день никто не отмечен.</div>`;
+    const running = items.filter((order) => !isPaused(order, day) && dateValue(order.work_start) !== key && dateValue(order.work_end) !== key);
+    const paused = hidePause ? [] : items.filter((order) => isPaused(order, day));
+    const mid = key < todayKey ? "выполнялось" : key > todayKey ? "запланировано" : "выполняется";
+    const block = (role, rows) => {
+      if (!rows.length) return "";
+      const { cls, icon } = mcalRoleBits(role);
+      return `<div class="mcal-sec ${cls}">${icon}<span>${esc(role)}</span></div>${rows.map((order) => mcalDayOrder(order, day)).join("")}`;
+    };
+    const pct = Math.min(100, (items.length / 4) * 100);
     return `<div class="mcal-day">
-      <button type="button" class="btn mcal-pause ${hidePause ? "active" : ""}" id="mcal-hide-pause" aria-pressed="${hidePause}" title="${hidePause ? "Показать паузы" : "Скрыть паузы"}">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6.5v11M15 6.5v11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        ${hidePause ? "Паузы скрыты" : "Паузы видны"}
-      </button>
       <div class="mcal-col ${dayToneClass(day)} ${key === todayKey ? "is-today" : ""}">
-        <div class="mcal-col-h"><b>${RU_WEEKDAYS[(day.getDay() + 6) % 7]}</b><span>${esc(calFmtDay(day))}</span><i>${shown}</i></div>
-        <label class="mcal-note">Заметка<textarea rows="2" data-cal-note="${esc(key)}" placeholder="Что в этот день">${esc(dayNote(key))}</textarea></label>
-        ${block("Старт", starts)}
+        <div class="mcal-col-h">
+          <strong>${RU_WEEKDAYS[(day.getDay() + 6) % 7]}</strong>
+          <span>${esc(calFmtDay(day))}</span>
+          <em>${items.length} зак.</em>
+        </div>
+        <div class="mcal-load"><i style="width:${pct}%"></i></div>
+        <textarea class="mcal-memo-edit" rows="2" data-cal-note="${esc(key)}" placeholder="Заметка">${esc(dayNote(key))}</textarea>
+        ${block("старт", starts)}
         ${block(mid, running)}
-        ${hidePause ? "" : block("Пауза", paused)}
-        ${block("Финиш", ends)}
-        ${empty}
+        ${block("пауза", paused)}
+        ${block("финиш", ends)}
+        ${items.length ? "" : `<div class="empty">пусто</div>`}
       </div>
     </div>`;
   }
@@ -207,6 +247,7 @@
     const list = cal.filter === "all" ? all : all.filter((order) => workStatus(order) === cal.filter);
     const now = all.filter((order) => workStatus(order) === "now");
     const nodate = all.filter((order) => workStatus(order) === "nodate");
+    const hidePause = cal.hidePause !== false;
     const modes = [
       ["classic", "Классический — сетка месяца"],
       ["extended", "Неделя — старты, в работе и финиши"],
@@ -243,7 +284,7 @@
       const cells = [];
       for (let d = gridFrom; d <= gridTo; d = addDays(d, 1)) {
         const key = dayKey(d);
-        const covering = list.filter((order) => orderMarksDay(order, d));
+        const covering = list.filter((order) => orderMarksDay(order, d) && !(hidePause && isPaused(order, d)));
         const n = covering.length;
         const inMonth = d.getMonth() === from.getMonth();
         const note = dayNote(key);
@@ -255,7 +296,7 @@
         <div class="mcal-month">${cells.join("")}</div>`;
       if (cal.pick) {
         const pick = parseDay(cal.pick);
-        const items = list.filter((order) => orderMarksDay(order, pick));
+        const items = list.filter((order) => orderMarksDay(order, pick) && !(hidePause && isPaused(order, pick)));
         const pickKey = dayKey(pick);
         board += `<div class="mcal-daylist"><h3>${esc(calFmtDay(pick))}</h3>
           <label class="mcal-note">Заметка<textarea rows="2" data-cal-note="${esc(pickKey)}" placeholder="Что в этот день">${esc(dayNote(pickKey))}</textarea></label>
@@ -271,7 +312,7 @@
         ? `<div class="mcal-week">${weekDays
         .map((day) => {
           const key = dayKey(day);
-          const items = list.filter((order) => orderMarksDay(order, day));
+          const items = list.filter((order) => orderMarksDay(order, day) && !(hidePause && isPaused(order, day)));
           const starts = items.filter((order) => dateValue(order.work_start) === key && !isPaused(order, day));
           const ends = items.filter((order) => dateValue(order.work_end) === key && !isPaused(order, day));
           const paused = items.filter((order) => isPaused(order, day));
@@ -335,6 +376,9 @@
       </div>
       <div class="mcal-nav">
         <button type="button" class="btn mcal-ico" data-cal-nav="0" title="Сегодня" aria-label="Сегодня">${todayIcon}</button>
+        <button type="button" class="btn mcal-ico ${hidePause ? "active" : ""}" id="mcal-hide-pause" title="Скрывать на паузе" aria-label="Скрывать на паузе" aria-pressed="${hidePause}">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6.5v11M15 6.5v11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
         ${
           cal.filter === "nodate"
             ? ""

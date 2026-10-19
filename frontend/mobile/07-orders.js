@@ -75,7 +75,7 @@
             <span class="oi-customer">${esc(order.name || "без названия")}</span>
           </div>
           <div class="oi-name">${esc(order.customer || "Без заказчика")} · ${live.length} поз.</div>
-          ${String(order.notes || "").trim() ? `<div class="oi-note">${esc(String(order.notes).trim())}</div>` : ""}
+          ${noteBoxHtml(order.notes)}
           <div class="oi-foot">
             <span class="sum">${esc(money(t.after))}</span>
             ${debt ? `<span class="sum debt">долг ${esc(money(t.unpaid))}</span>` : `<span class="sum paid">оплачено</span>`}

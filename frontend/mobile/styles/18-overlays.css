@@ -502,35 +502,82 @@
   cursor: pointer;
 }
 .mcal-daylist { margin-top: 12px; }
-.mcal-day { display: flex; flex-direction: column; gap: 8px; }
-.mcal-pause {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 38px;
-  padding: 8px 12px;
-  font-size: 14px;
+.mcal-ico.active { background: color-mix(in srgb, var(--accent) 16%, var(--card)); border-color: var(--accent); }
+.mcal-day .mcal-col-h { flex-direction: column; align-items: flex-start; gap: 1px; margin-bottom: 6px; }
+.mcal-day .mcal-col-h strong { text-transform: capitalize; font-size: 15px; }
+.mcal-day .mcal-col-h em { color: var(--muted); font-style: normal; font-size: 12px; }
+.mcal-load { height: 6px; margin: 0 0 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.mcal-load i { display: block; height: 100%; background: var(--accent); }
+textarea.mcal-memo-edit {
+  width: 100%;
+  min-height: 36px;
+  margin: 0 0 8px;
+  padding: 4px 7px;
+  border: 0;
+  border-left: 3px solid #7c3aed;
+  border-radius: 7px;
+  background: color-mix(in srgb, #7c3aed 16%, var(--card));
+  color: #4c1d95;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  resize: vertical;
 }
-.mcal-pause.active { background: color-mix(in srgb, var(--accent) 16%, var(--card)); border-color: var(--accent); }
-.mcal-day-order { margin-bottom: 8px; }
-.mcal-lines {
+html[data-theme="dark"] textarea.mcal-memo-edit {
+  color: #f5f3ff;
+  background: color-mix(in srgb, #a78bfa 32%, #121826);
+  border-left-color: #ddd6fe;
+}
+.mcal-day .mcal-sec {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 8px 0 4px;
+  text-transform: uppercase;
+}
+.mcal-day .mcal-sec svg,
+.mcal-role-i svg { width: 12px; height: 12px; flex: none; }
+.mcal-chip {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-  padding-left: 8px;
+  align-items: stretch;
+  gap: 3px;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--tint, var(--accent)) 14%, var(--card));
+  color: inherit;
+  text-align: left;
+  box-shadow: inset 3px 0 0 var(--tint, var(--accent));
+}
+.mcal-chip-title { font-size: 13px; font-weight: 650; line-height: 1.3; }
+.mcal-chip-title b { margin-right: 4px; }
+.mcal-role-i {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+}
+.mcal-sec.role-start, .mcal-role-i.role-start,
+.mcal-sec.role-done, .mcal-role-i.role-done,
+.mcal-sec.role-both, .mcal-role-i.role-both { color: #15803d; }
+.mcal-sec.role-now, .mcal-role-i.role-now { color: #0369a1; }
+.mcal-sec.role-was, .mcal-role-i.role-was { color: #4f46e5; }
+.mcal-sec.role-plan, .mcal-role-i.role-plan { color: #b45309; }
+.mcal-sec.role-pause, .mcal-role-i.role-pause { color: #dc2626; }
+.mcal-lines { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.mcal-line {
+  margin-left: 8px;
+  padding: 2px 4px 2px 8px;
   border-left: 2px solid color-mix(in srgb, var(--accent) 50%, var(--line));
 }
-.mcal-line b { display: block; font-size: 13px; }
-.mcal-line em {
-  display: block;
-  margin-top: 2px;
-  font-style: normal;
-  font-size: 12px;
-  line-height: 1.35;
-  white-space: pre-wrap;
-}
+.mcal-line > span { display: block; font-size: 12px; }
+.mcal-chip .note-box, .mcal-line .note-box { margin-top: 3px; }
 
 @media (min-width: 620px) {
   .screen { padding: 16px 20px 32px; max-width: 760px; margin: 0 auto; }

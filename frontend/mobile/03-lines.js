@@ -521,6 +521,12 @@
     return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
+  function noteBoxHtml(text) {
+    const clean = String(text || "").trim();
+    if (!clean) return "";
+    return `<div class="note-box"><i aria-hidden="true">i</i><span>${esc(clean)}</span></div>`;
+  }
+
   function toast(text) {
     const el = $("toast");
     el.textContent = text;
