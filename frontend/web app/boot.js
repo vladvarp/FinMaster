@@ -93,20 +93,7 @@
   }
 
   function ensureChrome() {
-    if (document.getElementById("fm-desk-lock")) return;
-    const lock = document.createElement("div");
-    lock.id = "fm-desk-lock";
-    lock.innerHTML = `
-      <div class="fm-desk-card">
-        <h2>Управление заблокировано</h2>
-        <p id="fm-desk-text">Управление перехвачено.</p>
-        <button type="button" id="fm-desk-take">Перехватить управление</button>
-      </div>`;
-    const seize = document.createElement("button");
-    seize.id = "fm-desk-seize";
-    seize.type = "button";
-    seize.textContent = "Перехватить управление";
-    seize.hidden = true;
+    if (document.getElementById("fm-desk-sync")) return;
     const sync = document.createElement("div");
     sync.id = "fm-desk-sync";
     sync.hidden = true;
@@ -114,27 +101,7 @@
     const note = document.createElement("div");
     note.id = "fm-desk-note";
     note.hidden = true;
-    lock.hidden = true;
-    document.body.append(lock, seize, sync, note);
-    const onTake = () => {
-      take().catch((err) => deskNote(err.message || "Не удалось перехватить управление"));
-    };
-    lock.querySelector("#fm-desk-take").addEventListener("click", onTake);
-    seize.addEventListener("click", onTake);
-  }
-
-  function paint(data) {
-    last = data || last;
-    locked = !!(last.holder && !last.mine);
-    document.documentElement.classList.toggle("fm-desk-locked", shown && locked);
-    const lock = document.getElementById("fm-desk-lock");
-    const text = document.getElementById("fm-desk-text");
-    const seize = document.getElementById("fm-desk-seize");
-    if (lock) lock.hidden = !shown || !locked;
-    if (seize) seize.hidden = !shown || locked || !!last.mine || !token;
-    if (!text) return;
-    if (last.holder === "pc") text.textContent = "Управление перехвачено на компьютере. Файлы остаются там.";
-    else text.textContent = `Управление перехвачено${last.name ? `: «${last.name}»` : ""}. Файлы остаются на главном компьютере.`;
+    document.body.append(sync, note);
   }
 
   async function readJson(res) {
@@ -385,7 +352,6 @@
   function reveal() {
     if (!shown || !statusReady) return;
     document.getElementById("fm-desk-load")?.remove();
-    paint(last);
   }
 
   window.FM_DESK_READY = () => {
@@ -397,19 +363,6 @@
     const path = pathOf(input);
     const method = methodOf(input, init);
     if (!token) return jsonResponse({ error: "Нет сессии." }, 401);
-    if (method !== "GET" && locked && !OPEN_WHEN_LOCKED.has(path)) {
-      if (path === "/api/write") {
-        let body = {};
-        try {
-          body = JSON.parse((init && init.body) || "{}");
-        } catch {
-          body = {};
-        }
-        return jsonResponse({ skipped: true, path: body.path, document: body.document });
-      }
-      if (path === "/api/dirty") return jsonResponse({ ok: true, dirty: false });
-      return jsonResponse({ ok: true, cancelled: true, locked: true });
-    }
     if (path === "/api/dialog/open" || path.startsWith("/api/dialog/") || path === "/api/instance/pending" || path === "/api/desktop/pdf-job" || path === "/api/quit" || path === "/api/open-folder" || path.startsWith("/api/runtime/") || path === "/api/window/fullscreen" || path === "/api/clipboard-text" || path === "/api/clipboard-png") {
       try {
         const local = await localAction(path, init);
@@ -434,41 +387,16 @@
     }
   };
 
-  document.addEventListener("keydown", (e) => {
-    if (!locked) return;
-    const target = e.target;
-    if (target && target.closest && target.closest("#fm-desk-lock")) return;
-    e.preventDefault();
-    e.stopPropagation();
-  }, true);
-
   function bootChrome() {
     ensureChrome();
-    paint({ mine: false, free: true });
+    statusReady = true;
     if (!token) {
       shown = true;
-      statusReady = true;
-      const text = document.getElementById("fm-desk-text");
-      const btn = document.getElementById("fm-desk-take");
-      if (text) text.textContent = "Откройте ссылку из окна «Телефон», из бота или из мобильного меню.";
-      if (btn) btn.hidden = true;
+      deskNote("Откройте ссылку из окна «Телефон», из бота или из мобильного меню.");
       reveal();
       return;
     }
-    pullLock();
-    setInterval(pullLock, 2000);
-    setInterval(beat, 3000);
-    window.addEventListener("pagehide", () => {
-      if (!token || !cid) return;
-      try {
-        navigator.sendBeacon(
-          `/api/remote/desk/leave?t=${encodeURIComponent(token)}`,
-          new Blob([JSON.stringify({ cid })], { type: "application/json" })
-        );
-      } catch {
-        /* вкладка уже закрывается */
-      }
-    });
+    reveal();
   }
 
   if (document.body) bootChrome();

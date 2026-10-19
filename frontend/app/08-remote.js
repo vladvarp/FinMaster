@@ -687,23 +687,12 @@
     if (text) pcDeskNote.timer = setTimeout(() => { el.hidden = true; }, 2600);
   }
 
-  function applyPcDeskLock(desk) {
-    if (window.FM_DESK || !state.desktop || !desk) return;
-    const holder = String(desk.holder || "");
-    const locked = !!holder && holder !== "pc";
-    remote.deskLocked = locked;
-    ensurePcDeskLock();
+  function applyPcDeskLock() {
+    remote.deskLocked = false;
+    document.documentElement.classList.remove("fm-pc-locked");
     const card = $("fm-pc-lock");
-    const text = $("fm-pc-lock-text");
-    if (card) card.hidden = !locked;
-    document.documentElement.classList.toggle("fm-pc-locked", locked);
-    if (text && locked) {
-      const who = desk.name ? ` «${desk.name}»` : "";
-      text.textContent = `Управление перехвачено${who}. Файлы остаются на этом компьютере.`;
-    }
-    if (locked) clearTimeout(state.autosaveTimer);
-    if (holder === "pc") startPcDeskBeat();
-    else stopPcDeskBeat();
+    if (card) card.hidden = true;
+    stopPcDeskBeat();
   }
 
   function ensurePcDeskLock() {

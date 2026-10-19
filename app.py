@@ -152,11 +152,8 @@ def _desk_holds() -> bool:
 
 
 def _desk_editor() -> bool:
-    """Править можно, пока управление никто не забрал или оно у этого окна."""
-    if not _desk_reader():
-        return False
-    snap = REMOTE.desk_snapshot(_desk_cid())
-    return bool(snap.get("free") or snap.get("mine"))
+    """Пишет тот, у кого действительная ссылка. Отдельного замка нет."""
+    return _desk_reader()
 
 
 def _under_dir(root: str, path: str) -> bool:
@@ -223,8 +220,6 @@ def _guard_desk_api():
         return jsonify({"error": "Это действие доступно только в окне главного компьютера."}), 403
     if request.method == "GET" or path in _DESK_VIEW_POST:
         return None
-    if not _desk_editor():
-        return jsonify({"error": "Управление у другого окна. Перехватите его.", "locked": True}), 423
     return None
 
 
