@@ -585,6 +585,7 @@
       try {
         const data = await apiGet(`/api/remote/pull?since=${remote.version}&cid=${remote.cid}&kind=desktop`);
         if (data.enabled === false) break;
+        applyRemoteHidePause(data);
         if (typeof data.version === "number") remote.version = data.version;
         if (Array.isArray(data.clients)) remote.clients = data.clients;
         if (Array.isArray(data.devices)) remote.devices = data.devices;
@@ -615,6 +616,17 @@
       }
     }
     remote.polling = false;
+  }
+
+  function applyRemoteHidePause(data) {
+    if (typeof data?.cal_hide_pause !== "boolean") return;
+    if (typeof data.version === "number" && data.version < remote.version) return;
+    const cal = calendarState();
+    const next = data.cal_hide_pause;
+    if ((cal.hidePause !== false) === next) return;
+    cal.hidePause = next;
+    persistPref(LS_CAL_HIDE_PAUSE, JSON.stringify(next), { now: true });
+    if (state.view === "calendar" && state.doc) renderCalendar();
   }
 
   function applyRemoteAutosave(enabled) {

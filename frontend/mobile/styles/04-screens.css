@@ -10,15 +10,18 @@
 }
 
 #screen-order,
-#screen-snapshot {
+#screen-snapshot,
+#screen-calendar {
   animation: none;
 }
 #screen-order.swipe-next,
-#screen-snapshot.swipe-next {
+#screen-snapshot.swipe-next,
+#screen-calendar.swipe-next {
   animation: order-swipe-next 0.22s ease;
 }
 #screen-order.swipe-prev,
-#screen-snapshot.swipe-prev {
+#screen-snapshot.swipe-prev,
+#screen-calendar.swipe-prev {
   animation: order-swipe-prev 0.22s ease;
 }
 #editor-body.swipe-next { animation: order-swipe-next 0.22s ease; }

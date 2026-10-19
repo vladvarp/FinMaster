@@ -220,7 +220,7 @@
     };
     const pct = Math.min(100, (items.length / 4) * 100);
     return `<div class="mcal-day">
-      <div class="mcal-col ${dayToneClass(day)} ${key === todayKey ? "is-today" : ""}">
+      <div class="mcal-col ${dayToneClass(day)} ${key === todayKey ? "is-today" : ""} ${cal.pick === key ? "is-pick" : ""}">
         <div class="mcal-col-h">
           <strong>${RU_WEEKDAYS[(day.getDay() + 6) % 7]}</strong>
           <span>${esc(calFmtDay(day))}</span>
@@ -391,6 +391,15 @@
       </div>
       ${board}
     `;
+    if (cal.revealPick) {
+      cal.revealPick = false;
+      const key = cal.pick;
+      if (key && cal.mode !== "day") {
+        requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+          document.querySelector(`[data-cal-day="${key}"]`)?.scrollIntoView({ block: "nearest" });
+        })));
+      }
+    }
   }
 
   function rangeDays(from, to) {

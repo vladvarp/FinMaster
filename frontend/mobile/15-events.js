@@ -108,6 +108,40 @@
       editorJump,
       editorSwipeIgnore
     );
+    let calSwiped = false;
+    const moveCalDay = (dir) => {
+      if (!state.cal.anchor) state.cal.anchor = dayStart(new Date());
+      state.cal.anchor = addDays(dayStart(state.cal.anchor), dir);
+      state.cal.pick = dayKey(state.cal.anchor);
+    };
+    const shiftCalPeriod = (dir) => {
+      if (!state.cal.anchor) state.cal.anchor = dayStart(new Date());
+      if (state.cal.mode === "classic") state.cal.anchor = new Date(state.cal.anchor.getFullYear(), state.cal.anchor.getMonth() + dir, 1);
+      else if (state.cal.mode === "day") moveCalDay(dir);
+      else state.cal.anchor = addDays(mondayOf(state.cal.anchor), dir * 7);
+    };
+    const showNeighborCal = (dir) => {
+      if (state.view !== "calendar" || state.cal.filter === "nodate") return false;
+      if (!$("sheet").hidden || !$("editor").hidden) return false;
+      shiftCalPeriod(dir);
+      calSwiped = true;
+      setTimeout(() => {
+        calSwiped = false;
+      }, 400);
+      renderCalendar();
+      flashSwipe($("screen-calendar"), dir);
+      try {
+        navigator.vibrate?.(10);
+      } catch (_) {}
+      return true;
+    };
+    const calSwipeIgnore = (el) => (el.closest(".mcal-cell") ? false : swipeIgnore(el));
+    bindSwipeNav(
+      $("screen-calendar"),
+      () => state.view === "calendar" && state.cal.filter !== "nodate" && $("sheet").hidden && $("editor").hidden,
+      showNeighborCal,
+      calSwipeIgnore
+    );
 
     document.addEventListener("touchstart", (e) => {
       const input = e.target.closest("#editor-body input.expr-input");
@@ -247,6 +281,10 @@
     });
 
     $("main").addEventListener("click", async (e) => {
+      if (calSwiped) {
+        calSwiped = false;
+        return;
+      }
       const workBtn = e.target.closest("[data-work-act]");
       if (workBtn) {
         const id = workBtn.dataset.calWork || state.orderId;
@@ -269,14 +307,31 @@
       const calMode = e.target.closest("[data-cal-mode]");
       if (calMode) {
         const next = calMode.dataset.calMode;
-        if (next === "day" && state.cal.mode !== "day") state.cal.anchor = dayStart(new Date());
+        if (next !== "classic" && next !== "extended" && next !== "day") return;
+        const picked = state.cal.pick ? parseDay(state.cal.pick) : null;
+        if (picked) state.cal.anchor = dayStart(picked);
+        else if (!(state.cal.anchor instanceof Date) || Number.isNaN(state.cal.anchor.getTime())) state.cal.anchor = dayStart(new Date());
+        if (next === "day") state.cal.pick = dayKey(dayStart(state.cal.anchor));
         state.cal.mode = next;
+        state.cal.revealPick = true;
         renderCalendar();
         return;
       }
       if (e.target.closest("#mcal-hide-pause")) {
-        state.cal.hidePause = state.cal.hidePause === false;
+        const next = state.cal.hidePause === false;
+        state.cal.hidePause = next;
+        state.cal.hidePauseGen = (state.cal.hidePauseGen || 0) + 1;
+        const gen = state.cal.hidePauseGen;
+        state.cal.hidePauseLock = true;
         renderCalendar();
+        api("/api/remote/cal-hide-pause", { method: "POST", body: JSON.stringify({ hide: next }) })
+          .then((res) => {
+            if (typeof res.version === "number") state.version = Math.max(state.version, res.version);
+          })
+          .catch(() => {})
+          .finally(() => {
+            if (state.cal.hidePauseGen === gen) state.cal.hidePauseLock = false;
+          });
         return;
       }
       if (e.target.closest("#btn-mcal-filter")) {
@@ -303,16 +358,18 @@
       if (calNav) {
         const dir = Number(calNav.dataset.calNav);
         if (!state.cal.anchor) state.cal.anchor = dayStart(new Date());
-        if (dir === 0) state.cal.anchor = dayStart(new Date());
-        else if (state.cal.mode === "classic") state.cal.anchor = new Date(state.cal.anchor.getFullYear(), state.cal.anchor.getMonth() + dir, 1);
-        else if (state.cal.mode === "day") state.cal.anchor = addDays(dayStart(state.cal.anchor), dir);
-        else state.cal.anchor = addDays(mondayOf(state.cal.anchor), dir * 7);
+        if (dir === 0) {
+          state.cal.anchor = dayStart(new Date());
+          state.cal.pick = dayKey(state.cal.anchor);
+          state.cal.revealPick = true;
+        } else shiftCalPeriod(dir);
         renderCalendar();
         return;
       }
       const calDay = e.target.closest("[data-cal-day]");
       if (calDay && !e.target.closest("[data-open], textarea, .mcal-acts")) {
-        state.cal.pick = state.cal.pick === calDay.dataset.calDay ? "" : calDay.dataset.calDay;
+        const key = calDay.dataset.calDay;
+        state.cal.pick = state.cal.pick === key ? "" : key;
         renderCalendar();
         return;
       }

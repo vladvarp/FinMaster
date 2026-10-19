@@ -320,6 +320,7 @@
           blocked("Сессия завершена", "На компьютере выключили удалённый доступ.");
           return;
         }
+        applyCalHidePause(data.cal_hide_pause, data.version);
         if (typeof data.version === "number") state.version = Math.max(state.version, data.version);
         if (typeof data.autosave === "boolean") applyAutosave(data.autosave);
         if (data.changed) applySnapshot(data);
@@ -417,7 +418,18 @@
     );
   }
 
+  function applyCalHidePause(value, version) {
+    if (typeof value !== "boolean") return false;
+    if (state.cal.hidePauseLock) return false;
+    if (typeof version === "number" && version < state.version) return false;
+    if ((state.cal.hidePause !== false) === value) return false;
+    state.cal.hidePause = value;
+    if (state.view === "calendar") renderCalendar();
+    return true;
+  }
+
   function applySnapshot(data, initial = false) {
+    applyCalHidePause(data.cal_hide_pause, data.version);
     const profilesChanged = applyShareProfiles(data.share_profiles);
     if (typeof data.version === "number") state.version = Math.max(state.version, data.version);
     if (typeof data.autosave === "boolean") applyAutosave(data.autosave);

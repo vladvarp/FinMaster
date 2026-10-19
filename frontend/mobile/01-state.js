@@ -42,7 +42,7 @@
     editLineId: null,
     headOpen: false,
     frozenOpen: false,
-    cal: { mode: "extended", filter: "all", anchor: null },
+    cal: { mode: "classic", filter: "all", anchor: null, pick: "", hidePauseLock: false },
     query: "",
     filter: "all",
     stats: { period: "all", filter: "all", status: "" },

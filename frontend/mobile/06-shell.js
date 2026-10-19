@@ -62,6 +62,14 @@
   }
 
   function setView(view, orderId) {
+    const enteringCalendar = view === "calendar" && state.view !== "calendar";
+    if (enteringCalendar) {
+      state.cal.mode = "classic";
+      state.cal.revealPick = true;
+      const picked = state.cal.pick ? parseDay(state.cal.pick) : null;
+      if (picked) state.cal.anchor = dayStart(picked);
+      state.scroll.calendar = 0;
+    }
     const changed = view !== state.view || (orderId !== undefined && orderId !== state.orderId);
     if (orderId !== undefined && orderId !== state.orderId) state.frozenOpen = false;
     if (changed) savePageScroll();

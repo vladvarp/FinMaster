@@ -303,6 +303,16 @@ def _autosave_on() -> bool:
     return bool(storage.load_config().get("autosave"))
 
 
+def _cal_hide_pause() -> bool:
+    """Та же кнопка «скрывать на паузе», что в календаре на компьютере."""
+    raw = storage.ui_prefs().get("cal_hide_pause")
+    if isinstance(raw, bool):
+        return raw
+    if raw in (0, "0", "false", "False"):
+        return False
+    return True
+
+
 def _mobile_url(base: str, token: str) -> str:
     return f"{base.rstrip('/')}/m?t={token}"
 
@@ -633,7 +643,7 @@ def api_ui_pref():
         prefs = storage.set_ui_pref(key, data.get("value"))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    if key == "share_profiles":
+    if key in {"share_profiles", "cal_hide_pause"}:
         REMOTE.notify()
     return jsonify({"ok": True, "ui_prefs": prefs})
 
@@ -1293,6 +1303,7 @@ def api_remote_pull():
     snap["library"] = storage.list_library_reports()
     snap["autosave"] = _autosave_on()
     snap["share_profiles"] = _share_profiles()
+    snap["cal_hide_pause"] = _cal_hide_pause()
     return jsonify(snap)
 
 
@@ -1305,6 +1316,7 @@ def api_remote_session():
     snap["desktop_online"] = bool(REMOTE.clients("desktop"))
     snap["autosave"] = _autosave_on()
     snap["share_profiles"] = _share_profiles()
+    snap["cal_hide_pause"] = _cal_hide_pause()
     cid = request.args.get("cid") or ""
     name = request.args.get("name") or ""
     if cid:
@@ -1408,6 +1420,21 @@ def api_remote_nav():
         line_id=str(data.get("line_id") or ""),
     )
     return jsonify({"ok": True, "version": version})
+
+
+@app.post("/api/remote/cal-hide-pause")
+def api_remote_cal_hide_pause():
+    """Телефон переключает ту же кнопку «скрывать на паузе», что и календарь на компьютере."""
+    if not REMOTE.enabled:
+        return jsonify({"error": "Сессия закрыта."}), 409
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get("hide"))
+    storage.set_ui_pref("cal_hide_pause", enabled)
+    version = REMOTE.notify()
+    g.netlog_text = "Паузы в календаре скрыты" if enabled else "Паузы в календаре видны"
+    g.netlog_level = "ok"
+    g.netlog_key = "cal-hide-pause"
+    return jsonify({"ok": True, "cal_hide_pause": enabled, "version": version})
 
 
 @app.post("/api/remote/autosave")
