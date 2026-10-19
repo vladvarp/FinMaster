@@ -796,6 +796,7 @@
   height: 11px;
   flex: none;
 }
+.cal-month .cal-chip i[class*="role-"] span { display: none; }
 .cal-chip.tone-now { background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
 .cal-chip.tone-warn { background: color-mix(in srgb, var(--danger) 10%, var(--card)); }
 .cal-chip.tone-ok { background: color-mix(in srgb, var(--ok) 10%, var(--card)); }
@@ -1398,6 +1399,14 @@
 .cal-block .cal-chip { margin-bottom: 4px; }
 html[data-theme="dark"] .cal-cell,
 html[data-theme="dark"] .cal-col { background: #151d2e; }
+html[data-theme="dark"] .cal-cell.is-weekend,
+html[data-theme="dark"] .cal-col.is-weekend { background: color-mix(in srgb, var(--danger) 16%, #151d2e); }
+html[data-theme="dark"] .cal-cell.is-off-day,
+html[data-theme="dark"] .cal-col.is-off-day { background: color-mix(in srgb, #7c3aed 24%, #151d2e); }
+html[data-theme="dark"] .cal-cell.is-work-day,
+html[data-theme="dark"] .cal-col.is-work-day { background: color-mix(in srgb, #0d9488 24%, #151d2e); }
+html[data-theme="dark"] .cal-cell.is-hot,
+html[data-theme="dark"] .cal-col.is-hot { background: color-mix(in srgb, #d97706 26%, #151d2e); }
 html[data-theme="dark"] .cal-color-themes button.is-on { background: #243044; }
 html[data-theme="dark"] .cal-color-name,
 html[data-theme="dark"] .cal-picker-hex input { background: var(--control-bg, #1b2538); }
