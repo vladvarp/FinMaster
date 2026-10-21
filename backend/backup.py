@@ -196,6 +196,23 @@ def create_backup(doc: dict[str, Any], path: str) -> dict[str, Any]:
     return describe(doc, path)
 
 
+def read_backup(report_id: str, name: str) -> dict[str, Any]:
+    report_id = valid_id(report_id)
+    if not report_id:
+        raise ValueError("Неизвестный отчёт.")
+    base = _safe_name(name)
+    full = os.path.join(_folder(report_id), base)
+    if not os.path.isfile(full):
+        raise FileNotFoundError("Резервная копия не найдена.")
+    try:
+        raw = json.loads(storage.read_text(full))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ValueError("Файл копии повреждён.") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("Файл копии повреждён.")
+    return raw
+
+
 def delete_backup(report_id: str, name: str) -> None:
     report_id = valid_id(report_id)
     if not report_id:

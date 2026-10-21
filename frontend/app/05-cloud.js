@@ -2294,6 +2294,11 @@
         openBackupLibrary();
         return;
       }
+      const diffBtn = e.target.closest("[data-history-diff]");
+      if (diffBtn) {
+        openHistoryDiff(diffBtn.dataset.historyDiff);
+        return;
+      }
       const item = e.target.closest("[data-history-id]");
       if (item) historyJump(item.dataset.historyId);
     });
@@ -2314,7 +2319,16 @@
     });
     $("backup-create")?.addEventListener("click", () => createReportBackup());
     $("preview-save")?.addEventListener("click", () => save({ as: true }));
+    $("diff-close")?.addEventListener("click", () => closeDiffModal());
+    $("diff-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("diff-modal")) closeDiffModal();
+    });
     $("backup-list")?.addEventListener("click", (e) => {
+      const diffBtn = e.target.closest("[data-bak-diff]");
+      if (diffBtn) {
+        openBackupDiff(diffBtn.dataset.bakDiff);
+        return;
+      }
       const openBtn = e.target.closest("[data-bak-open]");
       if (openBtn) {
         const path = openBtn.dataset.bakOpen;
@@ -3282,6 +3296,11 @@
         if ($("pdf-modal")?.classList.contains("open")) {
           e.preventDefault();
           $("pdf-modal").classList.remove("open");
+          return;
+        }
+        if ($("diff-modal")?.classList.contains("open")) {
+          e.preventDefault();
+          closeDiffModal();
           return;
         }
         if ($("backup-modal")?.classList.contains("open")) {

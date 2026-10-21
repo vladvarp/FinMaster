@@ -476,6 +476,25 @@ def load_doc_history(report_path: str) -> dict[str, Any]:
     return {"index": index, "items": items, "folder": os.path.basename(folder)}
 
 
+def read_history_document(report_path: str, snap_id: str) -> dict[str, Any] | None:
+    """Один снимок истории этого отчёта. Чужие папки и произвольные имена не читаются."""
+    folder = find_history_folder(report_path)
+    want = str(snap_id or "").strip()
+    if not folder or not want:
+        return None
+    meta = _read_history_meta(folder)
+    raw_items = meta.get("items") if isinstance(meta.get("items"), list) else []
+    for raw in raw_items:
+        if not isinstance(raw, dict) or str(raw.get("id") or "") != want:
+            continue
+        for name in _history_file_candidates(raw):
+            found = _read_history_snap(os.path.join(folder, name))
+            if found is not None:
+                return found
+        return None
+    return None
+
+
 def _append_doc_history(report_path: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Дописывает снимок и подписи. Тела старых снимков клиент не присылает."""
     if not report_path:

@@ -781,6 +781,20 @@ def api_history_delete():
     return jsonify({"ok": True, **storage.list_histories(str(data.get("path") or ""))})
 
 
+@app.post("/api/history/snap")
+def api_history_snap():
+    data = request.get_json(silent=True) or {}
+    path = str(data.get("path") or "")
+    if not path:
+        return jsonify({"error": "Нет пути файла."}), 400
+    if _is_desk_call() and not _desk_can_read(path):
+        return jsonify({"error": "История только для отчётов главного компьютера."}), 403
+    doc = storage.read_history_document(path, str(data.get("id") or ""))
+    if doc is None:
+        return jsonify({"error": "Снимок не найден."}), 404
+    return jsonify({"ok": True, "doc": doc})
+
+
 @app.post("/api/history/limit")
 def api_history_limit():
     n = storage.set_history_limit((request.get_json(silent=True) or {}).get("limit"))
@@ -796,6 +810,20 @@ def api_backups_list():
         return jsonify({"ok": True, **report_backup.describe(data.get("document") if isinstance(data.get("document"), dict) else {}, str(data.get("path") or ""))})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+
+
+@app.post("/api/backups/read")
+def api_backups_read():
+    if not _is_local() and not _desk_reader():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        doc = report_backup.read_backup(str(data.get("id") or ""), str(data.get("name") or ""))
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, "doc": doc})
 
 
 @app.post("/api/backups/create")

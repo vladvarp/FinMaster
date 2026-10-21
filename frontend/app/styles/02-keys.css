@@ -136,16 +136,30 @@ kbd {
 .history-empty { padding: 16px 10px; color: var(--muted); font-size: 13px; text-align: center; }
 .history-item {
   display: grid;
-  gap: 2px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
   width: 100%;
   text-align: left;
   border: 1px solid transparent;
   background: transparent;
   border-radius: 10px;
   padding: 8px 10px;
-  cursor: pointer;
   color: inherit;
 }
+.history-jump {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.history-diff { padding: 4px 8px; }
 .history-item:hover { background: #f8fafc; }
 .history-item.active {
   background: color-mix(in srgb, var(--accent) 12%, #fff);
@@ -156,7 +170,18 @@ kbd {
   justify-content: space-between;
   gap: 8px;
   align-items: baseline;
+  min-width: 0;
 }
+#diff-modal.open { z-index: 10100 !important; }
+.modal-card.diff-modal {
+  width: min(860px, calc(100vw - 32px));
+  max-height: min(82vh, 760px);
+  display: flex;
+  flex-direction: column;
+}
+.diff-table-wrap { overflow: auto; min-height: 0; }
+.diff-table { width: 100%; }
+.diff-table td { vertical-align: top; white-space: pre-wrap; word-break: break-word; }
 .history-item b { font-size: 13px; }
 .history-item time, .history-item small { color: var(--muted); font-size: 11px; }
 
