@@ -249,6 +249,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .app.sidebar-collapsed {
   grid-template-columns: 64px 1fr;
 }
+#app-shell[hidden] { display: none !important; }
 
 .sidebar {
   background: linear-gradient(180deg, var(--side) 0%, var(--side-end) 100%);
