@@ -156,6 +156,11 @@
     return { total, after, paid, unpaid, discount, cost: 0, kind: "", expense: false, mode: "amount", percent: 0, base: 0 };
   }
 
+  function beforeDiscountNote(t) {
+    if (!(Number(t?.discount) > 0)) return "";
+    return `<div style="color:#94a3b8;font-weight:500;font-size:11px">до скидки ${esc(money(t.total))}</div>`;
+  }
+
   function paidStatus() {
     const list = state.doc?.statuses || [];
     return list.find((s) => s.is_paid) || list.find((s) => s.id === "paid") || list.find((s) => /оплачен/i.test(s.name || ""));
@@ -2294,7 +2299,13 @@
     return `<colgroup>${ORDER_COLS.map(([key, , w]) => `<col data-col="${key}" style="width:${colWidth(key, w)}px">`).join("")}</colgroup>`;
   }
 
-  function orderHeadHtml() {
+  function orderHeadHtml(order) {
+    const lines = (order?.lines || []).filter((line) => !isExpenseLine(line));
+    const doneCount = lines.filter((line) => lineCalendarDone(order, line)).length;
+    const allDone = lines.length > 0 && doneCount === lines.length;
+    const someDone = doneCount > 0 && !allDone;
+    const masterTitle = allDone ? "Снять завершение со всех позиций" : "Завершить все позиции";
+    const masterCls = allDone ? " is-done" : someDone ? " is-plan" : "";
     return ORDER_COLS.map(([key, label]) => {
       const cal =
         key === "order_date" || key === "payment_date"
@@ -2303,7 +2314,11 @@
             </span>`
           : "";
       const resize = key === "actions" || key === "drag" ? "" : `<span class="col-resizer" data-col="${key}"></span>`;
-      return `<th data-col="${key}"><span class="th-title">${label}</span>${cal}${resize}</th>`;
+      const master =
+        key === "actions" && lines.length
+          ? `<div class="row-actions"><button type="button" class="done-btn${masterCls}" data-act="line-done-all" title="${esc(masterTitle)}" aria-label="${esc(masterTitle)}" aria-pressed="${allDone ? "true" : "false"}">✓</button><span class="head-done-pad" aria-hidden="true"></span></div>`
+          : "";
+      return `<th data-col="${key}"><span class="th-title">${label}</span>${cal}${master}${resize}</th>`;
     }).join("");
   }
 
@@ -2586,7 +2601,7 @@
             <table class="data">
               ${colgroupHtml()}
               <thead>
-                <tr>${orderHeadHtml()}</tr>
+                <tr>${orderHeadHtml(order)}</tr>
               </thead>
               <tbody>
                 ${
@@ -2638,7 +2653,7 @@
       <td class="num">${exprInput(line, "paid_expr", "", lockPaid?.reason || "")}</td>
       <td><input data-lk="payment_date" type="date" value="${esc(dateDay(line.payment_date))}" /></td>
       <td class="num computed">${esc(money(t.unpaid))}</td>
-      <td class="num computed">${esc(money(t.after))}<div style="color:#94a3b8;font-weight:500;font-size:11px">до скидки ${esc(money(t.total))}</div></td>
+      <td class="num computed">${esc(money(t.after))}${beforeDiscountNote(t)}</td>
       <td><select data-lk="status">${optionList(unique([line.status, ...statusNames]), line.status)}</select></td>
       <td><div class="row-actions">
         ${lineDoneButton(order, line)}

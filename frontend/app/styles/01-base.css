@@ -887,13 +887,15 @@ input[type="search"]::-webkit-search-decoration {
   box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
 }
 .row-actions .note-btn,
-.row-actions .done-btn {
+.row-actions .done-btn,
+th[data-col="actions"] .done-btn {
   flex: 0 0 28px;
   width: 28px;
   height: 28px;
   font-size: 14px;
 }
-.row-actions .done-btn {
+.row-actions .done-btn,
+th[data-col="actions"] .done-btn {
   border-radius: 50%;
   border: 1.5px solid var(--line);
   background: #fff;
@@ -903,25 +905,35 @@ input[type="search"]::-webkit-search-decoration {
   cursor: pointer;
   padding: 0;
 }
-.row-actions .done-btn:hover { border-color: var(--ok); color: var(--ok); }
-.row-actions .done-btn.is-done {
+.row-actions .done-btn:hover,
+th[data-col="actions"] .done-btn:hover { border-color: var(--ok); color: var(--ok); }
+.row-actions .done-btn.is-done,
+th[data-col="actions"] .done-btn.is-done {
   background: var(--ok);
   border-color: var(--ok);
   color: #fff;
 }
-.row-actions .done-btn.is-done:hover { color: #fff; }
+.row-actions .done-btn.is-done:hover,
+th[data-col="actions"] .done-btn.is-done:hover { color: #fff; }
 .row-actions .done-btn.is-plan,
-.row-actions .done-btn.is-plan:hover {
+.row-actions .done-btn.is-plan:hover,
+th[data-col="actions"] .done-btn.is-plan,
+th[data-col="actions"] .done-btn.is-plan:hover {
   background: var(--warn);
   border-color: var(--warn);
   color: #fff;
 }
 .row-actions .done-btn.is-today,
-.row-actions .done-btn.is-today:hover {
+.row-actions .done-btn.is-today:hover,
+th[data-col="actions"] .done-btn.is-today,
+th[data-col="actions"] .done-btn.is-today:hover {
   background: #38bdf8;
   border-color: #0ea5e9;
   color: #fff;
 }
+table.data th[data-col="actions"] { padding: 6px 8px; }
+th[data-col="actions"] .row-actions { gap: 0; }
+.head-done-pad { flex: 0 0 100px; width: 100px; }
 .line-note-row { display: none; }
 .line-note-row.open { display: table-row; }
 .line-note { padding: 8px 12px 12px; background: #f8fafc; }

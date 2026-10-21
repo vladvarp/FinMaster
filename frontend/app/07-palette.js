@@ -1046,6 +1046,14 @@
       e.target.closest("[data-act='toggle-frozen']")?.setAttribute("aria-expanded", open ? "false" : "true");
       return;
     }
+    if (act === "line-done-all") {
+      const lines = (order.lines || []).filter((line) => !isExpenseLine(line));
+      if (!lines.length) return;
+      setAllLinesCalendarDone(order, !lines.every((line) => lineCalendarDone(order, line)));
+      markDirty();
+      renderOrders();
+      return;
+    }
     if (act === "line-done") {
       const tr = e.target.closest("[data-line]");
       const line = order.lines.find((item) => item.id === tr?.dataset.line);
@@ -1130,11 +1138,21 @@
     if (act === "dup") {
       const copy = JSON.parse(JSON.stringify(order));
       copy.id = uid();
-      copy.number = `${order.number}-копия`;
+      copy.number = order.number;
+      const name = String(order.name || "").trim();
+      copy.name = name ? `${name} - копия` : "копия";
       copy.lines.forEach((l) => (l.id = uid()));
       state.doc.orders.push(copy);
       markDirty();
       renderOrders();
+      requestAnimationFrame(() => {
+        flashOrder(copy.id);
+        const nameInput = orderCardBox(copy.id)?.querySelector('input[data-k="name"]');
+        if (!nameInput) return;
+        nameInput.focus();
+        const end = nameInput.value.length;
+        try { nameInput.setSelectionRange(end, end); } catch { /* ignore */ }
+      });
       return;
     }
     if (act === "addline") {

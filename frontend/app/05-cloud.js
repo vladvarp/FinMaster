@@ -3636,7 +3636,7 @@
     } else {
       if (cells[0]) cells[0].textContent = money(t.unpaid);
       if (cells[1]) {
-        cells[1].innerHTML = `${esc(money(t.after))}<div style="color:#94a3b8;font-weight:500;font-size:11px">до скидки ${esc(money(t.total))}</div>`;
+        cells[1].innerHTML = `${esc(money(t.after))}${beforeDiscountNote(t)}`;
       }
     }
     if (!t.expense || t.mode === "amount") refreshPercentRows(card, order);

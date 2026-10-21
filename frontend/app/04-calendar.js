@@ -1166,6 +1166,33 @@
     normalizeWorkDates(order);
   }
 
+  function setAllLinesCalendarDone(order, on) {
+    const lines = (order?.lines || []).filter((line) => !isExpenseLine(line));
+    if (!lines.length) return;
+    const today = dayKey(clockToday());
+    if (on) {
+      let startFloor = dateDay(order.work_start) || today;
+      lines.forEach((line) => {
+        if (lineCalendarDone(order, line)) return;
+        let start = dateDay(line.work_start) || dateDay(order.work_start) || today;
+        if (start > today) start = today;
+        line.work_start = start;
+        line.work_end = today;
+        if (!isFrozenLine(line) && start < startFloor) startFloor = start;
+      });
+      if (lines.some((line) => !isFrozenLine(line)) && (!dateDay(order.work_start) || dateDay(order.work_start) > startFloor)) {
+        order.work_start = startFloor;
+      }
+    } else {
+      lines.forEach((line) => {
+        if (!dateDay(line.work_start)) line.work_start = dateDay(order.work_start) || today;
+        line.work_end = "";
+      });
+    }
+    syncOrderEndWithPositions(order);
+    normalizeWorkDates(order);
+  }
+
   function findCalendarLine(order, lineId) {
     if (!order || !lineId) return null;
     return (order.lines || []).find((line) => line.id === lineId) || null;
