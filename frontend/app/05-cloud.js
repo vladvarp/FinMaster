@@ -1079,7 +1079,12 @@
     return state.doc.orders.find((o) => o.id === id);
   }
 
+  const VIEW_SCROLL = new Set(["dashboard", "orders", "analytics", "cashflow", "forecast", "vault", "customers", "catalogs"]);
+  const viewScroll = {};
+
   function setView(name) {
+    const content = document.querySelector(".content");
+    if (content && VIEW_SCROLL.has(state.view)) viewScroll[state.view] = content.scrollTop;
     closeProductSuggest();
     if (name !== "cloud") orderCloud?.stopTour();
     if (name !== "calculator") {
@@ -1102,6 +1107,7 @@
       setDT("c-a-to", now);
     }
     renderAll();
+    if (content && VIEW_SCROLL.has(name)) content.scrollTop = viewScroll[name] || 0;
     if (name === "cloud") {
       applyCloudFocus({ fly: true });
       requestAnimationFrame(() => orderCloud?.resize?.());
