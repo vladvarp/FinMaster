@@ -885,11 +885,41 @@ input[type="search"]::-webkit-search-decoration {
   border-color: var(--accent-2);
   box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
 }
-.row-actions .note-btn {
+.row-actions .note-btn,
+.row-actions .done-btn {
   flex: 0 0 28px;
   width: 28px;
   height: 28px;
   font-size: 14px;
+}
+.row-actions .done-btn {
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.row-actions .done-btn:hover { border-color: var(--ok); color: var(--ok); }
+.row-actions .done-btn.is-done {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #fff;
+}
+.row-actions .done-btn.is-done:hover { color: #fff; }
+.row-actions .done-btn.is-plan,
+.row-actions .done-btn.is-plan:hover {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: #fff;
+}
+.row-actions .done-btn.is-today,
+.row-actions .done-btn.is-today:hover {
+  background: #38bdf8;
+  border-color: #0ea5e9;
+  color: #fff;
 }
 .line-note-row { display: none; }
 .line-note-row.open { display: table-row; }
@@ -2712,6 +2742,12 @@ html[data-theme="dark"] .order-head {
 html[data-theme="dark"] .note-btn,
 html[data-theme="dark"] .info-btn { background: #1b2538; color: #cbd5e1; border-color: var(--line); }
 html[data-theme="dark"] .note-btn.has-note { background: var(--accent); color: #fff; border-color: var(--accent); }
+html[data-theme="dark"] .done-btn { background: #1b2538; color: #cbd5e1; border-color: var(--line); }
+html[data-theme="dark"] .done-btn.is-done { background: var(--ok); color: #fff; border-color: var(--ok); }
+html[data-theme="dark"] .done-btn.is-plan,
+html[data-theme="dark"] .done-btn.is-plan:hover { background: var(--warn); color: #fff; border-color: var(--warn); }
+html[data-theme="dark"] .done-btn.is-today,
+html[data-theme="dark"] .done-btn.is-today:hover { background: #38bdf8; color: #fff; border-color: #0ea5e9; }
 html[data-theme="dark"] .order-notes { background: #121a2b; }
 html[data-theme="dark"] .order-notes textarea { background: #1b2538; color: var(--ink); }
 html[data-theme="dark"] .order-globals,

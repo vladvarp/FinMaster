@@ -1025,6 +1025,7 @@
     if (!line) return;
     historyCommit();
     line.frozen = !isFrozenLine(line);
+    normalizeWorkDates(order);
     markDirty();
     renderOrders();
     toast(line.frozen ? "Позиция заморожена" : "Позиция снова в заказе");
@@ -1043,6 +1044,15 @@
       else openFrozenOrders.add(order.id);
       card.querySelector(".order-frozen")?.classList.toggle("collapsed", open);
       e.target.closest("[data-act='toggle-frozen']")?.setAttribute("aria-expanded", open ? "false" : "true");
+      return;
+    }
+    if (act === "line-done") {
+      const tr = e.target.closest("[data-line]");
+      const line = order.lines.find((item) => item.id === tr?.dataset.line);
+      if (!line || isExpenseLine(line)) return;
+      toggleLineCalendarDone(order, line);
+      markDirty();
+      renderOrders();
       return;
     }
     if (act === "linenotes") {
@@ -1068,7 +1078,12 @@
       return;
     }
     if (act === "work-start-today" || act === "work-end-today") {
+      if (act === "work-end-today" && orderPlacedOnCalendar(order)) {
+        toast("Конечную дату меняют, пока заказа нет в календаре");
+        return;
+      }
       setWorkToday(order, act === "work-start-today" ? "start" : "end");
+      if (act === "work-end-today" && !dateDay(order.work_end)) toast("Есть позиция в работе — у заказа нет конечной даты");
       markDirty();
       renderOrders();
       return;
@@ -1083,6 +1098,7 @@
         const after = lineTotals(line).after;
         line.paid = after;
         line.paid_expr = String(after);
+        line.payment_date = dayKey(clockToday());
         applyPaidIfCovered(line);
       });
       markDirty();

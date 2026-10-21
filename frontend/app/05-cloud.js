@@ -3498,6 +3498,10 @@
       return;
     }
     if (e.target.dataset.k) {
+      if (e.target.dataset.k === "work_end" && orderPlacedOnCalendar(order)) {
+        e.target.value = dateDay(order.work_end) || "";
+        return;
+      }
       order[e.target.dataset.k] = e.target.value;
       if (e.target.dataset.k === "notes") {
         card.querySelector(".note-btn")?.classList.toggle("has-note", !!String(e.target.value || "").trim());
@@ -3510,11 +3514,26 @@
       }
       if (e.target.dataset.k === "work_start" || e.target.dataset.k === "work_end") {
         normalizeWorkDates(order);
+        if (e.type === "change" && e.target.dataset.k === "work_end" && !dateDay(order.work_end) && orderHasOpenPosition(order)) {
+          toast("Есть позиция в работе — у заказа нет конечной даты");
+        }
         if (e.type === "change") {
           e.target.value = order[e.target.dataset.k] || "";
           const other = e.target.dataset.k === "work_start" ? "work_end" : "work_start";
           const otherEl = card.querySelector(`[data-k="${other}"]`);
           if (otherEl) otherEl.value = order[other] || "";
+          const placed = orderPlacedOnCalendar(order);
+          const endInput = card.querySelector('[data-k="work_end"]');
+          const endBtn = card.querySelector('[data-act="work-end-today"]');
+          if (endInput) {
+            endInput.disabled = placed;
+            endInput.title = placed
+              ? orderHasOpenPosition(order)
+                ? "Есть позиция в работе — у заказа нет конечной даты"
+                : "Пока заказ в календаре, конец правится там и не раньше последней позиции"
+              : "";
+          }
+          if (endBtn) endBtn.disabled = placed;
           const pill = card.querySelector(".work-pill");
           if (pill) {
             const meta = workStatusMeta(order);

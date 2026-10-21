@@ -2274,7 +2274,7 @@
     ["unpaid", "Не оплачено", 110],
     ["total", "Итог", 120],
     ["status", "Статус", 140],
-    ["actions", "", 118],
+    ["actions", "", 156],
   ];
 
   function ensureUi() {
@@ -2286,7 +2286,7 @@
 
   function colWidth(key, fallback) {
     const w = Number(ensureUi().column_widths[key]);
-    const min = key === "drag" ? 24 : key === "actions" ? 86 : 52;
+    const min = key === "drag" ? 24 : key === "actions" ? 140 : 52;
     return Math.max(min, Number.isFinite(w) && w > 0 ? w : fallback);
   }
 
@@ -2492,8 +2492,38 @@
     revealOrderCard(orderId);
   }
 
+  function dayCountWord(n) {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return "день";
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "дня";
+    return "дней";
+  }
+
+  function lineDoneButton(order, line) {
+    const end = lineCalendarEnd(order, line);
+    const today = dayKey(clockToday());
+    const closedToday = end === today;
+    const done = !!end && end < today;
+    const planned = !!end && end > today;
+    const ago = done ? dayDiff(parseDay(end), clockToday()) : 0;
+    const left = planned ? dayDiff(clockToday(), parseDay(end)) : 0;
+    const title = closedToday
+      ? "Завершена сегодня"
+      : done
+        ? ago > 30
+          ? `Завершена ${calFmtDay(parseDay(end), true)}`
+          : `Завершена ${ago} ${dayCountWord(ago)} назад`
+        : planned
+          ? `До конечной даты ${left} ${dayCountWord(left)}`
+          : "Завершить позицию";
+    const cls = closedToday ? " is-today" : done ? " is-done" : planned ? " is-plan" : "";
+    return `<button type="button" class="done-btn${cls}" data-act="line-done" title="${esc(title)}" aria-label="${esc(title)}" aria-pressed="${end ? "true" : "false"}">✓</button>`;
+  }
+
   function renderOrders() {
     closeProductSuggest();
+    (state.doc?.orders || []).forEach((order) => syncOrderEndWithPositions(order));
     const editingId = document.activeElement?.closest?.(".order-card")?.dataset.order || "";
     const beforeIndex = editingId
       ? [...($("orders-list")?.querySelectorAll(":scope > .order-card") || [])].findIndex((el) => el.dataset.order === editingId)
@@ -2531,10 +2561,10 @@
           </div>
           <div class="order-work">
             <div class="field"><label>Начало работ</label><input data-k="work_start" type="date" value="${esc(dateDay(order.work_start))}" /></div>
-            <div class="field"><label>Конец работ</label><input data-k="work_end" type="date" value="${esc(dateDay(order.work_end))}" /></div>
+            <div class="field"><label>Конец работ</label><input data-k="work_end" type="date" value="${esc(dateDay(order.work_end))}" ${orderPlacedOnCalendar(order) ? "disabled" : ""} title="${esc(orderPlacedOnCalendar(order) ? (orderHasOpenPosition(order) ? "Есть позиция в работе — у заказа нет конечной даты" : "Пока заказ в календаре, конец правится там и не раньше последней позиции") : "")}" /></div>
             <span class="work-pill work-pill-${esc(workStatusMeta(order).id)}">${esc(workStatusMeta(order).label)}</span>
             <button class="btn small" type="button" data-act="work-start-today" title="Поставить начало на сегодня">Начать сегодня</button>
-            <button class="btn small" type="button" data-act="work-end-today" title="Поставить конец на сегодня">Закончить сегодня</button>
+            <button class="btn small" type="button" data-act="work-end-today" ${orderPlacedOnCalendar(order) ? "disabled" : ""} title="${esc(orderPlacedOnCalendar(order) ? "Конечную дату меняют, пока заказа нет в календаре" : "Поставить конец на сегодня")}">Закончить сегодня</button>
           </div>
           <div class="order-notes">
             <label>Заметки к заказу</label>
@@ -2550,7 +2580,7 @@
             <div class="field"><label>Статус всем строкам</label>
               <select data-g="status"><option value="">— не менять —</option>${optionList(statusNames, "")}</select>
             </div>
-            <button class="btn small primary" data-act="payall" title="В каждую строку запишет её итог и при полной оплате поставит статус «оплачено»">Оплатить все типы</button>
+            <button class="btn small primary" data-act="payall" title="В каждую строку запишет её итог, сегодняшнюю дату оплаты и при полной оплате поставит статус «оплачено»">Оплатить все типы</button>
           </div>
           <div class="table-wrap">
             <table class="data">
@@ -2611,6 +2641,7 @@
       <td class="num computed">${esc(money(t.after))}<div style="color:#94a3b8;font-weight:500;font-size:11px">до скидки ${esc(money(t.total))}</div></td>
       <td><select data-lk="status">${optionList(unique([line.status, ...statusNames]), line.status)}</select></td>
       <td><div class="row-actions">
+        ${lineDoneButton(order, line)}
         <button type="button" class="note-btn ${lineHasNote(line) ? "has-note" : ""}" data-act="linenotes" title="Комментарий к позиции" aria-label="Комментарий к позиции">i</button>
         <button class="btn icon small" data-act="dupline" title="Дублировать строку (Ctrl+Alt+D)">⧉</button>
         <button class="btn icon small danger" data-act="delline" title="Удалить строку">✕</button>

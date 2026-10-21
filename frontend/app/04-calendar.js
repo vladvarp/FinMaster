@@ -1076,11 +1076,94 @@
       normalizeOrderLinesWork(order);
       syncOrderPausesFromLines(order);
     }
+    if (isOrder) syncOrderEndWithPositions(order);
     return order;
   }
 
   function calendarWorkLines(order) {
     return (order?.lines || []).filter((line) => !isFrozenLine(line) && !isExpenseLine(line));
+  }
+
+  function orderPlacedOnCalendar(order) {
+    return !!(dateDay(order?.work_start) || dateDay(order?.work_end));
+  }
+
+  /** Конец позиции в календаре: свой или унаследованный от заказа. */
+  function lineCalendarEnd(order, line) {
+    if (!line || isExpenseLine(line)) return "";
+    if (dateDay(line.work_end)) return dateDay(line.work_end);
+    if (isFrozenLine(line)) return "";
+    if (!dateDay(line.work_start) && dateDay(order?.work_end)) return dateDay(order.work_end);
+    return "";
+  }
+
+  /** Галочка включена: у позиции есть конечная дата. Зелёная — конец сегодня или раньше, оранжевая — позже. */
+  function lineCalendarDone(order, line) {
+    return !!lineCalendarEnd(order, line);
+  }
+
+  function positionIsOpen(order, line) {
+    if (!line || isFrozenLine(line) || isExpenseLine(line)) return false;
+    if (dateDay(line.work_end)) return false;
+    if (dateDay(line.work_start)) return true;
+    return !dateDay(order?.work_end) && !!dateDay(order?.work_start);
+  }
+
+  function orderHasOpenPosition(order) {
+    return calendarWorkLines(order).some((line) => positionIsOpen(order, line));
+  }
+
+  /** Самая поздняя конечная дата позиций. Пусто, пока хотя бы одна позиция в работе. */
+  function positionEndFloor(order) {
+    const lines = calendarWorkLines(order);
+    if (!lines.length || lines.some((line) => positionIsOpen(order, line))) return "";
+    return lines.map((line) => dateDay(line.work_end)).filter(Boolean).sort().at(-1) || "";
+  }
+
+  function syncOrderEndWithPositions(order) {
+    if (!Array.isArray(order?.lines)) return order;
+    const lines = calendarWorkLines(order);
+    if (!lines.length) return order;
+    const placed =
+      orderPlacedOnCalendar(order) || lines.some((line) => dateDay(line.work_start) || dateDay(line.work_end));
+    if (!placed) return order;
+    if (orderHasOpenPosition(order)) {
+      order.work_end = "";
+      return order;
+    }
+    const floor = positionEndFloor(order);
+    if (floor && (!dateDay(order.work_end) || dateDay(order.work_end) < floor)) order.work_end = floor;
+    return order;
+  }
+
+  function keepSiblingEnds(order, exceptId) {
+    const end = dateDay(order?.work_end);
+    if (!end) return;
+    calendarWorkLines(order).forEach((line) => {
+      if (line.id === exceptId || dateDay(line.work_end)) return;
+      let start = dateDay(line.work_start) || dateDay(order.work_start) || end;
+      if (start > end) start = end;
+      line.work_start = start;
+      line.work_end = end;
+    });
+  }
+
+  function toggleLineCalendarDone(order, line) {
+    if (!order || !line || isExpenseLine(line)) return;
+    const today = dayKey(clockToday());
+    if (lineCalendarDone(order, line)) {
+      keepSiblingEnds(order, line.id);
+      if (!dateDay(line.work_start)) line.work_start = dateDay(order.work_start) || today;
+      line.work_end = "";
+    } else {
+      let start = dateDay(line.work_start) || dateDay(order.work_start) || today;
+      if (start > today) start = today;
+      line.work_start = start;
+      line.work_end = today;
+      if (!isFrozenLine(line) && (!dateDay(order.work_start) || dateDay(order.work_start) > start)) order.work_start = start;
+    }
+    syncOrderEndWithPositions(order);
+    normalizeWorkDates(order);
   }
 
   function findCalendarLine(order, lineId) {
@@ -1183,18 +1266,12 @@
 
   function clampLineToOrder(order, start, end, line) {
     const oStart = dateDay(order?.work_start);
-    const oEnd = dateDay(order?.work_end);
     const floor = lineDateFloor(line);
     let a = dateDay(start);
     let b = dateDay(end);
     if (oStart && a && a < oStart) a = oStart;
-    if (oEnd && a && a > oEnd) a = oEnd;
-    if (oStart && b && b < oStart) b = oStart;
-    if (oEnd && b && b > oEnd) b = oEnd;
     if (floor && a && a < floor) a = floor;
     if (floor && b && b < floor) b = floor;
-    if (a && b && b < a) [a, b] = [b, a];
-    if (floor && a && a < floor) a = floor;
     if (a && b && b < a) b = a;
     return { start: a, end: b };
   }
@@ -1211,24 +1288,28 @@
     const oEnd = dateDay(order.work_end);
     const defaultStart = dayKeyMax(oStart, lineDateFloor(line));
     const sameDates = dateDay(proxy.work_start) === defaultStart && dateDay(proxy.work_end) === oEnd;
+    const keepOwnEnd = !!dateDay(line.work_end);
     if (!dateDay(proxy.work_start) && !dateDay(proxy.work_end)) {
       line.work_start = "";
       line.work_end = "";
       line.work_pauses = [];
       syncOrderPausesFromLines(order);
+      syncOrderEndWithPositions(order);
       return;
     }
-    if (sameDates) {
+    if (sameDates && !keepOwnEnd) {
       line.work_start = "";
       line.work_end = "";
       line.work_pauses = pauses;
       syncOrderPausesFromLines(order);
+      syncOrderEndWithPositions(order);
       return;
     }
     line.work_start = dateDay(proxy.work_start);
     line.work_end = dateDay(proxy.work_end);
     line.work_pauses = pauses;
     syncOrderPausesFromLines(order);
+    syncOrderEndWithPositions(order);
   }
 
   function normalizeOrderLinesWork(order) {
@@ -1254,12 +1335,11 @@
     let from = oStart;
     if (floor && (!from || floor > from)) from = floor;
     if (!from) return null;
-    if (oEnd) {
-      if (from > oEnd) return null;
-      return { from, till: oEnd };
-    }
-    // Без конца у заказа позицию можно увести в будущее — полоса заказа удлинится.
-    return { from, till: addDays(clockToday(), LINE_DRAG_HORIZON_DAYS) };
+    // Конец позиции может быть позже конца заказа: линия заказа подтянется к самой поздней.
+    let till = addDays(clockToday(), LINE_DRAG_HORIZON_DAYS);
+    if (oEnd && oEnd > till) till = oEnd;
+    if (from > till) return null;
+    return { from, till };
   }
 
   function clampLineProxy(order, proxy, drag) {
@@ -2102,7 +2182,10 @@
   function renderCalendar() {
     if (!state.doc || !$("cal-board")) return;
     applyCalColors();
-    (state.doc.orders || []).forEach((order) => syncOrderPausesFromLines(order));
+    (state.doc.orders || []).forEach((order) => {
+      syncOrderEndWithPositions(order);
+      syncOrderPausesFromLines(order);
+    });
     const cal = calendarState();
     const win = calendarWindow();
     const all = calendarOrdersAll();
@@ -2790,6 +2873,8 @@
         ? `<div class="cal-pause-note">Паузы заказа считаются сами: пустой день или все позиции на паузе.</div>`
         : "";
     const lineIdx = selectedLine ? calendarWorkLines(selected).findIndex((line) => line.id === selectedLine.id) : -1;
+    const orderEndFloor = selected && !selectedLine ? positionEndFloor(selected) : "";
+    const orderEndBlocked = !!(selected && !selectedLine && orderHasOpenPosition(selected));
     const sel = selected
       ? `<div class="cal-sel">
           <div class="cal-sel-head">
@@ -2813,12 +2898,12 @@
           }
           <div class="cal-dates">
             <div class="field"><label>Начало</label><input type="date" data-cal-field="work_start" value="${esc(dateDay(workTarget.work_start))}" /></div>
-            <div class="field"><label>Конец</label><input type="date" data-cal-field="work_end" value="${esc(dateDay(workTarget.work_end))}" /></div>
+            <div class="field"><label>Конец</label><input type="date" data-cal-field="work_end" value="${esc(dateDay(workTarget.work_end))}" ${orderEndBlocked ? "disabled" : ""} ${!selectedLine && orderEndFloor ? `min="${esc(orderEndFloor)}" title="Не раньше последней позиции"` : ""} /></div>
           </div>
           ${pauseList}
           <div class="cal-actions">
             <button type="button" class="btn small primary" data-cal-act="start-today">Начать сегодня</button>
-            <button type="button" class="btn small" data-cal-act="end-today">Закончить сегодня</button>
+            <button type="button" class="btn small" data-cal-act="end-today" ${orderEndBlocked ? "disabled" : ""}>Закончить сегодня</button>
             <button type="button" class="btn small" data-cal-act="shift-left" title="Сдвинуть на день назад">−1 день</button>
             <button type="button" class="btn small" data-cal-act="shift-right" title="Сдвинуть на день вперёд">+1 день</button>
             ${
@@ -3309,6 +3394,10 @@
     }
     if (act === "pick-start" || act === "pick-end") {
       if (!cal.pick) return;
+      if (act === "pick-end" && !cal.selectedLine && orderHasOpenPosition(findOrder(cal.selected))) {
+        toast("Есть позиция в работе — у заказа нет конечной даты");
+        return;
+      }
       applyCalendarOrder((order) => {
         if (act === "pick-start") order.work_start = cal.pick;
         else order.work_end = cal.pick;
@@ -3376,6 +3465,10 @@
         },
         { toastText: "Позиция как у заказа", stay: true }
       );
+      return;
+    }
+    if (act === "end-today" && !calendarState().selectedLine && orderHasOpenPosition(findOrder(calendarState().selected))) {
+      toast("Есть позиция в работе — у заказа нет конечной даты");
       return;
     }
     applyCalendarOrder((order) => {
