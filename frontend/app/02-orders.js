@@ -1012,8 +1012,6 @@
     const list = options
       .filter((item) => !q || selected.has(item.id) || String(item.label || "").toLocaleLowerCase("ru").includes(q))
       .sort((a, b) => {
-        const pick = (item) => (selected.has(item.id) ? 0 : 1);
-        if (pick(a) !== pick(b)) return pick(a) - pick(b);
         if (b.count !== a.count) return b.count - a.count;
         return String(a.label).localeCompare(String(b.label), "ru");
       });

@@ -155,36 +155,97 @@
     }
   }
 
+  function historyChrome(place) {
+    if (place === "Калькулятор · открытая схема" || place === "Презентация · открытая страница" || place === "Хранилище · открытая страница") return true;
+    if (place === "Боковая панель" || place.startsWith("Ширина колонки") || place.startsWith("Калькулятор · панель ")) return true;
+    if (place === "Презентация · инспектор" || place === "Презентация · холст") return true;
+    return place.startsWith("Калькулятор") && place.endsWith(" · вид");
+  }
+
+  function historyContentChanged(prevJson, nextJson) {
+    try {
+      const before = typeof prevJson === "string" ? JSON.parse(prevJson) : prevJson;
+      const after = typeof nextJson === "string" ? JSON.parse(nextJson) : nextJson;
+      const rows = reportDiff(before, after);
+      if (!rows.length) return false;
+      return rows.some((row) => !historyChrome(row.place));
+    } catch {
+      return true;
+    }
+  }
+
+  function historyNoise(place) {
+    if (place === "Калькулятор · открытая схема" || place === "Презентация · открытая страница" || place === "Хранилище · открытая страница") return true;
+    if (place === "Боковая панель" || place.startsWith("Ширина колонки") || place.startsWith("Калькулятор · панель ")) return true;
+    if (place === "Презентация · инспектор" || place === "Презентация · холст") return true;
+    if (place.startsWith("Калькулятор") && (place.endsWith(" · вид") || place.endsWith(" · положение"))) return true;
+    if (place.startsWith("Презентация") && place.endsWith(" · положение")) return true;
+    return false;
+  }
+
+  function historyClip(value) {
+    const text = String(value ?? "")
+      .replace(/-?\d+\.\d{2,}/g, (n) => {
+        const x = Number(n);
+        return Number.isFinite(x) ? String(Math.round(x * 100) / 100) : n;
+      })
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!text) return "—";
+    return text.length > 36 ? `${text.slice(0, 35)}…` : text;
+  }
+
+  function historyBit(row) {
+    const was = historyClip(row.was);
+    const now = historyClip(row.now);
+    if (was === "—") return `${row.place}: ${now}`;
+    if (now === "—") return `${row.place}: убрано ${was}`;
+    return `${row.place}: ${was} → ${now}`;
+  }
+
+  function historyShort(row) {
+    const place = row.place || "";
+    if (place.endsWith(" · вид") || place.endsWith(" · положение")) {
+      const name = place.replace(/ · (вид|положение)$/, "").replace(/^Калькулятор · /, "");
+      return place.startsWith("Презентация") ? `Презентация: сдвиг ${name.replace(/^Презентация · /, "")}` : `Калькулятор: сдвиг ${name}`;
+    }
+    if (place === "Калькулятор · открытая схема") return `Калькулятор: схема «${historyClip(row.now)}»`;
+    if (place === "Презентация · открытая страница") return `Презентация: «${historyClip(row.now)}»`;
+    if (place === "Хранилище · открытая страница") return `Хранилище: «${historyClip(row.now)}»`;
+    if (place.startsWith("Ширина колонки")) return "Ширина колонок";
+    if (place === "Боковая панель") return row.now === "свёрнута" ? "Боковая панель свёрнута" : "Боковая панель развёрнута";
+    return historyBit(row);
+  }
+
   function historyGuessLabel(prevJson, nextJson) {
     try {
-      const a = JSON.parse(prevJson);
-      const b = JSON.parse(nextJson);
-      const ao = a.orders || [];
-      const bo = b.orders || [];
-      if (ao.length < bo.length) return "Новый заказ";
-      if (ao.length > bo.length) return "Удаление заказа";
-      const byId = (list) => Object.fromEntries((list || []).map((o) => [o.id, o]));
-      const A = byId(ao);
-      const B = byId(bo);
-      for (const id of Object.keys(B)) {
-        if (JSON.stringify(A[id] || null) === JSON.stringify(B[id] || null)) continue;
-        const n = String(B[id].number || B[id].name || "").trim();
-        return n ? `Заказ ${n}` : "Правка заказа";
-      }
-      if (JSON.stringify(a.customers || []) !== JSON.stringify(b.customers || [])) return "Справочник заказчиков";
-      if (JSON.stringify(a.statuses || []) !== JSON.stringify(b.statuses || [])) return "Справочник статусов";
-      if (JSON.stringify(a.products || []) !== JSON.stringify(b.products || [])) return "Справочник продуктов";
-      if (JSON.stringify(a.units || []) !== JSON.stringify(b.units || [])) return "Единицы измерения";
-      if (JSON.stringify(a.order_types || []) !== JSON.stringify(b.order_types || [])) return "Типы заказов";
-      if (JSON.stringify(a.ui?.calendar || {}) !== JSON.stringify(b.ui?.calendar || {})) return "Календарь";
-      if (JSON.stringify(a.ui?.calculator || {}) !== JSON.stringify(b.ui?.calculator || {})) return "Калькулятор";
-      if (JSON.stringify(a.ui?.presentation || {}) !== JSON.stringify(b.ui?.presentation || {})) return "Презентация";
-      if (JSON.stringify(a.ui?.vault || {}) !== JSON.stringify(b.ui?.vault || {})) return "Хранилище";
-      if (a.title !== b.title) return "Название отчёта";
+      const before = typeof prevJson === "string" ? JSON.parse(prevJson) : prevJson;
+      const after = typeof nextJson === "string" ? JSON.parse(nextJson) : nextJson;
+      const rows = reportDiff(before, after);
+      if (!rows.length) return "";
+      const real = rows.filter((row) => !historyNoise(row.place));
+      if (!real.length) return historyShort(rows[0]);
+      let text = historyBit(real[0]);
+      if (real.length > 1) text += ` · ещё ${real.length - 1}`;
+      return text.length > 120 ? `${text.slice(0, 119)}…` : text;
     } catch {
-      /* ignore */
+      return "";
     }
-    return "Правка";
+  }
+
+  function historyItemLabel(item, index) {
+    const prev = index > 0 ? history.stack[index - 1] : null;
+    if (prev?.json && item?.json) {
+      const key = `${prev.id}:${item.id}`;
+      if (item._stepKey === key && item._step) return item._step;
+      const text = historyGuessLabel(prev.json, item.json);
+      if (text) {
+        item._stepKey = key;
+        item._step = text;
+        return text;
+      }
+    }
+    return item?.label || "Правка";
   }
 
   function remoteDeviceName(origin) {
@@ -238,7 +299,12 @@
       history.pendingLabel = "";
       return null;
     }
-    const text = label || history.pendingLabel || (cur ? historyGuessLabel(cur.json, snap) : "Правка");
+    if (cur?.json && !historyContentChanged(cur.json, snap)) {
+      history.pending = false;
+      history.pendingLabel = "";
+      return null;
+    }
+    const text = (cur && historyGuessLabel(cur.json, snap)) || label || history.pendingLabel || "Правка";
     const src = meta || (remote.applying ? { source: "mobile", device: remoteDeviceName(remote.origin) } : localActor());
     history.stack = history.stack.slice(0, history.index + 1);
     history.stack.push(historyItem(snap, text, src));
@@ -1363,18 +1429,51 @@
     return rows;
   }
 
+  function diffPretty(value, field, currency) {
+    let text = String(value ?? "");
+    text = text.replace(/\d{4}-\d{2}-\d{2}/g, (iso) => {
+      const [y, m, d] = iso.split("-");
+      return `${d}.${m}.${y}`;
+    });
+    if ((field === "оплата" || field === "цена" || field === "сумма" || field === "скидка") && /^-?\d+(\.\d+)?$/.test(text.trim())) {
+      const formatted = Number(text).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+      return currency ? `${formatted} ${currency}` : formatted;
+    }
+    if (field === "процент" && /^-?\d+(\.\d+)?$/.test(text.trim())) {
+      return `${Number(text).toLocaleString("ru-RU", { maximumFractionDigits: 2 })} %`;
+    }
+    return text;
+  }
+
   function paintDiff(before, after) {
     const body = $("diff-body");
     if (!body) return;
-    const rows = reportDiff(before, after);
+    const all = reportDiff(before, after);
+    const rows = all.filter((row) => !historyChrome(row.place));
     if (!rows.length) {
-      body.innerHTML = `<div class="empty">Отличий с открытым отчётом нет.</div>`;
+      body.innerHTML = `<div class="empty">В данных отчёта отличий нет.</div>`;
       return;
     }
-    const more = rows.overflow || 0;
-    body.innerHTML = `<table class="data diff-table"><thead><tr><th>Что</th><th>До</th><th>После</th></tr></thead><tbody>${rows
-      .map((row) => `<tr><td>${esc(row.place)}</td><td>${esc(row.was)}</td><td>${esc(row.now)}</td></tr>`)
-      .join("")}${more ? `<tr><td colspan="3">И ещё ${more}</td></tr>` : ""}</tbody></table>`;
+    const currency = String(after?.currency || before?.currency || "").trim();
+    const lines = [];
+    let group = null;
+    rows.forEach((row) => {
+      const parts = String(row.place || "Правка").split(" · ");
+      const field = parts.length > 1 ? parts.pop() : parts[0];
+      const title = parts.join(" · ");
+      if (title !== group) {
+        group = title;
+        if (title) lines.push(`<tr class="diff-head"><td colspan="3">${esc(title)}</td></tr>`);
+      }
+      const label = field ? field.charAt(0).toUpperCase() + field.slice(1) : "Правка";
+      lines.push(
+        `<tr><td>${esc(label)}</td><td>${esc(diffPretty(row.was, field, currency))}</td><td>${esc(diffPretty(row.now, field, currency))}</td></tr>`
+      );
+    });
+    const more = all.overflow || 0;
+    body.innerHTML = `<table class="diff-table"><thead><tr><th>Поле</th><th>До</th><th>После</th></tr></thead><tbody>${lines.join("")}${
+      more ? `<tr><td colspan="3">И ещё ${more}</td></tr>` : ""
+    }</tbody></table>`;
   }
 
   function showDiffShell(lead, bodyHtml) {
@@ -1413,7 +1512,7 @@
     const item = history.stack.find((row) => row.id === id);
     if (!item || !state.doc) return;
     const seq = ++diffSeq;
-    const lead = `До — снимок «${item.label || "Правка"}», ${historyTime(item.at) || "без времени"}. После — открытый отчёт «${state.doc.title || "Отчёт"}».`;
+    const lead = `До — снимок «${historyItemLabel(item, history.stack.indexOf(item))}», ${historyTime(item.at) || "без времени"}. После — открытый отчёт «${state.doc.title || "Отчёт"}».`;
     showDiffShell(lead, `<div class="empty">Считаю отличия…</div>`);
     try {
       const before = await loadHistoryDoc(item);
@@ -1460,7 +1559,7 @@
         const i = history.stack.indexOf(item);
         return `<div class="history-item ${i === history.index ? "active" : ""}">
           <button type="button" class="history-jump" data-history-id="${esc(item.id)}">
-            <span class="history-item-top"><b>${esc(item.label || "Правка")}</b><time>${esc(historyTime(item.at))}</time></span>
+            <span class="history-item-top"><b>${esc(historyItemLabel(item, i))}</b><time>${esc(historyTime(item.at))}</time></span>
             <small>${esc(item.device || (item.source === "mobile" ? "Телефон" : item.source === "web" ? "WEB" : item.source === "desk" ? "Браузер" : "ПК"))}</small>
           </button>
           <button type="button" class="btn small history-diff" data-history-diff="${esc(item.id)}" title="До и после относительно открытого отчёта" aria-label="До и после">≠</button>

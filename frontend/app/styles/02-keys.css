@@ -180,8 +180,41 @@ kbd {
   flex-direction: column;
 }
 .diff-table-wrap { overflow: auto; min-height: 0; }
-.diff-table { width: 100%; }
-.diff-table td { vertical-align: top; white-space: pre-wrap; word-break: break-word; }
-.history-item b { font-size: 13px; }
+table.diff-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.diff-table th,
+.diff-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.diff-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--card, #fff);
+}
+.diff-table th:first-child,
+.diff-table td:first-child { width: 34%; }
+.diff-table tr.diff-head td {
+  font-weight: 650;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.diff-table td:last-child { font-weight: 650; }
+.history-item b { flex: 1 1 120px; min-width: 0; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
 .history-item time, .history-item small { color: var(--muted); font-size: 11px; }
 
