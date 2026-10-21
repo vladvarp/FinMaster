@@ -858,18 +858,319 @@
         return `<button type="button" class="btn ${state.orderFilter === id ? "active" : ""}" data-order-filter="${id}" role="menuitem">${esc(name)}<span class="chip-count">${count}</span></button>`;
       }).join("");
     }
+    syncLineFilterButton();
   }
 
   function filteredOrders() {
-    const q = state.search.trim().toLowerCase();
-    let orders = [...(state.doc.orders || [])];
-    if (q) {
-      orders = orders.filter((o) => o.lines.some((l) => matchesSearch(o, l, q)) || matchesSearch(o, {}, q));
-    }
-    orders = orders.filter((o) => orderFilterMatch(o, state.orderFilter));
+    let orders = ordersMatchingList();
+    if (lineFilterActive()) orders = orders.filter((order) => (order.lines || []).some((line) => linePasses(order, line)));
     const sort = $("order-sort")?.value || "date-desc";
     orders.sort((a, b) => compareOrders(a, b, sort));
     return orders;
+  }
+
+  function ordersMatchingList() {
+    const q = state.search.trim().toLowerCase();
+    let orders = [...(state.doc.orders || [])];
+    if (q) orders = orders.filter((o) => o.lines.some((l) => matchesSearch(o, l, q)) || matchesSearch(o, {}, q));
+    return orders.filter((o) => orderFilterMatch(o, state.orderFilter));
+  }
+
+  function emptyLineFilter() {
+    return {
+      status: [],
+      type: [],
+      product: [],
+      unit: [],
+      customer: [],
+      pay: [],
+      discount: [],
+      kind: [],
+      dateFrom: "",
+      dateTo: "",
+      sumMin: "",
+      sumMax: "",
+      chipQ: "",
+      more: {},
+      exclude: false,
+    };
+  }
+
+  function lineFilterState() {
+    if (!state.lineFilter) state.lineFilter = emptyLineFilter();
+    if (!state.lineFilter.more) state.lineFilter.more = {};
+    return state.lineFilter;
+  }
+
+  function lineFilterActive(f = state.lineFilter) {
+    if (!f) return false;
+    return (
+      f.status.length ||
+      f.type.length ||
+      f.product.length ||
+      f.unit.length ||
+      f.customer.length ||
+      f.pay.length ||
+      f.discount.length ||
+      f.kind.length ||
+      f.dateFrom ||
+      f.dateTo ||
+      f.sumMin !== "" ||
+      f.sumMax !== ""
+    );
+  }
+
+  function linePayKey(line, order) {
+    const t = lineTotals(line, order);
+    if (t.expense) return "";
+    if (t.after <= 0.005) return "empty";
+    if (t.unpaid <= 0.005) return "paid";
+    if (t.paid > 0.005) return "partial";
+    return "debt";
+  }
+
+  function lineKindKey(line) {
+    if (isFrozenLine(line)) return "frozen";
+    if (isExpenseLine(line)) return "expense";
+    return "income";
+  }
+
+  function lineSum(line, order) {
+    const t = lineTotals(line, order);
+    return t.expense ? t.cost : t.after;
+  }
+
+  function linePasses(order, line) {
+    const f = state.lineFilter;
+    if (!lineFilterActive(f)) return true;
+    const match = lineFilterMatch(order, line);
+    return f.exclude ? !match : match;
+  }
+
+  function lineFilterMatch(order, line) {
+    const f = state.lineFilter;
+    const has = (arr, val) => !arr.length || arr.includes(val);
+    if (!has(f.status, line.status || "")) return false;
+    if (!has(f.type, line.order_type || "")) return false;
+    if (!has(f.product, catalogNameKey(line.product))) return false;
+    if (!has(f.unit, line.unit || "")) return false;
+    if (!has(f.customer, catalogNameKey(order.customer))) return false;
+    if (f.pay.length && !f.pay.includes(linePayKey(line, order))) return false;
+    if (f.discount.length) {
+      const on = Number(lineTotals(line, order).discount) > 0 ? "yes" : "no";
+      if (!f.discount.includes(on)) return false;
+    }
+    if (f.kind.length && !f.kind.includes(lineKindKey(line))) return false;
+    const dt = dateDay(line.order_date);
+    if (f.dateFrom && (!dt || dt < f.dateFrom)) return false;
+    if (f.dateTo && (!dt || dt > f.dateTo)) return false;
+    const sum = lineSum(line, order);
+    if (f.sumMin !== "" && sum < num(f.sumMin)) return false;
+    if (f.sumMax !== "" && sum > num(f.sumMax)) return false;
+    return true;
+  }
+
+  function masterLines(order) {
+    return (order?.lines || []).filter((line) => {
+      if (isExpenseLine(line)) return false;
+      if (!lineFilterActive()) return true;
+      return !isFrozenLine(line) && linePasses(order, line);
+    });
+  }
+
+  function lineFacetPool() {
+    const rows = [];
+    ordersMatchingList().forEach((order) => {
+      (order.lines || []).forEach((line) => rows.push({ order, line }));
+    });
+    return rows;
+  }
+
+  function bumpFacet(map, id, label, extra) {
+    const key = id || "";
+    const row = map.get(key) || { id: key, label: label || "—", count: 0, ...extra };
+    row.count += 1;
+    if (!row.label && label) row.label = label;
+    map.set(key, row);
+    return row;
+  }
+
+  function facetList(rows, pick) {
+    const map = new Map();
+    rows.forEach((row) => {
+      const item = pick(row);
+      if (!item) return;
+      bumpFacet(map, item.id, item.label, item.extra || {});
+    });
+    return [...map.values()];
+  }
+
+  function lineFilterChips(key, options) {
+    const f = lineFilterState();
+    const selected = new Set(f[key] || []);
+    const q = String(f.chipQ || "").trim().toLocaleLowerCase("ru");
+    const list = options
+      .filter((item) => !q || selected.has(item.id) || String(item.label || "").toLocaleLowerCase("ru").includes(q))
+      .sort((a, b) => {
+        const pick = (item) => (selected.has(item.id) ? 0 : 1);
+        if (pick(a) !== pick(b)) return pick(a) - pick(b);
+        if (b.count !== a.count) return b.count - a.count;
+        return String(a.label).localeCompare(String(b.label), "ru");
+      });
+    if (!list.length) return "";
+    const open = !!q || !!f.more[key];
+    const shown = open ? list : list.slice(0, 12);
+    const rest = list.length - shown.length;
+    const chips = shown
+      .map((item) => {
+        const on = selected.has(item.id) ? " on" : "";
+        const ex = on && f.exclude ? " exclude" : "";
+        const dot = item.color ? `<i style="background:${esc(item.color)}"></i>` : "";
+        return `<button type="button" class="lf-chip${on}${ex}" data-lf-key="${esc(key)}" data-lf-chip="${esc(item.id)}">${dot}<span>${esc(item.label || "—")}</span><b>${item.count}</b></button>`;
+      })
+      .join("");
+    const more = rest > 0 ? `<button type="button" class="lf-more" data-lf-more="${esc(key)}">Ещё ${rest}</button>` : "";
+    const picked = selected.size ? ` · ${selected.size}` : "";
+    return `<section class="lf-sec"><h4>${esc(options.title || "")}${picked}</h4><div class="lf-chips">${chips}${more}</div></section>`;
+  }
+
+  function lineFilterHtml() {
+    const rows = lineFacetPool();
+    const f = lineFilterState();
+    const matched = rows.filter(({ order, line }) => linePasses(order, line)).length;
+    const statusColorOf = (name) => (state.doc?.statuses || []).find((s) => s.name === name)?.color || "";
+    const status = facetList(rows, ({ line }) => ({ id: line.status || "", label: line.status || "без статуса", extra: { color: statusColorOf(line.status) } }));
+    const type = facetList(rows, ({ line }) => ({ id: line.order_type || "", label: line.order_type || "без типа" }));
+    const product = facetList(rows, ({ line }) => {
+      const label = String(line.product || "").trim();
+      return { id: catalogNameKey(label), label: label || "без продукта" };
+    });
+    const unit = facetList(rows, ({ line }) => ({ id: line.unit || "", label: line.unit || "без единицы" }));
+    const customer = facetList(rows, ({ order }) => {
+      const label = String(order.customer || "").trim();
+      return { id: catalogNameKey(label), label: label || "без заказчика" };
+    });
+    const payNames = { debt: "Долг", partial: "Частично", paid: "Оплачено", empty: "Без цены" };
+    const pay = ["debt", "partial", "paid", "empty"].map((id) => ({
+      id,
+      label: payNames[id],
+      count: rows.filter(({ order, line }) => linePayKey(line, order) === id).length,
+    })).filter((item) => item.count);
+    const discount = [
+      { id: "yes", label: "Со скидкой", count: rows.filter(({ order, line }) => Number(lineTotals(line, order).discount) > 0).length },
+      { id: "no", label: "Без скидки", count: rows.filter(({ order, line }) => !(Number(lineTotals(line, order).discount) > 0)).length },
+    ].filter((item) => item.count);
+    const kindNames = { income: "Доход", expense: "Расход", frozen: "Замороженные" };
+    const kind = ["income", "expense", "frozen"].map((id) => ({
+      id,
+      label: kindNames[id],
+      count: rows.filter(({ line }) => lineKindKey(line) === id).length,
+    })).filter((item) => item.count);
+    status.title = "Статус";
+    type.title = "Тип";
+    product.title = "Продукт";
+    unit.title = "Единица";
+    customer.title = "Заказчик";
+    pay.title = "Оплата";
+    discount.title = "Скидка";
+    kind.title = "Строка";
+    const sections = [
+      lineFilterChips("status", status),
+      lineFilterChips("type", type),
+      lineFilterChips("product", product),
+      lineFilterChips("unit", unit),
+      lineFilterChips("customer", customer),
+      lineFilterChips("pay", pay),
+      lineFilterChips("discount", discount),
+      lineFilterChips("kind", kind),
+    ].join("");
+    return `<div class="lf-head">
+        <strong>Позиции</strong>
+        <span>${matched} из ${rows.length}</span>
+        <button type="button" class="lf-exclude${f.exclude ? " on" : ""}" data-lf="exclude" aria-pressed="${f.exclude ? "true" : "false"}">Исключение</button>
+        <button type="button" class="btn small" data-lf="reset">Сбросить</button>
+      </div>
+      <p class="lf-hint">${f.exclude ? "Исключение включено: строка скрывается, если подходит под отмеченные фильтры." : "В одной группе — любое из отмеченных. Разные группы сужают список вместе."}</p>
+      <input class="lf-search" data-lf="q" type="search" placeholder="Найти статус, тип, продукт…" value="${esc(f.chipQ || "")}" />
+      <div class="lf-body">
+        ${sections}
+        ${!rows.length ? `<p class="lf-empty">В текущем списке заказов нет позиций.</p>` : !sections ? `<p class="lf-empty">Ничего не нашлось. Очистите поиск.</p>` : ""}
+        <section class="lf-sec">
+          <h4>Дата заказа</h4>
+          <div class="lf-range">
+            <input type="date" data-lf-field="dateFrom" value="${esc(f.dateFrom || "")}" aria-label="Дата заказа с" />
+            <span>—</span>
+            <input type="date" data-lf-field="dateTo" value="${esc(f.dateTo || "")}" aria-label="Дата заказа по" />
+          </div>
+        </section>
+        <section class="lf-sec">
+          <h4>Сумма позиции</h4>
+          <div class="lf-range">
+            <input type="number" step="0.01" placeholder="от" data-lf-field="sumMin" value="${esc(f.sumMin || "")}" aria-label="Сумма от" />
+            <span>—</span>
+            <input type="number" step="0.01" placeholder="до" data-lf-field="sumMax" value="${esc(f.sumMax || "")}" aria-label="Сумма до" />
+          </div>
+        </section>
+      </div>`;
+  }
+
+  function syncLineFilterButton() {
+    const btn = $("btn-line-filter");
+    const label = $("line-filter-label");
+    if (!btn) return;
+    const on = lineFilterActive();
+    btn.classList.toggle("active", on);
+    if (!label) return;
+    if (!on) {
+      label.textContent = "Позиции";
+      return;
+    }
+    const rows = lineFacetPool();
+    const n = rows.filter(({ order, line }) => linePasses(order, line)).length;
+    label.textContent = `Позиции · ${n}`;
+  }
+
+  function renderLineFilterPanel() {
+    const menu = $("line-filter-menu");
+    if (!menu) return;
+    const prev = menu.querySelector(".lf-body");
+    const scroll = prev?.scrollTop || 0;
+    const qEl = menu.querySelector("[data-lf='q']");
+    const keepFocus = document.activeElement === qEl;
+    const caret = keepFocus ? qEl.selectionStart : null;
+    menu.innerHTML = lineFilterHtml();
+    const next = menu.querySelector(".lf-body");
+    if (next) next.scrollTop = scroll;
+    const q2 = menu.querySelector("[data-lf='q']");
+    if (keepFocus && q2) {
+      q2.focus();
+      const pos = caret ?? q2.value.length;
+      try { q2.setSelectionRange(pos, pos); } catch { /* ignore */ }
+    }
+    syncLineFilterButton();
+  }
+
+  function closeLineFilter() {
+    const menu = $("line-filter-menu");
+    if (menu) menu.hidden = true;
+    $("btn-line-filter")?.setAttribute("aria-expanded", "false");
+  }
+
+  function toggleLineFacet(key, id) {
+    const f = lineFilterState();
+    const arr = f[key];
+    if (!Array.isArray(arr)) return;
+    const i = arr.indexOf(id);
+    if (i >= 0) arr.splice(i, 1);
+    else arr.push(id);
+    renderLineFilterPanel();
+    renderOrders();
+  }
+
+  function resetLineFilter() {
+    state.lineFilter = emptyLineFilter();
+    renderLineFilterPanel();
+    renderOrders();
   }
 
   function updateOrdersSummary() {
@@ -879,7 +1180,9 @@
     const orders = filteredOrders();
     const summary = summarize(
       orders.flatMap((o) =>
-        (o.lines || []).filter((line) => !isFrozenLine(line)).map((line) => ({ order: o, line, totals: lineTotals(line, o) }))
+        (o.lines || [])
+          .filter((line) => !isFrozenLine(line) && linePasses(o, line))
+          .map((line) => ({ order: o, line, totals: lineTotals(line, o) }))
       )
     );
     const hasCost = summary.cost > 0.005;
@@ -2300,7 +2603,7 @@
   }
 
   function orderHeadHtml(order) {
-    const lines = (order?.lines || []).filter((line) => !isExpenseLine(line));
+    const lines = masterLines(order);
     const doneCount = lines.filter((line) => lineCalendarDone(order, line)).length;
     const allDone = lines.length > 0 && doneCount === lines.length;
     const someDone = doneCount > 0 && !allDone;
@@ -2547,7 +2850,7 @@
     renderOrderChips();
     updateOrdersSummary();
     if (!orders.length) {
-      const filtered = state.orderFilter !== "all" || state.search.trim();
+      const filtered = state.orderFilter !== "all" || state.search.trim() || lineFilterActive();
       $("orders-list").innerHTML = filtered
         ? `<div class="card empty">Под фильтр ничего не подошло. Сбросьте фильтр или поиск.</div>`
         : `<div class="card empty">Нет заказов. Нажмите «+ Заказ», чтобы добавить первый.</div>`;
@@ -2559,8 +2862,9 @@
     const canExpense = typeNames("expense").length > 0;
     $("orders-list").innerHTML = orders
       .map((order) => {
-        const tot = orderTotals(order);
-        const { income, expense, frozen } = splitLines(order.lines);
+        const shown = (order.lines || []).filter((line) => linePasses(order, line));
+        const tot = orderTotals({ lines: shown });
+        const { income, expense, frozen } = splitLines(shown);
         const ctx = { statusNames, units, types, order };
         return `<article class="order-card" data-order="${order.id}">
           <div class="order-head">
@@ -2607,7 +2911,7 @@
                 ${
                   income.length
                     ? income.map((line) => orderLineRow(line, ctx) + lineNoteRow(line, ORDER_COLS.length)).join("")
-                    : `<tr><td colspan="${ORDER_COLS.length}" class="empty-cell">${frozen.length ? "Все позиции заморожены — они ниже, в отдельном блоке." : expense.length ? "Доходных позиций нет — только расходы. Нажмите «+ Тип заказа»." : "Нет позиций. Нажмите «+ Тип заказа»."}</td></tr>`
+                    : `<tr><td colspan="${ORDER_COLS.length}" class="empty-cell">${lineFilterActive() && (order.lines || []).some((line) => !isFrozenLine(line) && !isExpenseLine(line)) ? "Нет позиций под этот фильтр." : frozen.length ? "Все позиции заморожены — они ниже, в отдельном блоке." : expense.length ? "Доходных позиций нет — только расходы. Нажмите «+ Тип заказа»." : "Нет позиций. Нажмите «+ Тип заказа»."}</td></tr>`
                 }
               </tbody>
             </table>

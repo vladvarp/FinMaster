@@ -30,6 +30,7 @@
     selectedCustomerId: null,
     shareOrderId: null,
     orderFilter: "all",
+    lineFilter: null,
     focusOrderId: null,
     focusLineId: null,
     remoteStats: null,

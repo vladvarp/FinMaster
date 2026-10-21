@@ -2270,6 +2270,7 @@
         const btn = $("btn-order-filter");
         if (!menu) return;
         const open = menu.hidden;
+        if (open) closeLineFilter();
         menu.hidden = !open;
         btn?.setAttribute("aria-expanded", String(open));
         return;
@@ -2279,9 +2280,57 @@
       state.orderFilter = item.dataset.orderFilter || "all";
       renderOrders();
     });
+    $("line-filter")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (e.target.closest("#btn-line-filter")) {
+        const menu = $("line-filter-menu");
+        const btn = $("btn-line-filter");
+        if (!menu) return;
+        const open = menu.hidden;
+        if (open) {
+          closeOrderFilter();
+          renderLineFilterPanel();
+        }
+        menu.hidden = !open;
+        btn?.setAttribute("aria-expanded", String(open));
+        if (open) menu.querySelector("[data-lf='q']")?.focus();
+        return;
+      }
+      const more = e.target.closest("[data-lf-more]");
+      if (more) {
+        lineFilterState().more[more.dataset.lfMore] = true;
+        renderLineFilterPanel();
+        return;
+      }
+      const chip = e.target.closest("[data-lf-chip]");
+      if (chip) {
+        toggleLineFacet(chip.dataset.lfKey, chip.dataset.lfChip);
+        return;
+      }
+      if (e.target.closest("[data-lf='exclude']")) {
+        const f = lineFilterState();
+        f.exclude = !f.exclude;
+        renderLineFilterPanel();
+        renderOrders();
+        return;
+      }
+      if (e.target.closest("[data-lf='reset']")) resetLineFilter();
+    });
+    $("line-filter")?.addEventListener("input", (e) => {
+      const t = e.target;
+      if (t.dataset.lf === "q") {
+        lineFilterState().chipQ = t.value;
+        renderLineFilterPanel();
+        return;
+      }
+      if (!t.dataset.lfField) return;
+      lineFilterState()[t.dataset.lfField] = t.value;
+      syncLineFilterButton();
+      renderOrders();
+    });
     document.addEventListener("click", (e) => {
-      if (e.target.closest("#order-filter")) return;
-      closeOrderFilter();
+      if (!e.target.closest("#order-filter")) closeOrderFilter();
+      if (!e.target.closest("#line-filter")) closeLineFilter();
     });
     $("btn-undo").addEventListener("click", undo);
     $("btn-redo").addEventListener("click", redo);

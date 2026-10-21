@@ -1047,9 +1047,9 @@
       return;
     }
     if (act === "line-done-all") {
-      const lines = (order.lines || []).filter((line) => !isExpenseLine(line));
+      const lines = masterLines(order);
       if (!lines.length) return;
-      setAllLinesCalendarDone(order, !lines.every((line) => lineCalendarDone(order, line)));
+      setAllLinesCalendarDone(order, !lines.every((line) => lineCalendarDone(order, line)), lineFilterActive() ? new Set(lines.map((line) => line.id)) : null);
       markDirty();
       renderOrders();
       return;

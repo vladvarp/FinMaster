@@ -1166,8 +1166,8 @@
     normalizeWorkDates(order);
   }
 
-  function setAllLinesCalendarDone(order, on) {
-    const lines = (order?.lines || []).filter((line) => !isExpenseLine(line));
+  function setAllLinesCalendarDone(order, on, only) {
+    const lines = (order?.lines || []).filter((line) => !isExpenseLine(line) && (!only || only.has(line.id)));
     if (!lines.length) return;
     const today = dayKey(clockToday());
     if (on) {
