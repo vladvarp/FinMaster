@@ -11,3 +11,5 @@ env/
 *.log
 build/
 python/
+*.exe
+FinMaster.exe
