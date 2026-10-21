@@ -45,6 +45,12 @@ def _blank_config() -> dict[str, Any]:
         "window_maximized": False,
         "history_limit": HISTORY_LIMIT_DEFAULT,
         "python_runtime": "folder",
+        "installed": False,
+        "install_path": "",
+        "install_commit": "",
+        "update_pending": False,
+        "python_place": "",
+        "install_shortcuts": True,
     }
 
 

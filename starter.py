@@ -1,4 +1,4 @@
-"""Точка входа FinMaster.exe: без консоли ставит среду в папку и запускает run.vbs."""
+"""Точка входа FinMaster.exe: без консоли ставит программу, среду и запускает run.vbs."""
 
 from __future__ import annotations
 
@@ -145,13 +145,36 @@ def main() -> int:
     hide_console()
     report_path = ""
     try:
-        from backend.instance import handoff_existing, requested_report
+        from backend.instance import requested_report
 
         report_path = requested_report()
+    except Exception:
+        report_path = ""
+    # Сначала установка и обновление, потом уже открытие отчёта в работающей копии.
+    if getattr(sys, "frozen", False) and sys.platform == "win32":
+        try:
+            from backend.setup import prepare
+
+            prepared = prepare(report_path)
+        except Exception as exc:
+            _tell(str(exc))
+            return 1
+        if prepared is not None:
+            return prepared
+    try:
+        from backend.instance import handoff_existing
+
         if handoff_existing(report_path):
             return 0
     except Exception:
-        report_path = ""
+        pass
+    if getattr(sys, "frozen", False) and sys.platform == "win32":
+        try:
+            from backend.setup import offer_update
+
+            offer_update()
+        except Exception:
+            pass
     os.chdir(ROOT)
     splash: Splash | None = None
     try:

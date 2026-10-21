@@ -542,6 +542,7 @@ def install_blocking(
     on_line: Callable[[str], None] | None = None,
     project_root: str | None = None,
     should_stop: Callable[[], bool] | None = None,
+    python_dir: str | None = None,
 ) -> None:
     """Ставит Python и библиотеки в папку FinMaster. Без окна консоли."""
     if sys.platform != "win32":
@@ -569,6 +570,8 @@ def install_blocking(
         "-Stdlib",
         stdlib,
     ]
+    if python_dir:
+        cmd.extend(["-PythonDir", os.path.abspath(python_dir)])
     kwargs: dict[str, Any] = {
         "cwd": root,
         "stdout": subprocess.DEVNULL,

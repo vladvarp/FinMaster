@@ -1,8 +1,9 @@
-﻿# Устанавливает Python в Документы\FinMaster\python и библиотеки из requirements.txt.
+﻿# Устанавливает Python в Документы\FinMaster\python (или в -PythonDir) и библиотеки из requirements.txt.
 # Архив — официальный embeddable с python.org, без записи в «Программы и компоненты».
 param(
   [string]$Requirements = "",
   [string]$Stdlib = "",
+  [string]$PythonDir = "",
   [switch]$Plan
 )
 
@@ -275,6 +276,16 @@ function Install-StdlibGaps([string]$Destination, [string]$Arch, [string[]]$Name
 
 $root = Get-FinMasterRoot
 $dest = Join-Path $root "python"
+if ($PythonDir) {
+  $PythonDir = [IO.Path]::GetFullPath($PythonDir)
+  $docsPy = [IO.Path]::GetFullPath((Join-Path $root "python"))
+  $leaf = Split-Path -Leaf $PythonDir
+  $parent = Split-Path -Parent $PythonDir
+  $beside = ($leaf -eq "python") -and (Test-Path -LiteralPath (Join-Path $parent "app.py")) -and (Test-Path -LiteralPath (Join-Path $parent "run.vbs"))
+  $inDocs = ($PythonDir.TrimEnd('\') -ieq $docsPy.TrimEnd('\'))
+  if (-not $beside -and -not $inDocs) { throw "Недопустимая папка Python" }
+  $dest = $PythonDir
+}
 $stateDir = Get-InstallStateDir
 $script:LogFile = Join-Path $stateDir "python-install.log"
 New-Item -ItemType Directory -Force -Path $root | Out-Null
