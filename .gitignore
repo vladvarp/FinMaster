@@ -9,7 +9,8 @@ env/
 .idea/
 .vscode/
 *.log
-build/
+build/*
+!build/FinMaster.spec
 python/
 *.exe
 FinMaster.exe

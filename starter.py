@@ -150,6 +150,17 @@ def main() -> int:
         report_path = requested_report()
     except Exception:
         report_path = ""
+    # Снимок с GitHub — только если рядом с exe нет run.vbs. Иначе прежний запуск.
+    if getattr(sys, "frozen", False) and sys.platform == "win32" and not os.path.isfile(os.path.join(ROOT, "run.vbs")):
+        try:
+            from backend.setup import install_missing_vbs
+
+            placed = install_missing_vbs(report_path)
+        except Exception as exc:
+            _tell(str(exc))
+            return 1
+        if placed is not None:
+            return placed
     # Сначала установка и обновление, потом уже открытие отчёта в работающей копии.
     if getattr(sys, "frozen", False) and sys.platform == "win32":
         try:

@@ -1,5 +1,6 @@
 """Установка и обновление FinMaster с GitHub: только последний коммит.
 
+Полный снимок качается только если рядом с FinMaster.exe нет run.vbs.
 FinMaster.exe с GitHub не скачивается. Запущенный файл копирует себя в папку
 программы, чтобы не качать ту же копию ещё раз.
 """
@@ -261,6 +262,15 @@ def _changed(root: str, sha: str) -> list[str]:
 _MKDIR = threading.Lock()
 
 
+def _pause(stop: Callable[[], bool], seconds: float) -> bool:
+    deadline = time.perf_counter() + seconds
+    while time.perf_counter() < deadline:
+        if stop():
+            return True
+        time.sleep(0.05)
+    return bool(stop())
+
+
 def _download_file(url: str, dest: str, stop: Callable[[], bool]) -> None:
     folder = os.path.dirname(dest)
     with _MKDIR:
@@ -295,6 +305,8 @@ def _download_files(
     files: list[str],
     report: Callable[[str, float | None], None],
     stop: Callable[[], bool],
+    workers: int = 10,
+    retries: int = 1,
 ) -> None:
     listed = _without_self(files)
     total = max(1, len(listed))
@@ -308,6 +320,7 @@ def _download_files(
     done_lock = threading.Lock()
     failed = threading.Event()
     errors: list[BaseException] = []
+    attempts = max(1, int(retries))
 
     def should_stop() -> bool:
         return bool(stop()) or failed.is_set()
@@ -316,25 +329,33 @@ def _download_files(
         nonlocal done
         if should_stop():
             return
-        try:
-            _download_file(_file_url(sha, rel), target, should_stop)
-        except _Stop:
+        error: BaseException | None = None
+        for attempt in range(attempts):
+            if should_stop():
+                return
+            try:
+                _download_file(_file_url(sha, rel), target, should_stop)
+                error = None
+                break
+            except _Stop:
+                failed.set()
+                return
+            except urllib.error.HTTPError as exc:
+                error = RuntimeError(f"Не удалось скачать {rel} ({exc.code})")
+            except (urllib.error.URLError, TimeoutError, OSError):
+                error = RuntimeError(f"Не удалось скачать {rel}")
+            if attempt + 1 < attempts and _pause(should_stop, 0.4):
+                return
+        if error is not None:
             failed.set()
-            return
-        except urllib.error.HTTPError as exc:
-            failed.set()
-            errors.append(RuntimeError(f"Не удалось скачать {rel} ({exc.code})"))
-            return
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            failed.set()
-            errors.append(RuntimeError(f"Не удалось скачать {rel}"))
+            errors.append(error)
             return
         with done_lock:
             done += 1
             current = done
         report(f"Скачиваю {current}/{total}", 18 + 64 * current / total)
 
-    workers: list[threading.Thread] = []
+    threads: list[threading.Thread] = []
     pending = list(targets)
 
     def worker() -> None:
@@ -345,11 +366,11 @@ def _download_files(
                 rel, target = pending.pop()
             one(rel, target)
 
-    for _ in range(min(10, len(targets))):
+    for _ in range(min(max(1, int(workers)), len(targets))):
         thread = threading.Thread(target=worker, daemon=True)
-        workers.append(thread)
+        threads.append(thread)
         thread.start()
-    for thread in workers:
+    for thread in threads:
         while thread.is_alive():
             thread.join(0.05)
     if stop():
@@ -508,12 +529,12 @@ def _run_hidden(args: list[str], env: dict[str, str] | None = None) -> None:
         raise RuntimeError(detail or "Не удалось создать ярлык")
 
 
-def _make_shortcuts(dest: str) -> None:
+def _make_shortcuts(dest: str, desktop: bool = True, start_menu: bool = True) -> None:
     target = os.path.join(dest, SELF_NAME)
     if not os.path.isfile(target):
         raise RuntimeError("В папке программы нет FinMaster.exe")
-    desktop = _special_dir(0x0010, os.path.join(os.path.expanduser("~"), "Desktop"))
-    programs = _special_dir(
+    desktop_dir = _special_dir(0x0010, os.path.join(os.path.expanduser("~"), "Desktop"))
+    programs_dir = _special_dir(
         0x0002,
         os.path.join(os.environ.get("APPDATA") or "", "Microsoft", "Windows", "Start Menu", "Programs"),
     )
@@ -529,7 +550,12 @@ def _make_shortcuts(dest: str) -> None:
         "$s.Description = 'FinMaster'\n"
         "$s.Save()\n"
     )
-    for folder in (desktop, programs):
+    folders: list[str] = []
+    if desktop:
+        folders.append(desktop_dir)
+    if start_menu:
+        folders.append(programs_dir)
+    for folder in folders:
         if not folder:
             raise RuntimeError("Не найдена папка для ярлыка")
         os.makedirs(folder, exist_ok=True)
@@ -594,6 +620,33 @@ def _icon(root: str) -> str:
     return path if os.path.isfile(path) else ""
 
 
+def _logo_path() -> str:
+    """favicon.ico: из сборки exe, рядом с программой или из исходников."""
+    found: list[str] = []
+    bundled = getattr(sys, "_MEIPASS", "")
+    if bundled:
+        found.append(os.path.join(bundled, "favicon.ico"))
+    found.append(os.path.join(_here(), "frontend", "favicon.ico"))
+    found.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "favicon.ico"))
+    for path in found:
+        if path and os.path.isfile(path):
+            return path
+    return ""
+
+
+def _apply_logo(root: Any) -> None:
+    path = _logo_path()
+    if not path:
+        return
+    try:
+        root.iconbitmap(default=path)
+    except Exception:
+        try:
+            root.iconbitmap(path)
+        except Exception:
+            pass
+
+
 def _run_splash(icon: str, first: str, work: Callable[..., None]) -> None:
     from backend.splash import Splash
 
@@ -643,6 +696,26 @@ def _remote_file_list(sha: str) -> list[str]:
     return files
 
 
+def _hidden_entry(rel: str) -> bool:
+    parts = str(rel or "").replace("\\", "/").split("/")
+    return any(part.startswith(".") for part in parts if part)
+
+
+def _snapshot_files(sha: str) -> list[str]:
+    """Файлы последнего коммита без FinMaster.exe и без имён на точку."""
+    files = [rel for rel in _remote_file_list(sha) if not _hidden_entry(rel)]
+    files.sort()
+    return files
+
+
+def _shortcut_places() -> tuple[bool, bool]:
+    cfg = storage.load_config()
+    if "install_shortcut_desktop" in cfg or "install_shortcut_start" in cfg:
+        return bool(cfg.get("install_shortcut_desktop")), bool(cfg.get("install_shortcut_start"))
+    enabled = bool(cfg.get("install_shortcuts", True))
+    return enabled, enabled
+
+
 def _pull(
     sha: str,
     dest: str,
@@ -672,7 +745,8 @@ def _pull(
     if shortcuts:
         report("Создаю ярлыки…", 94)
         try:
-            _make_shortcuts(dest)
+            desktop_on, start_on = _shortcut_places()
+            _make_shortcuts(dest, desktop=desktop_on, start_menu=start_on)
         except Exception as exc:
             shortcut_error = str(exc)
             report(shortcut_error, None)
@@ -706,20 +780,23 @@ def _relaunch() -> None:
     os._exit(0)
 
 
-def _mark_installed(dest: str, sha: str, place: str, shortcuts: bool) -> None:
+def _mark_installed(dest: str, sha: str, place: str, desktop: bool, start_menu: bool) -> None:
     cfg = storage.load_config()
     cfg["installed"] = True
     cfg["install_path"] = os.path.abspath(dest)
     cfg["install_commit"] = sha
     cfg["update_pending"] = False
     cfg["python_place"] = place
-    cfg["install_shortcuts"] = bool(shortcuts)
+    cfg["install_shortcut_desktop"] = bool(desktop)
+    cfg["install_shortcut_start"] = bool(start_menu)
+    cfg["install_shortcuts"] = bool(desktop or start_menu)
     storage.save_config(cfg)
+    _remove_manifest()
 
 
-def _perform_install(dest: str, shortcuts: bool, python_choice: str) -> str:
+def _perform_install(dest: str, desktop: bool, start_menu: bool) -> str:
     """Скачивает файлы и возвращает текст ошибки ярлыка, если она была."""
-    holder: dict[str, str] = {"sha": "", "place": python_choice, "shortcut": ""}
+    holder: dict[str, str] = {"sha": "", "shortcut": ""}
 
     def work(report: Callable[[str, float | None], None], stop: Callable[[], bool]) -> None:
         report("Смотрю последний коммит…", 12)
@@ -728,21 +805,18 @@ def _perform_install(dest: str, shortcuts: bool, python_choice: str) -> str:
         if stop():
             raise _Stop()
         report("Скачиваю файлы…", 16)
-        _download_files(sha, dest, _remote_file_list(sha), report, stop)
+        _download_files(sha, dest, _snapshot_files(sha), report, stop, workers=20, retries=20)
         report("Копирую FinMaster.exe…", 86)
         _copy_self(dest)
-        bundled = os.path.isfile(os.path.join(dest, "python", "pythonw.exe"))
-        place = "bundled" if bundled else python_choice
-        holder["place"] = place
-        if not bundled:
-            _ensure_python(dest, place, report, stop)
-        if shortcuts:
+        if desktop or start_menu:
             report("Создаю ярлыки…", 94)
             try:
-                _make_shortcuts(dest)
+                _make_shortcuts(dest, desktop=desktop, start_menu=start_menu)
             except Exception as exc:
                 holder["shortcut"] = str(exc)
-        _mark_installed(dest, sha, place, shortcuts and not holder["shortcut"])
+        saved = not holder["shortcut"]
+        bundled = "bundled" if os.path.isfile(os.path.join(dest, "python", "pythonw.exe")) else ""
+        _mark_installed(dest, sha, bundled, desktop and saved, start_menu and saved)
         report("Готово", 100)
 
     _run_splash(_icon(_here()) or _icon(dest), "Скачиваю FinMaster…", work)
@@ -769,7 +843,11 @@ def _first_install(report_path: str) -> int | None:
         existed = _nonempty(dest)
         os.makedirs(dest, exist_ok=True)
         try:
-            shortcut_error = _perform_install(dest, bool(choice["shortcuts"]), str(choice["python"]))
+            shortcut_error = _perform_install(
+                dest,
+                bool(choice["desktop"]),
+                bool(choice["start_menu"]),
+            )
         except _Stop:
             if not existed and not os.path.isfile(os.path.join(dest, "run.vbs")):
                 shutil.rmtree(dest, ignore_errors=True)
@@ -944,12 +1022,13 @@ def _ask_install(default_path: str) -> dict[str, Any] | None:
     color = _colors()
     root = tk.Tk()
     root.title("FinMaster")
+    _apply_logo(root)
     root.configure(bg=color["bg"])
     try:
         root.attributes("-topmost", True)
     except tk.TclError:
         pass
-    _center(root, 520, 430)
+    _center(root, 520, 360)
     result: dict[str, Any] = {}
     pad = tk.Frame(root, bg=color["card"], highlightthickness=1, highlightbackground=color["line"])
     pad.pack(fill="both", expand=True, padx=16, pady=16)
@@ -993,42 +1072,28 @@ def _ask_install(default_path: str) -> dict[str, Any] | None:
         relief="flat",
         padx=10,
     ).pack(side="left", padx=(8, 0))
-    shortcut_var = tk.BooleanVar(value=True)
+    desktop_var = tk.BooleanVar(value=True)
+    start_var = tk.BooleanVar(value=True)
     tk.Checkbutton(
         pad,
-        text="Ярлык на рабочем столе и в меню Пуск",
-        variable=shortcut_var,
+        text="Ярлык на рабочем столе",
+        variable=desktop_var,
         bg=color["card"],
         fg=color["ink"],
         activebackground=color["card"],
         font=("Segoe UI", 10),
         anchor="w",
-    ).pack(anchor="w", padx=22, pady=(4, 8))
-    tk.Label(
+    ).pack(anchor="w", padx=22, pady=(4, 0))
+    tk.Checkbutton(
         pad,
-        text="Куда поставить Python, если его нет в скачанной программе",
+        text="Ярлык в меню Пуск",
+        variable=start_var,
         bg=color["card"],
         fg=color["ink"],
+        activebackground=color["card"],
         font=("Segoe UI", 10),
-        wraplength=450,
-        justify="left",
-    ).pack(anchor="w", padx=22)
-    python_var = tk.StringVar(value="reports")
-    for value, label in (
-        ("reports", "В папку отчётов (Документы\\FinMaster)"),
-        ("program", "В папку программы"),
-    ):
-        tk.Radiobutton(
-            pad,
-            text=label,
-            variable=python_var,
-            value=value,
-            bg=color["card"],
-            fg=color["ink"],
-            activebackground=color["card"],
-            font=("Segoe UI", 10),
-            anchor="w",
-        ).pack(anchor="w", padx=28)
+        anchor="w",
+    ).pack(anchor="w", padx=22, pady=(0, 8))
     error_var = tk.StringVar(value="")
     tk.Label(pad, textvariable=error_var, bg=color["card"], fg=color["danger"], font=("Segoe UI", 9), wraplength=450).pack(
         anchor="w", padx=22, pady=(8, 0)
@@ -1044,8 +1109,8 @@ def _ask_install(default_path: str) -> dict[str, Any] | None:
             error_var.set(error)
             return
         result["path"] = dest
-        result["shortcuts"] = bool(shortcut_var.get())
-        result["python"] = python_var.get()
+        result["desktop"] = bool(desktop_var.get())
+        result["start_menu"] = bool(start_var.get())
         root.destroy()
 
     def cancel() -> None:
@@ -1088,6 +1153,7 @@ def _ask_menu(path: str) -> str:
     color = _colors()
     root = tk.Tk()
     root.title("FinMaster")
+    _apply_logo(root)
     root.configure(bg=color["bg"])
     try:
         root.attributes("-topmost", True)
@@ -1169,8 +1235,10 @@ def prepare(report_path: str = "") -> int | None:
         installed, path, _commit, pending, _place = _record()
         if pending:
             return _resume_update(report_path)
-        if not installed:
+        if not installed and not os.path.isfile(os.path.join(_here(), "run.vbs")):
             return _first_install(report_path)
+        if not installed:
+            return None
         if not _running_here(path):
             return _foreign_menu(path, report_path)
         return None
@@ -1178,6 +1246,16 @@ def prepare(report_path: str = "") -> int | None:
         return 1
     except Exception as exc:
         _tell(str(exc))
+        return 1
+
+
+def install_missing_vbs(report_path: str = "") -> int | None:
+    """Снимок с GitHub. Только когда рядом с FinMaster.exe нет run.vbs."""
+    _remove_stale_exe()
+    _dpi()
+    try:
+        return _first_install(report_path)
+    except _Stop:
         return 1
 
 
