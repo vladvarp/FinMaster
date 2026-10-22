@@ -1490,7 +1490,9 @@ def update_status(root: str) -> dict[str, Any]:
     """Есть ли версия новее. Даты — для вопроса в окне, без номеров коммитов."""
     empty = {"available": False, "current": "", "latest": "", "damaged": False}
     root = os.path.abspath(root)
-    if _repo_folder(root) or not os.path.isfile(os.path.join(root, "run.vbs")):
+    if _repo_folder(root):
+        return {**empty, "enabled": False}
+    if not os.path.isfile(os.path.join(root, "run.vbs")):
         return empty
     try:
         sha, when = _remote_head(4)

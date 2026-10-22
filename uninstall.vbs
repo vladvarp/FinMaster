@@ -200,7 +200,7 @@ Function BuildHta(folder, resultPath)
   html = html & "<h1>" & T("Удаление FinMaster") & "</h1>"
   html = html & "<p>" & T("Отчёты, история, копии и настройки при включении уходят в корзину. Папка программы и Python стираются сразу. Если программа открыта, она закроется.") & "</p>"
   html = html & Box("prog", progOn, T("Папка программы, ярлыки и интерпретация иконок"), progHint)
-  html = html & Box("python", True, T("Python в папке отчётов"), HtmlEsc(py))
+  html = html & Box("python", False, T("Python в папке отчётов"), HtmlEsc(py))
   html = html & Box("config", False, T("Папка настроек и файл конфигурации"), HtmlEsc(dir) & "<br>" & HtmlEsc(cfg))
   html = html & Box("history", False, T("История отчётов"), HtmlEsc(docs & "\history"))
   html = html & Box("backups", False, T("Резервные копии"), HtmlEsc(docs & "\backups"))

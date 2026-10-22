@@ -1564,17 +1564,26 @@
   async function refreshUpdateButton() {
     const btn = $("btn-update");
     if (!btn || !state.desktop) return;
+    let data = null;
     try {
-      const data = await apiGet("/api/update");
+      data = await apiGet("/api/update");
       state.updateReady = !!data.available;
       state.updateCurrent = data.current || "";
       state.updateLatest = data.latest || "";
       state.updateDamaged = !!data.damaged;
     } catch {
       state.updateReady = false;
+      state.updateDamaged = false;
+    }
+    const fromRepo = data && data.enabled === false;
+    btn.disabled = fromRepo;
+    if (fromRepo) {
+      state.updateReady = false;
+      state.updateDamaged = false;
     }
     btn.classList.toggle("update-ready", !!state.updateReady);
-    const title = state.updateReady ? "Есть обновление" : "Обновить программу";
+    btn.classList.toggle("update-damaged", !!state.updateReady && !!state.updateDamaged);
+    const title = fromRepo ? "В репозитории обновление выключено" : state.updateReady ? "Есть обновление" : "Обновить программу";
     btn.title = title;
     btn.setAttribute("aria-label", title);
   }

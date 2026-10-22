@@ -590,13 +590,22 @@ input[type="search"]::-webkit-search-decoration {
 .btn.icon { width: 34px; height: 34px; padding: 0; display: grid; place-items: center; }
 .btn.icon.on { color: var(--accent); border-color: var(--accent-2); }
 #btn-update.update-ready {
-  color: var(--accent);
-  border-color: var(--accent);
+  color: #ea580c;
+  border-color: #ea580c;
   animation: update-glow 1.8s ease-in-out infinite;
+}
+#btn-update.update-ready.update-damaged {
+  color: var(--danger);
+  border-color: var(--danger);
+  animation-name: update-glow-danger;
 }
 @keyframes update-glow {
   0%, 100% { box-shadow: 0 0 0 0 transparent; }
-  50% { box-shadow: 0 0 10px var(--accent); }
+  50% { box-shadow: 0 0 10px #ea580c; }
+}
+@keyframes update-glow-danger {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 10px var(--danger); }
 }
 #btn-toggle-sidebar svg { display: block; }
 .app.sidebar-collapsed #btn-toggle-sidebar svg { transform: scaleX(-1); }
