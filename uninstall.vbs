@@ -292,7 +292,7 @@ End Sub
 
 Sub AddRemoved(text)
   If removed <> "" Then removed = removed & vbCrLf
-  removed = removed & "• " & text
+  removed = removed & ChrW(&H2022) & " " & text
 End Sub
 
 Sub AddProblem(text)
