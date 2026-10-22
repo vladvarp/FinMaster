@@ -196,13 +196,13 @@ Function BuildHta(folder, resultPath)
   html = html & "var ts=fso.CreateTextFile('" & JsEsc(resultPath) & "',true);ts.Write(picked.join(','));ts.Close();close();}"
   html = html & "function cancel(){close();}"
   html = html & "document.onkeyup=function(e){e=e||window.event;if(e.keyCode==27)cancel();};"
-  html = html & "window.resizeTo(520,820);window.moveTo((screen.availWidth-520)/2,(screen.availHeight-820)/3);"
+  html = html & "window.resizeTo(600,680);window.moveTo((screen.availWidth-520)/2,(screen.availHeight-860)/3);"
   html = html & "</script></head><body><div class=""card"">"
   html = html & "<h1>" & T("Удаление FinMaster") & "</h1>"
   html = html & "<p>" & T("Отчёты, история, копии и настройки при включении уходят в корзину. Папка программы и Python стираются сразу. Если программа открыта, она закроется.") & "</p>"
   html = html & Box("prog", progOn, T("Папка программы, ярлыки и интерпретация иконок"), progHint)
   html = html & Box("python", False, T("Python"), HtmlEsc(py))
-  html = html & Box("config", False, T("Папка настроек и файл конфигурации"), HtmlEsc(dir) & "<br>" & HtmlEsc(cfg) & "<br><span class=""warn"">" & T("Пропадут недавние файлы, тема, профили, формулы и доступ с телефона. Сами отчёты останутся. Папка уходит в корзину.") & "</span>")
+  html = html & Box("config", False, T("Папка настроек и файл конфигурации"), HtmlEsc(dir) & "<br>" & HtmlEsc(cfg) & "<br><span class=""warn"">" & T("Пропадут недавние файлы, тема, профили, формулы, токен сессии телефона, токен ngrok и токен Telegram. Их придётся вводить заново. Сами отчёты останутся. Папка уходит в корзину.") & "</span>")
   html = html & Box("history", False, T("История отчётов"), HtmlEsc(docs & "\history") & "<br><span class=""warn"">" & T("Пропадут снимки правок: отмена, повтор и сравнение с прошлыми версиями. Сами отчёты останутся. Папка уходит в корзину.") & "</span>")
   html = html & Box("backups", False, T("Резервные копии"), HtmlEsc(docs & "\backups") & "<br><span class=""warn"">" & T("Пропадут запасные копии. Если отчёт испортится, вернуть прежнюю версию будет нечем. Копии уходят в корзину.") & "</span>")
   html = html & Box("reports", False, T("Отчёты .fmaster в папке FinMaster"), HtmlEsc(docs) & "<br><span class=""warn"">" & T("Пропадут заказы и заказчики из этих файлов. Отчёты в других папках не трогаются. Файлы уходят в корзину.") & "</span>")
