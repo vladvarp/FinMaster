@@ -590,23 +590,40 @@ input[type="search"]::-webkit-search-decoration {
 .btn.icon { width: 34px; height: 34px; padding: 0; display: grid; place-items: center; }
 .btn.icon.on { color: var(--accent); border-color: var(--accent-2); }
 #btn-update.update-ready {
-  color: #ea580c;
-  border-color: #ea580c;
+  color: #f59e0b;
+  border-color: #f59e0b;
   animation: update-glow 1.8s ease-in-out infinite;
 }
 #btn-update.update-ready.update-damaged {
-  color: var(--danger);
-  border-color: var(--danger);
+  color: #ef4444;
+  border-color: #ef4444;
   animation-name: update-glow-danger;
 }
 @keyframes update-glow {
   0%, 100% { box-shadow: 0 0 0 0 transparent; }
-  50% { box-shadow: 0 0 10px #ea580c; }
+  50% { box-shadow: 0 0 12px #f59e0b; }
 }
 @keyframes update-glow-danger {
   0%, 100% { box-shadow: 0 0 0 0 transparent; }
-  50% { box-shadow: 0 0 10px var(--danger); }
+  50% { box-shadow: 0 0 12px #ef4444; }
 }
+#confirm-text .confirm-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  margin: 10px 0 0;
+}
+#confirm-text .confirm-line i {
+  font-style: normal;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+#confirm-text .confirm-line b {
+  font-weight: 650;
+  text-align: right;
+}
+#confirm-text .confirm-line.warn b { color: #ef4444; }
 #btn-toggle-sidebar svg { display: block; }
 .app.sidebar-collapsed #btn-toggle-sidebar svg { transform: scaleX(-1); }
 

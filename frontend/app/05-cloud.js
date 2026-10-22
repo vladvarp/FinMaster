@@ -1583,7 +1583,13 @@
     }
     btn.classList.toggle("update-ready", !!state.updateReady);
     btn.classList.toggle("update-damaged", !!state.updateReady && !!state.updateDamaged);
-    const title = fromRepo ? "В репозитории обновление выключено" : state.updateReady ? "Есть обновление" : "Обновить программу";
+    const title = fromRepo
+      ? "В репозитории обновление выключено"
+      : state.updateDamaged
+        ? "Возможно, файлы повреждены"
+        : state.updateReady
+          ? "Есть обновление"
+          : "Обновить программу";
     btn.title = title;
     btn.setAttribute("aria-label", title);
   }
@@ -1603,15 +1609,24 @@
     const ok = await askConfirm(ready
       ? {
           title: state.updateDamaged ? "Версия старая" : "Есть обновление",
-          text: state.updateDamaged
-            ? `Программу нужно обновить. Новая версия от ${latest}. ${current}.`
-            : `Новая версия от ${latest}. Сейчас установлена версия от ${current}. Обновить программу?`,
+          lines: state.updateDamaged
+            ? [
+                { label: "Новая версия", value: latest },
+                { label: "Сейчас", value: current, warn: true },
+              ]
+            : [
+                { label: "Новая версия", value: latest },
+                { label: "Сейчас установлена", value: current },
+              ],
           ok: "Обновить",
           cancel: "Не сейчас",
         }
       : {
           title: "Обновление",
-          text: `Новой версии нет. Сейчас установлена версия от ${current}. Можно скачать файлы заново, если программа работает неправильно.`,
+          lines: [
+            { label: "Сейчас установлена", value: current },
+            { label: "Новой версии нет", value: "Можно скачать файлы заново" },
+          ],
           ok: "Скачать",
           cancel: "Отмена",
         });
@@ -1661,7 +1676,7 @@
     wait?.(!!ok);
   }
 
-  function askConfirm({ title, text, ok = "Продолжить", cancel = "Отмена", danger = false } = {}) {
+  function askConfirm({ title, text, lines, ok = "Продолжить", cancel = "Отмена", danger = false } = {}) {
     closeConfirm(false);
     return new Promise((resolve) => {
       confirmWait = resolve;
@@ -1670,7 +1685,15 @@
       const okBtn = $("confirm-ok");
       const cancelBtn = $("confirm-cancel");
       if (titleEl) titleEl.textContent = title || "Подтверждение";
-      if (textEl) textEl.textContent = text || "";
+      if (textEl) {
+        if (lines && lines.length) {
+          textEl.innerHTML = lines.map((row) =>
+            `<span class="confirm-line${row.warn ? " warn" : ""}"><i>${esc(row.label)}</i><b>${esc(row.value)}</b></span>`
+          ).join("");
+        } else {
+          textEl.textContent = text || "";
+        }
+      }
       if (okBtn) {
         okBtn.textContent = ok;
         okBtn.className = danger ? "btn danger" : "btn primary";
