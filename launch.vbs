@@ -1,6 +1,6 @@
 Option Explicit
 ' Тихий запуск FinMaster — без консоли и без мигания cmd.
-Dim sh, fso, dir, pyw, app, appPy, folderPy, systemPy, mode
+Dim sh, fso, dir, pyw, app, appPy, folderPy, systemPy, mode, uninst
 Dim BundledSkip
 BundledSkip = ""
 
@@ -32,6 +32,12 @@ ElseIf systemPy <> "" Then
 Else
   MsgBox "Python в папке FinMaster ещё не установлен. Запустите FinMaster.exe.", vbCritical, "FinMaster"
   WScript.Quit 1
+End If
+
+' Запись в «Приложения» Windows, если её ещё нет — удаление потом идёт через uninstall.vbs.
+uninst = dir & "\uninstall.vbs"
+If fso.FileExists(uninst) Then
+  sh.Run "wscript.exe //nologo """ & uninst & """ /register", 0, False
 End If
 
 ' 0 = полностью скрытое окно процесса
