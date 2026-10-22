@@ -1567,11 +1567,13 @@
     try {
       const data = await apiGet("/api/update");
       state.updateReady = !!data.available;
+      state.updateCurrent = data.current || "";
+      state.updateLatest = data.latest || "";
     } catch {
       state.updateReady = false;
     }
     btn.classList.toggle("update-ready", !!state.updateReady);
-    const title = state.updateReady ? "Есть обновление" : "Скачать снимок заново";
+    const title = state.updateReady ? "Есть обновление" : "Обновить программу";
     btn.title = title;
     btn.setAttribute("aria-label", title);
   }
@@ -1586,16 +1588,18 @@
 
   async function askProgramUpdate() {
     const ready = !!state.updateReady;
+    const current = state.updateCurrent || "дата неизвестна";
+    const latest = state.updateLatest || "дата неизвестна";
     const ok = await askConfirm(ready
       ? {
           title: "Есть обновление",
-          text: "На GitHub коммит новее этой копии. Скачать снимок и перезапустить программу?",
+          text: `Новая версия от ${latest}. Сейчас установлена версия от ${current}. Обновить программу?`,
           ok: "Обновить",
           cancel: "Не сейчас",
         }
       : {
-          title: "Скачать снимок заново",
-          text: "Нового коммита нет. Можно заново скачать файлы с GitHub и заменить сломанные.",
+          title: "Обновление",
+          text: `Новой версии нет. Сейчас установлена версия от ${current}. Можно скачать файлы заново, если программа работает неправильно.`,
           ok: "Скачать",
           cancel: "Отмена",
         });

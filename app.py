@@ -2037,9 +2037,9 @@ def api_window_fullscreen():
 def api_update_status():
     if not _is_local():
         return jsonify({"error": "Только в окне программы."}), 403
-    from backend.setup import update_available
+    from backend.setup import update_status
 
-    return jsonify({"available": update_available(ROOT)})
+    return jsonify(update_status(ROOT))
 
 
 @app.post("/api/update")

@@ -1441,26 +1441,53 @@ def offer_update() -> None:
     return
 
 
-def update_available(root: str) -> bool:
-    """commit.txt старше коммита на GitHub. Номер в config.json приводится к GitHub, чтобы старый exe не спрашивал при старте."""
+def _version_label(moment: datetime | None) -> str:
+    if moment is None:
+        return ""
+    local = moment.astimezone()
+    months = (
+        "января",
+        "февраля",
+        "марта",
+        "апреля",
+        "мая",
+        "июня",
+        "июля",
+        "августа",
+        "сентября",
+        "октября",
+        "ноября",
+        "декабря",
+    )
+    return f"{local.day} {months[local.month - 1]} {local.year}, {local.hour:02d}:{local.minute:02d}"
+
+
+def update_status(root: str) -> dict[str, Any]:
+    """Есть ли версия новее. Даты — для вопроса в окне, без номеров коммитов."""
+    empty = {"available": False, "current": "", "latest": ""}
     root = os.path.abspath(root)
     if _repo_folder(root) or not os.path.isfile(os.path.join(root, "run.vbs")):
-        return False
+        return empty
     try:
         sha, when = _remote_head(4)
     except Exception:
-        return False
+        return empty
     remote = _parse_when(when)
     local = _parse_when(_read_stamp(root))
     installed, path, commit, _pending, _place = _record()
     same = installed and _same(path, root)
-    # Только что поставленная копия уже на этом коммите, файла времени ещё нет.
+    # Только что поставленная копия уже на этой версии, файла времени ещё нет.
     if local is None and same and commit == sha:
         _write_stamp(root, when)
-        return False
+        label = _version_label(remote)
+        return {"available": False, "current": label, "latest": label}
     available = local is None or (remote is not None and remote > local)
     if available and local is not None and same and commit != sha:
         cfg = storage.load_config()
         cfg["install_commit"] = sha
         storage.save_config(cfg)
-    return available
+    return {
+        "available": available,
+        "current": _version_label(local),
+        "latest": _version_label(remote),
+    }
