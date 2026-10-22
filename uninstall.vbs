@@ -363,7 +363,7 @@ Function Under(path, root)
   If Right(b, 1) <> "\" Then b = b & "\"
   Under = (Left(a & "\", Len(b)) = b)
 End Function
-
+ 
 Function Unsafe(path)
   Dim full, windir, profile, reports
   Unsafe = True
