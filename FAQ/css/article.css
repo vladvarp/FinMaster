@@ -1,0 +1,96 @@
+.doc h1 {
+  margin: 8px 0 8px;
+  font-size: 32px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.lead {
+  margin: 0 0 22px;
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.doc h2 {
+  margin: 28px 0 8px;
+  font-size: 22px;
+  scroll-margin-top: 72px;
+}
+
+.doc h3 { margin: 20px 0 6px; font-size: 17px; scroll-margin-top: 72px; }
+
+.doc p { margin: 0 0 12px; }
+
+.doc ul, .doc ol { margin: 0 0 14px; padding-left: 1.25rem; }
+
+.doc li { margin: 4px 0; }
+
+.doc table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 16px;
+  font-size: 14px;
+  background: var(--card);
+}
+
+.doc th, .doc td {
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.doc th { background: var(--accent-soft); }
+
+.note, .warn, .ok {
+  border: 1px solid var(--note-line);
+  background: var(--note);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin: 0 0 14px;
+}
+
+.warn { border-color: var(--warn-line); background: var(--warn); }
+
+.ok { border-color: var(--ok-line); background: var(--ok); }
+
+kbd {
+  display: inline-block;
+  border: 1px solid var(--line);
+  background: var(--kbd);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 0 6px;
+  font-family: Consolas, "Segoe UI", sans-serif;
+  font-size: 0.92em;
+}
+
+code {
+  font-family: Consolas, "Segoe UI", sans-serif;
+  font-size: 0.92em;
+}
+
+.steps { counter-reset: step; list-style: none; padding-left: 0; }
+
+.steps li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 36px;
+  margin: 10px 0;
+}
+
+.steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}

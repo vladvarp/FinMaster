@@ -2414,6 +2414,7 @@
       syncAppFullscreen(pageFullscreenOn());
     });
     $("btn-help").addEventListener("click", openHelp);
+    $("btn-guide")?.addEventListener("click", openGuide);
     $("help-close").addEventListener("click", () => $("help-modal").classList.remove("open"));
     $("help-modal").addEventListener("click", (e) => {
       if (e.target === $("help-modal")) $("help-modal").classList.remove("open");

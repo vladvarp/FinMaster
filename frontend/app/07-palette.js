@@ -73,7 +73,8 @@
           markDirty();
         },
       },
-      { group: "Действия", ico: "?", title: "Горячие клавиши", right: "F1", run: openHelp },
+      { group: "Действия", ico: "⌨", title: "Горячие клавиши", right: "F1", run: openHelp },
+      { group: "Действия", ico: "?", title: "Справка", keys: "помощь руководство faq", run: openGuide },
 
       {
         group: "Фильтры",
@@ -988,6 +989,16 @@
 
   function openHelp() {
     $("help-modal").classList.add("open");
+  }
+
+  async function openGuide() {
+    try {
+      const data = await apiPost("/api/guide/open", {});
+      if (data && data.opened) return;
+      window.open((data && data.url) || "/faq/", "finmaster-guide");
+    } catch {
+      window.open("/faq/", "finmaster-guide");
+    }
   }
 
   function closeLineMenu() {

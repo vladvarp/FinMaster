@@ -10,7 +10,7 @@ import time
 import webbrowser
 from typing import Any
 
-from flask import Flask, g, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, redirect, request, send_from_directory
 
 from backend import netlog, qr, runtime, storage
 from backend.backup import is_backup_path
@@ -42,9 +42,11 @@ from backend.pdf_bridge import PDF_BRIDGE
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 FRONTEND = os.path.join(ROOT, "frontend")
+FAQ_DIR = os.path.join(ROOT, "FAQ")
 
 app = Flask(__name__, static_folder=FRONTEND, static_url_path="")
 WINDOW = None
+GUIDE_WINDOW = None
 WINDOW_FULLSCREEN = False
 FORCE_CLOSE = False
 DIRTY = False
@@ -470,6 +472,65 @@ def bundled_source():
         return send_from_directory(FRONTEND, filename)
     kind = "text/css" if ext == "css" else "text/javascript"
     return _no_cache(app.response_class(body, mimetype=kind))
+
+
+@app.get("/faq")
+def faq_root():
+    return redirect("/faq/", 302)
+
+
+@app.get("/faq/")
+def faq_index():
+    return _no_cache(send_from_directory(FAQ_DIR, "index.html"))
+
+
+@app.get("/faq/<path:name>")
+def faq_file(name: str):
+    return _no_cache(send_from_directory(FAQ_DIR, name))
+
+
+def _open_guide_window() -> None:
+    """Отдельное окно справки. Повторный вызов показывает уже открытое."""
+    global GUIDE_WINDOW
+    import webview
+
+    if GUIDE_WINDOW is not None:
+        try:
+            GUIDE_WINDOW.show()
+            GUIDE_WINDOW.restore()
+            return
+        except Exception:
+            GUIDE_WINDOW = None
+    url = f"http://127.0.0.1:{SERVER_PORT}/faq/"
+    GUIDE_WINDOW = webview.create_window(
+        "FinMaster — справка",
+        url,
+        width=1100,
+        height=800,
+        min_size=(760, 560),
+        background_color="#f4f7fb",
+        text_select=True,
+    )
+
+    def forget() -> None:
+        global GUIDE_WINDOW
+        GUIDE_WINDOW = None
+
+    try:
+        GUIDE_WINDOW.events.closed += forget
+    except Exception:
+        pass
+
+
+@app.post("/api/guide/open")
+def api_guide_open():
+    if not SERVER_PORT:
+        return jsonify({"opened": False, "url": "/faq/"})
+    try:
+        _open_guide_window()
+    except Exception:
+        return jsonify({"opened": False, "url": "/faq/"})
+    return jsonify({"opened": True})
 
 
 @app.get("/<path:filename>")
