@@ -23,8 +23,11 @@ End If
 
 sh.CurrentDirectory = dir
 sh.Environment("PROCESS")("FM_UPDATE_DIR") = dir
-rc = sh.Run("""" & pyw & """ -c ""from backend.setup import update_folder; update_folder()""", 0, True)
-If rc <> 0 Then WScript.Quit rc
+' Встроенный Python не смотрит в папку программы сам: путь надо добавить явно.
+rc = sh.Run("""" & pyw & """ -c ""import sys; sys.path.insert(0, r'" & dir & "'); from backend.setup import update_folder; update_folder()""", 1, True)
+If rc <> 0 Then
+  MsgBox "Не удалось скачать снимок.", vbCritical, "FinMaster"
+End If
 
 If fso.FileExists(dir & "\launch.vbs") Then
   sh.Run "wscript.exe //nologo """ & dir & "\launch.vbs""", 0, False

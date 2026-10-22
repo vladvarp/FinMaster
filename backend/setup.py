@@ -1439,9 +1439,14 @@ def update_available(root: str) -> bool:
         return False
     remote = _parse_when(when)
     local = _parse_when(_read_stamp(root))
-    available = local is None or (remote is not None and remote > local)
     installed, path, commit, _pending, _place = _record()
-    if installed and _same(path, root) and commit != sha:
+    same = installed and _same(path, root)
+    # Только что поставленная копия уже на этом коммите, файла времени ещё нет.
+    if local is None and same and commit == sha:
+        _write_stamp(root, when)
+        return False
+    available = local is None or (remote is not None and remote > local)
+    if available and local is not None and same and commit != sha:
         cfg = storage.load_config()
         cfg["install_commit"] = sha
         storage.save_config(cfg)
