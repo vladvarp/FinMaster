@@ -1561,6 +1561,14 @@
     await renderStartLists();
   }
 
+  async function runProgramUpdate() {
+    try {
+      await apiPost("/api/update", {});
+    } catch (err) {
+      toast(err && err.message ? err.message : "Не удалось запустить обновление");
+    }
+  }
+
   async function askClose() {
     await flushPendingSaves();
     if (!state.dirty) {
@@ -2415,6 +2423,15 @@
     });
     $("btn-help").addEventListener("click", openHelp);
     $("btn-guide")?.addEventListener("click", openGuide);
+    $("btn-update")?.addEventListener("click", async () => {
+      await flushPendingSaves();
+      if (state.dirty) {
+        state._update = true;
+        $("close-modal").classList.add("open");
+        return;
+      }
+      await runProgramUpdate();
+    });
     $("help-close").addEventListener("click", () => $("help-modal").classList.remove("open"));
     $("help-modal").addEventListener("click", (e) => {
       if (e.target === $("help-modal")) $("help-modal").classList.remove("open");
@@ -3227,11 +3244,17 @@
     $("close-cancel").addEventListener("click", () => {
       state.closeAfterSave = false;
       state._home = false;
+      state._update = false;
       $("close-modal").classList.remove("open");
     });
     $("close-discard").addEventListener("click", async () => {
       $("close-modal").classList.remove("open");
       state.dirty = false;
+      if (state._update) {
+        state._update = false;
+        await runProgramUpdate();
+        return;
+      }
       if (state._home) {
         state._home = false;
         showStart();
@@ -3251,6 +3274,11 @@
       const ok = await save();
       if (!ok) return;
       $("close-modal").classList.remove("open");
+      if (state._update) {
+        state._update = false;
+        await runProgramUpdate();
+        return;
+      }
       if (state._home) {
         state._home = false;
         showStart();

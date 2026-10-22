@@ -1,8 +1,9 @@
 """Установка и обновление FinMaster с GitHub: только последний коммит.
 
-Полный снимок качается только если рядом с FinMaster.exe нет run.vbs.
+Полный снимок качается при установке и при обновлении.
 FinMaster.exe с GitHub не скачивается. Запущенный файл копирует себя в папку
 программы, чтобы не качать ту же копию ещё раз.
+В папке программы commit.txt — время этого коммита.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from backend import storage
@@ -30,6 +32,7 @@ REPO = "vladvarp/FinMaster"
 API = f"https://api.github.com/repos/{REPO}"
 RAW = f"https://raw.githubusercontent.com/{REPO}"
 SELF_NAME = "FinMaster.exe"
+STAMP_NAME = "commit.txt"
 _CREATE_NO_WINDOW = 0x08000000
 _skip_check = False
 
@@ -218,11 +221,69 @@ def _read_json(url: str, timeout: float) -> dict[str, Any]:
     return payload
 
 
-def _remote_sha(timeout: float) -> str:
-    sha = str(_read_json(f"{API}/commits/HEAD", timeout).get("sha") or "").strip().lower()
+def _remote_head(timeout: float) -> tuple[str, str]:
+    payload = _read_json(f"{API}/commits/HEAD", timeout)
+    sha = str(payload.get("sha") or "").strip().lower()
     if not _sha_ok(sha):
         raise RuntimeError("GitHub не прислал номер версии")
-    return sha
+    commit = payload.get("commit") if isinstance(payload.get("commit"), dict) else {}
+    when = ""
+    for key in ("committer", "author"):
+        person = commit.get(key) if isinstance(commit.get(key), dict) else {}
+        when = str(person.get("date") or "").strip()
+        if when:
+            break
+    if not when:
+        raise RuntimeError("GitHub не прислал время коммита")
+    return sha, when
+
+
+def _remote_sha(timeout: float) -> str:
+    return _remote_head(timeout)[0]
+
+
+def _parse_when(text: str) -> datetime | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        value = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _stamp_path(dest: str) -> str:
+    return os.path.join(dest, STAMP_NAME)
+
+
+def _write_stamp(dest: str, when: str) -> None:
+    text = str(when or "").strip()
+    if not text:
+        return
+    path = _stamp_path(dest)
+    temporary = path + ".tmp"
+    with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
+def _read_stamp(dest: str) -> str:
+    try:
+        with open(_stamp_path(dest), encoding="utf-8") as handle:
+            return handle.readline().strip()
+    except OSError:
+        return ""
+
+
+def _repo_folder(path: str) -> bool:
+    return os.path.isdir(os.path.join(path, ".git"))
 
 
 def _tree(sha: str) -> dict[str, str]:
@@ -760,6 +821,12 @@ def _pull(
         cfg["python_place"] = chosen
     storage.save_config(cfg)
     _remove_manifest()
+    try:
+        remote, when = _remote_head(10)
+        if remote == sha:
+            _write_stamp(dest, when)
+    except Exception:
+        pass
     report("Готово", 100)
     return shortcut_error
 
@@ -800,8 +867,9 @@ def _perform_install(dest: str, desktop: bool, start_menu: bool) -> str:
 
     def work(report: Callable[[str, float | None], None], stop: Callable[[], bool]) -> None:
         report("Смотрю последний коммит…", 12)
-        sha = _remote_sha(20)
+        sha, when = _remote_head(20)
         holder["sha"] = sha
+        holder["when"] = when
         if stop():
             raise _Stop()
         report("Скачиваю файлы…", 16)
@@ -817,6 +885,7 @@ def _perform_install(dest: str, desktop: bool, start_menu: bool) -> str:
         saved = not holder["shortcut"]
         bundled = "bundled" if os.path.isfile(os.path.join(dest, "python", "pythonw.exe")) else ""
         _mark_installed(dest, sha, bundled, desktop and saved, start_menu and saved)
+        _write_stamp(dest, when)
         report("Готово", 100)
 
     _run_splash(_icon(_here()) or _icon(dest), "Скачиваю FinMaster…", work)
@@ -1227,11 +1296,88 @@ def _ask_menu(path: str) -> str:
     return result["choice"]
 
 
+def _update_wait() -> int | None:
+    args = sys.argv[1:]
+    if not args:
+        return None
+    flag = str(args[0] or "").strip().strip('"').lower()
+    if flag not in {"/update", "-update", "--update"}:
+        return None
+    if len(args) > 1 and str(args[1]).strip().isdigit():
+        return int(str(args[1]).strip())
+    return 0
+
+
+def _refresh_snapshot(dest: str, wait_pid: int) -> None:
+    """Полный снимок последнего коммита — то же скачивание, что при установке."""
+
+    def work(report: Callable[[str, float | None], None], stop: Callable[[], bool]) -> None:
+        if wait_pid:
+            report("Жду закрытия программы…", 8)
+            _wait_pid(wait_pid, stop)
+        if stop():
+            raise _Stop()
+        report("Смотрю последний коммит…", 12)
+        sha, when = _remote_head(20)
+        if stop():
+            raise _Stop()
+        report("Скачиваю файлы…", 16)
+        _download_files(sha, dest, _snapshot_files(sha), report, stop, workers=20, retries=20)
+        report("Копирую FinMaster.exe…", 90)
+        _copy_self(dest)
+        _write_stamp(dest, when)
+        _save_commit(dest, sha)
+        report("Готово", 100)
+
+    _run_splash(_icon(dest) or _icon(_here()), "Обновляю FinMaster…", work)
+
+
+def _apply_update(wait_pid: int) -> int | None:
+    dest = _here()
+    if _repo_folder(dest):
+        _tell("Это папка репозитория. Снимок с GitHub её не заменяет.")
+        _continue_here()
+        return None
+    if not os.path.isfile(os.path.join(dest, "run.vbs")):
+        _tell("Рядом нет установленной программы")
+        return 1
+    try:
+        _refresh_snapshot(dest, wait_pid)
+    except _Stop:
+        return 1
+    except Exception as exc:
+        _tell(str(exc))
+        return 1
+    _continue_here()
+    return None
+
+
+def launch_update_script(root: str, pid: int) -> None:
+    """Закрытие программы снаружи: update.vbs дождётся процесса и откроет FinMaster.exe /update."""
+    root = os.path.abspath(root)
+    if _repo_folder(root):
+        raise RuntimeError("Это папка репозитория. Снимок с GitHub её не заменяет.")
+    script = os.path.join(root, "update.vbs")
+    exe = os.path.join(root, SELF_NAME)
+    if not os.path.isfile(exe):
+        raise RuntimeError("В папке программы нет FinMaster.exe")
+    if not os.path.isfile(script):
+        raise RuntimeError("Рядом нет update.vbs")
+    system = os.environ.get("SystemRoot") or r"C:\Windows"
+    host = os.path.join(system, "System32", "wscript.exe")
+    if not os.path.isfile(host):
+        host = "wscript.exe"
+    subprocess.Popen([host, "//nologo", script, str(int(pid))], cwd=root, close_fds=True)
+
+
 def prepare(report_path: str = "") -> int | None:
     """None — можно запускать программу. Число — код выхода, запуск уже не нужен."""
     _remove_stale_exe()
     _dpi()
     try:
+        waited = _update_wait()
+        if waited is not None:
+            return _apply_update(waited)
         installed, path, _commit, pending, _place = _record()
         if pending:
             return _resume_update(report_path)
@@ -1260,26 +1406,35 @@ def install_missing_vbs(report_path: str = "") -> int | None:
 
 
 def offer_update() -> None:
-    """Коротко сверяет коммит. Если он тот же, сразу возвращает управление запуску."""
+    """Сверяет commit.txt с временем коммита на GitHub. Тот же момент — сразу запускает программу."""
     if _skip_check:
         return
     installed, path, commit, _pending, _place = _record()
-    if not installed or not path or not _running_here(path):
+    if not installed or not path or not _running_here(path) or _repo_folder(path):
         return
     try:
-        sha = _remote_sha(3)
+        sha, when = _remote_head(3)
     except Exception:
         return
-    if not sha or sha == commit:
+    remote = _parse_when(when)
+    local = _parse_when(_read_stamp(path))
+    if local is not None and remote is not None and remote <= local:
         return
-    files: list[str] | None
+    if local is None and commit == sha:
+        _write_stamp(path, when)
+        return
+    if remote is None and (not sha or sha == commit):
+        return
+    if not _ask_yes("На GitHub есть более новый коммит. Скачать последний снимок?"):
+        return
     try:
-        files = _without_self(_changed(path, sha))
+        launch_update_script(path, os.getpid())
     except Exception:
-        files = None
-    if files is not None and not files:
-        _save_commit(path, sha)
+        try:
+            _refresh_snapshot(path, 0)
+        except _Stop:
+            return
+        except Exception as exc:
+            _tell(str(exc))
         return
-    if not _ask_yes("На GitHub есть обновление. Перезапустить FinMaster и заменить изменённые файлы?"):
-        return
-    _begin_update(path, sha, restore=False, files=files)
+    os._exit(0)

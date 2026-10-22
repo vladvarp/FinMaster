@@ -102,6 +102,7 @@ _DESK_FILES = {
 }
 _DESK_DENY = {
     "/api/quit",
+    "/api/update",
     "/api/open-folder",
     "/api/dialog/open",
     "/api/dialog/save",
@@ -2030,6 +2031,19 @@ def api_window_fullscreen():
             return jsonify({"ok": False, "error": str(exc), "fullscreen": current}), 500
         WINDOW_FULLSCREEN = target
     return jsonify({"ok": True, "desktop": True, "fullscreen": _window_is_fullscreen()})
+
+
+@app.post("/api/update")
+def api_update():
+    if not _is_local():
+        return jsonify({"error": "Только в окне программы."}), 403
+    try:
+        from backend.setup import launch_update_script
+
+        launch_update_script(ROOT, os.getpid())
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+    return api_quit()
 
 
 @app.post("/api/quit")
