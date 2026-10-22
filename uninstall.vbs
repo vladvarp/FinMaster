@@ -203,7 +203,7 @@ Function BuildHta(folder, resultPath)
   html = html & Box("prog", progOn, T("Папка программы, ярлыки и интерпретация иконок"), progHint)
   html = html & Box("python", False, T("Python"), HtmlEsc(py))
   html = html & Box("config", False, T("Папка настроек и файл конфигурации"), HtmlEsc(dir) & "<br>" & HtmlEsc(cfg) & "<br><span class=""warn"">" & T("Пропадут недавние файлы, тема, профили, формулы и доступ с телефона. Сами отчёты останутся. Папка уходит в корзину.") & "</span>")
-  html = html & Box("history", False, T("История отчётов"), HtmlEsc(docs & "\history"))
+  html = html & Box("history", False, T("История отчётов"), HtmlEsc(docs & "\history") & "<br><span class=""warn"">" & T("Пропадут снимки правок: отмена, повтор и сравнение с прошлыми версиями. Сами отчёты останутся. Папка уходит в корзину.") & "</span>")
   html = html & Box("backups", False, T("Резервные копии"), HtmlEsc(docs & "\backups") & "<br><span class=""warn"">" & T("Пропадут запасные копии. Если отчёт испортится, вернуть прежнюю версию будет нечем. Копии уходят в корзину.") & "</span>")
   html = html & Box("reports", False, T("Отчёты .fmaster в папке FinMaster"), HtmlEsc(docs) & "<br><span class=""warn"">" & T("Пропадут заказы и заказчики из этих файлов. Отчёты в других папках не трогаются. Файлы уходят в корзину.") & "</span>")
   html = html & "<div class=""buttons""><button onclick=""cancel()"">" & T("Отмена") & "</button><button class=""danger"" onclick=""ok()"">" & T("Удалить") & "</button></div>"
