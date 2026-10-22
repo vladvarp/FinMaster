@@ -1385,7 +1385,20 @@ def launch_update_script(root: str, pid: int) -> None:
     host = os.path.join(system, "System32", "wscript.exe")
     if not os.path.isfile(host):
         host = "wscript.exe"
-    subprocess.Popen([host, "//nologo", script, str(int(pid))], cwd=root, close_fds=True)
+    # Отвязать от окна: иначе скрипт умирает вместе с программой и exe не стартует.
+    flags = 0x00000008 | 0x00000200
+    command = [host, "//nologo", script, str(int(pid))]
+    kwargs = {
+        "cwd": root,
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+    }
+    try:
+        subprocess.Popen(command, creationflags=flags | 0x01000000, **kwargs)
+    except OSError:
+        subprocess.Popen(command, creationflags=flags, **kwargs)
 
 
 def prepare(report_path: str = "") -> int | None:
