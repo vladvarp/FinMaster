@@ -1462,9 +1462,33 @@ def _version_label(moment: datetime | None) -> str:
     return f"{local.day} {months[local.month - 1]} {local.year}, {local.hour:02d}:{local.minute:02d}"
 
 
+def _readme_same(root: str) -> bool | None:
+    """None — не удалось сверить. True — README.md в папке совпал с GitHub."""
+    local = os.path.join(root, "README.md")
+    if not os.path.isfile(local):
+        return False
+    try:
+        payload = _read_json(f"{API}/contents/README.md", 8)
+        remote_blob = str(payload.get("sha") or "").strip().lower()
+        if not remote_blob:
+            return None
+        return _blob(local) == remote_blob
+    except Exception:
+        return None
+
+
+def _quiet_old_exe(root: str, sha: str) -> None:
+    installed, path, commit, _pending, _place = _record()
+    if not installed or not _same(path, root) or commit == sha:
+        return
+    cfg = storage.load_config()
+    cfg["install_commit"] = sha
+    storage.save_config(cfg)
+
+
 def update_status(root: str) -> dict[str, Any]:
     """Есть ли версия новее. Даты — для вопроса в окне, без номеров коммитов."""
-    empty = {"available": False, "current": "", "latest": ""}
+    empty = {"available": False, "current": "", "latest": "", "damaged": False}
     root = os.path.abspath(root)
     if _repo_folder(root) or not os.path.isfile(os.path.join(root, "run.vbs")):
         return empty
@@ -1473,21 +1497,29 @@ def update_status(root: str) -> dict[str, Any]:
     except Exception:
         return empty
     remote = _parse_when(when)
+    latest = _version_label(remote)
     local = _parse_when(_read_stamp(root))
-    installed, path, commit, _pending, _place = _record()
-    same = installed and _same(path, root)
-    # Только что поставленная копия уже на этой версии, файла времени ещё нет.
-    if local is None and same and commit == sha:
-        _write_stamp(root, when)
-        label = _version_label(remote)
-        return {"available": False, "current": label, "latest": label}
-    available = local is None or (remote is not None and remote > local)
-    if available and local is not None and same and commit != sha:
-        cfg = storage.load_config()
-        cfg["install_commit"] = sha
-        storage.save_config(cfg)
+    if local is None:
+        matched = _readme_same(root)
+        if matched is None:
+            return empty
+        if matched:
+            _write_stamp(root, when)
+            _quiet_old_exe(root, sha)
+            return {"available": False, "current": latest, "latest": latest, "damaged": False}
+        _quiet_old_exe(root, sha)
+        return {
+            "available": True,
+            "current": "Вероятно, есть повреждённые файлы",
+            "latest": latest,
+            "damaged": True,
+        }
+    available = remote is not None and remote > local
+    if available:
+        _quiet_old_exe(root, sha)
     return {
         "available": available,
         "current": _version_label(local),
-        "latest": _version_label(remote),
+        "latest": latest,
+        "damaged": False,
     }

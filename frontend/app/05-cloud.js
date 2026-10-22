@@ -1569,6 +1569,7 @@
       state.updateReady = !!data.available;
       state.updateCurrent = data.current || "";
       state.updateLatest = data.latest || "";
+      state.updateDamaged = !!data.damaged;
     } catch {
       state.updateReady = false;
     }
@@ -1592,8 +1593,10 @@
     const latest = state.updateLatest || "дата неизвестна";
     const ok = await askConfirm(ready
       ? {
-          title: "Есть обновление",
-          text: `Новая версия от ${latest}. Сейчас установлена версия от ${current}. Обновить программу?`,
+          title: state.updateDamaged ? "Версия старая" : "Есть обновление",
+          text: state.updateDamaged
+            ? `Программу нужно обновить. Новая версия от ${latest}. ${current}.`
+            : `Новая версия от ${latest}. Сейчас установлена версия от ${current}. Обновить программу?`,
           ok: "Обновить",
           cancel: "Не сейчас",
         }
