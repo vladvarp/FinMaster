@@ -589,6 +589,15 @@ input[type="search"]::-webkit-search-decoration {
 .btn.small { padding: 5px 8px; font-size: 12px; border-radius: 8px; }
 .btn.icon { width: 34px; height: 34px; padding: 0; display: grid; place-items: center; }
 .btn.icon.on { color: var(--accent); border-color: var(--accent-2); }
+#btn-update.update-ready {
+  color: var(--accent);
+  border-color: var(--accent);
+  animation: update-glow 1.8s ease-in-out infinite;
+}
+@keyframes update-glow {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 10px var(--accent); }
+}
 #btn-toggle-sidebar svg { display: block; }
 .app.sidebar-collapsed #btn-toggle-sidebar svg { transform: scaleX(-1); }
 

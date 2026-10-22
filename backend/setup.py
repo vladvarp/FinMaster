@@ -1308,7 +1308,7 @@ def _update_wait() -> int | None:
     return 0
 
 
-def _refresh_snapshot(dest: str, wait_pid: int) -> None:
+def _refresh_snapshot(dest: str, wait_pid: int, copy_exe: bool = True) -> None:
     """Полный снимок последнего коммита — то же скачивание, что при установке."""
 
     def work(report: Callable[[str, float | None], None], stop: Callable[[], bool]) -> None:
@@ -1323,13 +1323,34 @@ def _refresh_snapshot(dest: str, wait_pid: int) -> None:
             raise _Stop()
         report("Скачиваю файлы…", 16)
         _download_files(sha, dest, _snapshot_files(sha), report, stop, workers=20, retries=20)
-        report("Копирую FinMaster.exe…", 90)
-        _copy_self(dest)
+        if copy_exe:
+            report("Копирую FinMaster.exe…", 90)
+            _copy_self(dest)
         _write_stamp(dest, when)
         _save_commit(dest, sha)
         report("Готово", 100)
 
     _run_splash(_icon(dest) or _icon(_here()), "Обновляю FinMaster…", work)
+
+
+def update_folder(dest: str = "") -> None:
+    """Снимок в папку программы. FinMaster.exe не подменяется: его вызывает update.vbs через уже стоящий Python."""
+    dest = os.path.abspath(dest or os.environ.get("FM_UPDATE_DIR") or os.getcwd())
+    if _repo_folder(dest):
+        _tell("Это папка репозитория. Снимок с GitHub её не заменяет.")
+        raise SystemExit(1)
+    if not os.path.isfile(os.path.join(dest, "run.vbs")):
+        _tell("Рядом нет установленной программы")
+        raise SystemExit(1)
+    try:
+        _refresh_snapshot(dest, 0, copy_exe=False)
+    except _Stop:
+        raise SystemExit(1)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        _tell(str(exc))
+        raise SystemExit(1)
 
 
 def _apply_update(wait_pid: int) -> int | None:
@@ -1353,14 +1374,11 @@ def _apply_update(wait_pid: int) -> int | None:
 
 
 def launch_update_script(root: str, pid: int) -> None:
-    """Закрытие программы снаружи: update.vbs дождётся процесса и откроет FinMaster.exe /update."""
+    """Закрытие программы снаружи. Дальше качает сам update.vbs, без запуска FinMaster.exe."""
     root = os.path.abspath(root)
     if _repo_folder(root):
         raise RuntimeError("Это папка репозитория. Снимок с GitHub её не заменяет.")
     script = os.path.join(root, "update.vbs")
-    exe = os.path.join(root, SELF_NAME)
-    if not os.path.isfile(exe):
-        raise RuntimeError("В папке программы нет FinMaster.exe")
     if not os.path.isfile(script):
         raise RuntimeError("Рядом нет update.vbs")
     system = os.environ.get("SystemRoot") or r"C:\Windows"
@@ -1406,35 +1424,25 @@ def install_missing_vbs(report_path: str = "") -> int | None:
 
 
 def offer_update() -> None:
-    """Сверяет commit.txt с временем коммита на GitHub. Тот же момент — сразу запускает программу."""
-    if _skip_check:
-        return
-    installed, path, commit, _pending, _place = _record()
-    if not installed or not path or not _running_here(path) or _repo_folder(path):
-        return
+    """При запуске ничего не спрашивает. Решение остаётся за кнопкой в окне."""
+    return
+
+
+def update_available(root: str) -> bool:
+    """commit.txt старше коммита на GitHub. Номер в config.json приводится к GitHub, чтобы старый exe не спрашивал при старте."""
+    root = os.path.abspath(root)
+    if _repo_folder(root) or not os.path.isfile(os.path.join(root, "run.vbs")):
+        return False
     try:
-        sha, when = _remote_head(3)
+        sha, when = _remote_head(4)
     except Exception:
-        return
+        return False
     remote = _parse_when(when)
-    local = _parse_when(_read_stamp(path))
-    if local is not None and remote is not None and remote <= local:
-        return
-    if local is None and commit == sha:
-        _write_stamp(path, when)
-        return
-    if remote is None and (not sha or sha == commit):
-        return
-    if not _ask_yes("На GitHub есть более новый коммит. Скачать последний снимок?"):
-        return
-    try:
-        launch_update_script(path, os.getpid())
-    except Exception:
-        try:
-            _refresh_snapshot(path, 0)
-        except _Stop:
-            return
-        except Exception as exc:
-            _tell(str(exc))
-        return
-    os._exit(0)
+    local = _parse_when(_read_stamp(root))
+    available = local is None or (remote is not None and remote > local)
+    installed, path, commit, _pending, _place = _record()
+    if installed and _same(path, root) and commit != sha:
+        cfg = storage.load_config()
+        cfg["install_commit"] = sha
+        storage.save_config(cfg)
+    return available

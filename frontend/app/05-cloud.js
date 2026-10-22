@@ -1561,12 +1561,52 @@
     await renderStartLists();
   }
 
+  async function refreshUpdateButton() {
+    const btn = $("btn-update");
+    if (!btn || !state.desktop) return;
+    try {
+      const data = await apiGet("/api/update");
+      state.updateReady = !!data.available;
+    } catch {
+      state.updateReady = false;
+    }
+    btn.classList.toggle("update-ready", !!state.updateReady);
+    const title = state.updateReady ? "Есть обновление" : "Скачать снимок заново";
+    btn.title = title;
+    btn.setAttribute("aria-label", title);
+  }
+
   async function runProgramUpdate() {
     try {
       await apiPost("/api/update", {});
     } catch (err) {
       toast(err && err.message ? err.message : "Не удалось запустить обновление");
     }
+  }
+
+  async function askProgramUpdate() {
+    const ready = !!state.updateReady;
+    const ok = await askConfirm(ready
+      ? {
+          title: "Есть обновление",
+          text: "На GitHub коммит новее этой копии. Скачать снимок и перезапустить программу?",
+          ok: "Обновить",
+          cancel: "Не сейчас",
+        }
+      : {
+          title: "Скачать снимок заново",
+          text: "Нового коммита нет. Можно заново скачать файлы с GitHub и заменить сломанные.",
+          ok: "Скачать",
+          cancel: "Отмена",
+        });
+    if (!ok) return;
+    await flushPendingSaves();
+    if (state.dirty) {
+      state._update = true;
+      $("close-modal").classList.add("open");
+      return;
+    }
+    await runProgramUpdate();
   }
 
   async function askClose() {
@@ -2423,15 +2463,7 @@
     });
     $("btn-help").addEventListener("click", openHelp);
     $("btn-guide")?.addEventListener("click", openGuide);
-    $("btn-update")?.addEventListener("click", async () => {
-      await flushPendingSaves();
-      if (state.dirty) {
-        state._update = true;
-        $("close-modal").classList.add("open");
-        return;
-      }
-      await runProgramUpdate();
-    });
+    $("btn-update")?.addEventListener("click", () => askProgramUpdate());
     $("help-close").addEventListener("click", () => $("help-modal").classList.remove("open"));
     $("help-modal").addEventListener("click", (e) => {
       if (e.target === $("help-modal")) $("help-modal").classList.remove("open");

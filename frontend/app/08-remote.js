@@ -1366,6 +1366,7 @@
     try {
       const bootData = await apiGet("/api/bootstrap");
       state.desktop = true;
+      refreshUpdateButton();
       state.autosave = window.FM_DESK ? false : !!bootData.autosave;
       hydratePrefs(bootData.ui_prefs);
       applyTheme(bootData.theme || "light", false);
