@@ -169,10 +169,10 @@ Function BuildHta(folder, resultPath)
   dir = AppDataDir()
   cfg = ConfigFile()
   progOn = True
-  progHint = HtmlEsc(folder) & "<br>" & T("Ярлыки, привязка .fmaster и .fbak, автозагрузка и запись в списке программ. Python внутри папки программы удаляется вместе с ней.")
+  progHint = HtmlEsc(folder) & "<br><span class=""warn"">" & T("Ярлыки, привязка .fmaster и .fbak, автозагрузка и запись в списке программ. Python внутри папки программы удаляется вместе с ней.") & "</span>"
   If IsRepo(folder) Then
     progOn = False
-    progHint = HtmlEsc(folder) & "<br>" & T("Это папка репозитория, она не удаляется.")
+    progHint = HtmlEsc(folder) & "<br><span class=""warn"">" & T("Это папка репозитория, она не удаляется.") & "</span>"
   End If
   html = "<html><head><meta http-equiv=""x-ua-compatible"" content=""ie=9"">"
   html = html & "<HTA:APPLICATION ID=""u"" BORDER=""dialog"" CAPTION=""yes"" SCROLL=""no"" SINGLEINSTANCE=""yes"" SYSMENU=""yes"" SHOWINTASKBAR=""yes"">"
@@ -183,6 +183,7 @@ Function BuildHta(folder, resultPath)
   html = html & "p{color:#64748b;font-size:12px;line-height:1.4;margin:0 0 12px;}"
   html = html & "label{display:block;margin:9px 0 0;font-size:13px;}"
   html = html & ".hint{display:block;margin:1px 0 0 22px;color:#64748b;font-size:11px;line-height:1.35;}"
+  html = html & ".hint .warn{color:#ea580c;}"
   html = html & ".buttons{margin-top:16px;text-align:right;}"
   html = html & "button{font-family:Segoe UI,sans-serif;font-size:13px;padding:6px 14px;margin-left:8px;border:1px solid #dbe3ec;background:#e8eef4;color:#0f172a;}"
   html = html & "button.danger{background:#dc2626;color:#fff;border-color:#dc2626;}"
@@ -201,10 +202,10 @@ Function BuildHta(folder, resultPath)
   html = html & "<p>" & T("Отчёты, история, копии и настройки при включении уходят в корзину. Папка программы и Python стираются сразу. Если программа открыта, она закроется.") & "</p>"
   html = html & Box("prog", progOn, T("Папка программы, ярлыки и интерпретация иконок"), progHint)
   html = html & Box("python", False, T("Python"), HtmlEsc(py))
-  html = html & Box("config", False, T("Папка настроек и файл конфигурации"), HtmlEsc(dir) & "<br>" & HtmlEsc(cfg) & "<br>" & T("Пропадут недавние файлы, тема, профили, формулы и доступ с телефона. Сами отчёты останутся. Папка уходит в корзину."))
+  html = html & Box("config", False, T("Папка настроек и файл конфигурации"), HtmlEsc(dir) & "<br>" & HtmlEsc(cfg) & "<br><span class=""warn"">" & T("Пропадут недавние файлы, тема, профили, формулы и доступ с телефона. Сами отчёты останутся. Папка уходит в корзину.") & "</span>")
   html = html & Box("history", False, T("История отчётов"), HtmlEsc(docs & "\history"))
-  html = html & Box("backups", False, T("Резервные копии"), HtmlEsc(docs & "\backups") & "<br>" & T("Пропадут запасные копии. Если отчёт испортится, вернуть прежнюю версию будет нечем. Копии уходят в корзину."))
-  html = html & Box("reports", False, T("Отчёты .fmaster в папке FinMaster"), HtmlEsc(docs) & "<br>" & T("Пропадут заказы и заказчики из этих файлов. Отчёты в других папках не трогаются. Файлы уходят в корзину."))
+  html = html & Box("backups", False, T("Резервные копии"), HtmlEsc(docs & "\backups") & "<br><span class=""warn"">" & T("Пропадут запасные копии. Если отчёт испортится, вернуть прежнюю версию будет нечем. Копии уходят в корзину.") & "</span>")
+  html = html & Box("reports", False, T("Отчёты .fmaster в папке FinMaster"), HtmlEsc(docs) & "<br><span class=""warn"">" & T("Пропадут заказы и заказчики из этих файлов. Отчёты в других папках не трогаются. Файлы уходят в корзину.") & "</span>")
   html = html & "<div class=""buttons""><button onclick=""cancel()"">" & T("Отмена") & "</button><button class=""danger"" onclick=""ok()"">" & T("Удалить") & "</button></div>"
   html = html & "</div></body></html>"
   BuildHta = html
