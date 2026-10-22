@@ -6,11 +6,13 @@ Option Explicit
 
 Const HKCU = &H80000001
 
-Dim sh, fso, removed, problems
+Dim sh, fso, removed, problems, utf8Broken
 Set sh = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 removed = ""
 problems = ""
+' wscript читает этот UTF-8 файл как ANSI. T() возвращает нормальную кириллицу.
+utf8Broken = ("У" <> ChrW(&H423))
 
 Dim arg0, progDir
 progDir = fso.GetParentFolderName(WScript.ScriptFullName)
@@ -24,7 +26,7 @@ End If
 
 If arg0 = "/go" Or arg0 = "-go" Then
   If WScript.Arguments.Count < 2 Then
-    MsgBox "Не передана папка программы.", vbCritical, "FinMaster"
+    MsgBox T("Не передана папка программы."), vbCritical, "FinMaster"
     WScript.Quit 1
   End If
   RunUninstall WScript.Arguments(1), True
@@ -76,9 +78,9 @@ Sub RunUninstall(folder, fromTemp)
   If doProg Then
     If Unsafe(folder) Then
       If IsRepo(folder) Then
-        AddProblem "Папка репозитория не удаляется: " & folder
+        AddProblem T("Папка репозитория не удаляется: ") & folder
       Else
-        AddProblem "Папку программы удалять нельзя: " & folder
+        AddProblem T("Папку программы удалять нельзя: ") & folder
       End If
       doProg = False
     Else
@@ -87,38 +89,38 @@ Sub RunUninstall(folder, fromTemp)
       RemoveAutostart folder
       RemoveUninstallKey folder
       If Not doConfig Then RemoveServiceFiles
-      AddRemoved "Ярлыки, привязка иконок и автозагрузка"
+      AddRemoved T("Ярлыки, привязка иконок и автозагрузка")
     End If
   End If
 
   py = ReportsRoot() & "\python"
   If doPython Then
     If Not IsNamedChild(py, "python") Then
-      AddProblem "Неверная папка Python: " & py
+      AddProblem T("Неверная папка Python: ") & py
     ElseIf fso.FolderExists(py) Then
       RemoveFolder py
       If fso.FolderExists(py) Then
-        AddProblem "Не удалось удалить Python: " & py
+        AddProblem T("Не удалось удалить Python: ") & py
       Else
-        AddRemoved "Python в папке отчётов"
+        AddRemoved T("Python в папке отчётов")
       End If
     End If
   End If
 
-  If doHistory Then RecycleNamed ReportsRoot() & "\history", "history", "История отчётов"
-  If doBackups Then RecycleNamed ReportsRoot() & "\backups", "backups", "Резервные копии"
+  If doHistory Then RecycleNamed ReportsRoot() & "\history", "history", T("История отчётов")
+  If doBackups Then RecycleNamed ReportsRoot() & "\backups", "backups", T("Резервные копии")
   If doReports Then RecycleReports
 
   cfg = ConfigFile()
   dir = AppDataDir()
   If doConfig Then
     If Not IsAppDataFinMaster(dir) Then
-      AddProblem "Неверная папка настроек: " & dir
+      AddProblem T("Неверная папка настроек: ") & dir
     ElseIf fso.FolderExists(dir) Then
       If RecycleOne(dir) Then
-        AddRemoved "Папка настроек"
+        AddRemoved T("Папка настроек")
       Else
-        AddProblem "Не удалось убрать папку настроек: " & dir
+        AddProblem T("Не удалось убрать папку настроек: ") & dir
       End If
     End If
   ElseIf fso.FileExists(cfg) And (doProg Or doPython) Then
@@ -129,13 +131,13 @@ Sub RunUninstall(folder, fromTemp)
     If fromTemp Then
       RemoveFolder folder
       If fso.FolderExists(folder) Then
-        AddProblem "Не удалось удалить папку программы. Закройте FinMaster и запустите удаление снова."
+        AddProblem T("Не удалось удалить папку программы. Закройте FinMaster и запустите удаление снова.")
       Else
-        AddRemoved "Папка программы"
+        AddRemoved T("Папка программы")
       End If
     Else
       ScheduleDelete folder
-      AddRemoved "Папка программы будет удалена после закрытия этого окна"
+      AddRemoved T("Папка программы будет удалена после закрытия этого окна")
     End If
   End If
 
@@ -167,10 +169,10 @@ Function BuildHta(folder, resultPath)
   dir = AppDataDir()
   cfg = ConfigFile()
   progOn = True
-  progHint = HtmlEsc(folder) & "<br>Ярлыки, привязка .fmaster и .fbak, автозагрузка и запись в списке программ. Python внутри папки программы удаляется вместе с ней."
+  progHint = HtmlEsc(folder) & "<br>" & T("Ярлыки, привязка .fmaster и .fbak, автозагрузка и запись в списке программ. Python внутри папки программы удаляется вместе с ней.")
   If IsRepo(folder) Then
     progOn = False
-    progHint = HtmlEsc(folder) & "<br>Это папка репозитория, она не удаляется."
+    progHint = HtmlEsc(folder) & "<br>" & T("Это папка репозитория, она не удаляется.")
   End If
   html = "<html><head><meta http-equiv=""x-ua-compatible"" content=""ie=9"">"
   html = html & "<HTA:APPLICATION ID=""u"" BORDER=""dialog"" CAPTION=""yes"" SCROLL=""no"" SINGLEINSTANCE=""yes"" SYSMENU=""yes"" SHOWINTASKBAR=""yes"">"
@@ -188,22 +190,22 @@ Function BuildHta(folder, resultPath)
   html = html & "<script language=""javascript"">function ok(){"
   html = html & "var ids=['prog','python','config','history','backups','reports'];var picked=[];var i;"
   html = html & "for(i=0;i<ids.length;i++){if(document.getElementById(ids[i]).checked)picked.push(ids[i]);}"
-  html = html & "if(!picked.length){alert('Отметьте хотя бы один пункт.');return;}"
+  html = html & "if(!picked.length){alert('" & JsEsc(T("Отметьте хотя бы один пункт.")) & "');return;}"
   html = html & "var fso=new ActiveXObject('Scripting.FileSystemObject');"
   html = html & "var ts=fso.CreateTextFile('" & JsEsc(resultPath) & "',true);ts.Write(picked.join(','));ts.Close();close();}"
   html = html & "function cancel(){close();}"
   html = html & "document.onkeyup=function(e){e=e||window.event;if(e.keyCode==27)cancel();};"
   html = html & "window.resizeTo(500,720);window.moveTo((screen.availWidth-500)/2,(screen.availHeight-720)/3);"
   html = html & "</script></head><body><div class=""card"">"
-  html = html & "<h1>Удаление FinMaster</h1>"
-  html = html & "<p>Отчёты, история, копии и настройки при включении уходят в корзину. Папка программы и Python стираются сразу. Если программа открыта, она закроется.</p>"
-  html = html & Box("prog", progOn, "Папка программы, ярлыки и интерпретация иконок", progHint)
-  html = html & Box("python", True, "Python в папке отчётов", HtmlEsc(py))
-  html = html & Box("config", False, "Папка настроек и файл конфигурации", HtmlEsc(dir) & "<br>" & HtmlEsc(cfg))
-  html = html & Box("history", False, "История отчётов", HtmlEsc(docs & "\history"))
-  html = html & Box("backups", False, "Резервные копии", HtmlEsc(docs & "\backups"))
-  html = html & Box("reports", False, "Отчёты .fmaster в папке FinMaster", HtmlEsc(docs) & "<br>Только файлы .fmaster в этой папке. Отчёты в других местах остаются.")
-  html = html & "<div class=""buttons""><button onclick=""cancel()"">Отмена</button><button class=""danger"" onclick=""ok()"">Удалить</button></div>"
+  html = html & "<h1>" & T("Удаление FinMaster") & "</h1>"
+  html = html & "<p>" & T("Отчёты, история, копии и настройки при включении уходят в корзину. Папка программы и Python стираются сразу. Если программа открыта, она закроется.") & "</p>"
+  html = html & Box("prog", progOn, T("Папка программы, ярлыки и интерпретация иконок"), progHint)
+  html = html & Box("python", True, T("Python в папке отчётов"), HtmlEsc(py))
+  html = html & Box("config", False, T("Папка настроек и файл конфигурации"), HtmlEsc(dir) & "<br>" & HtmlEsc(cfg))
+  html = html & Box("history", False, T("История отчётов"), HtmlEsc(docs & "\history"))
+  html = html & Box("backups", False, T("Резервные копии"), HtmlEsc(docs & "\backups"))
+  html = html & Box("reports", False, T("Отчёты .fmaster в папке FinMaster"), HtmlEsc(docs) & "<br>" & T("Только файлы .fmaster в этой папке. Отчёты в других местах остаются."))
+  html = html & "<div class=""buttons""><button onclick=""cancel()"">" & T("Отмена") & "</button><button class=""danger"" onclick=""ok()"">" & T("Удалить") & "</button></div>"
   html = html & "</div></body></html>"
   BuildHta = html
 End Function
@@ -223,18 +225,66 @@ Function JsEsc(text)
   JsEsc = Replace(Replace(text & "", "\", "\\"), "'", "\'")
 End Function
 
+Function T(text)
+  If Not utf8Broken Then
+    T = text
+    Exit Function
+  End If
+  On Error Resume Next
+  T = Utf8Text(text)
+  If Err.Number <> 0 Or (T = "" And text <> "") Then
+    Err.Clear
+    T = text
+  End If
+  On Error GoTo 0
+End Function
+
+Function Utf8Text(text)
+  Dim bin, out, raw
+  Set bin = CreateObject("ADODB.Stream")
+  bin.Type = 2
+  bin.Charset = AnsiCharset()
+  bin.Open
+  bin.WriteText text
+  bin.Position = 0
+  bin.Type = 1
+  bin.Position = 0
+  raw = bin.Read
+  bin.Close
+  Set out = CreateObject("ADODB.Stream")
+  out.Type = 1
+  out.Open
+  out.Write raw
+  out.Position = 0
+  out.Type = 2
+  out.Charset = "utf-8"
+  Utf8Text = out.ReadText
+  out.Close
+End Function
+
+Function AnsiCharset()
+  Dim reg, cp
+  cp = ""
+  On Error Resume Next
+  Set reg = GetObject("winmgmts:\\.\root\default:StdRegProv")
+  reg.GetStringValue &H80000002, "SYSTEM\CurrentControlSet\Control\Nls\CodePage", "ACP", cp
+  On Error GoTo 0
+  If cp = "" Then cp = "1251"
+  AnsiCharset = "windows-" & cp
+End Function
+
 Sub ShowResult()
   Dim text, icon
   If removed = "" And problems = "" Then
-    MsgBox "Нечего удалять: выбранных папок и файлов уже нет.", vbInformation, "FinMaster"
+    MsgBox T("Нечего удалять: выбранных папок и файлов уже нет."), vbInformation, "FinMaster"
     Exit Sub
   End If
   text = ""
   icon = vbInformation
-  If removed <> "" Then text = "Удалено:" & vbCrLf & removed
+  If removed <> "" Then text = T("Удалено:") & vbCrLf & removed
   If problems <> "" Then
     If text <> "" Then text = text & vbCrLf & vbCrLf
-    text = text & "Не удалось:" & vbCrLf & problems
+    text = text & T("Не удалось:") & vbCrLf & problems
     icon = vbExclamation
   End If
   MsgBox text, icon, "FinMaster"
@@ -416,7 +466,7 @@ End Sub
 Sub ScheduleDelete(path)
   Dim bat, ts
   If BadChars(path) Then
-    AddProblem "В пути есть недопустимые символы, папка не удалена: " & path
+    AddProblem T("В пути есть недопустимые символы, папка не удалена: ") & path
     Exit Sub
   End If
   bat = TempDir() & "\rmdir.cmd"
@@ -432,14 +482,14 @@ End Sub
 
 Sub RecycleNamed(path, name, title)
   If Not IsNamedChild(path, name) Then
-    AddProblem "Неверная папка: " & path
+    AddProblem T("Неверная папка: ") & path
     Exit Sub
   End If
   If Not fso.FolderExists(path) Then Exit Sub
   If RecycleOne(path) Then
     AddRemoved title
   Else
-    AddProblem "Не удалось убрать " & title & ": " & path
+    AddProblem T("Не удалось убрать ") & title & ": " & path
   End If
 End Sub
 
@@ -459,8 +509,8 @@ Sub RecycleReports()
       End If
     End If
   Next
-  If n > 0 Then AddRemoved "Отчёты .fmaster (" & n & ")"
-  If fail > 0 Then AddProblem "Не удалось убрать отчётов: " & fail
+  If n > 0 Then AddRemoved T("Отчёты .fmaster (") & n & ")"
+  If fail > 0 Then AddProblem T("Не удалось убрать отчётов: ") & fail
 End Sub
 
 Function RecycleOne(path)
@@ -689,14 +739,14 @@ Sub PatchConfig(path, clearInstall, clearPython)
   If Err.Number <> 0 Or text = "" Then
     Err.Clear
     On Error GoTo 0
-    AddProblem "Не удалось обновить файл конфигурации."
+    AddProblem T("Не удалось обновить файл конфигурации.")
     Exit Sub
   End If
   nextText = PatchText(text, clearInstall, clearPython)
   WriteUtf8NoBom path, nextText
   If Err.Number <> 0 Then
     Err.Clear
-    AddProblem "Не удалось обновить файл конфигурации."
+    AddProblem T("Не удалось обновить файл конфигурации.")
   End If
   On Error GoTo 0
 End Sub
