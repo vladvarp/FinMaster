@@ -388,7 +388,7 @@ Function Unsafe(path)
   If IsRepo(full) Then Exit Function
   Unsafe = False
 End Function
-
+ 
 Function IsRepo(path)
   IsRepo = fso.FolderExists(path & "\.git") Or fso.FileExists(path & "\.git")
 End Function
