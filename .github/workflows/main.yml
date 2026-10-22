@@ -1,8 +1,11 @@
 name: Deploy FAQ
-on:
+"on":
   push:
     branches: [main]
-    paths: ["FAQ/**"]
+    paths:
+      - "FAQ/**"
+      - ".github/workflows/main.yml"
+  workflow_dispatch:
 permissions:
   contents: read
   pages: write
