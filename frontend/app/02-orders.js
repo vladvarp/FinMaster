@@ -547,12 +547,15 @@
 
   let previewHold = "";
   let previewLock = false;
+  let previewReturn = "";
 
   function applyPreviewMode() {
     const on = !!state.preview;
     $("app-shell")?.classList.toggle("is-preview", on);
     const banner = $("preview-banner");
     if (banner) banner.hidden = !on;
+    const back = $("preview-back");
+    if (back) back.hidden = !on || !previewReturn;
     const title = $("report-title");
     if (title) title.readOnly = on;
     const fileSave = $("btn-save");

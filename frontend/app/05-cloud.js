@@ -1122,6 +1122,7 @@
     persistChartPrefs();
     state.path = null;
     state.preview = false;
+    previewReturn = "";
     historyReset("Новый отчёт");
     setClean();
     applyPreviewMode();
@@ -1161,9 +1162,13 @@
   function applyLoaded(res, { keepView = false, view = "" } = {}) {
     const stay = keepView && !!state.view && $("app-shell") && !$("app-shell").hidden;
     const next = view || (stay ? state.view : reportViewFor(res.path) || "dashboard");
+    const opened = String(state.path || "");
+    const real = opened && !opened.toLowerCase().endsWith(".fbak") ? opened : "";
+    const back = real || (state.preview ? previewReturn : "");
     state.doc = res.document;
     state.path = res.path;
     state.preview = !!res.preview;
+    previewReturn = state.preview ? back : "";
     state.focusOrderId = null;
     state.focusLineId = null;
     cloudState().catalog = false;
@@ -1378,6 +1383,7 @@
         else if (res.modified_at && state.doc) state.doc.modified_at = res.modified_at;
         state.path = res.path;
         state.preview = false;
+        previewReturn = "";
         rememberReportView(state.path, state.view);
         if (res.recent) renderRecent(res.recent);
         setClean();
@@ -2605,12 +2611,18 @@
       const btn = e.target.closest("[data-hist-del]");
       if (btn) deleteHistoryFolder(btn.dataset.histDel);
     });
+    $("backup-tab-this")?.addEventListener("click", () => showBackupPane("this"));
+    $("backup-tab-other")?.addEventListener("click", () => showBackupPane("other"));
     $("backup-close")?.addEventListener("click", () => $("backup-modal")?.classList.remove("open"));
     $("backup-modal")?.addEventListener("click", (e) => {
       if (e.target === $("backup-modal")) $("backup-modal")?.classList.remove("open");
     });
     $("backup-create")?.addEventListener("click", () => createReportBackup());
     $("preview-save")?.addEventListener("click", () => save({ as: true }));
+    $("preview-back")?.addEventListener("click", () => {
+      if (!previewReturn) return;
+      openPath(previewReturn);
+    });
     $("diff-close")?.addEventListener("click", () => closeDiffModal());
     $("diff-modal")?.addEventListener("click", (e) => {
       if (e.target === $("diff-modal")) closeDiffModal();
@@ -2618,7 +2630,7 @@
     $("backup-list")?.addEventListener("click", (e) => {
       const diffBtn = e.target.closest("[data-bak-diff]");
       if (diffBtn) {
-        openBackupDiff(diffBtn.dataset.bakDiff);
+        openBackupDiff(diffBtn.dataset.bakDiff, diffBtn.dataset.bakId || "");
         return;
       }
       const openBtn = e.target.closest("[data-bak-open]");
@@ -2637,8 +2649,13 @@
         });
         return;
       }
+      const allBtn = e.target.closest("[data-bak-del-all]");
+      if (allBtn) {
+        deleteReportBackups(allBtn.dataset.bakDelAll, allBtn.dataset.bakTitle || "", allBtn.dataset.bakCount || "");
+        return;
+      }
       const delBtn = e.target.closest("[data-bak-del]");
-      if (delBtn) deleteReportBackup(delBtn.dataset.bakDel);
+      if (delBtn) deleteReportBackup(delBtn.dataset.bakDel, delBtn.dataset.bakId || "");
     });
     document.addEventListener("click", (e) => {
       if (e.target.closest("#history-pop") || e.target.closest("#history-panel") || e.target.closest("#history-modal") || e.target.closest("#backup-modal")) return;

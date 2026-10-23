@@ -91,12 +91,29 @@ kbd {
 }
 .preview-banner[hidden] { display: none; }
 .preview-banner span { min-width: 0; }
+.preview-banner-actions { display: flex; gap: 8px; flex: 0 0 auto; }
 .backup-actions { white-space: nowrap; }
+.backup-tabs { display: flex; gap: 6px; margin: 0 0 10px; }
+.backup-tabs .btn[aria-selected="true"] {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+}
+.hist-lib-table tr.backup-group td { background: var(--bg-2); }
 #app-shell.is-preview .view :is(input, textarea, select, .line-drag, .item-drag, [data-act]) {
   pointer-events: none;
 }
 #app-shell.is-preview #report-title { pointer-events: none; }
-.modal-card.history-modal { width: min(920px, calc(100vw - 32px)); }
+.modal-card.history-modal {
+  width: min(920px, calc(100vw - 32px));
+  max-height: min(82vh, 760px);
+  display: flex;
+  flex-direction: column;
+}
+.modal-card.history-modal .table-wrap {
+  overflow: auto;
+  min-height: 0;
+}
 .hist-lib-table { width: 100%; }
 .hist-lib-table td, .hist-lib-table th { vertical-align: top; }
 .hist-lib-path { font-size: 12px; word-break: break-all; max-width: 280px; }

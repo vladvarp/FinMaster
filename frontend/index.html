@@ -229,7 +229,10 @@
       </header>
       <div class="preview-banner" id="preview-banner" hidden>
         <span>Это резервная копия. Её можно только смотреть. Сохраните как отчёт — у нового файла будет свой номер, и тогда его можно править.</span>
-        <button type="button" class="btn small primary" id="preview-save">Сохранить как отчёт</button>
+        <div class="preview-banner-actions">
+          <button type="button" class="btn small" id="preview-back" hidden>Вернуться к отчёту</button>
+          <button type="button" class="btn small primary" id="preview-save">Сохранить как отчёт</button>
+        </div>
       </div>
       <section class="content">
         <div class="view active" id="view-dashboard">
@@ -1441,6 +1444,10 @@
           <button class="btn small primary" type="button" id="backup-create">Создать копию</button>
           <button class="btn" type="button" id="backup-close">Закрыть</button>
         </div>
+      </div>
+      <div class="backup-tabs" role="tablist">
+        <button class="btn small" type="button" id="backup-tab-this" role="tab" aria-selected="true">Этот отчёт</button>
+        <button class="btn small" type="button" id="backup-tab-other" role="tab" aria-selected="false">Другие отчёты</button>
       </div>
       <p id="backup-sum">Копии лежат в Документы\FinMaster\backups — отдельная папка на номер отчёта. Одинаковые названия не смешиваются.</p>
       <div class="table-wrap" id="backup-list"></div>

@@ -155,6 +155,39 @@ def _items(report_id: str) -> list[dict[str, Any]]:
     return rows
 
 
+def others(current_id: str) -> list[dict[str, Any]]:
+    """Папки копий с другим номером. Файл отчёта мог уже быть удалён — копии остаются."""
+    current = valid_id(current_id)
+    groups: list[dict[str, Any]] = []
+    try:
+        names = os.listdir(backups_root())
+    except OSError:
+        return groups
+    for name in names:
+        report_id = valid_id(name)
+        if not report_id or report_id == current or not os.path.isdir(os.path.join(backups_root(), name)):
+            continue
+        items = _items(report_id)
+        if not items:
+            continue
+        meta = _read_meta(report_id)
+        path = str(meta.get("path") or "")
+        title = str(meta.get("title") or "") or str(items[0].get("title") or "") or report_id[:8]
+        groups.append(
+            {
+                "id": report_id,
+                "title": title,
+                "path": path,
+                "exists": bool(path) and os.path.isfile(path) and not is_backup_path(path),
+                "count": len(items),
+                "bytes": sum(int(item.get("bytes") or 0) for item in items),
+                "items": items,
+            }
+        )
+    groups.sort(key=lambda group: str(group["items"][0].get("at") or ""), reverse=True)
+    return groups
+
+
 def describe(doc: dict[str, Any] | None, path: str) -> dict[str, Any]:
     document = doc if isinstance(doc, dict) else {}
     if not path or is_backup_path(path):
@@ -169,6 +202,7 @@ def describe(doc: dict[str, Any] | None, path: str) -> dict[str, Any]:
         "title": str(meta.get("title") or document.get("title") or ""),
         "root": os.path.join(backups_root(), report_id) if report_id else backups_root(),
         "items": _items(report_id) if report_id else [],
+        "others": others(report_id),
         "preview": is_backup_path(path),
     }
 
@@ -211,6 +245,19 @@ def read_backup(report_id: str, name: str) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("Файл копии повреждён.")
     return raw
+
+
+def delete_report_backups(report_id: str) -> int:
+    """Все .fbak одного номера. Сам отчёт и meta.json не трогает."""
+    report_id = valid_id(report_id)
+    if not report_id:
+        raise ValueError("Неизвестный отчёт.")
+    items = _items(report_id)
+    if not items:
+        raise FileNotFoundError("Резервных копий нет.")
+    for item in items:
+        storage.send_to_trash(str(item.get("path") or ""))
+    return len(items)
 
 
 def delete_backup(report_id: str, name: str) -> None:

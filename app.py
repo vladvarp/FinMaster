@@ -913,7 +913,10 @@ def api_backups_delete():
         return jsonify({"error": "Только на этом компьютере."}), 403
     data = request.get_json(silent=True) or {}
     try:
-        report_backup.delete_backup(str(data.get("id") or ""), str(data.get("name") or ""))
+        if data.get("all"):
+            report_backup.delete_report_backups(str(data.get("id") or ""))
+        else:
+            report_backup.delete_backup(str(data.get("id") or ""), str(data.get("name") or ""))
     except FileNotFoundError as exc:
         return jsonify({"error": str(exc)}), 404
     except ValueError as exc:

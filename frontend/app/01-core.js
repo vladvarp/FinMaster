@@ -678,21 +678,113 @@
     }
   }
 
+  let backupPane = "this";
+  let backupCache = null;
+
+  function backupWord(n) {
+    const n10 = n % 10;
+    const n100 = n % 100;
+    if (n10 === 1 && n100 !== 11) return "копия";
+    if (n10 >= 2 && n10 <= 4 && (n100 < 10 || n100 >= 20)) return "копии";
+    return "копий";
+  }
+
+  function reportsWord(n) {
+    const n10 = n % 10;
+    const n100 = n % 100;
+    if (n10 === 1 && n100 !== 11) return "отчёт";
+    if (n10 >= 2 && n10 <= 4 && (n100 < 10 || n100 >= 20)) return "отчёта";
+    return "отчётов";
+  }
+
+  function backupActions(row, reportId) {
+    const id = reportId ? ` data-bak-id="${esc(reportId)}"` : "";
+    const diff = reportId
+      ? ""
+      : `<button class="btn small" type="button" data-bak-diff="${esc(row.name)}" title="До и после относительно открытого отчёта">До/после</button>`;
+    return `<td class="backup-actions">
+      ${diff}
+      <button class="btn small" type="button" data-bak-open="${esc(row.path)}">Смотреть</button>
+      <button class="btn small danger" type="button" data-bak-del="${esc(row.name)}"${id}>Удалить</button>
+    </td>`;
+  }
+
+  function showBackupPane(pane) {
+    backupPane = pane === "other" ? "other" : "this";
+    const current = $("backup-tab-this");
+    const other = $("backup-tab-other");
+    if (current) current.setAttribute("aria-selected", backupPane === "this" ? "true" : "false");
+    if (other) other.setAttribute("aria-selected", backupPane === "other" ? "true" : "false");
+    if (backupCache) renderBackupList(backupCache);
+  }
+
   function renderBackupList(data) {
+    backupCache = data || { id: "", items: [], others: [] };
     const box = $("backup-list");
     const sum = $("backup-sum");
     const make = $("backup-create");
-    if (make) make.disabled = !!data.preview || !state.path || String(state.path).toLowerCase().endsWith(".fbak");
+    const otherBtn = $("backup-tab-other");
+    const groups = backupCache.others || [];
+    if (otherBtn) {
+      otherBtn.textContent = groups.length ? `Другие отчёты · ${groups.length}` : "Другие отчёты";
+    }
+    if (make) {
+      make.hidden = backupPane === "other";
+      make.disabled = !!backupCache.preview || !state.path || String(state.path).toLowerCase().endsWith(".fbak");
+    }
+    const currentTab = $("backup-tab-this");
+    const otherTab = $("backup-tab-other");
+    if (currentTab) currentTab.setAttribute("aria-selected", backupPane === "this" ? "true" : "false");
+    if (otherTab) otherTab.setAttribute("aria-selected", backupPane === "other" ? "true" : "false");
+    if (backupPane === "other") {
+      const copies = groups.reduce((sumN, group) => sumN + (group.count || 0), 0);
+      if (sum) {
+        const reportWord = reportsWord(groups.length);
+        sum.textContent = groups.length
+          ? `Копии других номеров. Если отчёт уже удалён, файлы .fbak остаются. ${groups.length} ${reportWord}, ${copies} ${backupWord(copies)}.`
+          : "Копий других отчётов нет.";
+      }
+      if (!box) return;
+      if (!groups.length) {
+        box.innerHTML = `<div class="empty">Копий других отчётов нет.</div>`;
+        return;
+      }
+      const body = groups
+        .map((group) => {
+          const where = group.exists ? group.path : "файла нет на диске";
+          const head = `<tr class="backup-group ${group.exists ? "" : "is-missing"}">
+            <td colspan="4"><b>${esc(group.title || "Отчёт")}</b><div class="meta">${esc(where)} · ${group.count || 0} ${backupWord(group.count || 0)} · ${esc(fmtBytes(group.bytes))}</div></td>
+            <td class="backup-actions"><button class="btn small danger" type="button" data-bak-del-all="${esc(group.id)}" data-bak-title="${esc(group.title || "Отчёт")}" data-bak-count="${group.count || 0}">Удалить все</button></td>
+          </tr>`;
+          const rows = (group.items || [])
+            .map(
+              (row) => `<tr>
+                <td>${esc(historyTime(row.at))}</td>
+                <td>${esc(row.title || group.title || "Отчёт")}</td>
+                <td class="hist-lib-path">${esc(row.name)}</td>
+                <td>${esc(fmtBytes(row.bytes))}</td>
+                ${backupActions(row, group.id)}
+              </tr>`
+            )
+            .join("");
+          return head + rows;
+        })
+        .join("");
+      box.innerHTML = `<table class="data hist-lib-table"><thead><tr>
+        <th>Когда</th><th>Название</th><th>Файл</th><th>Размер</th><th></th>
+      </tr></thead><tbody>${body}</tbody></table>`;
+      return;
+    }
     if (sum) {
-      const n = (data.items || []).length;
-      const id = data.id ? String(data.id).slice(0, 8) : "нет номера";
-      sum.textContent = data.id
-        ? `${data.root || ""} · номер ${id} · ${n} ${n === 1 ? "копия" : "копий"}`
+      const n = (backupCache.items || []).length;
+      const id = backupCache.id ? String(backupCache.id).slice(0, 8) : "нет номера";
+      sum.textContent = backupCache.id
+        ? `${backupCache.root || ""} · номер ${id} · ${n} ${backupWord(n)}`
         : "Сначала сохраните отчёт — копии привязываются к его номеру, а не к названию.";
     }
     if (!box) return;
-    const rows = data.items || [];
-    if (!data.id) {
+    const rows = backupCache.items || [];
+    if (!backupCache.id) {
       box.innerHTML = `<div class="empty">У несохранённого отчёта копий ещё нет.</div>`;
       return;
     }
@@ -709,11 +801,7 @@
           <td>${esc(row.title || "Отчёт")}</td>
           <td class="hist-lib-path">${esc(row.name)}</td>
           <td>${esc(fmtBytes(row.bytes))}</td>
-          <td class="backup-actions">
-            <button class="btn small" type="button" data-bak-diff="${esc(row.name)}" title="До и после относительно открытого отчёта">До/после</button>
-            <button class="btn small" type="button" data-bak-open="${esc(row.path)}">Смотреть</button>
-            <button class="btn small danger" type="button" data-bak-del="${esc(row.name)}">Удалить</button>
-          </td>
+          ${backupActions(row, "")}
         </tr>`
       )
       .join("")}</tbody></table>`;
@@ -726,6 +814,7 @@
       return;
     }
     if (!state.doc) return;
+    backupPane = "this";
     $("backup-modal")?.classList.add("open");
     try {
       const data = await apiPost("/api/backups", { path: state.path || "", document: state.doc });
@@ -752,17 +841,40 @@
     }
   }
 
-  async function deleteReportBackup(name) {
+  async function deleteReportBackups(reportId, title, count) {
+    const n = Number(count) || 0;
     const ok = await askConfirm({
-      title: "Удалить резервную копию?",
-      text: `Файл «${name}» попадёт в корзину. Сам отчёт останется.`,
+      title: "Удалить все копии?",
+      text: `Все копии отчёта «${title || "Отчёт"}» (${n} ${backupWord(n)}) попадут в корзину. Сам отчёт не удаляется.`,
       ok: "Удалить",
       danger: true,
     });
     if (!ok) return;
     try {
       const data = await apiPost("/api/backups/delete", {
-        id: state.doc?.id || "",
+        id: reportId,
+        all: true,
+        path: state.path || "",
+        document: state.doc,
+      });
+      renderBackupList(data);
+      toast("Копии удалены");
+    } catch (err) {
+      toast(err.message || String(err));
+    }
+  }
+
+  async function deleteReportBackup(name, reportId) {
+    const ok = await askConfirm({
+      title: "Удалить резервную копию?",
+      text: `Файл «${name}» попадёт в корзину. Сам отчёт не удаляется.`,
+      ok: "Удалить",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const data = await apiPost("/api/backups/delete", {
+        id: reportId || state.doc?.id || "",
         name,
         path: state.path || "",
         document: state.doc,
@@ -1554,7 +1666,7 @@
     }
   }
 
-  async function openBackupDiff(name) {
+  async function openBackupDiff(name, reportId) {
     if (!state.doc) return;
     if (!state.desktop) {
       toast("Резервные копии доступны в программе на компьютере");
@@ -1564,7 +1676,7 @@
     const lead = `До — копия «${name}». После — открытый отчёт «${state.doc.title || "Отчёт"}».`;
     showDiffShell(lead, `<div class="empty">Считаю отличия…</div>`);
     try {
-      const res = await apiPost("/api/backups/read", { id: state.doc.id || "", name });
+      const res = await apiPost("/api/backups/read", { id: reportId || state.doc.id || "", name });
       if (seq !== diffSeq) return;
       if (!res?.doc || typeof res.doc !== "object") throw new Error("Файл копии повреждён.");
       paintDiff(res.doc, state.doc);
