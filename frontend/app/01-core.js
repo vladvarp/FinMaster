@@ -509,15 +509,7 @@
     updateHistoryButtons();
     persistHistorySoon();
     history.busy = false;
-    clearTimeout(state.autosaveTimer);
-    if (state.path) {
-      // Сразу пишем файл: иначе при закрытии без автосохранения отмена теряется.
-      history.saveChain = Promise.resolve(history.saveChain)
-        .then(() => save({ silent: true }))
-        .catch(() => false);
-    } else {
-      scheduleAutosave();
-    }
+    scheduleAutosave();
     if (toastText) toast(toastText);
     return true;
   }
