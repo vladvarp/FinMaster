@@ -1,6 +1,6 @@
 Option Explicit
-' Ждёт закрытия FinMaster и скачивает последний снимок: FinMaster.exe /update
-Dim sh, fso, dir, exe, pid, i, env
+' Ждёт закрытия FinMaster. Снимок качает Python из папки, не код внутри FinMaster.exe.
+Dim sh, fso, dir, exe, pid, i, env, pyw
 
 Set sh = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -24,6 +24,13 @@ If pid <> "" Then
 End If
 
 sh.CurrentDirectory = dir
+' Снимок качает Python из папки: в FinMaster.exe логика скачивания старая.
+pyw = Pythonw(sh, fso, dir)
+If pyw <> "" Then
+  sh.Run """" & pyw & """ -c ""from backend.setup import update_folder; update_folder()""", 1, False
+  WScript.Quit 0
+End If
+
 ' Иначе exe думает, что он продолжение уже открытой копии, и не стартует.
 Set env = sh.Environment("PROCESS")
 env("PYINSTALLER_RESET_ENVIRONMENT") = "1"
@@ -34,6 +41,20 @@ env.Remove "_PYI_ARCHIVE_FILE"
 env.Remove "_PYI_SPLASH_IPC"
 On Error GoTo 0
 sh.Run """" & exe & """ /update", 1, False
+
+Function Pythonw(sh, fso, dir)
+  Dim docs, beside, folder
+  Pythonw = ""
+  beside = dir & "\python\pythonw.exe"
+  If fso.FileExists(beside) Then
+    Pythonw = beside
+    Exit Function
+  End If
+  docs = sh.SpecialFolders("MyDocuments")
+  If docs = "" Then Exit Function
+  folder = docs & "\FinMaster\python\pythonw.exe"
+  If fso.FileExists(folder) Then Pythonw = folder
+End Function
 
 Function PidAlive(id)
   Dim svc, found

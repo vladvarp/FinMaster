@@ -336,12 +336,19 @@ def _blob(path: str) -> str:
 
 
 def _changed(root: str, sha: str) -> list[str]:
+    """Файлы снимка, которых нет локально или которые не совпали с коммитом."""
     changed: list[str] = []
     for rel, blob in _tree(sha).items():
+        if _hidden_entry(rel):
+            continue
         local = _rel_target(root, rel)
         if not local:
             continue
-        if not os.path.isfile(local) or _blob(local) != blob:
+        try:
+            same = os.path.isfile(local) and _blob(local) == blob
+        except OSError:
+            same = False
+        if not same:
             changed.append(rel)
     changed.sort()
     return changed
@@ -1335,8 +1342,23 @@ def _update_wait() -> int | None:
     return 0
 
 
-def _refresh_snapshot(dest: str, wait_pid: int, copy_exe: bool = True) -> None:
-    """Полный снимок последнего коммита — то же скачивание, что при установке."""
+def _incremental_update(dest: str) -> bool:
+    """Новая версия без пометки о повреждении: качаем только отличия."""
+    if _broken_flag(dest):
+        return False
+    try:
+        _sha, when = _remote_head(8)
+    except Exception:
+        return False
+    remote = _parse_when(when)
+    local = _parse_when(_read_stamp(dest))
+    if local is None or remote is None:
+        return False
+    return remote > local
+
+
+def _refresh_snapshot(dest: str, wait_pid: int, copy_exe: bool = True, full: bool = True) -> None:
+    """full — весь снимок. Иначе только файлы, которых нет или которые отличаются."""
 
     def work(report: Callable[[str, float | None], None], stop: Callable[[], bool]) -> None:
         if wait_pid:
@@ -1348,8 +1370,14 @@ def _refresh_snapshot(dest: str, wait_pid: int, copy_exe: bool = True) -> None:
         sha, when = _remote_head(20)
         if stop():
             raise _Stop()
-        report("Скачиваю файлы…", 16)
-        _download_files(sha, dest, _snapshot_files(sha), report, stop, workers=40, retries=20)
+        if full:
+            listed = _snapshot_files(sha)
+            report("Скачиваю файлы…", 16)
+        else:
+            listed = _changed(dest, sha)
+            report("Скачиваю изменённые файлы…" if listed else "Изменённых файлов нет…", 16)
+        if listed:
+            _download_files(sha, dest, listed, report, stop, workers=40, retries=20)
         if copy_exe:
             report("Копирую FinMaster.exe…", 90)
             _copy_self(dest)
@@ -1370,7 +1398,7 @@ def update_folder(dest: str = "") -> None:
         _tell("Рядом нет установленной программы")
         raise SystemExit(1)
     try:
-        _refresh_snapshot(dest, 0, copy_exe=False)
+        _refresh_snapshot(dest, 0, copy_exe=False, full=not _incremental_update(dest))
     except _Stop:
         raise SystemExit(1)
     except SystemExit:
@@ -1390,7 +1418,7 @@ def _apply_update(wait_pid: int) -> int | None:
         _tell("Рядом нет установленной программы")
         return 1
     try:
-        _refresh_snapshot(dest, wait_pid)
+        _refresh_snapshot(dest, wait_pid, full=not _incremental_update(dest))
     except _Stop:
         return 1
     except Exception as exc:
