@@ -1872,7 +1872,7 @@ html[data-theme="dark"] .line-menu { background: #1b2538; border-color: var(--li
 .dash-day-sums b { font-size: 14px; }
 .dash-day-table { overflow: auto; min-height: 0; }
   width: min(980px, calc(100vw - 32px));
-}
+
 .modal-card h3 { margin: 0 0 8px; }
 .modal-title-row {
   display: flex;
@@ -1887,6 +1887,10 @@ html[data-theme="dark"] .line-menu { background: #1b2538; border-color: var(--li
 .modal-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 #confirm-modal { z-index: 72; }
 #confirm-modal.open { z-index: 10140 !important; }
+#program-about-modal.open { z-index: 10160 !important; }
+.modal-card p.program-about-copy { color: var(--ink); font-weight: 650; }
+.program-about-links { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.program-about-links a { color: var(--accent); }
 .modal-card.confirm-modal { width: min(440px, 100%); }
 
 .report-settings-modal {

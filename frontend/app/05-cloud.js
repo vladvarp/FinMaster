@@ -1575,11 +1575,13 @@
       state.updateDamaged = !!data.damaged;
       state.updateIntegrity = !!data.integrity;
       state.updateOffline = !!data.offline;
+      state.updateYear = Number(data.year) || 0;
     } catch {
       state.updateReady = false;
       state.updateDamaged = false;
       state.updateIntegrity = false;
       state.updateOffline = false;
+      state.updateYear = 0;
       return false;
     }
     const fromRepo = data && data.enabled === false;
@@ -1589,6 +1591,7 @@
       state.updateDamaged = false;
       state.updateIntegrity = false;
       state.updateOffline = false;
+      state.updateYear = 0;
     }
     paintUpdateButton();
     return true;
@@ -1752,6 +1755,7 @@
           ],
           ok: "Обновить",
           cancel: "Не сейчас",
+          about: true,
         }
       : {
           title: "Обновление",
@@ -1765,6 +1769,7 @@
           ok: "Скачать",
           cancel: "Отмена",
           extra: versionsMatch ? "Проверить целостность" : "",
+          about: true,
         });
     if (!ok) return;
     await flushPendingSaves();
@@ -1808,12 +1813,14 @@
 
   function closeConfirm(ok) {
     $("confirm-modal")?.classList.remove("open");
+    const aboutBtn = $("confirm-about");
+    if (aboutBtn) aboutBtn.hidden = true;
     const wait = confirmWait;
     confirmWait = null;
     wait?.(!!ok);
   }
 
-  function askConfirm({ title, text, lines, ok = "Продолжить", cancel = "Отмена", danger = false, extra = "" } = {}) {
+  function askConfirm({ title, text, lines, ok = "Продолжить", cancel = "Отмена", danger = false, extra = "", about = false } = {}) {
     closeConfirm(false);
     return new Promise((resolve) => {
       confirmWait = resolve;
@@ -1838,6 +1845,8 @@
         okBtn.className = danger ? "btn danger" : "btn primary";
       }
       if (cancelBtn) cancelBtn.textContent = cancel;
+      const aboutBtn = $("confirm-about");
+      if (aboutBtn) aboutBtn.hidden = !about;
       confirmExtra(extra, (event) => checkProgramIntegrity(event.currentTarget));
       $("confirm-modal")?.classList.add("open");
       queueMicrotask(() => okBtn?.focus());
@@ -3564,6 +3573,33 @@
       if (ok) await createNew();
     });
     $("confirm-cancel")?.addEventListener("click", () => closeConfirm(false));
+    $("confirm-about")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const copy = $("program-about-copy");
+      if (copy) copy.textContent = state.updateYear ? `© ${state.updateYear} V.Ar Production` : "© V.Ar Production";
+      $("program-about-modal")?.classList.add("open");
+    });
+    const closeProgramAbout = () => $("program-about-modal")?.classList.remove("open");
+    $("program-about-close")?.addEventListener("click", closeProgramAbout);
+    $("program-about-modal")?.addEventListener("click", async (event) => {
+      if (event.target === $("program-about-modal")) {
+        closeProgramAbout();
+        return;
+      }
+      const link = event.target.closest("[data-link]");
+      if (!link) return;
+      event.preventDefault();
+      if (!state.desktop) {
+        window.open(link.href, "_blank", "noopener");
+        return;
+      }
+      try {
+        await apiPost("/api/open-link", { id: link.dataset.link });
+      } catch (err) {
+        toast(err && err.message ? err.message : "Не удалось открыть ссылку");
+      }
+    });
     $("confirm-ok")?.addEventListener("click", () => closeConfirm(true));
     $("confirm-text")?.addEventListener("click", (event) => {
       const info = event.target.closest(".confirm-info");

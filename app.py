@@ -104,6 +104,7 @@ _DESK_DENY = {
     "/api/quit",
     "/api/update",
     "/api/integrity",
+    "/api/open-link",
     "/api/open-folder",
     "/api/dialog/open",
     "/api/dialog/save",
@@ -2038,9 +2039,29 @@ def api_window_fullscreen():
 def api_update_status():
     if not _is_local():
         return jsonify({"error": "Только в окне программы."}), 403
-    from backend.setup import update_status
+    from backend.setup import installed_year, update_status
 
-    return jsonify(update_status(ROOT))
+    payload = update_status(ROOT)
+    payload["year"] = installed_year(ROOT)
+    return jsonify(payload)
+
+
+_ABOUT_LINKS = {
+    "telegram": "https://t.me/Var_production",
+    "github": "https://github.com/vladvarp/FinMaster",
+}
+
+
+@app.post("/api/open-link")
+def api_open_link():
+    if not _is_local():
+        return jsonify({"error": "Только в окне программы."}), 403
+    data = request.get_json(silent=True) or {}
+    url = _ABOUT_LINKS.get(str(data.get("id") or ""))
+    if not url:
+        return jsonify({"error": "Неизвестная ссылка."}), 400
+    webbrowser.open(url)
+    return jsonify({"ok": True})
 
 
 @app.post("/api/integrity")

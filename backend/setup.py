@@ -1468,6 +1468,14 @@ def offer_update() -> None:
     return
 
 
+def installed_year(root: str) -> int | None:
+    """Год версии из первой строки commit.txt."""
+    moment = _parse_when(_read_stamp(root))
+    if moment is None:
+        return None
+    return moment.astimezone().year
+
+
 def _local_version(root: str) -> str:
     """Дата из commit.txt. Если строка не разбирается, показываем её как есть."""
     raw = _read_stamp(root)

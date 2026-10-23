@@ -851,12 +851,34 @@
 
   <div class="modal" id="confirm-modal">
     <div class="modal-card confirm-modal">
-      <h3 id="confirm-title">Подтверждение</h3>
+      <div class="modal-title-row">
+        <h3 id="confirm-title">Подтверждение</h3>
+        <button class="btn" type="button" id="confirm-about" hidden>О программе</button>
+      </div>
       <p id="confirm-text"></p>
       <div class="modal-actions">
         <button class="btn" type="button" id="confirm-cancel">Отмена</button>
         <button class="btn primary" type="button" id="confirm-ok">Продолжить</button>
       </div>
+    </div>
+  </div>
+
+  <div class="modal" id="program-about-modal">
+    <div class="modal-card confirm-modal">
+      <div class="modal-title-row">
+        <h3>О программе</h3>
+        <button class="btn icon" type="button" id="program-about-close" title="Закрыть" aria-label="Закрыть">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <p class="program-about-copy" id="program-about-copy">© V.Ar Production</p>
+      <p>Лицензия GNU GPL версии 3. Программу можно использовать, изучать и изменять. Текст лицензии — файл LICENSE в папке программы.</p>
+      <p class="program-about-links">
+        <span>Telegram <a href="https://t.me/Var_production" data-link="telegram">https://t.me/Var_production</a></span>
+        <span>GitHub <a href="https://github.com/vladvarp/FinMaster" data-link="github">https://github.com/vladvarp/FinMaster</a></span>
+      </p>
     </div>
   </div>
 
