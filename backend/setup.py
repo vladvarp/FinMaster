@@ -393,7 +393,7 @@ def _download_files(
     files: list[str],
     report: Callable[[str, float | None], None],
     stop: Callable[[], bool],
-    workers: int = 10,
+    workers: int = 40,
     retries: int = 1,
 ) -> None:
     listed = _without_self(files)
@@ -900,7 +900,7 @@ def _perform_install(dest: str, desktop: bool, start_menu: bool) -> str:
         if stop():
             raise _Stop()
         report("Скачиваю файлы…", 16)
-        _download_files(sha, dest, _snapshot_files(sha), report, stop, workers=20, retries=20)
+        _download_files(sha, dest, _snapshot_files(sha), report, stop, workers=40, retries=20)
         report("Копирую FinMaster.exe…", 86)
         _copy_self(dest)
         if desktop or start_menu:
@@ -1349,7 +1349,7 @@ def _refresh_snapshot(dest: str, wait_pid: int, copy_exe: bool = True) -> None:
         if stop():
             raise _Stop()
         report("Скачиваю файлы…", 16)
-        _download_files(sha, dest, _snapshot_files(sha), report, stop, workers=20, retries=20)
+        _download_files(sha, dest, _snapshot_files(sha), report, stop, workers=40, retries=20)
         if copy_exe:
             report("Копирую FinMaster.exe…", 90)
             _copy_self(dest)
