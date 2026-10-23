@@ -1,6 +1,6 @@
 Option Explicit
 ' Ждёт закрытия FinMaster. Снимок качает Python из папки, не код внутри FinMaster.exe.
-Dim sh, fso, dir, exe, pid, i, env, pyw
+Dim sh, fso, dir, exe, pid, i, env, pyw, pyPath, code
 
 Set sh = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -25,9 +25,12 @@ End If
 
 sh.CurrentDirectory = dir
 ' Снимок качает Python из папки: в FinMaster.exe логика скачивания старая.
+' Встроенный Python не кладёт текущую папку в путь, без этого модуль не находится и процесс сразу гаснет.
 pyw = Pythonw(sh, fso, dir)
 If pyw <> "" Then
-  sh.Run """" & pyw & """ -c ""from backend.setup import update_folder; update_folder()""", 1, False
+  pyPath = Replace(Replace(dir, "'", "\'"), "\", "\\")
+  code = "import sys; sys.path.insert(0, '" & pyPath & "'); exec('try:\n from backend.setup import update_folder\n update_folder()\nexcept SystemExit:\n raise\nexcept Exception as exc:\n import ctypes\n ctypes.windll.user32.MessageBoxW(None, str(exc)[:800], chr(70)+chr(105)+chr(110)+chr(77)+chr(97)+chr(115)+chr(116)+chr(101)+chr(114), 16)')"
+  sh.Run """" & pyw & """ -c """ & code & """", 1, False
   WScript.Quit 0
 End If
 
