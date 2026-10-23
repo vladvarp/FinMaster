@@ -484,7 +484,19 @@ def faq_root():
 
 @app.get("/faq/")
 def faq_index():
-    return _no_cache(send_from_directory(FAQ_DIR, "index.html"))
+    path = os.path.join(FAQ_DIR, "index.html")
+    with open(path, encoding="utf-8") as handle:
+        html = handle.read()
+    year = None
+    try:
+        from backend.setup import installed_year
+
+        year = installed_year(ROOT)
+    except Exception:
+        year = None
+    if year:
+        html = html.replace("© V.Ar Production", f"© {year} V.Ar Production", 1)
+    return _no_cache(app.response_class(html, mimetype="text/html; charset=utf-8"))
 
 
 @app.get("/faq/<path:name>")

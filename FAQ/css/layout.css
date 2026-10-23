@@ -8,11 +8,31 @@
   position: sticky;
   top: 0;
   height: 100vh;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--side);
   border-right: 1px solid var(--line);
-  padding: 18px 14px 28px;
+  padding: 18px 14px 14px;
 }
+
+#nav {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.side-copy {
+  flex: 0 0 auto;
+  margin: 12px 8px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.side-copy a { color: var(--accent); }
 
 .brand {
   display: flex;
