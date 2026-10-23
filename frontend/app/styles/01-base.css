@@ -663,6 +663,7 @@ input[type="search"]::-webkit-search-decoration {
   text-align: right;
 }
 #confirm-text .confirm-line.warn b { color: #ef4444; }
+#confirm-text .confirm-line.ok b { color: var(--ok); }
 #confirm-text .confirm-info {
   width: 22px;
   height: 22px;

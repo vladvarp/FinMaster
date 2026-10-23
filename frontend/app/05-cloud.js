@@ -1644,6 +1644,7 @@
       textEl.appendChild(line);
     }
     line.classList.toggle("warn", !ok);
+    line.classList.toggle("ok", !!ok);
     line.innerHTML = `<i>Проверка</i><b>${esc(value)}${ok ? "" : infoButton()}</b>`;
   }
 
@@ -1697,7 +1698,7 @@
       const broken = !data.ok;
       state.updateIntegrity = broken;
       paintUpdateButton();
-      paintIntegrity(data.ok, broken ? "Целостность программы нарушена" : "Файлы совпадают с GitHub");
+      paintIntegrity(data.ok, broken ? "Целостность программы нарушена" : "Целостность не нарушена");
       if (broken) toast("Целостность программы нарушена");
       else $("confirm-diff")?.classList.remove("open");
     } catch (err) {
