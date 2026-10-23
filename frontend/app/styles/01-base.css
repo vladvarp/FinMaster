@@ -302,7 +302,21 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   border-color: var(--accent-2);
   color: var(--ink);
 }
-.brand svg { flex: 0 0 auto; }
+.brand svg, .brand img { flex: 0 0 auto; display: block; width: 38px; height: 38px; }
+.file-menu-login {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+.file-menu-login:hover { background: color-mix(in srgb, var(--accent) 16%, var(--card)); }
 .brand h1 {
   margin: 0;
   font-size: 18px;

@@ -1630,7 +1630,9 @@
   function paintIntegrity(ok, value) {
     const textEl = $("confirm-text");
     if (!textEl) return;
-    let line = textEl.querySelector(".confirm-integrity");
+    const lines = [...textEl.querySelectorAll(".confirm-integrity")];
+    let line = lines[0];
+    lines.slice(1).forEach((extra) => extra.remove());
     if (!line) {
       line = document.createElement("span");
       line.className = "confirm-line confirm-integrity";
@@ -1725,7 +1727,7 @@
     const latest = state.updateLatest || "дата неизвестна";
     const versionsMatch = !ready && !state.updateDamaged && !!state.updateCurrent && state.updateCurrent === state.updateLatest;
     const integrityLine = state.updateIntegrity
-      ? { label: "Проверка", value: "Целостность программы нарушена", warn: true, info: true }
+      ? { label: "Проверка", value: "Целостность программы нарушена", warn: true, info: true, integrity: true }
       : null;
     const ok = await askConfirm(ready
       ? {
@@ -1817,7 +1819,7 @@
       if (textEl) {
         if (lines && lines.length) {
           textEl.innerHTML = lines.map((row) =>
-            `<span class="confirm-line${row.warn ? " warn" : ""}"><i>${esc(row.label)}</i><b>${esc(row.value)}${row.info ? infoButton() : ""}</b></span>`
+            `<span class="confirm-line${row.warn ? " warn" : ""}${row.integrity ? " confirm-integrity" : ""}"><i>${esc(row.label)}</i><b>${esc(row.value)}${row.info ? infoButton() : ""}</b></span>`
           ).join("");
         } else {
           textEl.textContent = text || "";

@@ -85,11 +85,7 @@
         </button>
         <div class="brand-wrap">
           <button type="button" class="brand" id="btn-file-menu" title="Файл: новый, открыть, сохранить" aria-haspopup="menu" aria-expanded="false" aria-controls="file-menu">
-            <svg width="38" height="38" viewBox="0 0 42 42" fill="none" aria-hidden="true">
-              <rect width="42" height="42" rx="12" fill="#0f766e"/>
-              <path d="M12 28V14h7.5a4.5 4.5 0 010 9H12" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/>
-              <path d="M12 23h18M22 23v7" stroke="#99f6e4" stroke-width="2.4" stroke-linecap="round"/>
-            </svg>
+            <img src="/favicon.svg" width="38" height="38" alt="" />
             <div class="brand-text">
               <h1>FinMaster</h1>
               <span>Учёт заказов</span>
@@ -100,6 +96,11 @@
             <button type="button" class="btn ghost" id="btn-open" role="menuitem">Открыть</button>
             <button type="button" class="btn ghost" id="btn-save" role="menuitem">Сохранить</button>
             <button type="button" class="btn ghost" id="btn-save-as" role="menuitem">Сохранить как</button>
+            <div class="file-menu-sep" role="separator"></div>
+            <label class="file-menu-login" title="При входе в Windows FinMaster откроется сам, без чёрного окна">
+              <span>Автозагрузка</span>
+              <input type="checkbox" id="remote-windows-login" />
+            </label>
             <div class="file-menu-sep" id="runtime-menu-sep" role="separator"></div>
             <button type="button" class="btn ghost" id="btn-runtime" role="menuitem">Среда запуска</button>
           </div>
@@ -1104,10 +1105,6 @@
           <label class="remote-autostart">
             <input type="checkbox" id="remote-ngrok" />
             Через интернет (ngrok)
-          </label>
-          <label class="remote-autostart" title="При входе в Windows FinMaster откроется сам, без чёрного окна">
-            <input type="checkbox" id="remote-windows-login" />
-            Автозагрузка
           </label>
           <div class="remote-fold collapsed" data-remote-fold>
             <button type="button" class="remote-fold-head">
