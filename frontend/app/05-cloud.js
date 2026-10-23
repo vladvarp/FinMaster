@@ -1574,6 +1574,7 @@
     } catch {
       state.updateReady = false;
       state.updateDamaged = false;
+      return false;
     }
     const fromRepo = data && data.enabled === false;
     btn.disabled = fromRepo;
@@ -1592,6 +1593,7 @@
           : "Обновить программу";
     btn.title = title;
     btn.setAttribute("aria-label", title);
+    return true;
   }
 
   async function runProgramUpdate() {
@@ -2502,7 +2504,22 @@
     });
     $("btn-help").addEventListener("click", openHelp);
     $("btn-guide")?.addEventListener("click", openGuide);
-    $("btn-update")?.addEventListener("click", () => askProgramUpdate());
+    $("btn-update")?.addEventListener("click", async () => {
+      const btn = $("btn-update");
+      if (!btn || btn.dataset.busy === "1") return;
+      btn.dataset.busy = "1";
+      try {
+        const checked = await refreshUpdateButton();
+        if (!checked) {
+          toast("Не удалось проверить обновление");
+          return;
+        }
+        if (btn.disabled) return;
+        await askProgramUpdate();
+      } finally {
+        delete btn.dataset.busy;
+      }
+    });
     $("help-close").addEventListener("click", () => $("help-modal").classList.remove("open"));
     $("help-modal").addEventListener("click", (e) => {
       if (e.target === $("help-modal")) $("help-modal").classList.remove("open");
