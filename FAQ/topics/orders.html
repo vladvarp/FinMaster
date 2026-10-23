@@ -2,7 +2,17 @@
 <p class="lead">Главный раздел. Заказ — карточка с общими полями и таблицей позиций. Отсюда считаются дашборд, касса, календарь и снимки.</p>
 <figure class="shot">
   <div class="live" data-sel="#view-orders > .toolbar" aria-label="Панель заказов"></div>
-  <figcaption>Панель заказов из программы.</figcaption>
+  <figcaption>Панель над списком карточек.</figcaption>
+</figure>
+<figure class="shot">
+  <div class="live" data-sel="#btn-add-order, #btn-share-many, #order-sort, #btn-order-filter, #btn-line-filter" data-flow="row" aria-label="Кнопки заказов"></div>
+  <figcaption>
+    <strong>+ Заказ</strong> — новая карточка, список прокручивается к ней.<br>
+    <strong>Снимок заказов</strong> — одно окно сразу на несколько заказов.<br>
+    <strong>Сортировка</strong> — по дате, номеру, заказчику, сумме.<br>
+    <strong>Воронка</strong> — Все, С долгом, Оплаченные, Этот месяц, Без цены.<br>
+    <strong>Позиции</strong> — статус, тип, продукт, единица, заказчик, оплата, скидка и вид строки. «Исключение» прячет подходящие.
+  </figcaption>
 </figure>
 <figure class="shot">
   <div class="live" data-block="order" aria-label="Пример заказа"></div>
@@ -46,3 +56,7 @@
 <h2>Действия с заказом</h2>
 <p>«Снимок» — картинка для заказчика. «Дублировать» — новый заказ с тем же номером и « - копия» в названии. «Удалить» можно отменить тостом. Кнопка «Снимок заказов» в тулбаре собирает снимок сразу по нескольким заказам.</p>
 <p>Позиции с расходным типом живут в отдельном блоке под таблицей. Как они считаются — в разделе «Налоги и затраты».</p>
+<figure class="shot">
+  <div class="live" data-sel="#formula-profile-modal, #formula-profile-del-modal" aria-label="Профили формул"></div>
+  <figcaption>Имя нового профиля формулы и удаление отмеченных. Профили общие для всех отчётов на этом компьютере.</figcaption>
+</figure>

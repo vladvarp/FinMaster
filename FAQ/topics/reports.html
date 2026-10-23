@@ -2,11 +2,20 @@
 <p class="lead">Один отчёт — один файл <code>.fmaster</code>. Внутри заказы, справочники, заказчики, календарь, схемы калькулятора и страницы презентации.</p>
 <figure class="shot">
   <div class="live" data-sel="#file-menu" aria-label="Меню файла"></div>
-  <figcaption>Меню логотипа: новый, открыть, сохранить, сохранить как.</figcaption>
+  <figcaption>
+    Меню логотипа. <strong>Новый</strong> — <kbd>Ctrl</kbd>+<kbd>N</kbd>. <strong>Открыть</strong> — <kbd>Ctrl</kbd>+<kbd>O</kbd>. <strong>Сохранить</strong> — <kbd>Ctrl</kbd>+<kbd>S</kbd>. <strong>Сохранить как</strong> — <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>.
+    <strong>Среда запуска</strong> видна, только если программа идёт не из своей папки <code>python</code>: можно переключить следующий запуск на Python, уже стоящий в Windows, и увидеть, каких библиотек нет.
+  </figcaption>
 </figure>
 <figure class="shot">
   <div class="live" data-sel="#btn-home, #btn-q-new, #btn-q-open, #btn-q-save, #btn-q-save-as" data-flow="row" aria-label="Кнопки файла"></div>
-  <figcaption>Те же команды в верхней панели.</figcaption>
+  <figcaption>
+    <strong>Домой</strong> — к списку отчётов, не закрывая программу.<br>
+    <strong>Новый</strong> — пустой отчёт. Если текущий не сохранён, программа спросит.<br>
+    <strong>Открыть</strong> — выбрать файл <code>.fmaster</code>.<br>
+    <strong>Сохранить</strong> — записать в известный путь. Точка на значке — файл изменён. Пока путь не выбран, сработает «сохранить как».<br>
+    <strong>Сохранить как</strong> — новый путь и имя. Резервная копия <code>.fbak</code> этой кнопкой сохраняется уже как обычный отчёт.
+  </figcaption>
 </figure>
 
 <h2>Создать, открыть, сохранить</h2>
@@ -32,3 +41,21 @@
 <h2>Резервная копия</h2>
 <p>Файл <code>.fbak</code> открывается тем же двойным щелчком, но только для просмотра. Править его нельзя, пока он не сохранён как новый отчёт. Открытая копия не попадает в список недавних.</p>
 <p>Если окно уже открыто, вторая копия программы не стартует: файл передаётся в открытое окно. Если в текущем отчёте есть несохранённые правки, программа сначала спросит, сохранять ли их.</p>
+<figure class="shot">
+  <div class="live" data-sel="#preview-banner" aria-label="Полоса резервной копии"></div>
+  <figcaption>Полоса появляется, когда открыт файл <code>.fbak</code>. Его можно только смотреть. <strong>Сохранить как отчёт</strong> делает новый <code>.fmaster</code> со своим номером.</figcaption>
+</figure>
+
+<h2>Вопросы при закрытии и создании</h2>
+<figure class="shot">
+  <div class="live" data-sel="#close-modal" aria-label="Сохранить отчёт"></div>
+  <figcaption><strong>Отмена</strong> остаётся в программе. <strong>Не сохранять</strong> закрывает и теряет правки. <strong>Сохранить</strong> пишет файл и закрывает.</figcaption>
+</figure>
+<figure class="shot">
+  <div class="live" data-sel="#new-modal" aria-label="Новый отчёт"></div>
+  <figcaption><strong>Отмена</strong>. <strong>Сохранить и создать</strong> — записать текущий и открыть пустой. <strong>Создать без сохранения</strong> — пустой отчёт, текущие правки не пишутся.</figcaption>
+</figure>
+<figure class="shot">
+  <div class="live" data-sel="#confirm-modal" aria-label="Подтверждение"></div>
+  <figcaption>Общий вопрос, например перед сменой пометки типа. <strong>Отмена</strong> и <strong>Продолжить</strong>.</figcaption>
+</figure>

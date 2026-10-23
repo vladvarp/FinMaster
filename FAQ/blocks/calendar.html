@@ -139,14 +139,14 @@
     const VEIL = "rgba(217,119,6,.45)";
     let viewDays = 16;
     const kitchen = { from: 7, span: 7 };
-    const top = { off: 4, span: 3 };
+    const counter = { off: 4, span: 3 };
     const pause = { off: 2, span: 3 };
     const sign = { from: 0, span: 4 };
     const mirror = { from: 4, span: 3 };
     const shelf = { from: 14, span: 2 };
     const light = { from: 8, ahead: false };
     const cornice = { from: 6, ahead: true };
-    let origin = 0;
+    let viewFrom = 0;
     let kitchenHidden = false;
     const days = [];
     const wd = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
@@ -171,9 +171,9 @@
       grid.innerHTML = "";
       document.getElementById("board").style.setProperty("--days", viewDays);
       for (let i = 0; i < viewDays; i++) {
-        const d = day(origin + i);
+        const d = day(viewFrom + i);
         const weekend = d.getDay() === 0 || d.getDay() === 6;
-        const today = origin + i === TODAY;
+        const today = viewFrom + i === TODAY;
         const cell = document.createElement("div");
         cell.className = "gantt-day" + (weekend ? " is-weekend" : "") + (today ? " is-today" : "");
         const text = label(d);
@@ -183,8 +183,8 @@
         col.className = "gantt-grid-col" + (weekend ? " is-weekend" : "") + (today ? " is-today" : "");
         grid.appendChild(col);
       }
-      document.getElementById("today-line").style.left = "calc((" + (TODAY - origin) + " + 0.5) / " + viewDays + " * 100%)";
-      document.getElementById("today-line").hidden = TODAY < origin || TODAY >= origin + viewDays;
+      document.getElementById("today-line").style.left = "calc((" + (TODAY - viewFrom) + " + 0.5) / " + viewDays + " * 100%)";
+      document.getElementById("today-line").hidden = TODAY < viewFrom || TODAY >= viewFrom + viewDays;
     }
 
     function fmt(d) {
@@ -203,10 +203,10 @@
 
     function clampInner() {
       if (kitchen.span < 2) kitchen.span = 2;
-      if (top.span < 1) top.span = 1;
-      if (top.span > kitchen.span) top.span = kitchen.span;
-      if (top.off < 0) top.off = 0;
-      if (top.off + top.span > kitchen.span) top.off = Math.max(0, kitchen.span - top.span);
+      if (counter.span < 1) counter.span = 1;
+      if (counter.span > kitchen.span) counter.span = kitchen.span;
+      if (counter.off < 0) counter.off = 0;
+      if (counter.off + counter.span > kitchen.span) counter.off = Math.max(0, kitchen.span - counter.span);
       if (pause.span < 1) pause.span = 1;
       if (pause.span > kitchen.span) pause.span = kitchen.span;
       if (pause.off < 0) pause.off = 0;
@@ -218,7 +218,7 @@
     }
 
     function topAbs() {
-      return kitchen.from + top.off;
+      return kitchen.from + counter.off;
     }
 
     function splitAround(from, span, cutFrom, cutSpan) {
@@ -251,7 +251,7 @@
     function orderHatch() {
       const p0 = pauseAbs();
       const top0 = topAbs();
-      const top1 = top0 + top.span;
+      const top1 = top0 + counter.span;
       const daysHit = [];
       for (let d = p0; d < p0 + pause.span; d++) {
         const inTop = d >= top0 && d < top1;
@@ -262,7 +262,7 @@
     }
 
     function bar(o) {
-      if (o.from + o.span <= origin || o.from >= origin + viewDays) return "";
+      if (o.from + o.span <= viewFrom || o.from >= viewFrom + viewDays) return "";
       const cls = ["gantt-bar"];
       if (o.pause) cls.push("is-pause");
       if (o.derived) cls.push("is-derived");
@@ -279,7 +279,7 @@
       if (o.hEnd) hands += '<i class="gantt-h end" data-cal-drag="' + o.hEnd + '"></i>';
       const title = String(o.title || "").replace(/"/g, "");
       return '<div class="' + cls.join(" ") + '" data-bar="' + o.id + '"' + dragAttr +
-        ' style="--from:' + (o.from - origin) + ";--span:" + o.span + ";--bar:" + o.color + ";--a:100%;--veil:" + (o.veil || "transparent") + ";--ink:" + o.color + '"' +
+        ' style="--from:' + (o.from - viewFrom) + ";--span:" + o.span + ";--bar:" + o.color + ";--a:100%;--veil:" + (o.veil || "transparent") + ";--ink:" + o.color + '"' +
         ' title="' + title + '">' + hands + "</div>";
     }
 
@@ -367,14 +367,14 @@
           title: "Пауза заказа из позиций: в эти дни ни одна позиция не работает. Тянуть её нельзя",
         })).join("");
         const topFrom = topAbs();
-        const liveToday = TODAY >= topFrom && TODAY < topFrom + top.span;
+        const liveToday = TODAY >= topFrom && TODAY < topFrom + counter.span;
         host.top.innerHTML = bar({
           id: "top",
           from: topFrom,
-          span: top.span,
+          span: counter.span,
           color: LIVE,
           live: liveToday,
-          deadline: topFrom + top.span - 1 > TODAY,
+          deadline: topFrom + counter.span - 1 > TODAY,
           drag: "move",
           hStart: "start",
           hEnd: "end",
@@ -459,7 +459,7 @@
           add(aheadDay, 1, lane + 1, STRIPE, "", " is-pause is-open-end");
         } else add(item.from, Math.max(1, TODAY - item.from + 1), lane + 1, WORK, "", " is-open-end");
       });
-      const left = ((origin + 14) / FULL) * 100;
+      const left = ((viewFrom + 14) / FULL) * 100;
       const width = (viewDays / FULL) * 100;
       const box = document.getElementById("nav-view-box");
       box.style.left = left + "%";
@@ -468,8 +468,8 @@
       document.getElementById("shade-r").style.left = (left + width) + "%";
       document.getElementById("shade-r").style.width = Math.max(0, 100 - left - width) + "%";
       document.getElementById("nav-today").style.left = (((14 + TODAY) + 0.5) / FULL * 100) + "%";
-      const a = day(origin);
-      const b = day(origin + viewDays - 1);
+      const a = day(viewFrom);
+      const b = day(viewFrom + viewDays - 1);
       document.getElementById("nav-view").textContent = "видно " + viewDays + " дн. · " + fmt(a) + " — " + fmt(b);
       const allA = day(-14);
       const allB = day(FULL - 15);
@@ -522,8 +522,8 @@
       kitchenHidden = false;
       kitchen.from = 7;
       kitchen.span = 7;
-      top.off = 4;
-      top.span = 3;
+      counter.off = 4;
+      counter.span = 3;
       pause.off = 2;
       pause.span = 3;
       paint();
@@ -545,7 +545,7 @@
       const handle = event.target.closest("[data-cal-drag]");
       const track = document.getElementById("tl-nav-track").getBoundingClientRect();
       if (navH || (navBox && event.target === navBox)) {
-        drag = { kind: navH ? navH.dataset.nav : "pan", x: event.clientX, origin: origin, viewDays: viewDays, width: track.width };
+        drag = { kind: navH ? navH.dataset.nav : "pan", x: event.clientX, origin: viewFrom, viewDays: viewDays, width: track.width };
         event.preventDefault();
         return;
       }
@@ -568,8 +568,8 @@
         kitchenSpan: kitchen.span,
         pauseOff: pause.off,
         pauseSpan: pause.span,
-        topOff: top.off,
-        topSpan: top.span,
+        topOff: counter.off,
+        topSpan: counter.span,
       };
       if (id === "sign" || id === "mirror" || id === "shelf") {
         const item = id === "sign" ? sign : id === "mirror" ? mirror : shelf;
@@ -584,11 +584,11 @@
       if (!drag) return;
       if (drag.kind === "pan" || (!drag.id && (drag.kind === "start" || drag.kind === "end"))) {
         const delta = Math.round((event.clientX - drag.x) / (drag.width / FULL));
-        if (drag.kind === "pan") origin = Math.max(-20, Math.min(20, drag.origin + delta));
+        if (drag.kind === "pan") viewFrom = Math.max(-20, Math.min(20, drag.origin + delta));
         if (drag.kind === "start") {
           const end = drag.origin + drag.viewDays;
-          origin = Math.max(-20, Math.min(end - 5, drag.origin + delta));
-          viewDays = end - origin;
+          viewFrom = Math.max(-20, Math.min(end - 5, drag.origin + delta));
+          viewDays = end - viewFrom;
         }
         if (drag.kind === "end") viewDays = Math.max(5, Math.min(28, drag.viewDays + delta));
         paint();
@@ -602,7 +602,7 @@
           kitchen.from = Math.min(end - 1, drag.kitchenFrom + delta);
           kitchen.span = end - kitchen.from + 1;
           pause.off = drag.pauseOff + (drag.kitchenFrom - kitchen.from);
-          top.off = drag.topOff + (drag.kitchenFrom - kitchen.from);
+          counter.off = drag.topOff + (drag.kitchenFrom - kitchen.from);
         }
         if (drag.kind === "end") kitchen.span = Math.max(2, drag.kitchenSpan + delta);
         clampInner();
@@ -619,16 +619,16 @@
         if (drag.kind === "pause-end") pause.span = Math.max(1, drag.pauseSpan + delta);
         clampInner();
       } else if (drag.id === "top") {
-        if (drag.kind === "move") top.off = drag.topOff + delta;
+        if (drag.kind === "move") counter.off = drag.topOff + delta;
         if (drag.kind === "start") {
           const end = drag.topOff + drag.topSpan;
           let off = drag.topOff + delta;
           if (off < 0) off = 0;
           if (off > end - 1) off = end - 1;
-          top.off = off;
-          top.span = end - off;
+          counter.off = off;
+          counter.span = end - off;
         }
-        if (drag.kind === "end") top.span = Math.max(1, drag.topSpan + delta);
+        if (drag.kind === "end") counter.span = Math.max(1, drag.topSpan + delta);
         clampInner();
       } else if (drag.id === "sign" || drag.id === "mirror" || drag.id === "shelf") {
         const item = drag.id === "sign" ? sign : drag.id === "mirror" ? mirror : shelf;

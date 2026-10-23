@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <style>
+    .demo-switch { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
+  </style>
+</head>
+<body data-view="month">
+  <p class="hint" id="story">Паузы скрыты.</p>
+  <div class="demo-switch">
+    <button class="btn cal-ico active" type="button" id="hide-pause" title="Скрывать заказы и позиции на паузе" aria-label="Скрывать на паузе" aria-pressed="true">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6.5v11M15 6.5v11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <span>Скрывать на паузе</span>
+  </div>
+  <div id="board"></div>
+  <script src="fit.js"></script>
+  <script src="board-demo.js"></script>
+</body>
+</html>
