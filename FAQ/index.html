@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Справка FinMaster</title>
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
   <link rel="stylesheet" href="css/base.css">
   <link rel="stylesheet" href="css/layout.css">
   <link rel="stylesheet" href="css/article.css">
@@ -12,14 +13,12 @@
   <div class="shell">
     <aside class="side">
       <div class="brand"><strong>FinMaster</strong><span>справка</span></div>
-      <input class="search" id="search" type="search" placeholder="Найти раздел" aria-label="Найти раздел">
+      <input class="search" id="search" type="search" placeholder="Слова, &quot;фраза&quot;, -исключить" aria-label="Поиск по справке">
       <nav id="nav"></nav>
     </aside>
     <div class="main">
       <div class="top">
         <button class="menu" id="menu" type="button">Разделы</button>
-        <span style="flex:1"></span>
-        <button class="theme" id="theme" type="button">Тёмная</button>
       </div>
       <div class="doc">
         <nav class="here" id="here" hidden></nav>
@@ -28,6 +27,7 @@
     </div>
   </div>
   <script src="js/toc.js"></script>
+  <script src="js/live.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

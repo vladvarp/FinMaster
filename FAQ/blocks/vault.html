@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+</head>
+<body>
+  <p class="hint">Пример страницы «Отпуск». С заказами хранилище не связано. Оформление — из программы.</p>
+  <div class="vault-kpis">
+    <div class="vault-kpi hand"><span>На руках</span><b>42 000,00 ₽</b><small>пополнения − снятия − копилка</small></div>
+    <div class="vault-kpi save"><span>В копилке</span><b>18 000,00 ₽</b><small>36% от цели</small></div>
+    <div class="vault-kpi in"><span>Пополнено</span><b>+80 000,00 ₽</b><small>все пополнения</small></div>
+    <div class="vault-kpi out"><span>Потрачено</span><b>−20 000,00 ₽</b><small>все снятия</small></div>
+  </div>
+  <div class="vault-goal">
+    <label class="vault-goal-field">Цель копилки
+      <input inputmode="decimal" value="50000" readonly>
+    </label>
+    <div class="vault-progress" title="36%"><i style="width:36%"></i></div>
+    <span class="vault-goal-note">осталось отложить 32 000,00 ₽</span>
+  </div>
+  <div class="vault-add-row">
+    <div class="vault-type-seg" role="radiogroup" aria-label="Тип строки">
+      <button type="button" class="vt-in active" title="Пополнение · Ctrl+Q">Пополнение</button>
+      <button type="button" class="vt-out" title="Снятие · Ctrl+W">Снятие</button>
+      <button type="button" class="vt-save" title="Копилка · Ctrl+E">Копилка</button>
+    </div>
+    <input class="vault-in-name" placeholder="Название строки" value="Зарплата">
+    <input class="vault-in-amount" placeholder="Сумма" value="80000">
+    <input class="vault-in-date" type="date">
+    <button type="button" class="btn primary">Добавить</button>
+  </div>
+  <script src="fit.js"></script>
+</body>
+</html>

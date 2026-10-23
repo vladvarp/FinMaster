@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <style>
+    /* Доска в программе занимает высоту окна. В справке ей нужна своя высота, иначе шкала схлопывается. */
+    .cal-board { height: auto !important; max-height: none !important; overflow: visible !important; }
+    .gantt-scroll { flex: none; overflow: visible; }
+    .gantt { flex: none; min-height: auto; overflow: visible; }
+    .cal-side { height: auto !important; max-height: none !important; overflow: visible !important; }
+    .demo-note { margin: 0 0 8px; }
+  </style>
+</head>
+<body>
+  <p class="hint demo-note" id="story">У «Фасадов» паузу тянут за середину, края меняют длину. Штрих на строке заказа сам и не двигается: он только в дни, когда ни одна позиция не работает. У «Света» нет конечной даты — стрелка. <b>Shift</b>+клик по правому краю открытой позиции ставит или снимает паузу со следующего рабочего дня. У «Карниза» она уже стоит: один день, фиолетовая черта слева, стрелка значит «и дальше».</p>
+  <div class="cal-board">
+    <div class="tl-nav" id="tl-nav">
+      <div class="tl-nav-meta">
+        <span id="nav-all">весь период</span>
+        <span id="nav-view">видно 14 дн.</span>
+      </div>
+      <div class="tl-nav-track" id="tl-nav-track" style="--lanes:3">
+        <div class="tl-nav-bars" id="nav-bars"></div>
+        <div class="tl-nav-today" id="nav-today"></div>
+        <div class="tl-nav-shade left" id="shade-l"></div>
+        <div class="tl-nav-shade right" id="shade-r"></div>
+        <div class="tl-nav-view" id="nav-view-box">
+          <i class="tl-nav-h start" data-nav="start"></i>
+          <i class="tl-nav-h end" data-nav="end"></i>
+        </div>
+      </div>
+    </div>
+    <div class="gantt-scroll" id="board" style="--days:14">
+      <div class="gantt-days" id="days"></div>
+      <div class="gantt">
+        <div class="gantt-body">
+          <div class="gantt-grid" id="grid" aria-hidden="true"></div>
+          <div class="gantt-today" id="today-line"></div>
+          <div class="gantt-row is-open has-deadline" id="row-main">
+            <div class="gantt-head">
+              <button type="button" class="gantt-expand is-open" id="expand" title="Показать позиции" aria-expanded="true">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <button type="button" class="gantt-label"><b>1042 Кухня</b><small>ООО «Север» · <span class="gantt-status role-now">идёт сейчас</span> · до дедлайна</small></button>
+            </div>
+            <div class="gantt-track" id="track-kitchen"></div>
+          </div>
+          <div id="lines">
+            <div class="gantt-row is-line">
+              <div class="gantt-head">
+                <button type="button" class="gantt-label"><b>Столешница</b><small id="top-status"><span class="gantt-status role-now">выполняется</span></small></button>
+              </div>
+              <div class="gantt-track" id="track-top"></div>
+            </div>
+            <div class="gantt-row is-line is-paused">
+              <div class="gantt-head">
+                <button type="button" class="gantt-label"><b>Фасады</b><small id="facade-status"><span class="gantt-status role-pause">пауза</span></small></button>
+              </div>
+              <div class="gantt-track" id="track-facade"></div>
+            </div>
+          </div>
+          <div class="gantt-row">
+            <div class="gantt-head">
+              <span class="gantt-expand is-empty"></span>
+              <button type="button" class="gantt-label"><b>1051 Свет</b><small><span class="gantt-status role-now">идёт сейчас</span> · без конечной даты</small></button>
+            </div>
+            <div class="gantt-track" id="track-light"></div>
+          </div>
+          <div class="gantt-row">
+            <div class="gantt-head">
+              <span class="gantt-expand is-empty"></span>
+              <button type="button" class="gantt-label"><b>1055 Карниз</b><small id="cornice-status"><span class="gantt-status role-pause">пауза со следующего рабочего дня</span></small></button>
+            </div>
+            <div class="gantt-track" id="track-cornice"></div>
+          </div>
+          <div class="gantt-row" id="row-plan">
+            <div class="gantt-head">
+              <span class="gantt-expand is-empty"></span>
+              <button type="button" class="gantt-label"><b>1048 Полка</b><small><span class="gantt-status role-plan">запланирован</span> · срок ещё впереди</small></button>
+            </div>
+            <div class="gantt-track" id="track-shelf"></div>
+          </div>
+          <div class="gantt-row">
+            <div class="gantt-head">
+              <span class="gantt-expand is-empty"></span>
+              <button type="button" class="gantt-label"><b>1036 Зеркало</b><small><span class="gantt-status role-warn">завершён</span> · долг остался</small></button>
+            </div>
+            <div class="gantt-track" id="track-mirror"></div>
+          </div>
+          <div class="gantt-row">
+            <div class="gantt-head">
+              <span class="gantt-expand is-empty"></span>
+              <button type="button" class="gantt-label"><b>1033 Вывеска</b><small>ООО «Север» · <span class="gantt-status role-done">завершён</span> · оплачен</small></button>
+            </div>
+            <div class="gantt-track" id="track-sign"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="cal-side" style="height:auto;max-height:none;overflow:visible;margin-top:12px">
+    <div class="cal-side-body">
+      <div class="cal-sel">
+        <div class="cal-sel-head">
+          <b id="sel-title">1042 Кухня</b>
+          <span class="work-pill work-pill-now" id="sel-pill">идёт сейчас</span>
+        </div>
+        <div class="cal-sel-sub" id="sel-sub">ООО «Север»</div>
+        <div class="cal-due-line" id="sel-due">Дедлайн на правом крае полосы</div>
+        <div class="cal-dates">
+          <div class="field"><label>Начало</label><input type="text" id="f-start" readonly></div>
+          <div class="field"><label>Конец</label><input type="text" id="f-end" readonly></div>
+        </div>
+        <div class="cal-actions">
+          <button type="button" class="btn small primary" id="act-start">Начать сегодня</button>
+          <button type="button" class="btn small" id="act-end">Закончить сегодня</button>
+          <button type="button" class="btn small" id="act-left" title="Сдвинуть на день назад">−1 день</button>
+          <button type="button" class="btn small" id="act-right" title="Сдвинуть на день вперёд">+1 день</button>
+          <button type="button" class="btn small" id="act-lines">С дат позиций</button>
+          <button type="button" class="btn small" id="act-clear">Снять даты</button>
+          <button type="button" class="btn small" id="act-open">Открыть заказ</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="fit.js"></script>
+  <script>
+    const FULL = 42;
+    const TODAY = 11;
+    const WORK = "#0f766e";
+    const LIVE = "#0369a1";
+    const PAID = "#059669";
+    const DUE = "#dc2626";
+    const PLAN = "#0284c8";
+    const STRIPE = "#64748b";
+    const VEIL = "rgba(217,119,6,.45)";
+    let viewDays = 16;
+    const kitchen = { from: 7, span: 7 };
+    const top = { off: 4, span: 3 };
+    const pause = { off: 2, span: 3 };
+    const sign = { from: 0, span: 4 };
+    const mirror = { from: 4, span: 3 };
+    const shelf = { from: 14, span: 2 };
+    const light = { from: 8, ahead: false };
+    const cornice = { from: 6, ahead: true };
+    let origin = 0;
+    let kitchenHidden = false;
+    const days = [];
+    const wd = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
+    const months = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+
+    function day(offset) {
+      const d = new Date();
+      d.setHours(12, 0, 0, 0);
+      d.setDate(d.getDate() - TODAY + offset);
+      return d;
+    }
+
+    function label(d) {
+      const first = d.getDate() === 1;
+      return { n: d.getDate(), s: first ? months[d.getMonth()] : wd[(d.getDay() + 6) % 7] };
+    }
+
+    function paintDays() {
+      const daysEl = document.getElementById("days");
+      const grid = document.getElementById("grid");
+      daysEl.innerHTML = "";
+      grid.innerHTML = "";
+      document.getElementById("board").style.setProperty("--days", viewDays);
+      for (let i = 0; i < viewDays; i++) {
+        const d = day(origin + i);
+        const weekend = d.getDay() === 0 || d.getDay() === 6;
+        const today = origin + i === TODAY;
+        const cell = document.createElement("div");
+        cell.className = "gantt-day" + (weekend ? " is-weekend" : "") + (today ? " is-today" : "");
+        const text = label(d);
+        cell.innerHTML = "<span>" + text.n + "</span><small>" + text.s + "</small>";
+        daysEl.appendChild(cell);
+        const col = document.createElement("div");
+        col.className = "gantt-grid-col" + (weekend ? " is-weekend" : "") + (today ? " is-today" : "");
+        grid.appendChild(col);
+      }
+      document.getElementById("today-line").style.left = "calc((" + (TODAY - origin) + " + 0.5) / " + viewDays + " * 100%)";
+      document.getElementById("today-line").hidden = TODAY < origin || TODAY >= origin + viewDays;
+    }
+
+    function fmt(d) {
+      return d.getDate() + " " + months[d.getMonth()];
+    }
+
+    function nextWork(index) {
+      let i = index;
+      for (let n = 0; n < 8; n++) {
+        const d = day(i);
+        if (d.getDay() !== 0 && d.getDay() !== 6) return i;
+        i += 1;
+      }
+      return index;
+    }
+
+    function clampInner() {
+      if (kitchen.span < 2) kitchen.span = 2;
+      if (top.span < 1) top.span = 1;
+      if (top.span > kitchen.span) top.span = kitchen.span;
+      if (top.off < 0) top.off = 0;
+      if (top.off + top.span > kitchen.span) top.off = Math.max(0, kitchen.span - top.span);
+      if (pause.span < 1) pause.span = 1;
+      if (pause.span > kitchen.span) pause.span = kitchen.span;
+      if (pause.off < 0) pause.off = 0;
+      if (pause.off + pause.span > kitchen.span) pause.off = Math.max(0, kitchen.span - pause.span);
+    }
+
+    function pauseAbs() {
+      return kitchen.from + pause.off;
+    }
+
+    function topAbs() {
+      return kitchen.from + top.off;
+    }
+
+    function splitAround(from, span, cutFrom, cutSpan) {
+      const end = from + span;
+      const c0 = cutFrom;
+      const c1 = cutFrom + cutSpan;
+      const parts = [];
+      if (c0 > from) parts.push({ from, span: Math.min(c0, end) - from, cutEnd: c0 < end });
+      if (c1 < end) parts.push({ from: Math.max(c1, from), span: end - Math.max(c1, from), cutStart: c1 > from });
+      return parts.filter((part) => part.span > 0);
+    }
+
+    function groupDays(list) {
+      if (!list.length) return [];
+      const out = [];
+      let a = list[0];
+      let b = list[0];
+      for (let i = 1; i < list.length; i++) {
+        if (list[i] === b + 1) b = list[i];
+        else {
+          out.push({ from: a, span: b - a + 1 });
+          a = list[i];
+          b = list[i];
+        }
+      }
+      out.push({ from: a, span: b - a + 1 });
+      return out;
+    }
+
+    function orderHatch() {
+      const p0 = pauseAbs();
+      const top0 = topAbs();
+      const top1 = top0 + top.span;
+      const daysHit = [];
+      for (let d = p0; d < p0 + pause.span; d++) {
+        const inTop = d >= top0 && d < top1;
+        const inOrder = d >= kitchen.from && d < kitchen.from + kitchen.span;
+        if (inOrder && !inTop) daysHit.push(d);
+      }
+      return groupDays(daysHit);
+    }
+
+    function bar(o) {
+      if (o.from + o.span <= origin || o.from >= origin + viewDays) return "";
+      const cls = ["gantt-bar"];
+      if (o.pause) cls.push("is-pause");
+      if (o.derived) cls.push("is-derived");
+      if (o.ahead) cls.push("is-ahead");
+      if (o.open) cls.push("is-open-end");
+      if (o.live) cls.push("is-live");
+      if (o.deadline) cls.push("has-deadline");
+      if (o.planned) cls.push("is-planned");
+      if (o.cutStart) cls.push("is-cut-start");
+      if (o.cutEnd) cls.push("is-cut-end");
+      const dragAttr = o.drag ? ' data-cal-drag="' + o.drag + '"' : "";
+      let hands = "";
+      if (o.hStart) hands += '<i class="gantt-h start" data-cal-drag="' + o.hStart + '"></i>';
+      if (o.hEnd) hands += '<i class="gantt-h end" data-cal-drag="' + o.hEnd + '"></i>';
+      const title = String(o.title || "").replace(/"/g, "");
+      return '<div class="' + cls.join(" ") + '" data-bar="' + o.id + '"' + dragAttr +
+        ' style="--from:' + (o.from - origin) + ";--span:" + o.span + ";--bar:" + o.color + ";--a:100%;--veil:" + (o.veil || "transparent") + ";--ink:" + o.color + '"' +
+        ' title="' + title + '">' + hands + "</div>";
+    }
+
+    function plain(id, item, color, extra) {
+      return bar(Object.assign({
+        id: id,
+        from: item.from,
+        span: item.span,
+        color: color,
+        drag: "move",
+        hStart: "start",
+        hEnd: "end",
+      }, extra || {}));
+    }
+
+    function paintOpen(item, id, name) {
+      const aheadDay = nextWork(TODAY + 1);
+      if (item.ahead) {
+        const workSpan = Math.max(0, aheadDay - item.from);
+        const html = [];
+        if (workSpan > 0) {
+          html.push(bar({
+            id: id, from: item.from, span: workSpan, color: WORK, live: true, cutEnd: true,
+            drag: "move", hStart: "start", hEnd: "end",
+            title: name + " · без конечной даты. Shift+клик по правому краю снимает паузу со следующего дня",
+          }));
+        }
+        html.push(bar({
+          id: id, from: aheadDay, span: 1, color: STRIPE, pause: true, ahead: true, open: true,
+          drag: "pause-move", hStart: "pause-start", hEnd: "pause-end",
+          title: name + " · с " + fmt(day(aheadDay)) + " на паузе и дальше. Стрелка — пауза не кончается. Shift+клик по правому краю возвращает в работу",
+        }));
+        return html.join("");
+      }
+      return bar({
+        id: id, from: item.from, span: Math.max(1, TODAY - item.from + 1), color: WORK, live: true, open: true,
+        drag: "move", hStart: "start", hEnd: "end",
+        title: name + " · конечной даты нет, полоса идёт стрелкой. Shift+клик по правому краю — пауза со следующего рабочего дня",
+      });
+    }
+
+    function paintTracks() {
+      const host = {
+        kitchen: document.getElementById("track-kitchen"),
+        top: document.getElementById("track-top"),
+        facade: document.getElementById("track-facade"),
+      };
+      if (kitchenHidden) {
+        host.kitchen.innerHTML = "";
+        host.top.innerHTML = "";
+        host.facade.innerHTML = "";
+      } else {
+        const hatch = orderHatch();
+        const hatchDays = {};
+        hatch.forEach((seg) => {
+          for (let d = seg.from; d < seg.from + seg.span; d++) hatchDays[d] = true;
+        });
+        const workDays = [];
+        for (let d = kitchen.from; d < kitchen.from + kitchen.span; d++) {
+          if (!hatchDays[d]) workDays.push(d);
+        }
+        const work = groupDays(workDays);
+        const endDay = kitchen.from + kitchen.span - 1;
+        host.kitchen.innerHTML = work.map((seg, i) => bar({
+          id: "kitchen",
+          from: seg.from,
+          span: seg.span,
+          color: WORK,
+          veil: VEIL,
+          live: true,
+          deadline: seg.from + seg.span - 1 === endDay && endDay > TODAY,
+          cutStart: i > 0,
+          cutEnd: i < work.length - 1,
+          drag: "move",
+          hStart: i === 0 ? "start" : "",
+          hEnd: i === work.length - 1 ? "end" : "",
+          title: "Кухня · долг вуалью, дедлайн на правом крае. Штрих рядом собран из «Фасадов» и не тянется",
+        })).join("") + hatch.map((seg) => bar({
+          id: "order-pause",
+          from: seg.from,
+          span: seg.span,
+          color: STRIPE,
+          pause: true,
+          derived: true,
+          title: "Пауза заказа из позиций: в эти дни ни одна позиция не работает. Тянуть её нельзя",
+        })).join("");
+        const topFrom = topAbs();
+        const liveToday = TODAY >= topFrom && TODAY < topFrom + top.span;
+        host.top.innerHTML = bar({
+          id: "top",
+          from: topFrom,
+          span: top.span,
+          color: LIVE,
+          live: liveToday,
+          deadline: topFrom + top.span - 1 > TODAY,
+          drag: "move",
+          hStart: "start",
+          hEnd: "end",
+          title: "Столешница · позиция, которая идёт сейчас",
+        });
+        document.getElementById("top-status").innerHTML = liveToday
+          ? '<span class="gantt-status role-now">выполняется</span>'
+          : '<span class="gantt-status role-plan">в сроке заказа</span>';
+        const p0 = pauseAbs();
+        const facadeParts = splitAround(kitchen.from, kitchen.span, p0, pause.span);
+        const pausedToday = TODAY >= p0 && TODAY < p0 + pause.span;
+        host.facade.innerHTML = facadeParts.map((seg) => bar({
+          id: "facade",
+          from: seg.from,
+          span: seg.span,
+          color: WORK,
+          cutStart: seg.cutStart,
+          cutEnd: seg.cutEnd,
+          title: "Фасады · рабочий кусок. Паузу двигают за штрих между кусками",
+        })).join("") + bar({
+          id: "pause",
+          from: p0,
+          span: pause.span,
+          color: STRIPE,
+          pause: true,
+          drag: "pause-move",
+          hStart: "pause-start",
+          hEnd: "pause-end",
+          title: "Пауза позиции «Фасады». Середина сдвигает весь штрих, края меняют начало и конец. За пределы срока позиции не выходит",
+        });
+        document.getElementById("facade-status").innerHTML = pausedToday
+          ? '<span class="gantt-status role-pause">пауза</span>'
+          : '<span class="gantt-status role-now">в работе</span>';
+      }
+      document.getElementById("track-light").innerHTML = paintOpen(light, "light", "Свет");
+      document.getElementById("track-cornice").innerHTML = paintOpen(cornice, "cornice", "Карниз");
+      document.getElementById("cornice-status").innerHTML = cornice.ahead
+        ? '<span class="gantt-status role-pause">пауза со следующего рабочего дня</span>'
+        : '<span class="gantt-status role-now">идёт сейчас</span> · без конечной даты';
+      document.getElementById("track-shelf").innerHTML = plain("shelf", shelf, PLAN, { planned: true, title: "Полка · срок целиком впереди" });
+      document.getElementById("track-mirror").innerHTML = plain("mirror", mirror, DUE, { title: "Зеркало · заказ закрыт, долг остался" });
+      document.getElementById("track-sign").innerHTML = plain("sign", sign, PAID, { title: "Вывеска · закрыт и оплачен" });
+    }
+
+    function navPiece(from, span, lane, color, veil, cls) {
+      const el = document.createElement("div");
+      el.className = "tl-nav-bar" + (cls || "");
+      el.style.setProperty("--lane", lane);
+      el.style.setProperty("--from", from + 14);
+      el.style.setProperty("--len", span);
+      el.style.setProperty("--span", FULL);
+      el.style.setProperty("--bar", color);
+      el.style.setProperty("--veil", veil || "transparent");
+      return el;
+    }
+
+    function paintNav() {
+      const host = document.getElementById("nav-bars");
+      host.innerHTML = "";
+      const add = (from, span, lane, color, veil, cls) => {
+        if (span > 0) host.appendChild(navPiece(from, span, lane, color, veil, cls));
+      };
+      if (!kitchenHidden) {
+        const hatch = orderHatch();
+        const hatchDays = {};
+        hatch.forEach((seg) => { for (let d = seg.from; d < seg.from + seg.span; d++) hatchDays[d] = true; });
+        const workDays = [];
+        for (let d = kitchen.from; d < kitchen.from + kitchen.span; d++) if (!hatchDays[d]) workDays.push(d);
+        groupDays(workDays).forEach((seg, i, all) => {
+          add(seg.from, seg.span, 0, WORK, VEIL, i === all.length - 1 && kitchen.from + kitchen.span - 1 > TODAY ? " has-deadline" : "");
+        });
+        hatch.forEach((seg) => add(seg.from, seg.span, 0, STRIPE, "", " is-pause"));
+      }
+      add(sign.from, sign.span, 0, PAID, "", "");
+      add(mirror.from, mirror.span, 0, DUE, "", "");
+      add(shelf.from, shelf.span, 0, PLAN, "", " is-planned");
+      ["light", "cornice"].forEach((id, lane) => {
+        const item = id === "light" ? light : cornice;
+        const aheadDay = nextWork(TODAY + 1);
+        if (item.ahead) {
+          add(item.from, Math.max(0, aheadDay - item.from), lane + 1, WORK, "", "");
+          add(aheadDay, 1, lane + 1, STRIPE, "", " is-pause is-open-end");
+        } else add(item.from, Math.max(1, TODAY - item.from + 1), lane + 1, WORK, "", " is-open-end");
+      });
+      const left = ((origin + 14) / FULL) * 100;
+      const width = (viewDays / FULL) * 100;
+      const box = document.getElementById("nav-view-box");
+      box.style.left = left + "%";
+      box.style.width = width + "%";
+      document.getElementById("shade-l").style.width = left + "%";
+      document.getElementById("shade-r").style.left = (left + width) + "%";
+      document.getElementById("shade-r").style.width = Math.max(0, 100 - left - width) + "%";
+      document.getElementById("nav-today").style.left = (((14 + TODAY) + 0.5) / FULL * 100) + "%";
+      const a = day(origin);
+      const b = day(origin + viewDays - 1);
+      document.getElementById("nav-view").textContent = "видно " + viewDays + " дн. · " + fmt(a) + " — " + fmt(b);
+      const allA = day(-14);
+      const allB = day(FULL - 15);
+      document.getElementById("nav-all").textContent = "весь период · " + fmt(allA) + " — " + fmt(allB) + " · " + FULL + " дн.";
+      document.getElementById("f-start").value = fmt(day(kitchen.from));
+      document.getElementById("f-end").value = kitchenHidden ? "" : fmt(day(kitchen.from + kitchen.span - 1));
+    }
+
+    function paint() {
+      paintDays();
+      paintTracks();
+      paintNav();
+    }
+
+    document.getElementById("expand").addEventListener("click", () => {
+      const open = document.getElementById("lines").hidden;
+      document.getElementById("lines").hidden = !open;
+      document.getElementById("expand").classList.toggle("is-open", open);
+      document.getElementById("expand").setAttribute("aria-expanded", open ? "true" : "false");
+    });
+
+    function shiftKitchen(by) {
+      kitchen.from += by;
+      paint();
+    }
+
+    document.getElementById("act-left").addEventListener("click", () => shiftKitchen(-1));
+    document.getElementById("act-right").addEventListener("click", () => shiftKitchen(1));
+    document.getElementById("act-start").addEventListener("click", () => {
+      const end = kitchen.from + kitchen.span - 1;
+      kitchen.from = Math.min(TODAY, end);
+      kitchen.span = end - kitchen.from + 1;
+      clampInner();
+      paint();
+    });
+    document.getElementById("act-end").addEventListener("click", () => {
+      kitchen.span = Math.max(2, TODAY - kitchen.from + 1);
+      clampInner();
+      paint();
+    });
+    document.getElementById("act-clear").addEventListener("click", () => {
+      kitchenHidden = true;
+      paint();
+      document.getElementById("story").textContent = "Даты кухни сняты — в программе заказ уходит в список «Без дат». «С дат позиций» возвращает полосу.";
+    });
+    document.getElementById("act-open").addEventListener("click", () => {
+      document.getElementById("story").textContent = "В программе «Открыть заказ» переходит в карточку. Здесь кнопка только показывает, где она стоит.";
+    });
+    document.getElementById("act-lines").addEventListener("click", () => {
+      kitchenHidden = false;
+      kitchen.from = 7;
+      kitchen.span = 7;
+      top.off = 4;
+      top.span = 3;
+      pause.off = 2;
+      pause.span = 3;
+      paint();
+      document.getElementById("story").textContent = "«С дат позиций» снова берёт крайние даты строк. Пауза «Фасадов» на своём месте.";
+    });
+
+    function toggleAhead(item, name) {
+      item.ahead = !item.ahead;
+      document.getElementById("story").textContent = item.ahead
+        ? name + ": с завтрашнего рабочего дня на паузе. Полоса работы обрывается, дальше один штрихованный день со стрелкой."
+        : name + ": пауза со следующего дня снята. Снова стрелка без конечной даты.";
+      paint();
+    }
+
+    let drag = null;
+    document.addEventListener("pointerdown", (event) => {
+      const navH = event.target.closest("[data-nav]");
+      const navBox = event.target.closest("#nav-view-box");
+      const handle = event.target.closest("[data-cal-drag]");
+      const track = document.getElementById("tl-nav-track").getBoundingClientRect();
+      if (navH || (navBox && event.target === navBox)) {
+        drag = { kind: navH ? navH.dataset.nav : "pan", x: event.clientX, origin: origin, viewDays: viewDays, width: track.width };
+        event.preventDefault();
+        return;
+      }
+      if (!handle) return;
+      const kind = handle.dataset.calDrag;
+      const id = handle.closest("[data-bar]").dataset.bar;
+      if (id === "order-pause") return;
+      if ((id === "light" || id === "cornice") && event.shiftKey && (kind === "end" || kind === "pause-end")) {
+        event.preventDefault();
+        toggleAhead(id === "light" ? light : cornice, id === "light" ? "Свет" : "Карниз");
+        return;
+      }
+      if ((id === "light" || id === "cornice") && kind.indexOf("pause") === 0) return;
+      const box = {
+        kind: kind,
+        id: id,
+        x: event.clientX,
+        width: document.getElementById("board").getBoundingClientRect().width,
+        kitchenFrom: kitchen.from,
+        kitchenSpan: kitchen.span,
+        pauseOff: pause.off,
+        pauseSpan: pause.span,
+        topOff: top.off,
+        topSpan: top.span,
+      };
+      if (id === "sign" || id === "mirror" || id === "shelf") {
+        const item = id === "sign" ? sign : id === "mirror" ? mirror : shelf;
+        box.from = item.from;
+        box.span = item.span;
+      }
+      if (id === "light" || id === "cornice") box.from = (id === "light" ? light : cornice).from;
+      drag = box;
+      event.preventDefault();
+    });
+    document.addEventListener("pointermove", (event) => {
+      if (!drag) return;
+      if (drag.kind === "pan" || (!drag.id && (drag.kind === "start" || drag.kind === "end"))) {
+        const delta = Math.round((event.clientX - drag.x) / (drag.width / FULL));
+        if (drag.kind === "pan") origin = Math.max(-20, Math.min(20, drag.origin + delta));
+        if (drag.kind === "start") {
+          const end = drag.origin + drag.viewDays;
+          origin = Math.max(-20, Math.min(end - 5, drag.origin + delta));
+          viewDays = end - origin;
+        }
+        if (drag.kind === "end") viewDays = Math.max(5, Math.min(28, drag.viewDays + delta));
+        paint();
+        return;
+      }
+      const delta = Math.round((event.clientX - drag.x) / (drag.width / viewDays));
+      if (drag.id === "kitchen") {
+        if (drag.kind === "move") kitchen.from = drag.kitchenFrom + delta;
+        if (drag.kind === "start") {
+          const end = drag.kitchenFrom + drag.kitchenSpan - 1;
+          kitchen.from = Math.min(end - 1, drag.kitchenFrom + delta);
+          kitchen.span = end - kitchen.from + 1;
+          pause.off = drag.pauseOff + (drag.kitchenFrom - kitchen.from);
+          top.off = drag.topOff + (drag.kitchenFrom - kitchen.from);
+        }
+        if (drag.kind === "end") kitchen.span = Math.max(2, drag.kitchenSpan + delta);
+        clampInner();
+      } else if (drag.id === "pause") {
+        if (drag.kind === "pause-move") pause.off = drag.pauseOff + delta;
+        if (drag.kind === "pause-start") {
+          const end = drag.pauseOff + drag.pauseSpan;
+          let off = drag.pauseOff + delta;
+          if (off < 0) off = 0;
+          if (off > end - 1) off = end - 1;
+          pause.off = off;
+          pause.span = end - off;
+        }
+        if (drag.kind === "pause-end") pause.span = Math.max(1, drag.pauseSpan + delta);
+        clampInner();
+      } else if (drag.id === "top") {
+        if (drag.kind === "move") top.off = drag.topOff + delta;
+        if (drag.kind === "start") {
+          const end = drag.topOff + drag.topSpan;
+          let off = drag.topOff + delta;
+          if (off < 0) off = 0;
+          if (off > end - 1) off = end - 1;
+          top.off = off;
+          top.span = end - off;
+        }
+        if (drag.kind === "end") top.span = Math.max(1, drag.topSpan + delta);
+        clampInner();
+      } else if (drag.id === "sign" || drag.id === "mirror" || drag.id === "shelf") {
+        const item = drag.id === "sign" ? sign : drag.id === "mirror" ? mirror : shelf;
+        if (drag.kind === "move") item.from = drag.from + delta;
+        if (drag.kind === "start") {
+          const end = drag.from + drag.span - 1;
+          item.from = Math.min(end, drag.from + delta);
+          item.span = end - item.from + 1;
+        }
+        if (drag.kind === "end") item.span = Math.max(1, drag.span + delta);
+        if (drag.id === "shelf") item.from = Math.max(TODAY + 1, item.from);
+      } else if (drag.id === "light" || drag.id === "cornice") {
+        const item = drag.id === "light" ? light : cornice;
+        if (drag.kind === "move" || drag.kind === "start") item.from = Math.min(TODAY, drag.from + delta);
+      }
+      paint();
+    });
+    document.addEventListener("pointerup", () => { drag = null; });
+    paint();
+  </script>
+</body>
+</html>

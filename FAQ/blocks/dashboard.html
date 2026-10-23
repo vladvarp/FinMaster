@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+</head>
+<body>
+  <p class="hint">Пример цифр, чтобы было видно плитки и инсайты. Оформление — из программы. В отчёте числа считаются по вашим заказам.</p>
+  <div class="kpis">
+    <div class="kpi"><div class="label">Заказов</div><div class="value">3</div><div class="sub">4 позиции</div></div>
+    <div class="kpi ok"><div class="label">К оплате (после скидки)</div><div class="value">128 000,00 ₽</div><div class="sub">без отмен: 128 000,00 ₽</div></div>
+    <div class="kpi"><div class="label">Оплачено</div><div class="value">70 000,00 ₽</div><div class="sub">55% от суммы</div></div>
+    <div class="kpi warn"><div class="label">Не оплачено</div><div class="value">58 000,00 ₽</div><div class="sub">долг по открытым позициям</div></div>
+    <div class="kpi cost"><div class="label">Расходы</div><div class="value">−12 800,00 ₽</div><div class="sub">1 налог и затрат</div></div>
+    <div class="kpi ok"><div class="label">Чистыми</div><div class="value">115 200,00 ₽</div><div class="sub">90% от выручки</div></div>
+  </div>
+  <div class="card insights-card">
+    <h3>Инсайты <span class="insights-sub">считаются по всем заказам отчёта</span></h3>
+    <div class="insights">
+      <div class="insight" style="--tint:#0f766e"><div class="insight-ico">▲</div><div class="insight-body"><div class="insight-label">Выручка за месяц</div><div class="insight-value">86 000,00 ₽</div><div class="insight-note">прошлый месяц 64 000,00 ₽</div></div><span class="trend up">+34%</span></div>
+      <div class="insight" style="--tint:#0369a1"><div class="insight-ico">→</div><div class="insight-body"><div class="insight-label">Прогноз до конца месяца</div><div class="insight-value">112 000,00 ₽</div><div class="insight-note">по темпу уже прошедших дней</div></div></div>
+      <div class="insight" style="--tint:#7c3aed"><div class="insight-ico">Ø</div><div class="insight-body"><div class="insight-label">Средний чек</div><div class="insight-value">42 666,67 ₽</div><div class="insight-note">сумма заказа после скидки</div></div></div>
+      <div class="insight" style="--tint:#b45309"><div class="insight-ico">!</div><div class="insight-body"><div class="insight-label">Долг старше 30 дней</div><div class="insight-value">18 000,00 ₽</div><div class="insight-note">позиции с остатком и старой датой заказа</div></div></div>
+    </div>
+  </div>
+  <script src="fit.js"></script>
+</body>
+</html>

@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+</head>
+<body>
+  <div class="demo-bar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    <button type="button" class="btn primary" id="play">Проиграть заполнение</button>
+    <button type="button" class="btn" id="reset">Сбросить</button>
+  </div>
+  <p class="hint" id="story">Пустая карточка. Кнопка выше впишет заказ «Кухня» и посчитает итог. Поля можно править и вручную, в том числе формулой: <b>2*3</b> или <b>1200/3</b>.</p>
+  <article class="order-card" id="card">
+    <div class="order-head">
+      <div class="field"><label>Номер заказа</label><input id="f-number" data-k="number" value=""></div>
+      <div class="field"><label>Заказчик</label><input id="f-customer" data-k="customer" value="" autocomplete="off" spellcheck="false"></div>
+      <div class="field"><label>Название заказа</label><input id="f-name" data-k="name" value=""></div>
+      <div class="order-head-actions">
+        <button type="button" class="note-btn" id="f-note" title="Заметки к заказу">i</button>
+        <button type="button" class="btn small" id="act-share">Снимок</button>
+        <button type="button" class="btn small" id="act-dup-order">Дублировать</button>
+        <button type="button" class="btn small danger" id="act-del-order">Удалить</button>
+      </div>
+    </div>
+    <div class="order-work">
+      <div class="field"><label>Начало работ</label><input id="f-start" type="date"></div>
+      <div class="field"><label>Конец работ</label><input id="f-end" type="date"></div>
+      <span class="work-pill work-pill-nodate" id="f-pill">без дат</span>
+      <button class="btn small" type="button" id="act-start-today">Начать сегодня</button>
+      <button class="btn small" type="button" id="act-end-today">Закончить сегодня</button>
+    </div>
+    <div class="order-notes" id="notes">
+      <label>Заметки к заказу</label>
+      <textarea id="f-notes" rows="3" placeholder="Комментарий, договорённости, детали…"></textarea>
+    </div>
+    <div class="order-globals">
+      <div class="field"><label>Тип всем строкам</label>
+        <select id="g-type"><option value="">— не менять —</option><option>Производство</option><option>Услуга</option><option>Поставка</option><option>Монтаж</option></select>
+      </div>
+      <div class="field"><label>Скидка % всем</label><input id="g-disc" type="text" inputmode="decimal" placeholder="%"></div>
+      <div class="field"><label>Статус всем строкам</label>
+        <select id="g-status"><option value="">— не менять —</option><option>Новый заказ</option><option>Выполняется</option><option>Ожидание</option><option>Не оплачено</option><option>Оплачено</option><option>Отменено</option></select>
+      </div>
+      <button class="btn small primary" type="button" id="act-payall" title="В каждую строку запишет её итог и сегодняшнюю дату оплаты">Оплатить все типы</button>
+    </div>
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th></th><th>Тип заказа</th><th>Продукт</th><th class="num">Кол-во</th><th>Ед.</th>
+            <th class="num">Цена</th><th class="num">Скидка %</th><th>Дата заказа</th><th class="num">Оплачено</th>
+            <th>Дата оплаты</th><th class="num">Не оплачено</th><th class="num">Итог</th><th>Статус</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="lines"></tbody>
+      </table>
+    </div>
+    <div id="expenses"></div>
+    <div class="order-foot">
+      <button class="btn small" type="button" id="act-add">+ Тип заказа</button>
+      <button class="btn small" type="button" id="act-cost" title="Строка налога или затраты — вычитается из заказа">+ Расход</button>
+      <div class="totals" id="totals"></div>
+    </div>
+  </article>
+  <script src="fit.js"></script>
+  <script>
+    const TYPES = ["Производство", "Услуга", "Поставка", "Монтаж"];
+    const UNITS = ["шт.", "м²", "м", "мин"];
+    const STATUSES = ["Новый заказ", "Выполняется", "Ожидание", "Не оплачено", "Оплачено", "Отменено"];
+    const lines = document.getElementById("lines");
+    let timers = [];
+    let costOn = false;
+    let gen = 0;
+
+    function esc(s) {
+      return String(s || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    }
+
+    function today() {
+      const d = new Date();
+      return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    }
+
+    function num(v) {
+      const s = String(v || "").replace(/,/g, ".").replace(/×/g, "*").replace(/x/gi, "*").trim();
+      if (!s) return 0;
+      if (!/^[\d.+\-*/()\s]+$/.test(s)) return 0;
+      try {
+        const n = Function('"use strict"; return (' + s + ")")();
+        return Number.isFinite(n) ? n : 0;
+      } catch (err) { return 0; }
+    }
+
+    function money(n) {
+      return new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0) + " ₽";
+    }
+
+    function options(list, value) {
+      return list.map((item) => "<option" + (item === value ? " selected" : "") + ">" + item + "</option>").join("");
+    }
+
+    function addLine(data) {
+      const row = document.createElement("tr");
+      row.className = "line-row";
+      row.innerHTML =
+        '<td class="line-drag" title="Перетащить строку"><span></span></td>' +
+        '<td><select data-k="type">' + options(TYPES, data.type || "Монтаж") + "</select></td>" +
+        '<td><input data-k="product" value="' + esc(data.product) + '" autocomplete="off" spellcheck="false"></td>' +
+        '<td class="num"><input data-k="qty" class="expr-field" value="' + esc(data.qty) + '" inputmode="decimal" placeholder="1+2*6"></td>' +
+        '<td><select data-k="unit">' + options(UNITS, data.unit || "шт.") + "</select></td>" +
+        '<td class="num"><input data-k="price" class="expr-field" value="' + esc(data.price) + '" inputmode="decimal"></td>' +
+        '<td class="num"><input data-k="disc" class="expr-field" value="' + esc(data.disc) + '" inputmode="decimal"></td>' +
+        '<td><input data-k="date" type="date" value="' + esc(data.date) + '"></td>' +
+        '<td class="num"><input data-k="paid" class="expr-field" value="' + esc(data.paid) + '" inputmode="decimal"></td>' +
+        '<td><input data-k="pdate" type="date" value="' + esc(data.pdate) + '"></td>' +
+        '<td class="num computed" data-k="unpaid"></td>' +
+        '<td class="num computed" data-k="total"></td>' +
+        '<td><select data-k="status">' + options(STATUSES, data.status || "Новый заказ") + "</select></td>" +
+        '<td><div class="row-actions">' +
+        '<button type="button" class="done-btn" data-act="done" title="Завершить позицию">✓</button>' +
+        '<button type="button" class="note-btn" data-act="note" title="Комментарий к позиции">i</button>' +
+        '<button type="button" class="btn icon small" data-act="dup" title="Дублировать строку">⧉</button>' +
+        '<button type="button" class="btn icon small danger" data-act="del" title="Удалить строку">✕</button>' +
+        "</div></td>";
+      lines.appendChild(row);
+      return row;
+    }
+
+    function lineOf(row) {
+      const read = (key) => row.querySelector('[data-k="' + key + '"]').value;
+      const qty = num(read("qty"));
+      const price = num(read("price"));
+      const disc = Math.min(100, Math.max(0, num(read("disc"))));
+      const after = qty * price * (1 - disc / 100);
+      const paid = num(read("paid"));
+      return { after: after, paid: paid, unpaid: Math.max(0, after - paid) };
+    }
+
+    function paint() {
+      let after = 0, paid = 0, unpaid = 0;
+      [...lines.querySelectorAll("tr")].forEach((row) => {
+        const t = lineOf(row);
+        after += t.after; paid += t.paid; unpaid += t.unpaid;
+        row.querySelector('[data-k="total"]').textContent = money(t.after);
+        row.querySelector('[data-k="unpaid"]').textContent = money(t.unpaid);
+      });
+      const cost = costOn ? after * 0.1 : 0;
+      const net = after - cost;
+      const box = document.getElementById("expenses");
+      if (costOn) {
+        box.innerHTML = '<div class="order-expenses"><div class="oe-head"><span class="oe-title">Расходы заказа</span><span class="oe-sum">−' +
+          money(cost) + " · чистыми " + money(net) + "</span></div>" +
+          '<div class="table-wrap"><table class="data cost-table"><thead><tr><th></th><th>Тип</th><th>Вид</th><th>За что</th><th>Расчёт</th><th class="num">Итог</th></tr></thead><tbody><tr class="line-row cost-row">' +
+          '<td class="line-drag"><span></span></td><td>Налог</td><td><span class="cost-kind tax">налог</span></td><td>НДС</td><td>10 % от выручки</td><td class="num computed">−' + money(cost) + "</td></tr></tbody></table></div></div>";
+      } else box.innerHTML = "";
+      let html = "Итог <b>" + money(after) + "</b> · оплачено <b>" + money(paid) + "</b> · не оплачено <b>" + money(unpaid) + "</b>";
+      if (costOn) html += ' · расход <b class="cost">−' + money(cost) + "</b> · чистыми <b>" + money(net) + "</b>";
+      document.getElementById("totals").innerHTML = html;
+      const start = document.getElementById("f-start").value;
+      const end = document.getElementById("f-end").value;
+      const pill = document.getElementById("f-pill");
+      const day = today();
+      if (!start && !end) { pill.className = "work-pill work-pill-nodate"; pill.textContent = "без дат"; }
+      else if (end && end < day) { pill.className = "work-pill work-pill-done"; pill.textContent = "завершён"; }
+      else if (start && start > day) { pill.className = "work-pill work-pill-planned"; pill.textContent = "запланирован"; }
+      else { pill.className = "work-pill work-pill-now"; pill.textContent = "идёт сейчас"; }
+    }
+
+    function wipe() {
+      gen += 1;
+      timers.forEach((id) => clearTimeout(id));
+      timers = [];
+      ["f-number", "f-customer", "f-name", "f-start", "f-end", "f-notes", "g-disc"].forEach((id) => { document.getElementById(id).value = ""; });
+      document.getElementById("g-type").value = "";
+      document.getElementById("g-status").value = "";
+      document.getElementById("notes").classList.remove("open");
+      document.getElementById("f-note").classList.remove("has-note");
+      lines.innerHTML = "";
+      costOn = false;
+      addLine({});
+      paint();
+      document.getElementById("story").textContent = "Пустая карточка. Нажмите «Проиграть заполнение» или впишите поля сами.";
+      document.getElementById("play").disabled = false;
+    }
+
+    function typeInto(el, value, mine) {
+      return new Promise((resolve) => {
+        el.focus();
+        el.value = "";
+        let i = 0;
+        const step = () => {
+          if (mine !== gen) { resolve(); return; }
+          i += 1;
+          el.value = value.slice(0, i);
+          paint();
+          if (i < value.length) timers.push(setTimeout(step, 28));
+          else resolve();
+        };
+        step();
+      });
+    }
+
+    async function play() {
+      wipe();
+      const mine = gen;
+      document.getElementById("play").disabled = true;
+      const day = today();
+      const story = document.getElementById("story");
+      story.textContent = "Номер, заказчик и название.";
+      await typeInto(document.getElementById("f-number"), "1042", mine);
+      if (mine !== gen) return;
+      await typeInto(document.getElementById("f-customer"), "ООО «Север»", mine);
+      if (mine !== gen) return;
+      await typeInto(document.getElementById("f-name"), "Кухня на Ленинском", mine);
+      if (mine !== gen) return;
+      story.textContent = "Срок работ — с сегодняшнего дня.";
+      document.getElementById("f-start").value = day;
+      paint();
+      story.textContent = "Позиция: монтаж столешницы, 2 шт. по 15 000 ₽, скидка 10%.";
+      const row = lines.querySelector("tr");
+      row.querySelector('[data-k="type"]').value = "Монтаж";
+      await typeInto(row.querySelector('[data-k="product"]'), "Столешница", mine);
+      if (mine !== gen) return;
+      await typeInto(row.querySelector('[data-k="qty"]'), "2", mine);
+      if (mine !== gen) return;
+      await typeInto(row.querySelector('[data-k="price"]'), "15000", mine);
+      if (mine !== gen) return;
+      await typeInto(row.querySelector('[data-k="disc"]'), "10", mine);
+      if (mine !== gen) return;
+      row.querySelector('[data-k="date"]').value = day;
+      story.textContent = "Оплачено 10 000 ₽ из 27 000 ₽. Долг — 17 000 ₽.";
+      await typeInto(row.querySelector('[data-k="paid"]'), "10000", mine);
+      if (mine !== gen) return;
+      row.querySelector('[data-k="status"]').value = "Не оплачено";
+      paint();
+      story.textContent = "Итог 27 000,00 ₽: 2 × 15 000 минус скидка 10%. Оплачено 10 000,00 ₽, не оплачено 17 000,00 ₽. Кнопка «+ Расход» добавит налог 10% и строку «чистыми».";
+      document.getElementById("play").disabled = false;
+    }
+
+    document.getElementById("card").addEventListener("input", paint);
+    document.getElementById("card").addEventListener("change", paint);
+    document.getElementById("play").addEventListener("click", play);
+    document.getElementById("reset").addEventListener("click", wipe);
+    document.getElementById("act-add").addEventListener("click", () => { addLine({}); paint(); });
+    document.getElementById("act-cost").addEventListener("click", () => { costOn = !costOn; paint(); });
+    document.getElementById("act-start-today").addEventListener("click", () => { document.getElementById("f-start").value = today(); paint(); });
+    document.getElementById("act-end-today").addEventListener("click", () => { document.getElementById("f-end").value = today(); paint(); });
+    document.getElementById("act-payall").addEventListener("click", () => {
+      const day = today();
+      [...lines.querySelectorAll("tr")].forEach((row) => {
+        const t = lineOf(row);
+        row.querySelector('[data-k="paid"]').value = String(Math.round(t.after * 100) / 100);
+        row.querySelector('[data-k="pdate"]').value = day;
+        row.querySelector('[data-k="status"]').value = "Оплачено";
+      });
+      paint();
+    });
+    document.getElementById("g-type").addEventListener("change", () => {
+      const v = document.getElementById("g-type").value;
+      if (!v) return;
+      lines.querySelectorAll('[data-k="type"]').forEach((el) => { el.value = v; });
+    });
+    document.getElementById("g-status").addEventListener("change", () => {
+      const v = document.getElementById("g-status").value;
+      if (!v) return;
+      lines.querySelectorAll('[data-k="status"]').forEach((el) => { el.value = v; });
+    });
+    document.getElementById("g-disc").addEventListener("input", () => {
+      const v = document.getElementById("g-disc").value;
+      if (!v) return;
+      lines.querySelectorAll('[data-k="disc"]').forEach((el) => { el.value = v; });
+      paint();
+    });
+    document.getElementById("f-note").addEventListener("click", () => {
+      const box = document.getElementById("notes");
+      box.classList.toggle("open");
+      document.getElementById("f-note").classList.toggle("has-note", box.classList.contains("open") && document.getElementById("f-notes").value);
+    });
+    document.getElementById("f-notes").addEventListener("input", () => {
+      document.getElementById("f-note").classList.toggle("has-note", !!document.getElementById("f-notes").value);
+    });
+    lines.addEventListener("click", (event) => {
+      const btn = event.target.closest("button");
+      if (!btn) return;
+      const row = btn.closest("tr");
+      if (btn.dataset.act === "del") {
+        if (lines.querySelectorAll("tr").length > 1) row.remove();
+        paint();
+      }
+      if (btn.dataset.act === "dup") {
+        const read = (key) => row.querySelector('[data-k="' + key + '"]').value;
+        addLine({ type: read("type"), product: read("product"), qty: read("qty"), unit: read("unit"), price: read("price"), disc: read("disc"), date: read("date"), paid: read("paid"), pdate: read("pdate"), status: read("status") });
+        paint();
+      }
+      if (btn.dataset.act === "done") btn.classList.toggle("is-done");
+    });
+    wipe();
+  </script>
+</body>
+</html>

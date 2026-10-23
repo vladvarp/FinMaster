@@ -73,6 +73,31 @@
   padding: 8px 10px;
 }
 
+.hit-count {
+  margin: 0 8px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hit-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.hit-btn:hover, .hit-btn:focus { background: var(--accent-soft); outline: none; }
+
+.hit-btn b { display: block; font-size: 14px; }
+
+.hit-btn small { color: var(--muted); font-size: 11px; }
+
+.hit-btn p { margin: 3px 0 0; font-size: 12px; line-height: 1.35; color: var(--muted); }
+
 .main { min-width: 0; }
 
 .top {
@@ -98,8 +123,12 @@
 
 .menu { display: none; }
 
+@media (min-width: 861px) {
+  .top { display: none; }
+}
+
 .doc {
-  max-width: 820px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 8px 28px 80px;
 }

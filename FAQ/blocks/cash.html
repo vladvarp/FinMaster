@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+</head>
+<body>
+  <p class="hint">Пример дебиторки, чтобы были видны плитки, чипы и старение. В программе суммы берутся из неоплаченных позиций.</p>
+  <div class="kpis">
+    <div class="kpi ok"><div class="label">Поступит за 7 дней</div><div class="value">24 000,00 ₽</div><div class="sub">2 позиции · за 30 дней 41 000,00 ₽</div></div>
+    <div class="kpi warn"><div class="label">Просрочено</div><div class="value">18 000,00 ₽</div><div class="sub">1 позиция · максимум 12 дней</div></div>
+    <div class="kpi"><div class="label">Средний срок оплаты</div><div class="value">19 дней</div><div class="sub">по договору 14 дней · платят на 5 дней позже</div></div>
+    <div class="kpi"><div class="label">Дебиторка всего</div><div class="value">58 000,00 ₽</div><div class="sub">2 заказа · собираемость 55%</div></div>
+  </div>
+  <div class="card">
+    <h3>Старение дебиторки</h3>
+    <div class="chips" style="margin-bottom:10px">
+      <button type="button" class="chip active">Все<span class="chip-count">3</span></button>
+      <button type="button" class="chip">Срок не наступил<span class="chip-count">1</span></button>
+      <button type="button" class="chip">Просрочено<span class="chip-count">1</span></button>
+    </div>
+    <div class="aging-stack">
+      <span class="aging-seg" style="flex:40000;background:#0f766e" title="Срок не наступил"></span>
+      <span class="aging-seg" style="flex:18000;background:#f59e0b" title="Просрочка 1–7 дней"></span>
+      <span class="aging-seg" style="flex:0.001;background:#f97316"></span>
+      <span class="aging-seg" style="flex:0.001;background:#dc2626"></span>
+    </div>
+    <div class="aging-rows">
+      <button type="button" class="aging-row"><i style="background:#0f766e"></i><span class="aging-label">Срок не наступил</span><span class="aging-share">69%</span><span class="aging-sum">40 000,00 ₽</span></button>
+      <button type="button" class="aging-row"><i style="background:#f59e0b"></i><span class="aging-label">Просрочка 1–7 дней</span><span class="aging-share">31%</span><span class="aging-sum">18 000,00 ₽</span></button>
+      <button type="button" class="aging-row dim"><i style="background:#f97316"></i><span class="aging-label">Просрочка 8–30 дней</span><span class="aging-share">0%</span><span class="aging-sum">0,00 ₽</span></button>
+      <button type="button" class="aging-row dim"><i style="background:#7f1d1d"></i><span class="aging-label">Просрочка больше 60 дней</span><span class="aging-share">0%</span><span class="aging-sum">0,00 ₽</span></button>
+    </div>
+  </div>
+  <script src="fit.js"></script>
+</body>
+</html>
