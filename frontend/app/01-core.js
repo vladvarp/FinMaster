@@ -128,8 +128,11 @@
     pending: false,
     pendingLabel: "",
     saveChain: Promise.resolve(),
+    savedStack: null,
     limit: HISTORY_LIMIT_DEFAULT,
   };
+
+  let historyWrite = Promise.resolve();
 
   function clampHistoryLimit(value) {
     const n = Number(value);
@@ -278,6 +281,7 @@
     history.stack = snap ? [historyItem(snap, label, localActor())] : [];
     history.index = history.stack.length - 1;
     updateHistoryButtons();
+    markHistorySaved();
     if (opts.persist !== false) persistHistorySoon();
   }
 
@@ -374,17 +378,49 @@
     };
   }
 
+  function markHistorySaved() {
+    if (history.index < 0 || !history.stack.length) {
+      history.savedStack = null;
+      return;
+    }
+    history.savedStack = history.stack.slice(0, history.index + 1);
+  }
+
+  function persistHistoryNow() {
+    if (window.FM_DESK || !state.desktop || !state.path) return historyWrite;
+    const path = state.path;
+    const title = state.doc?.title || "";
+    const payload = historyDiskPayload();
+    historyWrite = historyWrite
+      .catch(() => {})
+      .then(() => apiPost("/api/history", { path, title, ...payload }))
+      .catch(() => {});
+    return historyWrite;
+  }
+
+  async function revertHistoryToLastSave() {
+    const saved = history.savedStack;
+    if (!saved || !saved.length || !state.path) return;
+    const same = history.stack.length === saved.length && history.stack.every((item, i) => item.id === saved[i]?.id);
+    if (same && history.index === saved.length - 1) return;
+    clearTimeout(history.timer);
+    clearTimeout(history.persistTimer);
+    history.pending = false;
+    history.pendingLabel = "";
+    history.stack = saved.slice();
+    history.index = saved.length - 1;
+    updateHistoryButtons();
+    await persistHistoryNow();
+  }
+
   function persistHistorySoon() {
     renderHistoryPanel();
     if (window.FM_DESK) return;
     if (!state.desktop || !state.path) return;
     clearTimeout(history.persistTimer);
     history.persistTimer = setTimeout(() => {
-      apiPost("/api/history", {
-        path: state.path,
-        title: state.doc?.title || "",
-        ...historyDiskPayload(),
-      }).catch(() => {});
+      history.persistTimer = 0;
+      persistHistoryNow();
     }, 400);
   }
 
@@ -416,6 +452,7 @@
       history.pending = false;
       history.pendingLabel = "";
       updateHistoryButtons();
+      markHistorySaved();
       return;
     }
     const restored = [];
@@ -449,6 +486,7 @@
     history.pending = false;
     history.pendingLabel = "";
     updateHistoryButtons();
+    markHistorySaved();
   }
 
   function updateHistoryButtons() {

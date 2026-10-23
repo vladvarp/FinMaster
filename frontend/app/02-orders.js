@@ -423,11 +423,7 @@
     }
     if (state.desktop && state.path) {
       try {
-        await apiPost("/api/history", {
-          path: state.path,
-          title: state.doc?.title || "",
-          ...historyDiskPayload(),
-        });
+        await persistHistoryNow();
       } catch {
         /* ignore */
       }
@@ -594,6 +590,7 @@
 
   function setClean() {
     state.dirty = false;
+    markHistorySaved();
     updateChrome();
     syncDirty();
     remotePublish();
@@ -699,7 +696,8 @@
     renderStartLists();
   }
 
-  function discardOpenReport() {
+  async function discardOpenReport() {
+    if (state.dirty) await revertHistoryToLastSave();
     state.preview = false;
     state.doc = emptyDoc();
     state.path = "";

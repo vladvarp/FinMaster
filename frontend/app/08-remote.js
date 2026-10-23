@@ -1001,6 +1001,7 @@
       persistHistorySoon();
       toast(`Хранить снимков: ${history.limit}`);
     } else if (cmd.type === "new") {
+      if (state.dirty) await revertHistoryToLastSave();
       const stay = !!state.view && $("app-shell") && !$("app-shell").hidden;
       const view = stay ? state.view : "dashboard";
       state.doc = emptyDoc();
@@ -1335,8 +1336,14 @@
       const data = await apiGet("/api/instance/pending");
       for (const path of data.paths || []) {
         if (!path || (samePath(path, state.path) && state.doc)) continue;
-        const ok = await confirmSwitchReport();
-        if (!ok) continue;
+        const choice = await confirmSwitchReport();
+        if (!choice || choice === "cancel") continue;
+        if (choice === "save") {
+          const ok = await save();
+          if (!ok) continue;
+        } else if (choice === "discard") {
+          await revertHistoryToLastSave();
+        }
         await openPath(path);
       }
     } catch {

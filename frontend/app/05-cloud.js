@@ -1230,6 +1230,8 @@
       if (choice === "save") {
         const ok = await save();
         if (!ok) return;
+      } else if (choice === "discard") {
+        await revertHistoryToLastSave();
       }
     }
     const engine = fromStart ? startCloud : orderCloud;
@@ -2607,8 +2609,14 @@
       const openBtn = e.target.closest("[data-bak-open]");
       if (openBtn) {
         const path = openBtn.dataset.bakOpen;
-        confirmSwitchReport().then((ok) => {
-          if (!ok) return;
+        confirmSwitchReport().then(async (choice) => {
+          if (!choice || choice === "cancel") return;
+          if (choice === "save") {
+            const ok = await save();
+            if (!ok) return;
+          } else if (choice === "discard") {
+            await revertHistoryToLastSave();
+          }
           $("backup-modal")?.classList.remove("open");
           openPath(path);
         });
@@ -3468,6 +3476,7 @@
     });
     $("close-discard").addEventListener("click", async () => {
       $("close-modal").classList.remove("open");
+      await revertHistoryToLastSave();
       state.dirty = false;
       if (state._update) {
         state._update = false;
@@ -3526,6 +3535,7 @@
     });
     $("new-discard").addEventListener("click", async () => {
       $("new-modal").classList.remove("open");
+      await revertHistoryToLastSave();
       if (unsavedWait) {
         const done = unsavedWait;
         unsavedWait = null;
@@ -3759,6 +3769,7 @@
         danger: true,
       });
       if (!ok) return;
+      await revertHistoryToLastSave();
     }
     await fn();
   }
