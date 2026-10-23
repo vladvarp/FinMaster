@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <style>
+    .kind {
+      display: grid;
+      grid-template-columns: minmax(280px, 400px) minmax(0, 1fr);
+      gap: 8px 18px;
+      align-items: start;
+      margin: 0 0 18px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .kind h2 {
+      grid-column: 1 / -1;
+      margin: 0;
+      font-size: 18px;
+    }
+    .kind p { margin: 0; font-size: 14px; line-height: 1.45; }
+    .kind .calc-node {
+      position: relative !important;
+      left: auto !important;
+      top: auto !important;
+    }
+    .kind .calc-node.is-formula { width: 100% !important; }
+    .kind .calc-node.is-result { min-width: 0; width: 280px; }
+    .kind .calc-node.is-filter,
+    .kind .calc-node.is-dashboard { width: 100%; }
+    .group-box { position: relative; height: 168px; }
+    .group-box .calc-node.is-group,
+    .group-box .calc-group-chrome {
+      position: absolute !important;
+      left: 0 !important;
+      top: 0 !important;
+      width: 280px;
+      height: 150px;
+    }
+  </style>
+</head>
+<body>
+  <section class="kind">
+    <h2>Заказ</h2>
+    <article class="calc-node is-order">
+      <header class="calc-node-h">
+        <span>1042</span>
+        <button type="button" class="calc-mini calc-order-types" title="Суммы по типам">Σ</button>
+      </header>
+      <div class="calc-node-sub">Кухня</div>
+      <div class="calc-ports">
+        <div class="calc-row out is-income">
+          <span class="calc-row-name">Фасады</span>
+          <b>18 000</b>
+          <i class="calc-port out" title="Фасады"></i>
+        </div>
+        <div class="calc-row out is-income">
+          <span class="calc-row-name">Сборка</span>
+          <b>9 000</b>
+          <i class="calc-port out" title="Сборка"></i>
+        </div>
+        <div class="calc-row out is-total">
+          <span class="calc-row-name">Итого</span>
+          <b>27 000</b>
+          <i class="calc-port out" title="Итого"></i>
+        </div>
+      </div>
+    </article>
+    <p>Карточка заказа из отчёта. У каждой позиции свой выход: доход бирюзовый, налог янтарный, затрата розовый, замороженная строка серая. «Итого» — сумма позиций, здесь 18 000 + 9 000 = 27 000. Кнопка Σ добавляет выход на сумму всех позиций одного типа. Правый клик по выходу открывает доп. поля этой строки. С заказа можно провести сколько угодно линий.</p>
+  </section>
+
+  <section class="kind">
+    <h2>Константа</h2>
+    <article class="calc-node is-const">
+      <header class="calc-node-h"><span>Константа</span></header>
+      <input class="calc-const-val" value="1500" readonly tabindex="-1" title="Число" />
+      <textarea class="calc-const-note" rows="1" readonly tabindex="-1" title="Комментарий: что это за число и откуда оно">Монтаж</textarea>
+      <div class="calc-ports">
+        <div class="calc-row out">
+          <span>1 500</span>
+          <i class="calc-port out" title="Выход"></i>
+        </div>
+      </div>
+    </article>
+    <p>Своё число, которого нет в заказе. На стенде это монтаж, 1 500. Под числом комментарий до 500 символов: в сумму он не входит, только подпись. Выход один и равен числу.</p>
+  </section>
+
+  <section class="kind">
+    <h2>Оператор</h2>
+    <article class="calc-node is-math">
+      <header class="calc-node-h"><span>Оператор</span></header>
+      <div class="calc-ops">
+        <button type="button" class="calc-op on" tabindex="-1">+</button>
+        <button type="button" class="calc-op" tabindex="-1">−</button>
+        <button type="button" class="calc-op" tabindex="-1">×</button>
+        <button type="button" class="calc-op" tabindex="-1">÷</button>
+      </div>
+      <div class="calc-screen" title="Выход"><span class="calc-screen-val">28 500</span></div>
+      <div class="calc-ports">
+        <div class="calc-row in">
+          <i class="calc-port in"></i>
+          <span>вход 1</span>
+          <button type="button" class="calc-mini" title="Удалить связь" tabindex="-1">×</button>
+        </div>
+        <div class="calc-row in">
+          <i class="calc-port in"></i>
+          <span>вход 2</span>
+          <button type="button" class="calc-mini" title="Удалить связь" tabindex="-1">×</button>
+        </div>
+        <div class="calc-row in">
+          <i class="calc-port in"></i>
+          <span>вход 3</span>
+        </div>
+        <div class="calc-row out">
+          <span>28 500</span>
+          <i class="calc-port out" title="Выход"></i>
+        </div>
+      </div>
+    </article>
+    <p>Четыре действия: + − × ÷. Входов сначала два, максимум двадцать: следующий пустой появляется, когда занят последний. Пустой вход в расчёт не берётся, поэтому третья строка здесь ничего не прибавляет: 27 000 + 1 500 = 28 500. Если пусты все входы, на экране ноль. Деление на ноль оставляет прочерк.</p>
+  </section>
+
+  <section class="kind">
+    <h2>Результат</h2>
+    <article class="calc-node is-result">
+      <header class="calc-node-h">
+        <input class="calc-result-prio" type="number" value="1" readonly tabindex="-1" title="Приоритет на схеме (меньше — выше)" />
+        <input class="calc-pname calc-result-name" value="Смета" readonly tabindex="-1" title="Имя результата" />
+        <button type="button" class="calc-eye" title="Скрыть из ноды схемы" aria-label="Скрыть из ноды схемы" tabindex="-1">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/></svg>
+        </button>
+      </header>
+      <div class="calc-screen" title="Значение связи"><span class="calc-screen-val">28 500</span></div>
+      <div class="calc-ports">
+        <div class="calc-row in">
+          <i class="calc-port in"></i>
+          <span>вход</span>
+          <button type="button" class="calc-mini" title="Удалить связь" tabindex="-1">×</button>
+        </div>
+        <div class="calc-row out">
+          <span>выход</span>
+          <i class="calc-port out" title="Выход"></i>
+        </div>
+      </div>
+    </article>
+    <p>Ничего не считает: показывает число, которое пришло по линии, и отдаёт его дальше. Имя и приоритет задают, как этот выход встанет на ноде «Схема» в другом блюпринте. Меньшее число приоритета — выше. Глаз прячет результат из той ноды, сама карточка на поле остаётся.</p>
+  </section>
+
+  <section class="kind">
+    <h2>Формула</h2>
+    <article class="calc-node is-formula">
+      <header class="calc-node-h"><span>Формула</span></header>
+      <div class="calc-fprof">
+        <select disabled aria-label="Профили формулы" title="Профилей пока нет. Создайте новый кнопкой +"><option>Создайте профиль</option></select>
+        <button type="button" class="calc-mini" tabindex="-1" title="Сохранить текущую формулу как профиль">+</button>
+        <button type="button" class="calc-mini" tabindex="-1" title="Удалить профили">×</button>
+      </div>
+      <div class="calc-ports">
+        <div class="calc-sec">Входы</div>
+        <div class="calc-row in">
+          <i class="calc-port in"></i>
+          <input class="calc-pname" value="A" readonly tabindex="-1" title="Буква входа" />
+        </div>
+        <div class="calc-row in">
+          <i class="calc-port in"></i>
+          <input class="calc-pname" value="B" readonly tabindex="-1" title="Буква входа" />
+        </div>
+        <div class="calc-sec">Выходы</div>
+        <div class="calc-row out formula">
+          <input class="calc-expr" value="A+B" readonly tabindex="-1" title="Выражение" />
+          <span class="calc-eq">=</span>
+          <input class="calc-pname" value="C" readonly tabindex="-1" />
+          <b class="calc-out-val">28 500</b>
+          <i class="calc-port out" title="Выход"></i>
+        </div>
+        <div class="calc-row out formula">
+          <input class="calc-expr" value="C*2" readonly tabindex="-1" title="Выражение" />
+          <span class="calc-eq">=</span>
+          <input class="calc-pname" value="D" readonly tabindex="-1" />
+          <b class="calc-out-val">57 000</b>
+          <i class="calc-port out" title="Выход"></i>
+        </div>
+      </div>
+    </article>
+    <p>Буквы только A…Z, без повторов. Сюда пришли те же числа, что на первом стенде: A = 27 000, B = 1 500. Выходы считаются сверху вниз, поэтому нижняя строка уже видит C и удваивает её: 57 000. Пока профиль не сохранён, список сверху неактивен. Ошибка в букве или в выражении красит ноду и обводит это поле.</p>
+  </section>
+
+  <section class="kind">
+    <h2>Процент</h2>
+    <article class="calc-node is-percent">
+      <header class="calc-node-h"><span>Процент</span></header>
+      <div class="calc-screen" title="Число × % / 100"><span class="calc-screen-val">2 700</span></div>
+      <div class="calc-ports">
+        <div class="calc-row in">
+          <i class="calc-port in" title="Вход"></i>
+          <span>число</span>
+        </div>
+        <div class="calc-row in">
+          <i class="calc-port in" title="Вход"></i>
+          <span>%</span>
+        </div>
+        <div class="calc-row out">
+          <span>выход</span>
+          <i class="calc-port out" title="Выход"></i>
+        </div>
+      </div>
+    </article>
+    <p>Два входа и ничего больше. Выход всегда число × % / 100. Итог кухни 27 000 и константа 10 дают 2 700. Пустой вход считается нулём, поэтому без линии на экране будет 0. Смету эта нода не меняет: у неё своя линия.</p>
+  </section>
+
+  <section class="kind">
+    <h2>Фильтр</h2>
+    <article class="calc-node is-filter">
+      <header class="calc-node-h"><span>Фильтр</span></header>
+      <div class="calc-filter-fields">
+        <div class="calc-filter-row">
+          <span>Заказчик</span>
+          <div class="calc-multi-wrap"><details class="calc-multi" title="Несколько заказчиков"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Иванов</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Петров</span></label></div></details></div>
+        </div>
+        <div class="calc-filter-row">
+          <span>Заказ</span>
+          <div class="calc-multi-wrap"><details class="calc-multi" title="Несколько заказов"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>1042 — Кухня</span></label></div></details></div>
+        </div>
+        <label class="calc-filter-row">
+          <span>Период</span>
+          <select class="calc-filter-input" aria-label="Период">
+            <option value="all">Весь период</option>
+            <option value="today">Сегодня</option>
+            <option value="week">7 дней</option>
+            <option value="month" selected>Этот месяц</option>
+            <option value="year">Этот год</option>
+            <option value="range">Диапазон</option>
+          </select>
+        </label>
+        <div class="calc-filter-row">
+          <span>Фильтр</span>
+          <div class="calc-multi-wrap"><details class="calc-multi" title="Фильтр оплаты"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>С долгом</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Оплаченные</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Этот месяц</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Без цены</span></label></div></details></div>
+        </div>
+      </div>
+      <div class="calc-ports">
+        <div class="calc-row out"><span class="calc-row-name">Заказов</span><b>1</b><i class="calc-port out"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Позиций</span><b>2</b><i class="calc-port out"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">К оплате</span><b>27 000</b><i class="calc-port out"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Оплачено</span><b>10 000</b><i class="calc-port out"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Долг</span><b>17 000</b><i class="calc-port out"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Расходы</span><b>0</b><i class="calc-port out"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Чистыми</span><b>27 000</b><i class="calc-port out"></i></div>
+      </div>
+    </article>
+    <p>Входов нет. Срез задаётся на самой карточке: заказчик, заказ, период, оплата, тип, продукт, статус. На стенде период «Этот месяц» и одна кухня: две позиции, к оплате 27 000, оплачено 10 000, долг 17 000. Если пунктов выбрано больше одного, справа появляется × и сбрасывает выбор. Цифры уходят выходами, как у обычной ноды.</p>
+  </section>
+
+  <section class="kind">
+    <h2>Дашборд</h2>
+    <article class="calc-node is-dashboard">
+      <header class="calc-node-h">
+        <span>Дашборд</span>
+        <button type="button" class="calc-mini calc-dash-ports" tabindex="-1" title="Порты метрик">+</button>
+      </header>
+      <div class="calc-filter-fields">
+        <div class="calc-filter-row">
+          <span>Заказчик</span>
+          <div class="calc-multi-wrap"><details class="calc-multi" title="Несколько заказчиков"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Иванов</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Петров</span></label></div></details></div>
+        </div>
+        <label class="calc-filter-row">
+          <span>Период</span>
+          <select class="calc-filter-input" aria-label="Период">
+            <option value="all" selected>Весь период</option>
+            <option value="today">Сегодня</option>
+            <option value="week">7 дней</option>
+            <option value="month">Этот месяц</option>
+            <option value="year">Этот год</option>
+            <option value="range">Диапазон</option>
+          </select>
+        </label>
+      </div>
+      <div class="calc-ports">
+        <div class="calc-row out"><span class="calc-row-name">Заказов</span><b>1</b><i class="calc-port out"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">К оплате</span><b>27 000</b><i class="calc-port out"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Оплачено</span><b>10 000</b><i class="calc-port out"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Долг</span><b>17 000</b><i class="calc-port out"></i></div>
+      </div>
+    </article>
+    <p>Те же фильтры, что у фильтра, но набор выходов свой. Сразу после создания их четыре: заказы, к оплате, оплачено, долг. Кнопка + или правый клик по порту добавляет остальные метрики: без отмен, средний чек, просрочка, прогноз месяца. Лишние так же снимаются.</p>
+  </section>
+
+  <section class="kind">
+    <h2>Группа</h2>
+    <div class="group-box">
+      <article class="calc-node is-group" style="--group-color:#14b8a6"></article>
+      <div class="calc-group-chrome" style="--group-color:#14b8a6">
+        <header class="calc-node-h calc-group-h">
+          <input class="calc-pname calc-group-name" value="Смета" readonly tabindex="-1" title="Имя группы" />
+          <input class="calc-group-color" type="color" value="#14b8a6" disabled tabindex="-1" title="Цвет группы" />
+        </header>
+        <i class="calc-resize" title="Изменить размер"></i>
+      </div>
+    </div>
+    <p>Рамка, не расчёт. Портов нет, число сквозь неё не идёт. Имя и цвет только чтобы собрать кусок схемы глазами. Ноды внутри едут вместе с рамкой. Кнопка ∅ группу не удаляет.</p>
+  </section>
+
+  <section class="kind">
+    <h2>Комментарий</h2>
+    <article class="calc-node is-comment">
+      <header class="calc-node-h"><span>Комментарий</span></header>
+      <textarea class="calc-comment" rows="4" readonly tabindex="-1">Монтаж не входит в позиции заказа, поэтому он константой.</textarea>
+    </article>
+    <p>Записка на поле. Портов нет, в сумму не входит. Кнопка ∅ её не удаляет: иначе текст без линий пропал бы при первой же чистке.</p>
+  </section>
+
+  <section class="kind">
+    <h2>Схема</h2>
+    <article class="calc-node is-scheme">
+      <header class="calc-node-h"><span>Смета кухни</span></header>
+      <div class="calc-ports">
+        <div class="calc-row">
+          <span class="calc-row-name">Смета</span>
+          <b>28 500</b>
+          <i class="calc-port out" title="Выход"></i>
+        </div>
+      </div>
+    </article>
+    <p>Это другая схема, поставленная сюда одной карточкой. Выходы — её видимые результаты, по приоритету: меньшее число выше. Глаз на результате прячет этот выход. Своих входов у ноды нет. Схема не может включить сама себя: такая карточка помечается ошибкой.</p>
+  </section>
+
+  <section class="kind">
+    <h2>Презентация</h2>
+    <article class="calc-node is-present">
+      <header class="calc-node-h">
+        <span><span class="pres-tool-ico" aria-hidden="true">●</span><span class="pres-tool-name">Итог</span></span>
+      </header>
+      <div class="calc-node-sub">Лист · Метрика</div>
+      <div class="calc-ports">
+        <div class="calc-row in">
+          <i class="calc-port in" title="Значение"></i>
+          <span>Значение</span>
+          <b>28 500</b>
+        </div>
+      </div>
+    </article>
+    <p>Карточка блока со страницы презентации. Входы — порты этого блока: у метрики один, «Значение». Число по линии попадает на холст. Один и тот же вход блока во всём отчёте занимает только одна линия: чужой порт серый, правый клик его освобождает. Заголовок, заметка и отступ сюда не ставятся — у них нет портов.</p>
+  </section>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

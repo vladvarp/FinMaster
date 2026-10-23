@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <style>
+    .sheet {
+      position: relative;
+      width: 860px;
+      height: 470px;
+      max-width: none;
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+    }
+    .sheet .calc-node { position: absolute; }
+    .sheet .calc-node.is-result { min-width: 250px; width: 260px; }
+    .wires {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      z-index: 1;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <p class="hint">Стенд. Итог заказа 27 000 и константа 1 500 складываются. Пустой третий вход в сумму не входит.</p>
+  <div class="sheet" id="sheet">
+    <svg class="wires" id="wires" aria-hidden="true"></svg>
+
+    <article class="calc-node is-order" style="left:16px;top:16px">
+      <header class="calc-node-h">
+        <span>1042</span>
+        <button type="button" class="calc-mini calc-order-types" title="Суммы по типам">Σ</button>
+      </header>
+      <div class="calc-node-sub">Кухня</div>
+      <div class="calc-ports">
+        <div class="calc-row out is-income">
+          <span class="calc-row-name">Фасады</span>
+          <b>18 000</b>
+          <i class="calc-port out" title="Фасады"></i>
+        </div>
+        <div class="calc-row out is-income">
+          <span class="calc-row-name">Сборка</span>
+          <b>9 000</b>
+          <i class="calc-port out" title="Сборка"></i>
+        </div>
+        <div class="calc-row out is-total">
+          <span class="calc-row-name">Итого</span>
+          <b>27 000</b>
+          <i class="calc-port out" id="order-total" title="Итого"></i>
+        </div>
+      </div>
+    </article>
+
+    <article class="calc-node is-const" style="left:16px;top:250px">
+      <header class="calc-node-h"><span>Константа</span></header>
+      <input class="calc-const-val" value="1500" readonly tabindex="-1" title="Число" />
+      <textarea class="calc-const-note" rows="1" readonly tabindex="-1" title="Комментарий">Монтаж</textarea>
+      <div class="calc-ports">
+        <div class="calc-row out">
+          <span>1 500</span>
+          <i class="calc-port out" id="const-out" title="Выход"></i>
+        </div>
+      </div>
+    </article>
+
+    <article class="calc-node is-math" style="left:320px;top:78px">
+      <header class="calc-node-h"><span>Оператор</span></header>
+      <div class="calc-ops">
+        <button type="button" class="calc-op on" tabindex="-1">+</button>
+        <button type="button" class="calc-op" tabindex="-1">−</button>
+        <button type="button" class="calc-op" tabindex="-1">×</button>
+        <button type="button" class="calc-op" tabindex="-1">÷</button>
+      </div>
+      <div class="calc-screen" title="Выход"><span class="calc-screen-val">28 500</span></div>
+      <div class="calc-ports">
+        <div class="calc-row in">
+          <i class="calc-port in" id="math-in1"></i>
+          <span>вход 1</span>
+          <button type="button" class="calc-mini" title="Удалить связь" tabindex="-1">×</button>
+        </div>
+        <div class="calc-row in">
+          <i class="calc-port in" id="math-in2"></i>
+          <span>вход 2</span>
+          <button type="button" class="calc-mini" title="Удалить связь" tabindex="-1">×</button>
+        </div>
+        <div class="calc-row in">
+          <i class="calc-port in"></i>
+          <span>вход 3</span>
+        </div>
+        <div class="calc-row out">
+          <span>28 500</span>
+          <i class="calc-port out" id="math-out" title="Выход"></i>
+        </div>
+      </div>
+    </article>
+
+    <article class="calc-node is-result" style="left:580px;top:120px">
+      <header class="calc-node-h">
+        <input class="calc-result-prio" type="number" value="1" readonly tabindex="-1" title="Приоритет на схеме (меньше — выше)" />
+        <input class="calc-pname calc-result-name" value="Смета" readonly tabindex="-1" title="Имя результата" />
+      </header>
+      <div class="calc-screen" title="Значение связи"><span class="calc-screen-val">28 500</span></div>
+      <div class="calc-ports">
+        <div class="calc-row in">
+          <i class="calc-port in" id="result-in"></i>
+          <span>вход</span>
+          <button type="button" class="calc-mini" title="Удалить связь" tabindex="-1">×</button>
+        </div>
+        <div class="calc-row out">
+          <span>выход</span>
+          <i class="calc-port out" title="Выход"></i>
+        </div>
+      </div>
+    </article>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+  <script>
+    function paintWires() {
+      const host = document.getElementById("sheet");
+      const svg = document.getElementById("wires");
+      if (!host || !svg) return;
+      const box = host.getBoundingClientRect();
+      svg.setAttribute("viewBox", "0 0 " + host.clientWidth + " " + host.clientHeight);
+      svg.replaceChildren();
+      [
+        ["order-total", "math-in1", "is-order"],
+        ["const-out", "math-in2", "is-const"],
+        ["math-out", "result-in", "is-math"],
+      ].forEach(function (pair) {
+        const startEl = document.getElementById(pair[0]);
+        const endEl = document.getElementById(pair[1]);
+        if (!startEl || !endEl) return;
+        const start = startEl.getBoundingClientRect();
+        const end = endEl.getBoundingClientRect();
+        const ax = start.left - box.left + start.width / 2;
+        const ay = start.top - box.top + start.height / 2;
+        const bx = end.left - box.left + end.width / 2;
+        const by = end.top - box.top + end.height / 2;
+        const bend = Math.max(40, Math.abs(bx - ax) * 0.45);
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("class", "calc-wire " + pair[2]);
+        path.setAttribute("d", "M" + ax + "," + ay + " C" + (ax + bend) + "," + ay + " " + (bx - bend) + "," + by + " " + bx + "," + by);
+        svg.appendChild(path);
+      });
+    }
+    paintWires();
+    window.addEventListener("load", paintWires);
+    if (window.ResizeObserver) new ResizeObserver(paintWires).observe(document.getElementById("sheet"));
+  </script>
+</body>
+</html>

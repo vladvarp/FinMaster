@@ -94,7 +94,9 @@
     const frameCss = doc.createElement("link");
     frameCss.rel = "stylesheet";
     frameCss.href = "/faq/blocks/stage.css";
-    doc.head.append(appCss, frameCss);
+    const chrome = doc.createElement("script");
+    chrome.src = "blocks/chrome.js";
+    doc.head.append(appCss, frameCss, chrome);
     const stage = doc.createElement("div");
     stage.className = row ? "stage is-row" : "stage";
     nodes.forEach((node) => stage.appendChild(doc.importNode(node, true)));
