@@ -1571,9 +1571,11 @@
       state.updateCurrent = data.current || "";
       state.updateLatest = data.latest || "";
       state.updateDamaged = !!data.damaged;
+      state.updateIntegrity = !!data.integrity;
     } catch {
       state.updateReady = false;
       state.updateDamaged = false;
+      state.updateIntegrity = false;
       return false;
     }
     const fromRepo = data && data.enabled === false;
@@ -1581,19 +1583,29 @@
     if (fromRepo) {
       state.updateReady = false;
       state.updateDamaged = false;
+      state.updateIntegrity = false;
     }
-    btn.classList.toggle("update-ready", !!state.updateReady);
-    btn.classList.toggle("update-damaged", !!state.updateReady && !!state.updateDamaged);
-    const title = fromRepo
+    paintUpdateButton();
+    return true;
+  }
+
+  function paintUpdateButton() {
+    const btn = $("btn-update");
+    if (!btn) return;
+    const red = (!!state.updateReady && !!state.updateDamaged) || !!state.updateIntegrity;
+    btn.classList.toggle("update-ready", !!state.updateReady || red);
+    btn.classList.toggle("update-damaged", red);
+    const title = btn.disabled
       ? "В репозитории обновление выключено"
-      : state.updateDamaged
-        ? "Возможно, файлы повреждены"
-        : state.updateReady
-          ? "Есть обновление"
-          : "Обновить программу";
+      : state.updateIntegrity
+        ? "Целостность программы нарушена"
+        : state.updateDamaged
+          ? "Возможно, файлы повреждены"
+          : state.updateReady
+            ? "Есть обновление"
+            : "Обновить программу";
     btn.title = title;
     btn.setAttribute("aria-label", title);
-    return true;
   }
 
   async function runProgramUpdate() {
@@ -1602,6 +1614,17 @@
     } catch (err) {
       toast(err && err.message ? err.message : "Не удалось запустить обновление");
     }
+  }
+
+  function infoButton() {
+    return `<button type="button" class="info-btn confirm-info" data-diff="files" title="Чем отличается" aria-label="Чем отличается">i</button>`;
+  }
+
+  function filesWord(count) {
+    const n10 = count % 10;
+    const n100 = count % 100;
+    const word = n10 === 1 && n100 !== 11 ? "файл отличается" : n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14) ? "файла отличаются" : "файлов отличаются";
+    return count + " " + word;
   }
 
   function paintIntegrity(ok, value) {
@@ -1614,7 +1637,45 @@
       textEl.appendChild(line);
     }
     line.classList.toggle("warn", !ok);
-    line.innerHTML = `<i>Проверка</i><b>${esc(value)}</b>`;
+    line.innerHTML = `<i>Проверка</i><b>${esc(value)}${ok ? "" : infoButton()}</b>`;
+  }
+
+  function diffHost() {
+    let panel = $("confirm-diff");
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.id = "confirm-diff";
+      panel.className = "confirm-diff";
+      $("confirm-text")?.after(panel);
+    }
+    return panel;
+  }
+
+  async function toggleFileDiff(btn) {
+    const panel = diffHost();
+    const same = panel.classList.contains("open");
+    document.querySelectorAll("#confirm-text .confirm-info").forEach((item) => item.classList.remove("open"));
+    if (same) {
+      panel.classList.remove("open");
+      return;
+    }
+    btn?.classList.add("open");
+    panel.innerHTML = `<p class="confirm-diff-wait">Смотрю файлы…</p>`;
+    panel.classList.add("open");
+    try {
+      const data = diffCache || await apiPost("/api/integrity", { remember: false });
+      diffCache = data;
+      const files = data.files || [];
+      if (!files.length) {
+        panel.innerHTML = `<p class="confirm-diff-wait">Отличий нет. Файлы совпадают с GitHub.</p>`;
+        return;
+      }
+      panel.innerHTML = `<div class="confirm-diff-head">${esc(filesWord(files.length))}</div><ul>${files.map((file, index) =>
+        `<li class="${file.kind === "missing" ? "is-missing" : "is-changed"}" style="--i:${index}"><span>${esc(file.path)}</span><em>${file.kind === "missing" ? "нет файла" : "изменён"}</em></li>`
+      ).join("")}</ul>`;
+    } catch (err) {
+      panel.innerHTML = `<p class="confirm-diff-wait">${esc(err && err.message ? err.message : "Не удалось сверить файлы")}</p>`;
+    }
   }
 
   async function checkProgramIntegrity(btn) {
@@ -1624,10 +1685,14 @@
     btn.disabled = true;
     btn.textContent = "Проверяю…";
     try {
-      const data = await apiPost("/api/integrity", {});
+      const data = await apiPost("/api/integrity", { remember: true });
+      diffCache = data;
       const broken = !data.ok;
+      state.updateIntegrity = broken;
+      paintUpdateButton();
       paintIntegrity(data.ok, broken ? "Целостность программы нарушена" : "Файлы совпадают с GitHub");
       if (broken) toast("Целостность программы нарушена");
+      else $("confirm-diff")?.classList.remove("open");
     } catch (err) {
       toast(err && err.message ? err.message : "Не удалось проверить целостность");
     } finally {
@@ -1659,18 +1724,24 @@
     const current = state.updateCurrent || "дата неизвестна";
     const latest = state.updateLatest || "дата неизвестна";
     const versionsMatch = !ready && !state.updateDamaged && !!state.updateCurrent && state.updateCurrent === state.updateLatest;
+    const integrityLine = state.updateIntegrity
+      ? { label: "Проверка", value: "Целостность программы нарушена", warn: true, info: true }
+      : null;
     const ok = await askConfirm(ready
       ? {
           title: state.updateDamaged ? "Версия старая" : "Есть обновление",
-          lines: state.updateDamaged
-            ? [
-                { label: "Новая версия", value: latest },
-                { label: "Сейчас", value: current, warn: true },
-              ]
-            : [
-                { label: "Новая версия", value: latest },
-                { label: "Сейчас установлена", value: current },
-              ],
+          lines: [
+            ...(state.updateDamaged
+              ? [
+                  { label: "Новая версия", value: latest, info: !integrityLine },
+                  { label: "Сейчас", value: current, warn: true },
+                ]
+              : [
+                  { label: "Новая версия", value: latest, info: !integrityLine },
+                  { label: "Сейчас установлена", value: current },
+                ]),
+            ...(integrityLine ? [integrityLine] : []),
+          ],
           ok: "Обновить",
           cancel: "Не сейчас",
         }
@@ -1679,6 +1750,7 @@
           lines: [
             { label: "Сейчас установлена", value: current },
             { label: "Новой версии нет", value: "Можно скачать файлы заново" },
+            ...(integrityLine ? [integrityLine] : []),
           ],
           ok: "Скачать",
           cancel: "Отмена",
@@ -1722,6 +1794,7 @@
   }
 
   let confirmWait = null;
+  let diffCache = null;
 
   function closeConfirm(ok) {
     $("confirm-modal")?.classList.remove("open");
@@ -1734,6 +1807,8 @@
     closeConfirm(false);
     return new Promise((resolve) => {
       confirmWait = resolve;
+      diffCache = null;
+      $("confirm-diff")?.remove();
       const titleEl = $("confirm-title");
       const textEl = $("confirm-text");
       const okBtn = $("confirm-ok");
@@ -1742,7 +1817,7 @@
       if (textEl) {
         if (lines && lines.length) {
           textEl.innerHTML = lines.map((row) =>
-            `<span class="confirm-line${row.warn ? " warn" : ""}"><i>${esc(row.label)}</i><b>${esc(row.value)}</b></span>`
+            `<span class="confirm-line${row.warn ? " warn" : ""}"><i>${esc(row.label)}</i><b>${esc(row.value)}${row.info ? infoButton() : ""}</b></span>`
           ).join("");
         } else {
           textEl.textContent = text || "";
@@ -3471,6 +3546,13 @@
     });
     $("confirm-cancel")?.addEventListener("click", () => closeConfirm(false));
     $("confirm-ok")?.addEventListener("click", () => closeConfirm(true));
+    $("confirm-text")?.addEventListener("click", (event) => {
+      const info = event.target.closest(".confirm-info");
+      if (!info) return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggleFileDiff(info);
+    });
     $("confirm-modal")?.addEventListener("click", (e) => {
       if (e.target === $("confirm-modal")) closeConfirm(false);
     });

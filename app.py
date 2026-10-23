@@ -2050,7 +2050,8 @@ def api_integrity():
     try:
         from backend.setup import check_integrity
 
-        return jsonify(check_integrity(ROOT))
+        data = request.get_json(silent=True) or {}
+        return jsonify(check_integrity(ROOT, remember=bool(data.get("remember"))))
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
 

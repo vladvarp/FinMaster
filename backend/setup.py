@@ -261,25 +261,50 @@ def _stamp_path(dest: str) -> str:
     return os.path.join(dest, STAMP_NAME)
 
 
-def _write_stamp(dest: str, when: str) -> None:
-    text = str(when or "").strip()
-    if not text:
-        return
-    path = _stamp_path(dest)
-    temporary = path + ".tmp"
-    with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(text + "\n")
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary, path)
+_BROKEN_MARK = "integrity broken"
+
+
+def _stamp_lines(dest: str) -> list[str]:
+    try:
+        with open(_stamp_path(dest), encoding="utf-8") as handle:
+            return [line.strip() for line in handle.read().splitlines()]
+    except OSError:
+        return []
 
 
 def _read_stamp(dest: str) -> str:
-    try:
-        with open(_stamp_path(dest), encoding="utf-8") as handle:
-            return handle.readline().strip()
-    except OSError:
-        return ""
+    lines = _stamp_lines(dest)
+    return lines[0] if lines else ""
+
+
+def _broken_flag(dest: str) -> bool:
+    return any(line.lower() == _BROKEN_MARK for line in _stamp_lines(dest)[1:])
+
+
+def _write_stamp(dest: str, when: str | None = None, *, broken: bool | None = None) -> None:
+    """Первая строка — дата версии. Вторая, если есть, — пометка о нарушении целостности."""
+    text = _read_stamp(dest) if when is None else str(when or "").strip()
+    flag = _broken_flag(dest) if broken is None else bool(broken)
+    lines: list[str] = []
+    if text:
+        lines.append(text)
+    if flag:
+        if not lines:
+            lines.append("")
+        lines.append(_BROKEN_MARK)
+    path = _stamp_path(dest)
+    if not lines:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return
+    temporary = path + ".tmp"
+    with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(lines) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
 
 
 def _repo_folder(path: str) -> bool:
@@ -824,7 +849,7 @@ def _pull(
     try:
         remote, when = _remote_head(10)
         if remote == sha:
-            _write_stamp(dest, when)
+            _write_stamp(dest, when, broken=False)
     except Exception:
         pass
     report("Готово", 100)
@@ -885,7 +910,7 @@ def _perform_install(dest: str, desktop: bool, start_menu: bool) -> str:
         saved = not holder["shortcut"]
         bundled = "bundled" if os.path.isfile(os.path.join(dest, "python", "pythonw.exe")) else ""
         _mark_installed(dest, sha, bundled, desktop and saved, start_menu and saved)
-        _write_stamp(dest, when)
+        _write_stamp(dest, when, broken=False)
         report("Готово", 100)
 
     _run_splash(_icon(_here()) or _icon(dest), "Скачиваю FinMaster…", work)
@@ -1326,7 +1351,7 @@ def _refresh_snapshot(dest: str, wait_pid: int, copy_exe: bool = True) -> None:
         if copy_exe:
             report("Копирую FinMaster.exe…", 90)
             _copy_self(dest)
-        _write_stamp(dest, when)
+        _write_stamp(dest, when, broken=False)
         _save_commit(dest, sha)
         report("Готово", 100)
 
@@ -1486,11 +1511,12 @@ def _quiet_old_exe(root: str, sha: str) -> None:
     storage.save_config(cfg)
 
 
-def check_integrity(root: str) -> dict[str, Any]:
-    """Файлы папки против последнего коммита. FinMaster.exe и имена на точку не входят."""
+def _file_diff(root: str, sha: str = "") -> dict[str, Any]:
+    """Файлы папки против коммита. FinMaster.exe и имена на точку не входят."""
     root = os.path.abspath(root)
-    sha, _when = _remote_head(12)
-    differ = 0
+    if not sha:
+        sha, _when = _remote_head(12)
+    files: list[dict[str, str]] = []
     for rel, blob in _tree(sha).items():
         if _hidden_entry(rel):
             continue
@@ -1498,21 +1524,44 @@ def check_integrity(root: str) -> dict[str, Any]:
         if not local:
             continue
         if not os.path.isfile(local):
-            differ += 1
+            files.append({"path": rel, "kind": "missing"})
             continue
         try:
             same = _blob(local) == blob
         except OSError:
-            differ += 1
+            files.append({"path": rel, "kind": "missing"})
             continue
         if not same:
-            differ += 1
-    return {"ok": differ == 0, "changed": differ}
+            files.append({"path": rel, "kind": "changed"})
+    files.sort(key=lambda item: item["path"])
+    return {"ok": not files, "changed": len(files), "files": files}
+
+
+def _settle_integrity(root: str, sha: str = "") -> bool:
+    """Пока в commit.txt есть пометка, при запуске сверяем файлы и снимаем её, когда они совпали."""
+    if not _broken_flag(root):
+        return False
+    try:
+        result = _file_diff(root, sha)
+    except Exception:
+        return True
+    if result["ok"]:
+        _write_stamp(root, None, broken=False)
+        return False
+    return True
+
+
+def check_integrity(root: str, remember: bool = False) -> dict[str, Any]:
+    root = os.path.abspath(root)
+    result = _file_diff(root)
+    if remember:
+        _write_stamp(root, None, broken=not result["ok"])
+    return result
 
 
 def update_status(root: str) -> dict[str, Any]:
     """Есть ли версия новее. Даты — для вопроса в окне, без номеров коммитов."""
-    empty = {"available": False, "current": "", "latest": "", "damaged": False}
+    empty = {"available": False, "current": "", "latest": "", "damaged": False, "integrity": False}
     root = os.path.abspath(root)
     if _repo_folder(root):
         return {**empty, "enabled": False}
@@ -1521,24 +1570,31 @@ def update_status(root: str) -> dict[str, Any]:
     try:
         sha, when = _remote_head(4)
     except Exception:
-        return empty
+        return {**empty, "integrity": _broken_flag(root)}
     remote = _parse_when(when)
     latest = _version_label(remote)
     local = _parse_when(_read_stamp(root))
     if local is None:
         matched = _readme_same(root)
         if matched is None:
-            return empty
+            return {**empty, "integrity": _settle_integrity(root, sha)}
         if matched:
             _write_stamp(root, when)
             _quiet_old_exe(root, sha)
-            return {"available": False, "current": latest, "latest": latest, "damaged": False}
+            return {
+                "available": False,
+                "current": latest,
+                "latest": latest,
+                "damaged": False,
+                "integrity": _settle_integrity(root, sha),
+            }
         _quiet_old_exe(root, sha)
         return {
             "available": True,
             "current": "Вероятно, есть повреждённые файлы",
             "latest": latest,
             "damaged": True,
+            "integrity": _settle_integrity(root, sha),
         }
     available = remote is not None and remote > local
     if available:
@@ -1548,4 +1604,5 @@ def update_status(root: str) -> dict[str, Any]:
         "current": _version_label(local),
         "latest": latest,
         "damaged": False,
+        "integrity": _settle_integrity(root, sha),
     }
