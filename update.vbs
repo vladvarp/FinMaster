@@ -24,16 +24,6 @@ If pid <> "" Then
 End If
 
 sh.CurrentDirectory = dir
-' Снимок качает Python из папки: в FinMaster.exe логика скачивания старая.
-' Встроенный Python не кладёт текущую папку в путь, без этого модуль не находится и процесс сразу гаснет.
-pyw = Pythonw(sh, fso, dir)
-If pyw <> "" Then
-  pyPath = Replace(Replace(dir, "'", "\'"), "\", "\\")
-  code = "import sys; sys.path.insert(0, '" & pyPath & "'); exec('try:\n from backend.setup import update_folder\n update_folder()\nexcept SystemExit:\n raise\nexcept Exception as exc:\n import ctypes\n ctypes.windll.user32.MessageBoxW(None, str(exc)[:800], chr(70)+chr(105)+chr(110)+chr(77)+chr(97)+chr(115)+chr(116)+chr(101)+chr(114), 16)')"
-  sh.Run """" & pyw & """ -c """ & code & """", 1, False
-  WScript.Quit 0
-End If
-
 ' Иначе exe думает, что он продолжение уже открытой копии, и не стартует.
 Set env = sh.Environment("PROCESS")
 env("PYINSTALLER_RESET_ENVIRONMENT") = "1"
@@ -43,6 +33,19 @@ env.Remove "_PYI_APPLICATION_HOME_DIR"
 env.Remove "_PYI_ARCHIVE_FILE"
 env.Remove "_PYI_SPLASH_IPC"
 On Error GoTo 0
+
+' Снимок качает Python из папки: в FinMaster.exe логика скачивания старая.
+' Встроенный Python не кладёт текущую папку в путь, без этого модуль не находится и процесс сразу гаснет.
+pyw = Pythonw(sh, fso, dir)
+If pyw <> "" Then
+  pyPath = Replace(Replace(dir, "'", "\'"), "\", "\\")
+  code = "import sys; sys.path.insert(0, '" & pyPath & "'); exec('try:\n from backend.setup import update_folder\n update_folder()\nexcept SystemExit:\n raise\nexcept Exception as exc:\n import ctypes\n ctypes.windll.user32.MessageBoxW(None, str(exc)[:800], chr(70)+chr(105)+chr(110)+chr(77)+chr(97)+chr(115)+chr(116)+chr(101)+chr(114), 16)')"
+  If sh.Run("""" & pyw & """ -c """ & code & """", 1, True) = 0 Then
+    sh.Run """" & exe & """", 1, False
+  End If
+  WScript.Quit 0
+End If
+
 sh.Run """" & exe & """ /update", 1, False
 
 Function Pythonw(sh, fso, dir)
