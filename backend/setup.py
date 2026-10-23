@@ -1486,6 +1486,30 @@ def _quiet_old_exe(root: str, sha: str) -> None:
     storage.save_config(cfg)
 
 
+def check_integrity(root: str) -> dict[str, Any]:
+    """Файлы папки против последнего коммита. FinMaster.exe и имена на точку не входят."""
+    root = os.path.abspath(root)
+    sha, _when = _remote_head(12)
+    differ = 0
+    for rel, blob in _tree(sha).items():
+        if _hidden_entry(rel):
+            continue
+        local = _rel_target(root, rel)
+        if not local:
+            continue
+        if not os.path.isfile(local):
+            differ += 1
+            continue
+        try:
+            same = _blob(local) == blob
+        except OSError:
+            differ += 1
+            continue
+        if not same:
+            differ += 1
+    return {"ok": differ == 0, "changed": differ}
+
+
 def update_status(root: str) -> dict[str, Any]:
     """Есть ли версия новее. Даты — для вопроса в окне, без номеров коммитов."""
     empty = {"available": False, "current": "", "latest": "", "damaged": False}

@@ -103,6 +103,7 @@ _DESK_FILES = {
 _DESK_DENY = {
     "/api/quit",
     "/api/update",
+    "/api/integrity",
     "/api/open-folder",
     "/api/dialog/open",
     "/api/dialog/save",
@@ -2040,6 +2041,18 @@ def api_update_status():
     from backend.setup import update_status
 
     return jsonify(update_status(ROOT))
+
+
+@app.post("/api/integrity")
+def api_integrity():
+    if not _is_local():
+        return jsonify({"error": "Только в окне программы."}), 403
+    try:
+        from backend.setup import check_integrity
+
+        return jsonify(check_integrity(ROOT))
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.post("/api/update")

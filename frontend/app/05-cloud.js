@@ -1604,10 +1604,61 @@
     }
   }
 
+  function paintIntegrity(ok, value) {
+    const textEl = $("confirm-text");
+    if (!textEl) return;
+    let line = textEl.querySelector(".confirm-integrity");
+    if (!line) {
+      line = document.createElement("span");
+      line.className = "confirm-line confirm-integrity";
+      textEl.appendChild(line);
+    }
+    line.classList.toggle("warn", !ok);
+    line.innerHTML = `<i>Проверка</i><b>${esc(value)}</b>`;
+  }
+
+  async function checkProgramIntegrity(btn) {
+    if (!btn || btn.dataset.busy === "1") return;
+    btn.dataset.busy = "1";
+    const previous = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Проверяю…";
+    try {
+      const data = await apiPost("/api/integrity", {});
+      const broken = !data.ok;
+      paintIntegrity(data.ok, broken ? "Целостность программы нарушена" : "Файлы совпадают с GitHub");
+      if (broken) toast("Целостность программы нарушена");
+    } catch (err) {
+      toast(err && err.message ? err.message : "Не удалось проверить целостность");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = previous;
+      delete btn.dataset.busy;
+    }
+  }
+
+  function confirmExtra(label, onClick) {
+    const actions = document.querySelector("#confirm-modal .modal-actions");
+    const old = $("confirm-extra");
+    if (!label) {
+      old?.remove();
+      return;
+    }
+    const btn = old || document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn";
+    btn.id = "confirm-extra";
+    btn.disabled = false;
+    btn.textContent = label;
+    btn.onclick = onClick;
+    if (!old && actions) actions.insertBefore(btn, actions.firstChild);
+  }
+
   async function askProgramUpdate() {
     const ready = !!state.updateReady;
     const current = state.updateCurrent || "дата неизвестна";
     const latest = state.updateLatest || "дата неизвестна";
+    const versionsMatch = !ready && !state.updateDamaged && !!state.updateCurrent && state.updateCurrent === state.updateLatest;
     const ok = await askConfirm(ready
       ? {
           title: state.updateDamaged ? "Версия старая" : "Есть обновление",
@@ -1631,6 +1682,7 @@
           ],
           ok: "Скачать",
           cancel: "Отмена",
+          extra: versionsMatch ? "Проверить целостность" : "",
         });
     if (!ok) return;
     await flushPendingSaves();
@@ -1678,7 +1730,7 @@
     wait?.(!!ok);
   }
 
-  function askConfirm({ title, text, lines, ok = "Продолжить", cancel = "Отмена", danger = false } = {}) {
+  function askConfirm({ title, text, lines, ok = "Продолжить", cancel = "Отмена", danger = false, extra = "" } = {}) {
     closeConfirm(false);
     return new Promise((resolve) => {
       confirmWait = resolve;
@@ -1701,6 +1753,7 @@
         okBtn.className = danger ? "btn danger" : "btn primary";
       }
       if (cancelBtn) cancelBtn.textContent = cancel;
+      confirmExtra(extra, (event) => checkProgramIntegrity(event.currentTarget));
       $("confirm-modal")?.classList.add("open");
       queueMicrotask(() => okBtn?.focus());
     });
