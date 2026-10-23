@@ -1574,10 +1574,12 @@
       state.updateLatest = data.latest || "";
       state.updateDamaged = !!data.damaged;
       state.updateIntegrity = !!data.integrity;
+      state.updateOffline = !!data.offline;
     } catch {
       state.updateReady = false;
       state.updateDamaged = false;
       state.updateIntegrity = false;
+      state.updateOffline = false;
       return false;
     }
     const fromRepo = data && data.enabled === false;
@@ -1586,6 +1588,7 @@
       state.updateReady = false;
       state.updateDamaged = false;
       state.updateIntegrity = false;
+      state.updateOffline = false;
     }
     paintUpdateButton();
     return true;
@@ -1727,7 +1730,7 @@
     const ready = !!state.updateReady;
     const current = state.updateCurrent || "дата неизвестна";
     const latest = state.updateLatest || "дата неизвестна";
-    const versionsMatch = !ready && !state.updateDamaged && !!state.updateCurrent && state.updateCurrent === state.updateLatest;
+    const versionsMatch = !ready && !state.updateOffline && !state.updateDamaged && !!state.updateCurrent && state.updateCurrent === state.updateLatest;
     const integrityLine = state.updateIntegrity
       ? { label: "Проверка", value: "Целостность программы нарушена", warn: true, info: true, integrity: true }
       : null;
@@ -1753,7 +1756,9 @@
           title: "Обновление",
           lines: [
             { label: "Сейчас установлена", value: current },
-            { label: "Новой версии нет", value: "Можно скачать файлы заново" },
+            state.updateOffline
+              ? { label: "GitHub", value: "Не удалось проверить обновление: сервер не ответил", warn: true }
+              : { label: "Новой версии нет", value: "Можно скачать файлы заново" },
             ...(integrityLine ? [integrityLine] : []),
           ],
           ok: "Скачать",

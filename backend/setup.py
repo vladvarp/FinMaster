@@ -213,6 +213,8 @@ def _read_json(url: str, timeout: float) -> dict[str, Any]:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            raise RuntimeError("GitHub отклонил запрос") from exc
         raise RuntimeError(f"GitHub ответил {exc.code}") from exc
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise RuntimeError("Нет связи с GitHub") from exc
@@ -1466,6 +1468,17 @@ def offer_update() -> None:
     return
 
 
+def _local_version(root: str) -> str:
+    """Дата из commit.txt. Если строка не разбирается, показываем её как есть."""
+    raw = _read_stamp(root)
+    label = _version_label(_parse_when(raw))
+    if label:
+        return label
+    if raw and raw.lower() != _BROKEN_MARK:
+        return raw
+    return ""
+
+
 def _version_label(moment: datetime | None) -> str:
     if moment is None:
         return ""
@@ -1570,14 +1583,28 @@ def update_status(root: str) -> dict[str, Any]:
     try:
         sha, when = _remote_head(4)
     except Exception:
-        return {**empty, "integrity": _broken_flag(root)}
+        return {
+            "available": False,
+            "current": _local_version(root),
+            "latest": "",
+            "damaged": False,
+            "integrity": _broken_flag(root),
+            "offline": True,
+        }
     remote = _parse_when(when)
     latest = _version_label(remote)
     local = _parse_when(_read_stamp(root))
     if local is None:
         matched = _readme_same(root)
         if matched is None:
-            return {**empty, "integrity": _settle_integrity(root, sha)}
+            return {
+                "available": False,
+                "current": _local_version(root),
+                "latest": latest,
+                "damaged": False,
+                "integrity": _settle_integrity(root, sha),
+                "offline": True,
+            }
         if matched:
             _write_stamp(root, when)
             _quiet_old_exe(root, sha)
