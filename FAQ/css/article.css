@@ -117,6 +117,37 @@ mark.hit {
 
 html[data-theme="dark"] mark.hit { background: #854d0e; color: #fff7ed; }
 
+.doc pre {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--kbd);
+  overflow: auto;
+}
+
+.doc pre code { font-size: 14px; }
+
+.pull {
+  margin: 0 0 22px;
+  padding: 2px 0 2px 16px;
+  border-left: 3px solid var(--accent);
+  font-size: 18px;
+  line-height: 1.45;
+}
+
+.review {
+  margin: 8px 0 16px;
+  padding: 18px 20px 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+}
+
+.review h3 { margin-top: 18px; }
+
+.review .ok { margin-top: 16px; }
+
 .steps li::before {
   content: counter(step);
   position: absolute;

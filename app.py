@@ -502,7 +502,7 @@ def _open_guide_window() -> None:
             return
         except Exception:
             GUIDE_WINDOW = None
-    url = f"http://127.0.0.1:{SERVER_PORT}/faq/"
+    url = f"http://127.0.0.1:{SERVER_PORT}/faq/#about"
     GUIDE_WINDOW = webview.create_window(
         "FinMaster — справка",
         url,

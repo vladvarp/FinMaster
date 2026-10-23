@@ -82,8 +82,8 @@
   }
 
   function currentId() {
-    const id = decodeURIComponent((location.hash || "#start").slice(1)).split("/")[0];
-    return flat.some((item) => item.id === id) ? id : "start";
+    const id = decodeURIComponent((location.hash || "#about").slice(1)).split("/")[0];
+    return flat.some((item) => item.id === id) ? id : "about";
   }
 
   function renderNav(active) {
@@ -294,7 +294,7 @@
   });
 
   window.addEventListener("hashchange", () => load(currentId()));
-  if (!location.hash) history.replaceState(null, "", "#start");
+  if (!location.hash) history.replaceState(null, "", "#about");
   warm();
   load(currentId());
 })();
