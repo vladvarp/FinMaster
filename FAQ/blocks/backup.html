@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <style>
+    .modal-card.history-modal {
+      position: relative !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      max-height: none !important;
+      height: auto !important;
+      margin: 0 0 18px;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+    .modal-card .table-wrap {
+      overflow: auto !important;
+      min-height: auto !important;
+      max-width: 100%;
+    }
+    .hist-lib-table { width: 100% !important; min-width: 0 !important; }
+    .hist-lib-table th,
+    .hist-lib-table td { white-space: normal; }
+    .hist-lib-path { max-width: none !important; overflow-wrap: anywhere; }
+    .backup-actions { white-space: normal !important; }
+    .preview-banner { margin: 0; flex-wrap: wrap; }
+    h2 { margin: 16px 0 8px; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <h2>Этот отчёт</h2>
+  <p class="hint">Стенд копий открытого файла. «До/после» есть только здесь.</p>
+  <div class="modal-card history-modal">
+    <div class="modal-title-row">
+      <h3>Резервные копии</h3>
+      <div class="modal-title-actions">
+        <button class="btn small primary" type="button" tabindex="-1">Создать копию</button>
+        <button class="btn" type="button" tabindex="-1">Закрыть</button>
+      </div>
+    </div>
+    <div class="backup-tabs" role="tablist">
+      <button class="btn small" type="button" role="tab" aria-selected="true" tabindex="-1">Этот отчёт</button>
+      <button class="btn small" type="button" role="tab" aria-selected="false" tabindex="-1">Другие отчёты · 1</button>
+    </div>
+    <p>Документы\FinMaster\backups\a1b2c3d4 · номер a1b2c3d4 · 2 копии</p>
+    <div class="table-wrap">
+      <table class="data hist-lib-table">
+        <thead><tr><th>Когда</th><th>Название</th><th>Файл</th><th>Размер</th><th></th></tr></thead>
+        <tbody>
+          <tr>
+            <td>23.10, 18:42</td>
+            <td>Кухня</td>
+            <td class="hist-lib-path">2026-10-23_18-42-10.fbak</td>
+            <td>30 КБ</td>
+            <td class="backup-actions">
+              <button class="btn small" type="button" title="До и после относительно открытого отчёта" tabindex="-1">До/после</button>
+              <button class="btn small" type="button" tabindex="-1">Смотреть</button>
+              <button class="btn small danger" type="button" tabindex="-1">Удалить</button>
+            </td>
+          </tr>
+          <tr>
+            <td>22.10, 09:15</td>
+            <td>Кухня</td>
+            <td class="hist-lib-path">2026-10-22_09-15-04.fbak</td>
+            <td>28 КБ</td>
+            <td class="backup-actions">
+              <button class="btn small" type="button" title="До и после относительно открытого отчёта" tabindex="-1">До/после</button>
+              <button class="btn small" type="button" tabindex="-1">Смотреть</button>
+              <button class="btn small danger" type="button" tabindex="-1">Удалить</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <h2>Другие отчёты</h2>
+  <p class="hint">Стенд чужих номеров. Файла на диске нет, копии остались. «До/после» нет. «Удалить все» снимает всю пачку.</p>
+  <div class="modal-card history-modal">
+    <div class="backup-tabs" role="tablist">
+      <button class="btn small" type="button" role="tab" aria-selected="false" tabindex="-1">Этот отчёт</button>
+      <button class="btn small" type="button" role="tab" aria-selected="true" tabindex="-1">Другие отчёты · 1</button>
+    </div>
+    <p>Копии других номеров. Если отчёт уже удалён, файлы .fbak остаются. 1 отчёт, 2 копии.</p>
+    <div class="table-wrap">
+      <table class="data hist-lib-table">
+        <thead><tr><th>Когда</th><th>Название</th><th>Файл</th><th>Размер</th><th></th></tr></thead>
+        <tbody>
+          <tr class="backup-group is-missing">
+            <td colspan="4"><b>Финансовый отчёт</b><div class="meta">файла нет на диске · 2 копии · 60 КБ</div></td>
+            <td class="backup-actions"><button class="btn small danger" type="button" tabindex="-1">Удалить все</button></td>
+          </tr>
+          <tr>
+            <td>21.10, 12:37</td>
+            <td>Финансовый отчёт</td>
+            <td class="hist-lib-path">2026-10-21_12-37-52.fbak</td>
+            <td>30 КБ</td>
+            <td class="backup-actions">
+              <button class="btn small" type="button" tabindex="-1">Смотреть</button>
+              <button class="btn small danger" type="button" tabindex="-1">Удалить</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <h2>Просмотр копии</h2>
+  <p class="hint">Полоса над отчётом, пока открыт .fbak. «Вернуться к отчёту» есть, только если перед копией был обычный файл.</p>
+  <div class="preview-banner">
+    <span>Это резервная копия. Её можно только смотреть. Сохраните как отчёт — у нового файла будет свой номер, и тогда его можно править.</span>
+    <div class="preview-banner-actions">
+      <button type="button" class="btn small" tabindex="-1">Вернуться к отчёту</button>
+      <button type="button" class="btn small primary" tabindex="-1">Сохранить как отчёт</button>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

@@ -81,7 +81,8 @@
         var style = getComputedStyle(el);
         if (style.display === "none" || style.position === "fixed") continue;
         var rect = el.getBoundingClientRect();
-        bottom = Math.max(bottom, rect.bottom + window.scrollY);
+        var margin = parseFloat(style.marginBottom) || 0;
+        bottom = Math.max(bottom, rect.bottom + window.scrollY + margin);
       }
       var pad = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
       parent.postMessage({ type: "faq-live", h: Math.ceil(bottom + pad) }, "*");

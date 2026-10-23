@@ -17,7 +17,8 @@
       const style = getComputedStyle(el);
       if (style.display === "none" || style.position === "fixed") continue;
       const rect = el.getBoundingClientRect();
-      bottom = Math.max(bottom, rect.bottom + window.scrollY);
+      const margin = parseFloat(style.marginBottom) || 0;
+      bottom = Math.max(bottom, rect.bottom + window.scrollY + margin);
     }
     const pad = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
     parent.postMessage({ type: "faq-live", h: Math.ceil(bottom + pad) }, "*");

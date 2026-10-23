@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <style>
+    .history-panel {
+      position: relative !important;
+      top: auto !important;
+      right: auto !important;
+      width: min(360px, 100%) !important;
+      max-height: none !important;
+      margin: 0 0 18px;
+    }
+    .modal-card.history-modal,
+    .modal-card.diff-modal {
+      position: relative !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      max-height: none !important;
+      height: auto !important;
+      margin: 0 0 18px;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+    .modal-card .table-wrap {
+      overflow: auto !important;
+      min-height: auto !important;
+      max-width: 100%;
+    }
+    .hist-lib-table {
+      width: 100% !important;
+      min-width: 0 !important;
+    }
+    .hist-lib-table th,
+    .hist-lib-table td { white-space: normal; }
+    .hist-lib-path {
+      max-width: none !important;
+      overflow-wrap: anywhere;
+    }
+    .hist-lib-table th:nth-child(4),
+    .hist-lib-table td:nth-child(4),
+    .hist-lib-table th:nth-child(5),
+    .hist-lib-table td:nth-child(5) { width: 72px; white-space: nowrap; }
+    .hist-lib-table th:last-child,
+    .hist-lib-table td:last-child { width: 96px; white-space: nowrap; }
+    h2 { margin: 16px 0 8px; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <p class="hint">Стенд панели часов. Нижний снимок — текущий. «≠» сравнивает выбранный шаг с открытым отчётом.</p>
+  <div class="history-panel">
+    <div class="history-panel-h">
+      <strong>История</strong>
+      <label>Хранить <input type="number" value="40" readonly tabindex="-1" /></label>
+    </div>
+    <button class="btn small history-manage" type="button" tabindex="-1">Резервные копии</button>
+    <button class="btn small history-manage" type="button" tabindex="-1">Все истории отчётов</button>
+    <div class="history-list">
+      <div class="history-item">
+        <button type="button" class="history-jump" tabindex="-1">
+          <span class="history-item-top"><b>1042 Кухня · цена 18 000 → 16 000</b><time>23.10, 18:40</time></span>
+          <small>ПК</small>
+        </button>
+        <button type="button" class="btn small history-diff" title="До и после относительно открытого отчёта" tabindex="-1">≠</button>
+      </div>
+      <div class="history-item active">
+        <button type="button" class="history-jump" tabindex="-1">
+          <span class="history-item-top"><b>1042 Кухня · цена 16 000 → 18 000</b><time>23.10, 18:42</time></span>
+          <small>ПК</small>
+        </button>
+        <button type="button" class="btn small history-diff" title="До и после относительно открытого отчёта" tabindex="-1">≠</button>
+      </div>
+    </div>
+  </div>
+
+  <h2>До и после</h2>
+  <p class="hint">Стенд сравнения. Слева снимок, справа то, что открыто сейчас. Строка — одно поле.</p>
+  <div class="modal-card diff-modal">
+    <div class="modal-title-row">
+      <h3>До и после</h3>
+      <button class="btn" type="button" tabindex="-1">Закрыть</button>
+    </div>
+    <p>До — снимок «1042 Кухня · цена 16 000 → 18 000». После — открытый отчёт «Кухня».</p>
+    <div class="table-wrap diff-table-wrap">
+      <table class="diff-table">
+        <thead><tr><th>Где</th><th>Было</th><th>Стало</th></tr></thead>
+        <tbody>
+          <tr class="diff-head"><td colspan="3">1042 Кухня · Фасады</td></tr>
+          <tr><td>Цена</td><td>16 000</td><td>18 000</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <h2>Все истории отчётов</h2>
+  <p class="hint">Стенд списка папок. «Финансовый отчёт» уже удалён с диска, снимки на месте.</p>
+  <div class="modal-card history-modal">
+    <div class="modal-title-row">
+      <h3>Истории отчётов</h3>
+      <button class="btn" type="button" tabindex="-1">Закрыть</button>
+    </div>
+    <p>Документы\FinMaster\history · 2 истории</p>
+    <div class="table-wrap">
+      <table class="data hist-lib-table">
+        <thead><tr><th>Отчёт</th><th>Путь</th><th>Где</th><th>Снимки</th><th>Размер</th><th></th></tr></thead>
+        <tbody>
+          <tr class="is-current">
+            <td><b>Кухня</b></td>
+            <td class="hist-lib-path">C:\Users\user\Documents\FinMaster\Кухня.fmaster</td>
+            <td>открыт сейчас</td>
+            <td>2</td>
+            <td>48 КБ</td>
+            <td><button class="btn small danger" type="button" tabindex="-1">Удалить</button></td>
+          </tr>
+          <tr class="is-missing">
+            <td><b>Финансовый отчёт</b></td>
+            <td class="hist-lib-path">C:\Users\user\Documents\FinMaster\Финансовый отчёт.fmaster</td>
+            <td>файла нет на диске</td>
+            <td>11</td>
+            <td>1,2 МБ</td>
+            <td><button class="btn small danger" type="button" tabindex="-1">Удалить</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

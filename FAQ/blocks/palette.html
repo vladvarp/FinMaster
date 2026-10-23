@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <style>
+    .palette {
+      position: relative !important;
+      display: flex !important;
+      top: auto !important;
+      right: auto !important;
+      width: min(440px, 100%) !important;
+      height: auto !important;
+      min-height: 0 !important;
+    }
+    .palette-list { flex: none; overflow: visible; }
+  </style>
+</head>
+<body>
+  <p class="hint">Стенд. В поле уже набрано «кухня»: сверху команда, ниже сам заказ. Выбрана первая строка.</p>
+  <div class="palette open">
+    <div class="palette-head">
+      <span class="palette-title">Ассистент</span>
+      <span class="palette-hint"><kbd>Ctrl</kbd><kbd>Пробел</kbd></span>
+      <button type="button" class="palette-tool" title="Свернуть" tabindex="-1">—</button>
+    </div>
+    <div class="palette-body">
+      <div class="palette-input has-value">
+        <span class="ico">✦</span>
+        <input value="кухня" readonly tabindex="-1" aria-label="Поиск ассистента" />
+        <button type="button" class="search-clear" title="Очистить" tabindex="-1">×</button>
+      </div>
+      <div class="palette-list">
+        <div class="palette-group">Разделы</div>
+        <button type="button" class="palette-item active" tabindex="-1">
+          <span class="pi-ico">∑</span>
+          <span><span class="pi-title">Калькулятор</span><span class="pi-sub"> — схемы из заказов, операторов и формул</span></span>
+        </button>
+        <div class="palette-group">Заказы</div>
+        <button type="button" class="palette-item" tabindex="-1">
+          <span class="pi-ico">№</span>
+          <span><span class="pi-title">1042 · Кухня</span><span class="pi-sub"> — Иванов</span></span>
+          <span class="pi-right">27 000 ₽</span>
+        </button>
+      </div>
+      <div class="palette-foot">
+        <span><kbd>↑</kbd><kbd>↓</kbd> выбор</span>
+        <span><kbd>Enter</kbd> выполнить</span>
+        <span><kbd>Esc</kbd> свернуть</span>
+      </div>
+    </div>
+    <div class="palette-resize" title="Изменить размер"></div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>
