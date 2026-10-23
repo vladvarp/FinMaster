@@ -1759,7 +1759,7 @@
             { label: "Сейчас установлена", value: current },
             state.updateOffline
               ? { label: "GitHub", value: "Не удалось проверить обновление: сервер не ответил", warn: true }
-              : { label: "Новой версии нет", value: "Можно скачать файлы заново" },
+              : { label: "Версия", value: "Это последняя версия" },
             ...(integrityLine ? [integrityLine] : []),
           ],
           ok: "Скачать",
