@@ -263,7 +263,10 @@
     if (Array.isArray(data.clients)) remote.clients = data.clients;
     if (Array.isArray(data.devices)) remote.devices = data.devices;
     if (typeof data.autostart === "boolean") remote.autostart = data.autostart;
-    if (typeof data.windows_login === "boolean") remote.windowsLogin = data.windows_login;
+    if (typeof data.windows_login === "boolean") {
+      remote.windowsLogin = data.windows_login;
+      paintWindowsLogin();
+    }
     if (data.qr) remote.qr = data.qr;
     if (data.lan_url) remote.lan_url = data.lan_url;
     if ("public_url" in data) remote.public_url = data.public_url || "";
@@ -483,6 +486,11 @@
     }
   }
 
+  function paintWindowsLogin() {
+    const login = $("remote-windows-login");
+    if (login && typeof remote.windowsLogin === "boolean") login.checked = remote.windowsLogin;
+  }
+
   function renderRemoteModal(data) {
     applyRemotePayload(data);
     const qrBox = $("remote-qr");
@@ -500,8 +508,7 @@
     renderRemoteIps();
     const auto = $("remote-autostart");
     if (auto) auto.checked = !!remote.autostart;
-    const login = $("remote-windows-login");
-    if (login && typeof remote.windowsLogin === "boolean") login.checked = remote.windowsLogin;
+    paintWindowsLogin();
     const ngrokChk = $("remote-ngrok");
     if (ngrokChk) ngrokChk.checked = !!remote.ngrok;
     const ngrokCheck = $("remote-ngrok-check");

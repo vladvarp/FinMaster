@@ -1939,6 +1939,7 @@
       const open = menu.hidden;
       menu.hidden = !open;
       btn.setAttribute("aria-expanded", String(open));
+      if (open) paintWindowsLogin();
     });
     menu.addEventListener("click", (e) => {
       if (e.target.closest("button")) closeFileMenu();
