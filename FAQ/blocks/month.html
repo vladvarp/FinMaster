@@ -7,6 +7,12 @@
   <link rel="stylesheet" href="stage.css">
   <style>
     .demo-switch { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
+    .cal-weekdays, .cal-month {
+      grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+      height: auto !important;
+      align-content: start;
+    }
+    .cal-cell { height: auto; }
   </style>
 </head>
 <body data-view="month">

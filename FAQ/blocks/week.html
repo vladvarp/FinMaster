@@ -7,9 +7,21 @@
   <link rel="stylesheet" href="stage.css">
   <style>
     .demo-switch { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
-    .cal-week { height: auto !important; min-height: 220px; }
-    .cal-col { height: auto !important; min-height: 180px; overflow: visible; }
-    .cal-col-body { overflow: visible; min-height: 72px; }
+    .cal-week {
+      height: auto !important;
+      min-height: 0 !important;
+      flex: none !important;
+      grid-template-rows: none !important;
+      grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+      align-content: start;
+    }
+    .cal-col {
+      height: auto !important;
+      min-height: 0 !important;
+      max-height: none !important;
+      overflow: visible;
+    }
+    .cal-col-body { flex: none; overflow: visible; min-height: 0; }
   </style>
 </head>
 <body data-view="week">

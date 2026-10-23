@@ -72,8 +72,19 @@
 
   const FRAME_JS = `
     function post() {
-      var h = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-      parent.postMessage({ type: "faq-live", h: h }, "*");
+      var bottom = 0;
+      var kids = document.body.children;
+      var i;
+      for (i = 0; i < kids.length; i += 1) {
+        var el = kids[i];
+        if (el.tagName === "SCRIPT") continue;
+        var style = getComputedStyle(el);
+        if (style.display === "none" || style.position === "fixed") continue;
+        var rect = el.getBoundingClientRect();
+        bottom = Math.max(bottom, rect.bottom + window.scrollY);
+      }
+      var pad = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
+      parent.postMessage({ type: "faq-live", h: Math.ceil(bottom + pad) }, "*");
     }
     document.addEventListener("click", function (event) {
       var el = event.target.closest && event.target.closest("button, a");
@@ -81,6 +92,10 @@
     }, true);
     if (window.ResizeObserver) new ResizeObserver(post).observe(document.body);
     window.addEventListener("load", post);
+    window.addEventListener("message", function (event) {
+      if (!event.data || event.data.type !== "faq-fit") return;
+      post();
+    });
     post();
   `;
 
@@ -118,6 +133,16 @@
     if (!event.data || event.data.type !== "faq-live") return;
     const frame = [...document.querySelectorAll("iframe.live-frame")].find((item) => item.contentWindow === event.source);
     if (frame) frame.style.height = Math.max(44, Math.ceil(event.data.h)) + "px";
+  });
+
+  let fitTimer = 0;
+  window.addEventListener("resize", () => {
+    clearTimeout(fitTimer);
+    fitTimer = setTimeout(() => {
+      document.querySelectorAll("iframe.live-frame").forEach((frame) => {
+        try { frame.contentWindow.postMessage({ type: "faq-fit" }, "*"); } catch (err) { /* рисунок ещё не открыт */ }
+      });
+    }, 60);
   });
 
   function offline(host) {
