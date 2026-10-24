@@ -1609,6 +1609,11 @@
     const red = (!!state.updateReady && !!state.updateDamaged) || !!state.updateIntegrity;
     btn.classList.toggle("update-ready", !!state.updateReady || red);
     btn.classList.toggle("update-damaged", red);
+    if (btn.classList.contains("update-checking")) {
+      btn.title = "Проверяю обновление…";
+      btn.setAttribute("aria-label", "Проверяю обновление…");
+      return;
+    }
     const title = btn.disabled
       ? "В репозитории обновление выключено"
       : state.updateIntegrity
@@ -2679,8 +2684,15 @@
       const btn = $("btn-update");
       if (!btn || btn.dataset.busy === "1") return;
       btn.dataset.busy = "1";
+      btn.classList.add("update-checking");
+      btn.setAttribute("aria-busy", "true");
+      btn.title = "Проверяю обновление…";
+      btn.setAttribute("aria-label", "Проверяю обновление…");
       try {
         const checked = await refreshUpdateButton();
+        btn.classList.remove("update-checking");
+        btn.removeAttribute("aria-busy");
+        paintUpdateButton();
         if (!checked) {
           toast("Не удалось проверить обновление");
           return;
@@ -2688,7 +2700,10 @@
         if (btn.disabled) return;
         await askProgramUpdate();
       } finally {
+        btn.classList.remove("update-checking");
+        btn.removeAttribute("aria-busy");
         delete btn.dataset.busy;
+        paintUpdateButton();
       }
     });
     $("help-close").addEventListener("click", () => $("help-modal").classList.remove("open"));

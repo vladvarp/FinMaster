@@ -630,6 +630,24 @@ input[type="search"]::-webkit-search-decoration {
   animation: update-bang 1.8s ease-in-out infinite;
 }
 #btn-update.update-damaged .update-bang { display: grid; }
+#btn-update.update-checking,
+#btn-update.update-ready.update-checking,
+#btn-update.update-ready.update-damaged.update-checking {
+  color: var(--accent);
+  border-color: var(--accent);
+  animation: update-check 1s ease-in-out infinite;
+}
+#btn-update.update-checking svg {
+  transform-origin: center;
+  animation: update-spin 0.7s linear infinite;
+}
+@keyframes update-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes update-check {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 10px var(--accent); }
+}
 @keyframes update-bang {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.14); }
