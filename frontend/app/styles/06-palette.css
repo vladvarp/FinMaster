@@ -4,9 +4,9 @@
   z-index: 56;
   top: 72px;
   right: 18px;
-  width: 440px;
+  width: 560px;
   height: 520px;
-  min-width: 320px;
+  min-width: 540px;
   min-height: 280px;
   display: none;
   flex-direction: column;
@@ -224,8 +224,175 @@
   min-width: 0;
   padding-right: 4px;
 }
-.palette-input.has-value input { padding-right: 32px; }
+.palette-input.has-value input { padding-right: 64px; }
 .palette-input .search-clear { right: 12px; }
+.palette-ask {
+  position: absolute;
+  right: 40px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 24px;
+  height: 24px;
+  display: none;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+.palette-input.has-value > .palette-ask { display: grid; }
+.palette-ask:hover { background: color-mix(in srgb, var(--accent-2) 18%, transparent); }
+.palette-ask[disabled] { opacity: 0.45; cursor: progress; }
+.modal-card.ask-modal {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(82vh, 760px);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  background:
+    linear-gradient(var(--card), var(--card)) padding-box,
+    linear-gradient(115deg, var(--accent-2), #5eead4, #38bdf8, #818cf8, var(--accent)) border-box;
+  background-size: 100% 100%, 220% 220%;
+  background-position: 0 0, 0% 40%;
+  animation: assistant-window 7.5s ease-in-out infinite;
+  box-shadow:
+    var(--shadow),
+    0 22px 60px rgba(15, 23, 42, 0.18),
+    0 0 22px color-mix(in srgb, var(--accent-2) 22%, transparent);
+}
+.modal.open .modal-card.ask-modal {
+  animation: modal-in 0.2s cubic-bezier(0.22, 1, 0.36, 1), assistant-window 7.5s ease-in-out infinite;
+}
+.ask-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 14px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-2) 16%, var(--bg-2)), var(--bg-2) 42%, color-mix(in srgb, #38bdf8 12%, var(--bg-2)));
+  background-size: 180% 100%;
+  animation: assistant-head 8s ease-in-out infinite;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-2) 28%, var(--line));
+}
+.ask-title { font-weight: 700; font-size: 13px; letter-spacing: 0.02em; }
+.ask-title::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff, var(--accent-2) 45%, var(--accent));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-2) 25%, transparent), 0 0 10px var(--accent-2);
+  vertical-align: -1px;
+  animation: assistant-heart 2.6s ease-in-out infinite;
+}
+.ask-hint { opacity: 0.55; }
+.ask-hint kbd {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+}
+.ask-tool {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: 650 16px var(--sans);
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  padding: 0;
+  cursor: pointer;
+}
+.ask-tool:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
+.ask-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.ask-search .ico { color: var(--accent-2); font-size: 16px; }
+.ask-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 16px;
+  padding: 0;
+}
+.ask-modal.is-busy .ask-search { box-shadow: inset 0 -2px 0 var(--accent-2); }
+.ask-scroll { overflow: auto; min-height: 180px; padding: 8px 8px 14px; }
+.ask-modal p.ask-lead { margin: 6px 10px 8px; color: var(--muted); }
+.ask-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 8px 8px; }
+.ask-chips:empty { display: none; }
+.ask-chips span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-2) 14%, var(--bg-2));
+  color: var(--ink);
+  font-size: 12px;
+}
+.ask-body { display: flex; flex-direction: column; gap: 4px; }
+.ask-section { padding: 2px 4px 8px; }
+.ask-section h4 {
+  margin: 8px 10px 4px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+}
+.ask-metrics { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 6px 6px; }
+.ask-metrics span {
+  display: block;
+  min-width: 120px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-2) 10%, var(--bg-2));
+  border: 1px solid color-mix(in srgb, var(--accent-2) 22%, var(--line));
+  font-size: 13px;
+  font-weight: 650;
+}
+.ask-group {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  margin: 8px 10px 2px;
+}
+.ask-group b { font-size: 13px; }
+.ask-group span { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.ask-item {
+  margin: 2px 4px 0;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.ask-item:hover { background: color-mix(in srgb, var(--accent-2) 10%, transparent); }
+.ask-modal p.ask-line { margin: 2px 10px 0; color: var(--ink); font-size: 13px; line-height: 1.45; }
+html[data-theme="dark"] .modal-card.ask-modal {
+  background:
+    linear-gradient(var(--card), var(--card)) padding-box,
+    linear-gradient(115deg, var(--accent-2), #5eead4, #38bdf8, #818cf8, var(--accent)) border-box;
+  border-color: transparent;
+  color: var(--ink);
+}
 .palette-list { flex: 1; min-height: 0; overflow: auto; padding: 6px; }
 .palette-group {
   font-size: 10px;
@@ -266,13 +433,15 @@
 .palette-empty { padding: 26px 12px; text-align: center; color: var(--muted); font-size: 13px; }
 .palette-foot {
   display: flex;
-  gap: 14px;
+  flex-wrap: nowrap;
+  gap: 16px;
   padding: 10px 16px;
   border-top: 1px solid var(--line);
   background: var(--bg-2);
   color: var(--muted);
   font-size: 11px;
 }
+.palette-foot span { white-space: nowrap; }
 @keyframes assistant-window {
   0%, 100% {
     background-position: 0 0, 0% 40%;
@@ -356,6 +525,10 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .palette.open:not(.is-min),
+  .modal-card.ask-modal,
+  .modal.open .modal-card.ask-modal,
+  .ask-head,
+  .ask-title::before,
   .palette.is-min,
   .palette-head,
   .palette-title::before,

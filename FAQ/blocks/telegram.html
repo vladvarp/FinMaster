@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <style>
+    .tg-layout { display: grid; grid-template-columns: minmax(280px, 420px) minmax(280px, 1fr); gap: 16px; align-items: start; }
+    @media (max-width: 760px) { .tg-layout { grid-template-columns: 1fr; } }
+    .remote-fold { margin: 0; }
+    .chat {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--bg-2);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-height: 420px;
+    }
+    .chat-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      background: linear-gradient(135deg, var(--accent), #115e59 70%);
+      color: #eafaf7;
+    }
+    .chat-head b { display: block; }
+    .chat-head span { display: block; font-size: 12px; opacity: 0.85; }
+    .chat-log { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+    .bubble {
+      max-width: 92%;
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .bubble.me { margin-left: auto; background: color-mix(in srgb, var(--accent-2) 16%, var(--card)); }
+    .bubble[hidden] { display: none !important; }
+    .bubble b { display: block; margin-bottom: 4px; }
+    .keys { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-top: 1px solid var(--line); background: var(--card); }
+    .keys .row { display: flex; gap: 6px; }
+    .keys .btn { flex: 1; }
+    .demo-bar { display: flex; gap: 8px; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <div class="demo-bar">
+    <button type="button" class="btn small primary" id="play">Проиграть вопрос</button>
+  </div>
+  <p class="hint">Слева блок из окна «Телефон». Справа стенд чата: кнопки бота и ответ по открытому отчёту. Кнопка выше показывает, как приходит вопрос «долги».</p>
+  <div class="tg-layout">
+    <div class="remote-fold">
+      <button type="button" class="remote-fold-head" tabindex="-1">
+        <span class="remote-fold-title">Telegram<i class="token-dot on" title="Токен сохранён"></i></span>
+        <span class="remote-fold-ico">▾</span>
+      </button>
+      <div class="remote-fold-body">
+        <div class="remote-tg-box">
+          <label class="field">
+            <span>Токен Telegram-бота</span>
+            <input type="password" value="123456:AAF-example" readonly tabindex="-1" aria-label="Токен">
+          </label>
+          <label class="field">
+            <span>Chat id <small>(необязательно — заполнится, когда напишете боту)</small></span>
+            <input type="text" value="123456789" readonly tabindex="-1" aria-label="Chat id">
+          </label>
+          <div class="remote-tg-actions">
+            <button type="button" class="btn small" tabindex="-1">Запомнить токен</button>
+            <button type="button" class="btn small" tabindex="-1">Проверить связь</button>
+            <button type="button" class="btn small primary" tabindex="-1">Отправить ссылку сейчас</button>
+          </div>
+          <div class="remote-ngrok-status">Бот на связи. Отвечает одному чату.</div>
+        </div>
+      </div>
+    </div>
+    <div class="chat" aria-label="Чат бота">
+      <div class="chat-head"><div><b>FinMaster</b><span>бот · отчёт «Мастерская»</span></div></div>
+      <div class="chat-log" id="log">
+        <div class="bubble">Отчёты, заказы и снимок — кнопками внизу. Вопрос можно написать или прислать голосом.</div>
+        <div class="bubble me" id="q" hidden>долги</div>
+        <div class="bubble" id="a" hidden>
+          <b>Долги · 2</b>
+          310 · Иванов — 42 000 ₽, срок 7 дней<br>
+          1042 · Сидорова — 12 400 ₽, просрочка 3 дня
+        </div>
+      </div>
+      <div class="keys">
+        <div class="row">
+          <button type="button" class="btn small" tabindex="-1">Отчёты</button>
+          <button type="button" class="btn small" tabindex="-1">Заказы</button>
+          <button type="button" class="btn small" tabindex="-1">Снимок</button>
+        </div>
+        <div class="row">
+          <button type="button" class="btn small" tabindex="-1">Ссылка</button>
+          <button type="button" class="btn small" tabindex="-1">Меню</button>
+        </div>
+        <div class="row">
+          <button type="button" class="btn small" tabindex="-1">Новая ссылка</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+  <script>
+    document.getElementById("play").addEventListener("click", () => {
+      const q = document.getElementById("q");
+      const a = document.getElementById("a");
+      q.hidden = true;
+      a.hidden = true;
+      setTimeout(() => { q.hidden = false; }, 280);
+      setTimeout(() => { a.hidden = false; }, 900);
+    });
+  </script>
+</body>
+</html>

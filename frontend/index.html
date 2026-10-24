@@ -1089,16 +1089,39 @@
       <div class="palette-input">
         <span class="ico">✦</span>
         <input id="palette-input" placeholder="Команда, заказ, заказчик или продукт…" autocomplete="off" spellcheck="false" />
+        <button type="button" class="palette-ask" id="palette-ask" title="Найти в отчёте (Shift+Enter)" aria-label="Найти в отчёте">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 2.5h7.1L13 5.3V13.5H3z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 2.6V5.4H13M5.2 8h5.6M5.2 10.6h4.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        </button>
         <button type="button" class="search-clear" data-search-clear="palette-input" title="Очистить" aria-label="Очистить поиск">×</button>
       </div>
       <div class="palette-list" id="palette-list"></div>
       <div class="palette-foot">
         <span><kbd>↑</kbd><kbd>↓</kbd> выбор</span>
         <span><kbd>Enter</kbd> выполнить</span>
+        <span><kbd>Shift</kbd><kbd>Enter</kbd> найти</span>
         <span><kbd>Esc</kbd> свернуть</span>
       </div>
     </div>
     <div class="palette-resize" id="palette-resize" title="Изменить размер"></div>
+  </div>
+
+  <div class="modal" id="ask-modal">
+    <div class="modal-card ask-modal" role="dialog" aria-labelledby="ask-title">
+      <div class="ask-head">
+        <span class="ask-title" id="ask-title">Найти</span>
+        <span class="ask-hint"><kbd>Esc</kbd></span>
+        <button type="button" class="ask-tool" id="ask-close" title="Закрыть" aria-label="Закрыть">×</button>
+      </div>
+      <label class="ask-search">
+        <span class="ico">✦</span>
+        <input id="ask-query" type="text" placeholder="Долги, номер, заказчик, продукт…" autocomplete="off" spellcheck="false" aria-label="Запрос по отчёту" />
+      </label>
+      <div class="ask-scroll">
+        <p class="ask-lead" id="ask-lead" hidden></p>
+        <div class="ask-chips" id="ask-chips"></div>
+        <div class="ask-body" id="ask-body"></div>
+      </div>
+    </div>
   </div>
 
   <div class="modal" id="remote-modal">
@@ -1345,6 +1368,7 @@
         <section class="help-section">
           <h4>Общее</h4>
           <div class="help-row"><span>Ассистент</span><span><kbd>Ctrl</kbd><kbd>Пробел</kbd></span></div>
+          <div class="help-row"><span>Найти в отчёте</span><span><kbd>Shift</kbd><kbd>Enter</kbd></span></div>
           <div class="help-row"><span>Отменить / история снимков</span><span><kbd>Ctrl</kbd><kbd>Z</kbd></span></div>
           <div class="help-row"><span>Повторить действие</span><span><kbd>Ctrl</kbd><kbd>Y</kbd></span></div>
           <div class="help-row"><span>Поиск по отчёту</span><span><kbd>Ctrl</kbd><kbd>F</kbd></span></div>

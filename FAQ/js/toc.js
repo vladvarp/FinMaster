@@ -42,7 +42,7 @@ window.FAQ_TOC = [
     title: "Клавиши и помощник",
     items: [
       { id: "keys", title: "Горячие клавиши", keys: "ctrl f1 клавиатура" },
-      { id: "assistant", title: "Ассистент", keys: "палитра круг команда поиск ctrl пробел кухня" },
+      { id: "assistant", title: "Ассистент", keys: "палитра круг команда поиск ctrl пробел кухня shift enter найти долги" },
       { id: "history", title: "История", keys: "отмена снимок часы до и после ctrl z все истории" },
       { id: "backups", title: "Резервные копии", keys: "fbak копия другие отчёты удалить все вернуться смотреть" },
     ],
@@ -50,10 +50,10 @@ window.FAQ_TOC = [
   {
     title: "Телефон и интернет",
     items: [
-      { id: "phone", title: "Подключение телефона", keys: "qr wi-fi доступ устройства" },
+      { id: "phone", title: "Подключение телефона", keys: "qr wi-fi доступ устройства экран вкладки стенд" },
       { id: "ngrok", title: "Интернет через ngrok", keys: "токен path store туннель" },
-      { id: "telegram", title: "Telegram-бот", keys: "botfather mini app снимок голос вопрос долги" },
-      { id: "mobile", title: "Экран телефона", keys: "вкладки свайп заказы календарь" },
+      { id: "telegram", title: "Telegram-бот", keys: "botfather mini app снимок голос вопрос долги чат стенд токен" },
+      { id: "mobile", title: "Экран телефона", keys: "вкладки свайп заказы календарь стенд проиграть" },
       { id: "desk", title: "Интерфейс компьютера в браузере", keys: "desk ссылка web" },
     ],
   },

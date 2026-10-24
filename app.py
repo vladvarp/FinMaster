@@ -12,6 +12,7 @@ from typing import Any
 
 from flask import Flask, g, jsonify, redirect, request, send_from_directory
 
+from backend import ask
 from backend import netlog, qr, runtime, storage
 from backend.backup import is_backup_path
 from backend import backup as report_backup
@@ -946,6 +947,24 @@ def api_theme():
     data = request.get_json(silent=True) or {}
     theme = storage.set_theme(data.get("theme") or "light")
     return jsonify({"ok": True, "theme": theme})
+
+
+@app.post("/api/ask")
+def api_ask():
+    """Тот же разбор просьбы, что у бота. Документ приходит из открытого окна."""
+    if not _is_local() and not _desk_editor():
+        return jsonify({"error": "Доступ запрещён."}), 403
+    data = request.get_json(silent=True) or {}
+    query = str(data.get("query") or "").strip()
+    doc = data.get("doc")
+    if not query:
+        return jsonify({"error": "Введите запрос."}), 400
+    if not isinstance(doc, dict):
+        return jsonify({"error": "Нет открытого отчёта."}), 400
+    reply = ask.parse(query, doc, voice=True, surface="desk")
+    if reply is None or not str(reply.html or "").strip():
+        return jsonify({"title": "Ответ", "lead": "", "chips": [], "sections": [{"title": "Ответ", "rows": [{"kind": "text", "text": "В отчёте по этому запросу ничего нет."}]}]})
+    return jsonify(ask.present(reply.html))
 
 
 @app.post("/api/ui-pref")

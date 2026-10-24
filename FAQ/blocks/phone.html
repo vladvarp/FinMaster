@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/mobile.css">
+  <link rel="stylesheet" href="stage.css">
+  <style>
+    html, body { background: #f4f7fb !important; color-scheme: light; }
+    html[data-theme="dark"], html[data-theme="dark"] body { background: #0b1220 !important; color-scheme: dark; }
+    .phone {
+      position: relative;
+      width: min(390px, 100%);
+      height: 760px;
+      margin: 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      overflow: hidden;
+      background: var(--bg);
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+    }
+    .phone .topbar,
+    .phone .sync-bar,
+    .phone .tabbar { position: relative !important; inset: auto !important; }
+    .phone .topbar { height: 58px; flex: 0 0 auto; }
+    .phone .sync-bar.show { height: 22px; flex: 0 0 auto; }
+    .phone .tabbar { height: 64px; flex: 0 0 auto; }
+    .phone main { flex: 1; min-height: 0; overflow: hidden; }
+    .phone .fab { position: absolute; right: 16px; bottom: 16px; }
+    .phone .screen { display: none; }
+    .phone .screen.on { display: block; height: 100%; overflow: auto; }
+    .demo-bar { display: flex; gap: 8px; justify-content: center; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <div class="demo-bar">
+    <button type="button" class="btn small primary" id="play">Проиграть экран</button>
+  </div>
+  <p class="hint">Стенд телефона. Вкладки внизу переключают заказы, календарь, сводку, снимок и отчёты. Кнопка выше проходит их по кругу.</p>
+  <div class="phone" id="phone">
+    <header class="topbar">
+      <div class="topbar-title">
+        <strong id="head">Заказы</strong>
+        <span>Мастерская · на связи</span>
+      </div>
+      <button type="button" class="icon-btn" tabindex="-1" aria-label="Отменить">↶</button>
+      <button type="button" class="icon-btn" tabindex="-1" aria-label="Повторить">↷</button>
+      <button type="button" class="icon-btn accent" tabindex="-1" aria-label="Меню">⋯</button>
+    </header>
+    <div class="sync-bar show ok"><span class="sync-dot"></span><span>на связи с компьютером</span></div>
+    <main>
+      <section class="screen on" data-pane="orders" data-title="Заказы">
+        <div class="search-wrap">
+          <input type="search" value="" placeholder="Поиск: заказ, клиент, позиция" readonly tabindex="-1" aria-label="Поиск">
+          <button type="button" class="btn" tabindex="-1">Все</button>
+          <button type="button" class="sort-btn" tabindex="-1">↓ новые</button>
+        </div>
+        <div class="list">
+          <article class="card order-item" style="--tint:#0f766e">
+            <div class="oi-top"><span class="oi-num">310</span><span class="oi-sep">—</span><span class="oi-customer">6 ст2 п6 эт9 КВ-310</span></div>
+            <div class="oi-name">Иванов · 3 поз.</div>
+            <div class="oi-foot"><span class="sum">186 000 ₽</span><span class="sum debt">долг 42 000 ₽</span></div>
+          </article>
+          <article class="card order-item" style="--tint:#d97706">
+            <div class="oi-top"><span class="oi-num">310</span><span class="oi-sep">—</span><span class="oi-customer">Окно</span></div>
+            <div class="oi-name">Петров · 1 поз.</div>
+            <div class="oi-foot"><span class="sum">27 000 ₽</span><span class="sum paid">оплачено</span></div>
+          </article>
+          <article class="card order-item" style="--tint:#059669">
+            <div class="oi-top"><span class="oi-num">1042</span><span class="oi-sep">—</span><span class="oi-customer">Кухня</span></div>
+            <div class="oi-name">Сидорова · 4 поз.</div>
+            <div class="oi-foot"><span class="sum">96 400 ₽</span><span class="sum debt">долг 12 400 ₽</span></div>
+          </article>
+        </div>
+        <button type="button" class="fab" tabindex="-1" aria-label="Новый заказ">+</button>
+      </section>
+      <section class="screen" data-pane="calendar" data-title="Календарь">
+        <div class="mcal-kpis">
+          <div><span>Идёт</span><b>1</b></div>
+          <div><span>Без дат</span><b>0</b></div>
+        </div>
+        <div class="mcal-top">
+          <div class="mcal-tools">
+            <div class="mcal-modes">
+              <button type="button" class="chip active" tabindex="-1" title="Классический — сетка месяца" aria-label="Классический — сетка месяца"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 9.5h16M8 5v3M16 5v3M8 13h.01M12 13h.01M16 13h.01M8 16.5h.01M12 16.5h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+              <button type="button" class="chip" tabindex="-1" title="Неделя — старты, в работе и финиши" aria-label="Неделя"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 9v8M8.5 6v11M12 8v9M15.5 7v10M19 10v7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+              <button type="button" class="chip" tabindex="-1" title="День" aria-label="День"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="7" y="3.5" width="10" height="17" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M7 8h10" stroke="currentColor" stroke-width="1.8"/><path d="M12 12.2v4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12.2" r="1.5" fill="currentColor"/></svg></button>
+            </div>
+            <div class="mcal-quick">
+              <button type="button" class="btn mcal-ico" tabindex="-1" title="Сегодня" aria-label="Сегодня"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M4 9.5h16M8 5v3M16 5v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="15" r="2.3" fill="currentColor"/></svg></button>
+              <button type="button" class="btn mcal-ico active" tabindex="-1" title="Скрывать на паузе" aria-label="Скрывать на паузе" aria-pressed="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6.5v11M15 6.5v11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+            </div>
+          </div>
+          <div class="mcal-filter">
+            <button type="button" class="btn" tabindex="-1" title="Фильтр заказов: Все"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5h16l-6.2 7.4v5.1L10.2 19v-6.6L4 5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg><span>Все</span></button>
+          </div>
+        </div>
+        <div class="mcal-nav">
+          <div class="mcal-nav-dates">
+            <button type="button" class="btn" tabindex="-1">‹</button>
+            <select class="mcal-pick" tabindex="-1" aria-label="Месяц"><option selected>Октябрь</option></select>
+            <select class="mcal-pick" tabindex="-1" aria-label="Год"><option selected>2026</option></select>
+            <button type="button" class="btn" tabindex="-1">›</button>
+          </div>
+        </div>
+        <div class="mcal-weekdays"><span>пн</span><span>вт</span><span>ср</span><span>чт</span><span>пт</span><span class="is-weekend">сб</span><span class="is-weekend">вс</span></div>
+        <div class="mcal-month">
+          <button type="button" class="mcal-cell is-out" tabindex="-1"><b>28</b></button>
+          <button type="button" class="mcal-cell is-out" tabindex="-1"><b>29</b></button>
+          <button type="button" class="mcal-cell is-out" tabindex="-1"><b>30</b></button>
+          <button type="button" class="mcal-cell" tabindex="-1"><b>1</b></button>
+          <button type="button" class="mcal-cell" tabindex="-1"><b>2</b></button>
+          <button type="button" class="mcal-cell is-weekend" tabindex="-1"><b>3</b></button>
+          <button type="button" class="mcal-cell is-weekend" tabindex="-1"><b>4</b></button>
+          <button type="button" class="mcal-cell" tabindex="-1"><b>5</b></button>
+          <button type="button" class="mcal-cell" tabindex="-1"><b>6</b></button>
+          <button type="button" class="mcal-cell" tabindex="-1"><b>7</b></button>
+          <button type="button" class="mcal-cell" tabindex="-1"><b>8</b></button>
+          <button type="button" class="mcal-cell" tabindex="-1"><b>9</b></button>
+          <button type="button" class="mcal-cell is-weekend" tabindex="-1"><b>10</b></button>
+          <button type="button" class="mcal-cell is-weekend" tabindex="-1"><b>11</b></button>
+          <button type="button" class="mcal-cell has-now" tabindex="-1"><b>12</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now" tabindex="-1"><b>13</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now" tabindex="-1"><b>14</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now" tabindex="-1"><b>15</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now" tabindex="-1"><b>16</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now is-weekend" tabindex="-1"><b>17</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now is-weekend" tabindex="-1"><b>18</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now" tabindex="-1"><b>19</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now" tabindex="-1"><b>20</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now" tabindex="-1"><b>21</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now" tabindex="-1"><b>22</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now" tabindex="-1"><b>23</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now is-weekend is-today" tabindex="-1"><b>24</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now is-weekend" tabindex="-1"><b>25</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now" tabindex="-1"><b>26</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now" tabindex="-1"><b>27</b><i>1</i></button>
+          <button type="button" class="mcal-cell has-now" tabindex="-1"><b>28</b><i>1</i></button>
+          <button type="button" class="mcal-cell" tabindex="-1"><b>29</b></button>
+          <button type="button" class="mcal-cell" tabindex="-1"><b>30</b></button>
+          <button type="button" class="mcal-cell is-weekend" tabindex="-1"><b>31</b></button>
+          <button type="button" class="mcal-cell is-out is-weekend" tabindex="-1"><b>1</b></button>
+          <button type="button" class="mcal-cell is-out" tabindex="-1"><b>2</b></button>
+          <button type="button" class="mcal-cell is-out has-planned" tabindex="-1"><b>3</b><i>1</i></button>
+          <button type="button" class="mcal-cell is-out" tabindex="-1"><b>4</b></button>
+          <button type="button" class="mcal-cell is-out" tabindex="-1"><b>5</b></button>
+          <button type="button" class="mcal-cell is-out" tabindex="-1"><b>6</b></button>
+          <button type="button" class="mcal-cell is-out is-weekend" tabindex="-1"><b>7</b></button>
+          <button type="button" class="mcal-cell is-out is-weekend" tabindex="-1"><b>8</b></button>
+        </div>
+      </section>
+      <section class="screen" data-pane="stats" data-title="Сводка">
+        <div class="chips wrap">
+          <button type="button" class="chip active" tabindex="-1">Этот месяц</button>
+          <button type="button" class="chip" tabindex="-1">Все заказы</button>
+          <button type="button" class="chip" tabindex="-1">Любой статус</button>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><span>Заказов</span><strong>3</strong></div>
+          <div class="kpi"><span>Позиций</span><strong>8</strong></div>
+          <div class="kpi"><span>Выручка</span><strong>309 тыс</strong></div>
+          <div class="kpi debt"><span>Долг</span><strong>54 тыс</strong></div>
+        </div>
+        <article class="card">
+          <div class="bar-row"><span>За этот месяц</span><b>186 000 ₽</b>
+            <div class="bar-track"><div class="bar-fill" style="background:var(--accent-2);width:60%"></div></div>
+          </div>
+        </article>
+        <h3 class="section">Кто должен</h3>
+        <article class="card order-item" style="--tint:var(--danger)">
+          <div class="oi-top"><span class="oi-num">310</span><span class="oi-sep">—</span><span class="oi-customer">Иванов</span></div>
+          <div class="oi-foot"><span class="sum debt">42 000 ₽</span></div>
+        </article>
+      </section>
+      <section class="screen" data-pane="snapshot" data-title="Снимок">
+        <article class="card">
+          <div class="field last">
+            <label>Заказ</label>
+            <button type="button" class="picker" tabindex="-1"><span>310 · КВ-310</span><span class="picker-ico">▾</span></button>
+          </div>
+        </article>
+        <article class="card">
+          <div class="chips inline">
+            <button type="button" class="chip active" tabindex="-1">Все</button>
+            <button type="button" class="chip" tabindex="-1">Долг</button>
+            <button type="button" class="chip" tabindex="-1">Оплата</button>
+          </div>
+          <div class="chips wrap">
+            <button type="button" class="chip theme-chip active" tabindex="-1"><i class="sw" style="background:#0f766e"></i>Бирюза</button>
+            <button type="button" class="chip theme-chip" tabindex="-1"><i class="sw" style="background:#1e293b"></i>Графит</button>
+          </div>
+          <button type="button" class="btn wide primary" tabindex="-1">Поделиться</button>
+        </article>
+      </section>
+      <section class="screen" data-pane="files" data-title="Отчёты">
+        <article class="card">
+          <div class="muted" style="margin-bottom:8px">Открыто на компьютере</div>
+          <strong>Мастерская</strong>
+          <div class="chips wrap" style="margin-top:10px">
+            <button type="button" class="chip active" tabindex="-1">₽</button>
+            <button type="button" class="chip" tabindex="-1">$</button>
+            <button type="button" class="chip" tabindex="-1">€</button>
+          </div>
+          <button type="button" class="btn wide primary" tabindex="-1">Сохранить на компьютере</button>
+        </article>
+        <article class="card file-item current">
+          <div class="fi-body"><strong>Мастерская</strong><small>Мастерская.fmaster</small></div>
+          <div class="fi-actions"><span class="pill" style="background:var(--accent-2)">открыт</span></div>
+        </article>
+        <article class="card file-item">
+          <div class="fi-body"><strong>Склад</strong><small>Склад.fmaster</small></div>
+          <div class="fi-actions"><button type="button" class="btn small" tabindex="-1">Открыть</button></div>
+        </article>
+      </section>
+    </main>
+    <nav class="tabbar" id="tabs">
+      <button type="button" data-tab="orders" class="active"><span>▤</span>Заказы</button>
+      <button type="button" data-tab="calendar"><span>▦</span>Календарь</button>
+      <button type="button" data-tab="stats"><span>◔</span>Сводка</button>
+      <button type="button" data-tab="snapshot"><span>◨</span>Снимок</button>
+      <button type="button" data-tab="files"><span>◈</span>Отчёты</button>
+    </nav>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+  <script>
+    const titles = { orders: "Заказы", calendar: "Календарь", stats: "Сводка", snapshot: "Снимок", files: "Отчёты" };
+    const order = ["orders", "calendar", "stats", "snapshot", "files"];
+    let timer = 0;
+    function show(id) {
+      document.querySelectorAll(".phone .screen").forEach((el) => el.classList.toggle("on", el.dataset.pane === id));
+      document.querySelectorAll("#tabs button").forEach((el) => el.classList.toggle("active", el.dataset.tab === id));
+      document.getElementById("head").textContent = titles[id];
+    }
+    document.getElementById("tabs").addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-tab]");
+      if (!btn) return;
+      clearInterval(timer);
+      show(btn.dataset.tab);
+    });
+    document.getElementById("play").addEventListener("click", () => {
+      clearInterval(timer);
+      let i = 0;
+      show(order[0]);
+      timer = setInterval(() => {
+        i = (i + 1) % order.length;
+        show(order[i]);
+        if (i === 0) clearInterval(timer);
+      }, 1400);
+    });
+  </script>
+</body>
+</html>

@@ -172,7 +172,7 @@ def help_text() -> str:
         "• долги, кто должен, просрочка, старение, напоминание заказчику\n"
         "• сводка, выручка, оплаты, расходы, налоги, чистыми, средний чек\n"
         "• заказы и позиции: по номеру, имени, продукту, статусу, типу\n"
-        "• период: сегодня, вчера, эта неделя, этот месяц, этот год, за 30 дней, прошлый месяц\n"
+        "• период: сегодня, вчера, эта неделя, этот месяц, август, май 2025, 5 августа, 1 квартал, за 30 дней\n"
         "• календарь: в работе, запланировано, закрыто, без дат\n"
         "• заказчики и контакты, заметки, замороженные\n"
         "• «всё» или «весь отчёт» — сводка целиком\n"
@@ -181,7 +181,83 @@ def help_text() -> str:
     )
 
 
-def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: bool = False) -> Reply | None:
+_SECTION_TITLES = {
+    "Сводка",
+    "Долги",
+    "Заказы",
+    "Календарь",
+    "Заказчики",
+    "Продукты",
+    "Расходы",
+    "Заметки",
+    "Замороженные",
+    "Напоминание",
+    "Ответ",
+}
+
+
+def _unesc(value: str) -> str:
+    return str(value or "").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+
+
+def present(html: str) -> dict[str, Any]:
+    """Разметка ответа для окна ассистента: шапка, чипы и блоки, не сплошной текст."""
+    raw = str(html or "").strip()
+    lines = raw.split("\n")
+    head = lines[0] if lines else ""
+    title_match = re.search(r"<b>(.*?)</b>", head)
+    title = _unesc(title_match.group(1)) if title_match else "Найти"
+    tail = _unesc(re.sub(r"<[^>]+>", "", re.sub(r"<b>.*?</b>", "", head, count=1))).strip()
+    chips = [bit.strip(" ·—-") for bit in tail.split("·") if bit.strip(" ·—-")]
+    lead = ""
+    if len(chips) == 1 and len(chips[0]) > 42:
+        lead = chips[0]
+        chips = []
+    sections: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+
+    def ensure() -> dict[str, Any]:
+        nonlocal current
+        if current is None:
+            current = {"title": "Найти", "rows": []}
+            sections.append(current)
+        return current
+
+    for line in lines[1:]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        mixed = re.fullmatch(r"<b>(.*?)</b>\s*(.*)", stripped)
+        if mixed:
+            name = _unesc(mixed.group(1)).strip()
+            meta = _unesc(re.sub(r"<[^>]+>", "", mixed.group(2))).strip(" ·—-")
+            if name in _SECTION_TITLES:
+                current = {"title": f"{name} · {meta}" if meta else name, "rows": []}
+                sections.append(current)
+                continue
+            ensure()["rows"].append({"kind": "group", "title": name, "meta": meta})
+            continue
+        plain = _unesc(re.sub(r"<[^>]+>", "", stripped)).strip()
+        if not plain:
+            continue
+        box = ensure()
+        if plain.startswith("•"):
+            box["rows"].append({"kind": "item", "text": plain[1:].strip()})
+            continue
+        if " · " in plain and not plain.startswith("№"):
+            parts = [bit.strip() for bit in plain.split("·") if bit.strip()]
+            if len(parts) >= 2 and all(len(bit) <= 80 for bit in parts):
+                box["rows"].append({"kind": "metrics", "items": parts})
+                continue
+        box["rows"].append({"kind": "text", "text": plain})
+    if not sections:
+        plain = _unesc(re.sub(r"<[^>]+>", "", raw)).strip()
+        if plain:
+            sections.append({"title": "Найти", "rows": [{"kind": "text", "text": plain}]})
+    return {"title": title, "lead": lead, "chips": chips, "sections": sections}
+
+
+def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: bool = False, surface: str = "bot") -> Reply | None:
     low = _norm(text)
     if not low:
         return Reply(html="Не разобрал речь. Скажите ещё раз или напишите вопрос.") if voice else None
@@ -308,8 +384,9 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
             needs_report=True,
         )
     if not matched and explicit != {"snap"} and "snap" not in explicit:
-        tail = "В отчёте по этой просьбе ничего нет."
-        if voice or _ASK.search(low):
+        tail = f"За {html_esc(period_label)} в отчёте ничего нет." if period_label else "В отчёте по этой просьбе ничего нет."
+        understood = bool(explicit or customers or products or order_ids or statuses or types or period != "all" or pay or work_state)
+        if (voice or _ASK.search(low)) and not understood:
             tail += "\n" + help_text()
         return Reply(html=f"{head}\n{tail}", needs_report=True)
 
@@ -321,7 +398,7 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
         return html_esc(money(value, cur, decimals))
 
     if "summary" in explicit or "money" in explicit:
-        parts.append(_summary(source, matched, today, cash, terms, delays))
+        parts.append(_summary(source, matched, today, cash, terms, delays, period))
     if "debt" in explicit:
         parts.append(_debts(matched, today, terms, delays, cash, overdue_only="overdue" in explicit, incoming="incoming" in explicit, period=period))
     if "orders" in explicit:
@@ -351,7 +428,7 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
             ids.append(oid)
     specific = bool(customers or products or order_ids or statuses or types or words or pay or period != "all" or work_state or "debt" in explicit)
     action = ""
-    if snap:
+    if snap and surface != "desk":
         action = "snap_send" if specific and ids else "snap"
         if action == "snap":
             parts = [head, "Открываю снимок. Отметьте заказы и нажмите PNG, PDF или текст."]
@@ -472,6 +549,22 @@ def _work_mode(text: str) -> str:
     return ""
 
 
+_MONTHS = (
+    (1, r"январ\w*", "январь"),
+    (2, r"феврал\w*", "февраль"),
+    (3, r"март\w*", "март"),
+    (4, r"апрел\w*", "апрель"),
+    (5, r"ма[йяе]", "май"),
+    (6, r"июн\w*", "июнь"),
+    (7, r"июл\w*", "июль"),
+    (8, r"август\w*", "август"),
+    (9, r"сентябр\w*", "сентябрь"),
+    (10, r"октябр\w*", "октябрь"),
+    (11, r"ноябр\w*", "ноябрь"),
+    (12, r"декабр\w*", "декабрь"),
+)
+
+
 def _take_period(text: str) -> tuple[str, str, str]:
     rules = (
         (r"прошл\w+\s+месяц\w*", "prev_month", "прошлый месяц"),
@@ -490,7 +583,88 @@ def _take_period(text: str) -> tuple[str, str, str]:
     if days:
         count = max(1, min(366, int(days.group(1))))
         return f"days:{count}", f"за {count} дн.", re.sub(r"за\s+\d{1,3}\s+дн\w*", " ", text, count=1)
+    named = _named_period(text, date.today())
+    if named:
+        return named
     return "all", "", text
+
+
+def _named_period(text: str, today: date) -> tuple[str, str, str] | None:
+    quarter = _quarter_period(text, today)
+    if quarter:
+        return quarter
+    best: tuple[int, str, str, tuple[int, int]] | None = None
+    for num, stem, title in _MONTHS:
+        rx = re.compile(
+            rf"(?:(?P<day>\d{{1,2}})(?:-?(?:го|е))?\s+)?"
+            rf"(?:(?P<pre>прошл\w+)\s+)?"
+            rf"(?<![а-я])(?P<month>{stem})(?![а-я])"
+            rf"(?:\s+(?P<year>20\d\d))?"
+            rf"(?:\s+(?P<post>прошл\w+\s+года))?"
+        )
+        found = rx.search(text)
+        if not found:
+            continue
+        span = found.end() - found.start()
+        if best and span <= best[0]:
+            continue
+        year = int(found.group("year")) if found.group("year") else today.year
+        if (found.group("pre") or found.group("post")) and not found.group("year"):
+            year -= 1
+        elif not found.group("year") and (year, num) > (today.year, today.month):
+            year -= 1
+        day_n = int(found.group("day") or 0)
+        try:
+            picked = date(year, num, day_n) if day_n else None
+        except ValueError:
+            picked = None
+            day_n = 0
+        if picked:
+            gen = ("", "января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря")[num]
+            key = f"day:{picked.isoformat()}"
+            label = f"{picked.day} {gen} {picked.year}"
+        else:
+            key = f"ym:{year:04d}-{num:02d}"
+            label = f"{title} {year}"
+        best = (span, key, label, found.span())
+    if not best:
+        return None
+    _, key, label, span = best
+    cleaned = f"{text[:span[0]]} {text[span[1]:]}"
+    return key, label, cleaned
+
+
+def _quarter_period(text: str, today: date) -> tuple[str, str, str] | None:
+    rules = (
+        (r"(?:4|четверт\w+|iv)\s+квартал\w*", 4),
+        (r"(?:3|трет\w+|iii)\s+квартал\w*", 3),
+        (r"(?:2|втор\w+|ii)\s+квартал\w*", 2),
+        (r"(?:1|перв\w+|\bi\b)\s+квартал\w*", 1),
+        (r"прошл\w+\s+квартал\w*", 0),
+        (r"(?:этот|текущ\w+|за|в)\s+квартал\w*|квартал\w*", -1),
+    )
+    for pattern, num in rules:
+        rx = re.compile(rf"{pattern}(?:\s+(20\d\d))?")
+        found = rx.search(text)
+        if not found:
+            continue
+        year = int(found.group(1)) if found.lastindex and found.group(1) and found.group(1).isdigit() else today.year
+        quarter = (today.month - 1) // 3 + 1
+        if num == 0:
+            quarter -= 1
+            if quarter < 1:
+                quarter = 4
+                year -= 1
+        elif num == -1:
+            pass
+        else:
+            quarter = num
+            if not (found.lastindex and found.group(1) and found.group(1).isdigit()) and (year, quarter) > (today.year, (today.month - 1) // 3 + 1):
+                year -= 1
+        label = f"{quarter} квартал {year}"
+        cleaned = rx.sub(" ", text, count=1)
+        return f"q:{year:04d}-{quarter}", label, cleaned
+    return None
 
 
 def _in_period(day: date | None, period: str, today: date) -> bool:
@@ -517,6 +691,15 @@ def _in_period(day: date | None, period: str, today: date) -> bool:
     if period.startswith("days:"):
         count = int(period.split(":", 1)[1])
         return today - timedelta(days=count - 1) <= day <= today
+    if period.startswith("ym:"):
+        year_s, month_s = period[3:].split("-", 1)
+        return (day.year, day.month) == (int(year_s), int(month_s))
+    if period.startswith("day:"):
+        return day.isoformat() == period[4:]
+    if period.startswith("q:"):
+        year_s, quarter_s = period[2:].split("-", 1)
+        start = (int(quarter_s) - 1) * 3 + 1
+        return day.year == int(year_s) and start <= day.month <= start + 2
     return True
 
 
@@ -874,7 +1057,7 @@ def _order_ref(order: dict[str, Any]) -> str:
     return html_esc(" ".join(bits) or "Заказ")
 
 
-def _summary(doc: dict[str, Any], rows: list[dict[str, Any]], today: date, cash, terms: int, delays: tuple[float, bool, dict[str, float]]) -> str:
+def _summary(doc: dict[str, Any], rows: list[dict[str, Any]], today: date, cash, terms: int, delays: tuple[float, bool, dict[str, float]], period: str = "all") -> str:
     income = [row for row in rows if not row["tot"].get("kind")]
     after = sum(float(row["tot"]["after"]) for row in income)
     paid = sum(float(row["tot"]["paid"]) for row in income)
@@ -895,9 +1078,10 @@ def _summary(doc: dict[str, Any], rows: list[dict[str, Any]], today: date, cash,
         f"К оплате {cash(after)} · оплачено {cash(paid)} · долг {cash(unpaid)}",
         f"Расходы {cash(cost)} · чистыми {cash(after - cost)}",
         f"Средний чек {cash(avg)} · собираемость {html_esc(_share(paid, after))}",
-        f"Этот месяц {cash(month_after)} · прошлый {cash(prev_after)}",
     ]
-    if today.day:
+    if period == "all":
+        lines.append(f"Этот месяц {cash(month_after)} · прошлый {cash(prev_after)}")
+    if period == "all" and today.day:
         dim = (today.replace(day=1) + timedelta(days=32)).replace(day=1) - timedelta(days=1)
         forecast = month_after / today.day * dim.day if today.day else 0
         lines.append(f"Прогноз месяца {cash(forecast)}")

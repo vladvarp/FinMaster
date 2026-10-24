@@ -1,7 +1,7 @@
   /* ==== Командная палитра ==== */
   const palette = { items: [], index: 0, drag: null };
   const ASSISTANT_KEY = "finmaster.assistant";
-  const ASSISTANT_MIN_W = 320;
+  const ASSISTANT_MIN_W = 540;
   const ASSISTANT_MIN_H = 280;
 
   function paletteCommands() {
@@ -632,7 +632,7 @@
 
   function windowPoint() {
     const saved = assistantSaved() || {};
-    const size = clampAssistantSize(saved.w || 440, saved.h || 520);
+    const size = clampAssistantSize(saved.w >= 540 ? saved.w : 560, saved.h || 520);
     const orb = orbPoint();
     let x = orb.x;
     let y = orb.y + ASSISTANT_ORB - size.h;
@@ -708,7 +708,7 @@
     const size = frame
       ? { w: frame.w, h: frame.h }
       : min
-        ? clampAssistantSize(prev.w || 440, prev.h || 520)
+        ? clampAssistantSize(prev.w >= 540 ? prev.w : 560, prev.h || 520)
         : clampAssistantSize(rect.width, rect.height);
     const x = frame ? frame.x : min && Number.isFinite(prev.x) ? prev.x : rect.left;
     const y = frame ? frame.y : min && Number.isFinite(prev.y) ? prev.y : rect.top;
@@ -816,6 +816,16 @@
       if (removed || !input?.value) return;
       cancelAssistantIdle();
     });
+    $("palette-ask")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      runAssistantAsk();
+    });
+    $("ask-close")?.addEventListener("click", closeAskModal);
+    $("ask-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("ask-modal")) closeAskModal();
+    });
+    $("ask-query")?.addEventListener("input", () => scheduleAsk(160));
     document.addEventListener("pointerdown", (e) => {
       if (!box.classList.contains("open") || box.classList.contains("is-min") || palette.drag) return;
       if (assistantContainsPoint(e.clientX, e.clientY)) {
@@ -1190,5 +1200,122 @@
       renderOrders();
       undoToast("Строка удалена");
     }
+  }
+
+  let askToken = 0;
+  let askTimer = 0;
+
+  function closeAskModal() {
+    clearTimeout(askTimer);
+    askToken += 1;
+    $("ask-modal")?.classList.remove("open", "is-busy");
+  }
+
+  function openAskModal(query) {
+    const input = $("ask-query");
+    if (input) input.value = query || "";
+    $("ask-modal")?.classList.add("open");
+    input?.focus();
+    const end = input?.value.length || 0;
+    input?.setSelectionRange(end, end);
+    scheduleAsk(0);
+  }
+
+  function scheduleAsk(delay) {
+    clearTimeout(askTimer);
+    askTimer = setTimeout(runAskQuery, delay);
+  }
+
+  function askRow(row) {
+    if (row.kind === "metrics") {
+      const box = document.createElement("div");
+      box.className = "ask-metrics";
+      (row.items || []).forEach((item) => {
+        const span = document.createElement("span");
+        span.textContent = item;
+        box.appendChild(span);
+      });
+      return box;
+    }
+    if (row.kind === "group") {
+      const box = document.createElement("div");
+      box.className = "ask-group";
+      const title = document.createElement("b");
+      title.textContent = row.title || "";
+      box.appendChild(title);
+      if (row.meta) {
+        const meta = document.createElement("span");
+        meta.textContent = row.meta;
+        box.appendChild(meta);
+      }
+      return box;
+    }
+    const line = document.createElement(row.kind === "item" ? "div" : "p");
+    line.className = row.kind === "item" ? "ask-item" : "ask-line";
+    line.textContent = row.text || "";
+    return line;
+  }
+
+  function fillAskModal(data) {
+    $("ask-title").textContent = data.title || "Найти";
+    const lead = $("ask-lead");
+    lead.textContent = data.lead || "";
+    lead.hidden = !data.lead;
+    const chips = $("ask-chips");
+    chips.replaceChildren();
+    (data.chips || []).forEach((chip) => {
+      const span = document.createElement("span");
+      span.textContent = chip;
+      chips.appendChild(span);
+    });
+    const body = $("ask-body");
+    body.replaceChildren();
+    (data.sections || []).forEach((section) => {
+      const card = document.createElement("section");
+      card.className = "ask-section";
+      const heading = document.createElement("h4");
+      heading.textContent = section.title || "Найти";
+      card.appendChild(heading);
+      (section.rows || []).forEach((row) => card.appendChild(askRow(row)));
+      body.appendChild(card);
+    });
+  }
+
+  async function runAskQuery() {
+    const query = String($("ask-query")?.value || "").trim();
+    const token = ++askToken;
+    const modal = $("ask-modal");
+    if (!query) {
+      fillAskModal({
+        title: "Найти",
+        lead: "Введите запрос — долги, номер, имя или продукт.",
+        chips: [],
+        sections: [],
+      });
+      modal?.classList.remove("is-busy");
+      return;
+    }
+    if (!state.doc) return;
+    modal?.classList.add("is-busy");
+    try {
+      const data = await apiPost("/api/ask", { query, doc: state.doc });
+      if (token !== askToken) return;
+      fillAskModal(data);
+    } catch (err) {
+      if (token !== askToken) return;
+      fillAskModal({
+        title: "Найти",
+        lead: "",
+        chips: [],
+        sections: [{ title: "Найти", rows: [{ kind: "text", text: err?.message || "Не удалось собрать ответ." }] }],
+      });
+    } finally {
+      if (token === askToken) modal?.classList.remove("is-busy");
+    }
+  }
+
+  function runAssistantAsk() {
+    if (!state.doc) return;
+    openAskModal(String($("palette-input")?.value || "").trim());
   }
 

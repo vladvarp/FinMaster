@@ -2707,12 +2707,20 @@
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         paletteMove(-1);
+      } else if (e.key === "Enter" && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        runAssistantAsk();
       } else if (e.key === "Enter") {
         e.preventDefault();
         paletteRun(palette.index);
       } else if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
+        if ($("ask-modal")?.classList.contains("open")) {
+          closeAskModal();
+          return;
+        }
         setAssistantMin(true);
       }
     });
@@ -3642,7 +3650,21 @@
         toggleAppFullscreen();
         return;
       }
+      if (e.key === "Enter" && e.shiftKey && !ctrl && !e.altKey) {
+        const typing = e.target?.closest?.("input, textarea, select, [contenteditable='true']");
+        if (!typing && state.doc && !$("app-shell")?.hidden) {
+          e.preventDefault();
+          if ($("ask-modal")?.classList.contains("open")) $("ask-query")?.focus();
+          else openAskModal(String($("palette-input")?.value || "").trim());
+          return;
+        }
+      }
       if (e.key === "Escape") {
+        if ($("ask-modal")?.classList.contains("open")) {
+          e.preventDefault();
+          closeAskModal();
+          return;
+        }
         if (cloudFullscreenOn()) {
           e.preventDefault();
           toggleCloudFullscreen(false);
