@@ -305,6 +305,7 @@ _IMPORT_TO_PACKAGE = {
     "dateutil": "python-dateutil",
     "dotenv": "python-dotenv",
     "webview": "pywebview",
+    "imageio_ffmpeg": "imageio-ffmpeg",
     "win32api": "pywin32",
     "win32con": "pywin32",
     "win32gui": "pywin32",

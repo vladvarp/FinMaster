@@ -1,3 +1,5 @@
 flask>=3.0.0
 pywebview>=5.0
 pillow>=10.0.0
+vosk>=0.3.45
+imageio-ffmpeg>=0.5.1

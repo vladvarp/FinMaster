@@ -52,7 +52,7 @@ window.FAQ_TOC = [
     items: [
       { id: "phone", title: "Подключение телефона", keys: "qr wi-fi доступ устройства" },
       { id: "ngrok", title: "Интернет через ngrok", keys: "токен path store туннель" },
-      { id: "telegram", title: "Telegram-бот", keys: "botfather mini app снимок" },
+      { id: "telegram", title: "Telegram-бот", keys: "botfather mini app снимок голос вопрос долги" },
       { id: "mobile", title: "Экран телефона", keys: "вкладки свайп заказы календарь" },
       { id: "desk", title: "Интерфейс компьютера в браузере", keys: "desk ссылка web" },
     ],

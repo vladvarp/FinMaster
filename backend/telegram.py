@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -12,8 +13,10 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable
 
+from backend import ask
 from backend import netlog
 from backend import storage
+from backend import voice
 from backend.document import normalize_document
 from backend.finance import (
     html_esc,
@@ -224,7 +227,7 @@ def _menu_keyboard(app_url: str = "") -> dict[str, Any]:
     return {
         "keyboard": rows,
         "resize_keyboard": True,
-        "input_field_placeholder": "Отчёты, заказы, снимок или поиск",
+        "input_field_placeholder": "Вопрос голосом или текстом",
     }
 
 
@@ -359,6 +362,42 @@ def send_html(
     return sent
 
 
+def _html_to_text(text: str) -> str:
+    plain = re.sub(r"<[^>]+>", "", str(text or ""))
+    return plain.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+
+
+def send_long_html(token: str, chat_id: str, text: str, markup: dict[str, Any] | None = None) -> None:
+    """Короткий ответ остаётся в чате. Длинный сворачивается в текстовый файл."""
+    body = str(text or "").strip()
+    if not body:
+        return
+    plain = _html_to_text(body).strip()
+    filled = [line for line in plain.splitlines() if line.strip()]
+    if len(plain) <= 900 and len(filled) <= 12:
+        send_html(token, chat_id, body, markup)
+        return
+    head = body.split("\n", 1)[0].strip() or "Ответ"
+    if len(_html_to_text(head)) > 240:
+        head = html_esc(_html_to_text(head)[:239] + "…")
+    send_html(token, chat_id, f"{head}\n<i>Полный ответ — в файле.</i>", markup)
+    send_document(token, chat_id, plain.encode("utf-8"), "finmaster-otvet.txt", "Полный ответ")
+
+
+def _tg_file(token: str, file_id: str) -> bytes:
+    data = _call(token, "getFile", {"file_id": file_id}, timeout=30)
+    result = data.get("result") if isinstance(data.get("result"), dict) else {}
+    path = str(result.get("file_path") or "")
+    if not path or ".." in path.replace("\\", "/").split("/"):
+        raise RuntimeError("Telegram не отдал файл записи.")
+    url = (
+        f"https://api.telegram.org/file/bot{urllib.parse.quote(token, safe=':-_')}/"
+        f"{urllib.parse.quote(path, safe='/')}"
+    )
+    with urllib.request.urlopen(url, timeout=60) as response:
+        return response.read()
+
+
 def send_photo(token: str, chat_id: str, png: bytes, caption: str, filename: str) -> dict[str, Any]:
     data = _call_file(
         token,
@@ -468,6 +507,7 @@ def welcome_text(info: Any = None) -> str:
         f"{channel_block(info)}\n\n"
         "Кнопки внизу: <b>Отчёты</b>, <b>Заказы</b>, <b>Снимок</b>, <b>Ссылка</b>, <b>Интерфейс ПК</b>, <b>Новая ссылка</b>.\n"
         "«Открыть» — телефон. «Интерфейс ПК» — тот же экран, что на компьютере.\n"
+        "Голосом или текстом можно спросить долги, заказы, кассу, календарь, заказчика — отвечу по открытому отчёту.\n"
         "В списке заказов можно написать имя или номер — найду."
     )
 
@@ -575,6 +615,7 @@ def setup_bot(token: str) -> None:
                     {"command": "snap", "description": "Снимок для заказчика"},
                     {"command": "link", "description": "Ссылка на телефон"},
                     {"command": "newlink", "description": "Новая ссылка на телефон"},
+                    {"command": "ask", "description": "Спросить по открытому отчёту"},
                 ]
             },
         )
@@ -886,6 +927,12 @@ class TelegramBot:
                 return
             if msg.get("message_id") is not None:
                 _bump_tail(str(cid), int(msg["message_id"]))
+            voice_msg = msg.get("voice") if isinstance(msg.get("voice"), dict) else None
+            audio_msg = msg.get("audio") if isinstance(msg.get("audio"), dict) else None
+            clip = voice_msg or audio_msg
+            if clip and clip.get("file_id"):
+                self._on_voice(token, str(cid), str(clip.get("file_id")))
+                return
             text = str(msg.get("text") or "").strip()
             netlog.add(
                 "telegram",
@@ -900,7 +947,39 @@ class TelegramBot:
             with self._lock:
                 self._error = str(exc)
 
-    def _on_text(self, token: str, chat_id: str, text: str) -> None:
+    def _on_voice(self, token: str, chat_id: str, file_id: str) -> None:
+        if not self._authorized(chat_id):
+            send_html(
+                token,
+                chat_id,
+                "Этот бот уже привязан к другому чату. В FinMaster → Телефон очистите Chat id, если хотите сменить аккаунт.",
+            )
+            return
+        send_html(token, chat_id, "Слушаю запись…")
+        try:
+            voice.require()
+            if not voice.model_ready():
+                send_html(
+                    token,
+                    chat_id,
+                    "Первый раз скачиваю распознавание речи на этот компьютер. Нужен интернет, дальше голос разбирается здесь и никуда не отправляется.",
+                )
+            heard = voice.transcribe(_tg_file(token, file_id))
+        except voice.VoiceError as exc:
+            send_html(token, chat_id, html_esc(str(exc)))
+            return
+        except Exception as exc:
+            send_html(token, chat_id, f"Не удалось разобрать голос: {html_esc(str(exc) or 'ошибка')}")
+            return
+        heard = " ".join(str(heard or "").split())
+        if not heard:
+            send_html(token, chat_id, "Не разобрал речь. Скажите ближе к телефону или напишите вопрос текстом.")
+            return
+        netlog.add("telegram", f"Голос: {heard[:80]}", source=f"chat {chat_id}", key=f"tg-voice-{chat_id}")
+        send_html(token, chat_id, f"Услышал: <i>{html_esc(heard)}</i>")
+        self._on_text(token, chat_id, heard, voice=True)
+
+    def _on_text(self, token: str, chat_id: str, text: str, voice: bool = False) -> None:
         low = text.lower()
         info = self._status_for(chat_id)
         if low in ASK_MENU or not text:
@@ -915,7 +994,7 @@ class TelegramBot:
             )
             return
         session = self._chat(chat_id)
-        if session.awaiting == "title":
+        if session.awaiting == "title" and not voice:
             session.snap["title"] = text[:80]
             session.awaiting = ""
             self._show(token, chat_id, "look")
@@ -944,12 +1023,108 @@ class TelegramBot:
             self._prepare_snap(session, reset=not bool(session.snap.get("ready")))
             self._show(token, chat_id, "snap")
             return
+        if text and self._try_ask(token, chat_id, text, voice=voice):
+            return
+        if voice:
+            send_html(
+                token,
+                chat_id,
+                "Не нашёл это в отчёте. Спросите долги, заказы, выручку, календарь или имя заказчика.",
+                self._reply_kb(chat_id),
+            )
+            return
         if session.screen in {"orders", "order", "home"} and text:
             session.search = text
             session.opage = 0
             self._show(token, chat_id, "orders")
             return
         send_html(token, chat_id, "Нажмите <b>Отчёты</b>, <b>Заказы</b>, <b>Снимок</b> или <b>Меню</b>.", self._reply_kb(chat_id))
+
+    def _has_report(self, session: ChatSession) -> bool:
+        if session.path or _live_path():
+            return True
+        return bool(REMOTE.enabled and isinstance(REMOTE.doc, dict))
+
+    def _try_ask(self, token: str, chat_id: str, text: str, voice: bool = False) -> bool:
+        session = self._chat(chat_id)
+        doc, live = self._doc_of(session)
+        reply = ask.parse(text, doc, voice=voice, live=live)
+        if reply is None:
+            return False
+        if reply.action == "open_report":
+            self._open_named_report(token, chat_id, reply.target)
+            return True
+        if reply.action == "reports":
+            self._show(token, chat_id, "reports")
+            return True
+        if reply.action == "orders":
+            session.opage = 0
+            self._show(token, chat_id, "orders")
+            return True
+        if reply.action == "link":
+            info = self._status_for(chat_id)
+            send_access(token, chat_id, str(info.get("url") or ""), info)
+            return True
+        if reply.action == "pc":
+            self._open_on_pc(token, chat_id)
+            return True
+        if reply.action == "snap" and not reply.html:
+            self._prepare_snap(session, reset=not bool(session.snap.get("ready")))
+            self._show(token, chat_id, "snap")
+            return True
+        if reply.needs_report and not self._has_report(session):
+            send_html(token, chat_id, "Сначала выберите отчёт.", self._reply_kb(chat_id))
+            self._show(token, chat_id, "reports")
+            return True
+        if reply.html:
+            send_long_html(token, chat_id, reply.html, self._reply_kb(chat_id))
+        if reply.action == "snap":
+            self._prepare_snap(session, reset=True)
+            self._show(token, chat_id, "snap")
+        elif reply.action == "snap_send":
+            self._prepare_snap(session, reset=True)
+            if reply.order_ids:
+                session.snap["order_ids"] = list(reply.order_ids)
+            self._send_snap(token, chat_id, reply.kind or "png")
+        return True
+
+    def _open_named_report(self, token: str, chat_id: str, query: str) -> None:
+        needle = " ".join(str(query or "").lower().replace("ё", "е").split())
+        if not needle:
+            self._show(token, chat_id, "reports")
+            return
+        seen: list[str] = []
+        found: list[dict[str, Any]] = []
+        for item in _library_items() + [row for row in _recent_items() if row.get("exists") is not False]:
+            path = str(item.get("path") or "")
+            if not path or any(storage.same_path(path, other) for other in seen):
+                continue
+            seen.append(path)
+            title = str(item.get("title") or item.get("name") or os.path.basename(path)).lower().replace("ё", "е")
+            base = os.path.basename(path).lower()
+            if needle in title or needle in base:
+                found.append(item)
+        if len(found) != 1:
+            send_html(
+                token,
+                chat_id,
+                "Не вижу такого отчёта." if not found else "Подходит несколько файлов — выберите в списке.",
+                self._reply_kb(chat_id),
+            )
+            self._show(token, chat_id, "reports")
+            return
+        path = str(found[0].get("path") or "")
+        if not _path_allowed(path):
+            send_html(token, chat_id, "Этот файл открыть нельзя.")
+            return
+        session = self._chat(chat_id)
+        session.path = path
+        session.order_id = ""
+        session.search = ""
+        session.filter = "all"
+        session.opage = 0
+        session.snap = session._fresh_snap()
+        self._show(token, chat_id, "orders")
 
     def _on_callback(self, token: str, query: dict[str, Any]) -> None:
         qid = str(query.get("id") or "")
