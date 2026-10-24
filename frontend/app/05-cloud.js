@@ -3976,7 +3976,7 @@
     if (EXPR_MAP[key]) {
       if (e.target.dataset.showing === "result") return;
       commaToDot(e.target);
-      if (key === "price_expr") {
+      if (EXPR_MAP[key]) {
         const cleaned = stripLeadingZerosPlain(e.target.value);
         if (cleaned !== e.target.value) {
           const pos = e.target.selectionStart;
@@ -4111,11 +4111,11 @@
     const line = order?.lines.find((l) => l.id === tr.dataset.line);
     if (!line) return;
     const raw = inp.value.includes(",") && DECIMAL_KEYS.has(key) ? inp.value.replaceAll(",", ".") : inp.value;
-    const next = key === "price_expr" ? stripLeadingZerosPlain(raw) : raw;
+    const next = EXPR_MAP[key] ? stripLeadingZerosPlain(raw) : raw;
     if (next !== inp.value) inp.value = next;
     line[key] = next;
-    inp.dataset.expr = raw;
-    const v = evalExpr(raw);
+    inp.dataset.expr = next;
+    const v = evalExpr(next);
     inp.classList.toggle("invalid", raw.trim() !== "" && !Number.isFinite(v));
     if (Number.isFinite(v)) {
       const numKey = EXPR_MAP[key];

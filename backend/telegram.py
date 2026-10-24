@@ -501,6 +501,8 @@ def _rich_markdown(html: str, *, nested: bool = False) -> str:
             title = _html_to_text(mixed.group(1)).strip()
             rest = _html_to_text(mixed.group(2)).strip(" ·")
             section = title in _RICH_SECTIONS
+            if out and str(out[-1]).startswith(">"):
+                out.append("")
             if not first and not section and out:
                 out.append("---")
             level = "#" if first else ("##" if section else "###")
@@ -593,7 +595,7 @@ def _rich_markdown(html: str, *, nested: bool = False) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
 
 
-def _send_rich(token: str, chat_id: str, markdown: str, markup: dict[str, Any] | None) -> None:
+def _send_rich(token: str, chat_id: str, markdown: str, markup: dict[str, Any] | None) -> int | None:
     payload: dict[str, Any] = {
         "chat_id": chat_id,
         "rich_message": {"markdown": markdown},
@@ -605,6 +607,8 @@ def _send_rich(token: str, chat_id: str, markdown: str, markup: dict[str, Any] |
     mid = result.get("message_id")
     if mid is not None:
         _bump_tail(chat_id, int(mid))
+        return int(mid)
+    return None
 
 
 def _html_chunks(text: str, limit: int = 3800) -> list[str]:
@@ -2139,17 +2143,36 @@ class TelegramBot:
 
     def _show(self, token: str, chat_id: str, screen: str) -> None:
         session = self._chat(chat_id)
+        previous = session.screen
         session.screen = screen
         session.awaiting = ""
         text, rows = self._screen(session, screen)
+        markup = _inline(rows) if rows else self._reply_kb(chat_id)
         anchor = session.message_id
         if anchor is not None and _chat_tail.get(str(chat_id), 0) > int(anchor):
             anchor = None
+        if screen == "order" or previous == "order":
+            if anchor is not None:
+                try:
+                    _call(token, "deleteMessage", {"chat_id": chat_id, "message_id": anchor})
+                except RuntimeError:
+                    pass
+            anchor = None
+        if screen == "order":
+            markdown = _rich_markdown(text)
+            mid = None
+            if markdown and len(markdown) <= 30000 and markdown.count("\n") < 450:
+                try:
+                    mid = _send_rich(token, chat_id, markdown, markup)
+                except RuntimeError:
+                    mid = None
+            session.message_id = mid if mid is not None else send_html(token, chat_id, text, markup)
+            return
         session.message_id = send_html(
             token,
             chat_id,
             text,
-            _inline(rows) if rows else self._reply_kb(chat_id),
+            markup,
             message_id=anchor,
         )
 
@@ -2295,10 +2318,18 @@ class TelegramBot:
         lines_out = []
         for line in income:
             bit = order_totals({"lines": [line]}, types)
+            when = str(line.get("order_date") or "").strip()
+            if len(when) >= 10 and when[4] == "-":
+                year, month, day = when[:10].split("-")
+                when = f"{day}.{month}.{year}"
             lines_out.append(
                 f"• {html_esc(line.get('product') or '—')} · {html_esc(qty_text(line))} · "
-                f"{html_esc(money(bit['after'], currency, decimals))} · {html_esc(line.get('status') or '—')}"
+                f"{html_esc(money(bit['after'], currency, decimals))} · долг {html_esc(money(bit['unpaid'], currency, decimals))}"
+                f" · {html_esc(when or '—')} · {html_esc(line.get('status') or '—')}"
             )
+            comment = str(line.get("notes") or "").strip()
+            if comment:
+                lines_out.append("  " + html_esc(comment))
         cost_out = []
         for line in expense:
             bit = line_totals(line, types, order)
@@ -2310,7 +2341,7 @@ class TelegramBot:
             )
         notes = str(order.get("notes") or "").strip()
         sums = (
-            f"Итого {html_esc(money(tot['after'], currency, decimals))} · оплачено {html_esc(money(tot['paid'], currency, decimals))} · "
+            f"к оплате {html_esc(money(tot['after'], currency, decimals))} · оплачено {html_esc(money(tot['paid'], currency, decimals))} · "
             f"долг {html_esc(money(tot['unpaid'], currency, decimals))}"
         )
         if tot["cost"] > 0.005:
@@ -2324,7 +2355,7 @@ class TelegramBot:
         if cost_out:
             text += "\n\n<b>Расходы</b>\n" + "\n".join(cost_out)
         if notes:
-            text += f"\n\nЗаметки: {html_esc(notes)}"
+            text += f"\nзаметка: {html_esc(notes)}"
         if len(text) > 3800:
             text = text[:3790] + "…"
         rows = [

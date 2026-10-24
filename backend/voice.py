@@ -49,7 +49,7 @@ def transcribe(data: bytes) -> str:
     require()
     path = ensure_model()
     wav = _to_wav(data)
-    return _recognize(path, wav)
+    return spoken_digits(_recognize(path, wav))
 
 
 def ensure_model() -> str:
@@ -152,3 +152,106 @@ def _recognize(path: str, wav: bytes) -> str:
             recognizer.AcceptWaveform(chunk)
         payload = json.loads(recognizer.FinalResult() or "{}")
     return " ".join(str(payload.get("text") or "").split())
+
+
+_UNITS = {
+    "ноль": 0,
+    "один": 1,
+    "одна": 1,
+    "одно": 1,
+    "два": 2,
+    "две": 2,
+    "три": 3,
+    "четыре": 4,
+    "пять": 5,
+    "шесть": 6,
+    "семь": 7,
+    "восемь": 8,
+    "девять": 9,
+}
+_TEENS = {
+    "десять": 10,
+    "одиннадцать": 11,
+    "двенадцать": 12,
+    "тринадцать": 13,
+    "четырнадцать": 14,
+    "пятнадцать": 15,
+    "шестнадцать": 16,
+    "семнадцать": 17,
+    "восемнадцать": 18,
+    "девятнадцать": 19,
+}
+_TENS = {
+    "двадцать": 20,
+    "тридцать": 30,
+    "сорок": 40,
+    "пятьдесят": 50,
+    "шестьдесят": 60,
+    "семьдесят": 70,
+    "восемьдесят": 80,
+    "девяносто": 90,
+}
+_HUNDREDS = {
+    "сто": 100,
+    "двести": 200,
+    "триста": 300,
+    "четыреста": 400,
+    "пятьсот": 500,
+    "шестьсот": 600,
+    "семьсот": 700,
+    "восемьсот": 800,
+    "девятьсот": 900,
+}
+_SCALES = {"тысяча": 1000, "тысячи": 1000, "тысяч": 1000, "миллион": 1000000, "миллиона": 1000000, "миллионов": 1000000}
+_NUM_ALIASES = {
+    "тристо": "триста",
+    "двесте": "двести",
+    "пятсот": "пятьсот",
+    "пяцот": "пятьсот",
+    "шестсот": "шестьсот",
+    "семсот": "семьсот",
+    "восемсот": "восемьсот",
+    "девятсот": "девятьсот",
+    "одинадцать": "одиннадцать",
+}
+
+
+def _number_token(word: str) -> int | None:
+    token = _NUM_ALIASES.get(word, word)
+    for table in (_UNITS, _TEENS, _TENS, _HUNDREDS, _SCALES):
+        if token in table:
+            return table[token]
+    return None
+
+
+def spoken_digits(text: str) -> str:
+    """«триста десять» и «тристо десять» становятся 310."""
+    words = str(text or "").split()
+    out: list[str] = []
+    index = 0
+    while index < len(words):
+        raw = words[index].lower().replace("ё", "е")
+        if _number_token(raw) is None:
+            out.append(words[index])
+            index += 1
+            continue
+        total = 0
+        current = 0
+        while index < len(words):
+            token = words[index].lower().replace("ё", "е")
+            value = _number_token(token)
+            if value is None:
+                break
+            scale = _SCALES.get(_NUM_ALIASES.get(token, token))
+            if scale:
+                total += (current or 1) * scale
+                current = 0
+            elif value >= 100:
+                current += value
+            elif value >= 20:
+                current += value
+            else:
+                current += value
+            index += 1
+        out.append(str(total + current))
+    return " ".join(out)

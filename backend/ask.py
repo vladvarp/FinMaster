@@ -196,7 +196,7 @@ def help_text(surface: str = "bot") -> str:
         "• календарь: в работе, запланировано, закрыто, без дат\n"
         "• заказчики и контакты, заметки, замороженные\n"
         "• «всё» или «весь отчёт» — сводка целиком\n"
-        "• «открой отчёт …», «снимок заказа 12», «снимок заказа 12 без итогов», «открой на компьютере»\n"
+        "• «открой отчёт …», «снимок заказа 12», «pdf без цен», «текст без итогов», «открой на компьютере»\n"
         "Кнопки внизу по-прежнему открывают отчёты, заказы, снимок и ссылку."
     )
 
@@ -338,9 +338,11 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
     today = date.today()
     rows = _rows(source)
     raw = low
-    hide_totals = bool(re.search(r"без итог", raw))
+    hide_totals = bool(re.search(r"без\s+(?:итог|цен)", raw))
     if hide_totals:
-        raw = " ".join(re.sub(r"без итог\w*", " ", raw).split())
+        raw = re.sub(r"без\s+(?:итог\w*|цен\w*)", " ", raw)
+    raw = re.sub(r"\b(?:снимок\w*|картинк\w*|pdf|png|пдф|текст\w*)\b", " ", raw)
+    raw = " ".join(raw.split())
     period, period_label, raw = _take_period(raw)
     recent_n, raw = _take_recent(raw)
     customers, raw = _take_names(raw, _customer_names(source, rows))
@@ -352,8 +354,11 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
     pay = _pay_mode(low)
     work_state = _work_mode(low)
     words = _words(raw)
-    snap = bool(re.search(r"сним|картинк|\bpdf\b|\bpng\b|пдф", low))
-    kind = "pdf" if re.search(r"\bpdf\b|пдф", low) else ("text" if snap and "текст" in low else "png")
+    wants_text = bool(re.search(r"(?<![а-яё])текст", low)) and bool(
+        re.search(r"без\s+(?:итог|цен)|снимок|заказ|pdf|пдф|png", low)
+    )
+    snap = bool(re.search(r"сним|картинк|\bpdf\b|\bpng\b|пдф", low) or wants_text)
+    kind = "pdf" if re.search(r"\bpdf\b|пдф", low) else ("text" if wants_text or (snap and "текст" in low) else "png")
     remind = bool(re.search(r"напомн", low))
     explicit = set(topics)
     if re.search(r"все данные|весь отч|целиком|полностью|покажи вс[её]$|вс[её] подряд", low):

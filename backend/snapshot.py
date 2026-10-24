@@ -564,12 +564,12 @@ def render_png(
     types = type_index(doc)
     cols = cols_of(fields)
     theme = THEMES[theme_key(theme_name)]
-    heading = default_title(blocks, title)
+    heading = default_title(blocks, title) if (str(title or "").strip() or len(blocks) <= 1) else ""
     stamp = stamp_text()
     head_font, body_font, th_font, strong_font = _fonts()
     pad = 20
     row_h = 34
-    header_h = 64
+    header_h = 64 if heading else 0
 
     def col_widths(lines: list[dict[str, Any]], order: dict[str, Any] | None = None) -> list[int]:
         widths: list[int] = []
@@ -623,14 +623,15 @@ def render_png(
     def text(x: float, y: float, value: str, font: Any, color: str) -> None:
         draw.text((x, y), value, font=font, fill=_hex(color))
 
-    start, end = _hex(theme["head"][0]), _hex(theme["head"][1])
-    for x in range(width):
-        t = x / max(1, width - 1)
-        color = tuple(int(start[i] + (end[i] - start[i]) * t) for i in range(3))
-        draw.line([(x, 0), (x, header_h)], fill=color)
-    if theme.get("headLine"):
-        line(0, header_h - 1, width, header_h - 1, theme["accent"], 2)
-    text(pad, 24, heading, head_font, theme["headInk"])
+    if heading:
+        start, end = _hex(theme["head"][0]), _hex(theme["head"][1])
+        for x in range(width):
+            t = x / max(1, width - 1)
+            color = tuple(int(start[i] + (end[i] - start[i]) * t) for i in range(3))
+            draw.line([(x, 0), (x, header_h)], fill=color)
+        if theme.get("headLine"):
+            line(0, header_h - 1, width, header_h - 1, theme["accent"], 2)
+        text(pad, 24, heading, head_font, theme["headInk"])
 
     y = header_h + 16
     for index, block in enumerate(layouts):

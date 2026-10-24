@@ -2507,9 +2507,8 @@
 
   function stripLeadingZerosPlain(raw) {
     const text = String(raw ?? "").replaceAll(",", ".");
-    if (!text || isFormula(text)) return String(raw ?? "");
-    const m = /^(-?)0+(\d+(?:\.\d*)?)$/.exec(text);
-    return m ? m[1] + m[2] : text;
+    if (!text) return "";
+    return text.replace(/(^|[^\d.])0+(?=\d)/g, "$1");
   }
 
   function shownExpr(line, exprKey) {
