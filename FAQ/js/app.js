@@ -23,7 +23,35 @@
     if (window.FAQLive) window.FAQLive.mount(doc, true);
   });
 
-  menuBtn.addEventListener("click", () => shell.classList.toggle("nav-open"));
+  menuBtn.addEventListener("click", () => {
+    if (window.matchMedia("(min-width: 861px)").matches) {
+      setSideCollapsed(false);
+      return;
+    }
+    shell.classList.toggle("nav-open");
+  });
+  document.getElementById("side-collapse").addEventListener("click", () => setSideCollapsed(true));
+
+  function setSideCollapsed(collapsed) {
+    try { localStorage.setItem("finmaster.faq.side", collapsed ? "0" : "1"); }
+    catch (err) { /* окно без хранилища просто сворачивает панель до перезагрузки */ }
+    applySide();
+  }
+
+  function applySide() {
+    const wide = window.matchMedia("(min-width: 861px)").matches;
+    let collapsed = false;
+    try { collapsed = localStorage.getItem("finmaster.faq.side") === "0"; }
+    catch (err) { collapsed = false; }
+    shell.classList.toggle("side-collapsed", wide && collapsed);
+    if (!wide) shell.classList.remove("side-collapsed");
+    const open = !wide || !collapsed;
+    menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    document.getElementById("side-collapse").setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  applySide();
+  window.addEventListener("resize", applySide);
 
   function warm() {
     if (indexPromise) return indexPromise;

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+  <style>
+    .remote-fold { max-width: 520px; }
+  </style>
+</head>
+<body>
+  <p class="hint">Тот же блок, что в окне «Телефон». Точка зелёная — токен сохранён.</p>
+  <div class="remote-fold">
+    <button type="button" class="remote-fold-head" tabindex="-1">
+      <span class="remote-fold-title">Токен ngrok<i class="token-dot on" title="Токен сохранён"></i></span>
+      <span class="remote-fold-ico">▾</span>
+    </button>
+    <div class="remote-fold-body">
+      <div class="remote-ngrok-box show">
+        <label class="field"><span>Токен ngrok</span><input type="password" value="2abc-example" readonly tabindex="-1" aria-label="Токен ngrok"></label>
+        <div class="remote-tg-actions">
+          <button type="button" class="btn small" tabindex="-1">Сохранить и включить</button>
+          <button type="button" class="btn small" tabindex="-1">Проверить связь</button>
+        </div>
+        <div class="remote-ngrok-status">Туннель отвечает. QR ведёт на https-адрес.</div>
+      </div>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

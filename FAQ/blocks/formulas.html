@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+  <style>
+    .pair { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+    .pair .modal-card { position: relative; }
+  </style>
+</head>
+<body>
+  <p class="hint">Окна профилей. Профиль хранит набор формул и общий для всех отчётов на этом компьютере.</p>
+  <div class="pair">
+    <div class="modal-card confirm-modal">
+      <h3>Новый профиль формулы</h3>
+      <label class="field"><span>Название</span><input value="Скидка" readonly tabindex="-1" aria-label="Название"></label>
+      <div class="modal-actions">
+        <button class="btn" type="button" tabindex="-1">Отмена</button>
+        <button class="btn primary" type="button" tabindex="-1">Сохранить</button>
+      </div>
+    </div>
+    <div class="modal-card confirm-modal">
+      <h3>Удалить профили</h3>
+      <p>Отметьте профили. Удаление произойдёт только после подтверждения.</p>
+      <div class="formula-profile-list">
+        <label class="formula-profile-pick"><input type="checkbox" checked tabindex="-1"> <span>Скидка</span></label>
+        <label class="formula-profile-pick"><input type="checkbox" tabindex="-1"> <span>НДС 10%</span></label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" type="button" tabindex="-1">Отмена</button>
+        <button class="btn danger" type="button" tabindex="-1">Удалить выбранные</button>
+      </div>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

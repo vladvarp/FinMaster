@@ -538,6 +538,19 @@ def _open_guide_window() -> None:
         pass
 
 
+def _close_guide_window() -> None:
+    """Справка — второе окно того же процесса. Без этого выход из программы его не закрывает."""
+    global GUIDE_WINDOW
+    window = GUIDE_WINDOW
+    if window is None:
+        return
+    GUIDE_WINDOW = None
+    try:
+        window.destroy()
+    except Exception:
+        pass
+
+
 @app.post("/api/guide/open")
 def api_guide_open():
     if not SERVER_PORT:
@@ -2129,6 +2142,7 @@ def api_quit():
     global FORCE_CLOSE, DIRTY
     FORCE_CLOSE = True
     DIRTY = False
+    _close_guide_window()
     REMOTE.stop()
     TUNNEL.stop()
     TELEGRAM.stop()
@@ -2310,6 +2324,7 @@ def main(splash=None) -> None:
         persist_window_state()
         # Never call evaluate_js on this stack: WebView2 deadlocks the window.
         if FORCE_CLOSE or not DIRTY:
+            threading.Timer(0.05, _close_guide_window).start()
             return True
         window = WINDOW
 

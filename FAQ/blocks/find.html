@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+  <style>
+    .ask-modal { position: relative; width: min(720px, 100%); max-height: none; }
+  </style>
+</head>
+<body>
+  <p class="hint">Окно поиска. Запрос «итоги за август» уже набран: месяц берётся по дате заказа, не как слово в тексте.</p>
+  <div class="modal-card ask-modal" role="dialog" aria-label="Поиск по отчёту">
+    <div class="ask-head">
+      <span class="ask-title">Сводка</span>
+      <span class="ask-hint"><kbd>Esc</kbd></span>
+      <button type="button" class="ask-tool" tabindex="-1" aria-label="Закрыть">×</button>
+    </div>
+    <label class="ask-search">
+      <span class="ico">✦</span>
+      <input value="итоги за август" readonly tabindex="-1" aria-label="Запрос">
+    </label>
+    <div class="ask-scroll">
+      <div class="ask-chips"><span>сводка</span><span>август 2026</span></div>
+      <div class="ask-body">
+        <section class="ask-section">
+          <h4>Сводка</h4>
+          <div class="ask-metrics"><span>1 заказ · 3 позиции</span><span>К оплате 186 000 ₽</span><span>Долг 42 000 ₽</span><span>Чистыми 155 400 ₽</span></div>
+        </section>
+        <section class="ask-section">
+          <h4>Заказы · 1</h4>
+          <div class="ask-item">310 · КВ-310 · Иванов · 186 000 ₽ · долг 42 000 ₽</div>
+        </section>
+      </div>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

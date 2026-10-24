@@ -11,7 +11,7 @@
     <button type="button" class="btn primary" id="play">Проиграть заполнение</button>
     <button type="button" class="btn" id="reset">Сбросить</button>
   </div>
-  <p class="hint" id="story">Пустая карточка. Кнопка выше впишет заказ «Кухня» и посчитает итог. Поля можно править и вручную, в том числе формулой: <b>2*3</b> или <b>1200/3</b>.</p>
+  <p class="hint" id="story">Пустая карточка. Кнопка выше впишет заказ «Кухня» и посчитает итог. Поля можно править и вручную, в том числе формулой: <b>2*3</b> или <b>1200/3</b>. Вне ячейки виден результат, клик возвращает формулу.</p>
   <article class="order-card" id="card">
     <div class="order-head">
       <div class="field"><label>Номер заказа</label><input id="f-number" data-k="number" value=""></div>
@@ -84,14 +84,52 @@
       return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
     }
 
-    function num(v) {
-      const s = String(v || "").replace(/,/g, ".").replace(/×/g, "*").replace(/x/gi, "*").trim();
+    function exprText(v) {
+      return String(v || "").replace(/,/g, ".").replace(/×/g, "*").replace(/x/gi, "*").trim();
+    }
+
+    function evalExpr(v) {
+      const s = exprText(v);
       if (!s) return 0;
-      if (!/^[\d.+\-*/()\s]+$/.test(s)) return 0;
+      if (!/^[\d.+\-*/()\s]+$/.test(s)) return null;
       try {
         const n = Function('"use strict"; return (' + s + ")")();
-        return Number.isFinite(n) ? n : 0;
-      } catch (err) { return 0; }
+        return Number.isFinite(n) ? n : null;
+      } catch (err) { return null; }
+    }
+
+    function num(v) {
+      const n = evalExpr(v);
+      return n == null ? 0 : n;
+    }
+
+    function isFormula(v) {
+      return /[+\-*/()×xX]/.test(String(v || ""));
+    }
+
+    function shownNumber(inp, n) {
+      let v = Math.round(n * 100) / 100;
+      if (inp.dataset.k === "disc") v = Math.min(100, Math.max(0, v));
+      if (inp.dataset.k === "price" || inp.dataset.k === "paid") v = Math.max(0, v);
+      return String(v);
+    }
+
+    function revealFormula(inp) {
+      if (!inp.classList.contains("expr-field") || inp.dataset.showing !== "result") return;
+      inp.dataset.showing = "expr";
+      inp.value = inp.dataset.expr || "";
+    }
+
+    function revealResult(inp) {
+      if (!inp.classList.contains("expr-field") || inp.dataset.showing === "result") return;
+      const typed = inp.value;
+      const n = evalExpr(typed);
+      inp.dataset.expr = typed;
+      inp.classList.toggle("invalid", String(typed).trim() !== "" && n == null);
+      if (n != null && isFormula(typed)) {
+        inp.dataset.showing = "result";
+        inp.value = shownNumber(inp, n);
+      } else inp.dataset.showing = "expr";
     }
 
     function money(n) {
@@ -109,12 +147,12 @@
         '<td class="line-drag" title="Перетащить строку"><span></span></td>' +
         '<td><select data-k="type">' + options(TYPES, data.type || "Монтаж") + "</select></td>" +
         '<td><input data-k="product" value="' + esc(data.product) + '" autocomplete="off" spellcheck="false"></td>' +
-        '<td class="num"><input data-k="qty" class="expr-field" value="' + esc(data.qty) + '" inputmode="decimal" placeholder="1+2*6"></td>' +
+        '<td class="num"><input data-k="qty" class="expr-field" value="' + esc(data.qty) + '" inputmode="decimal" placeholder="1+2*6" title="Можно формулу. Клик — правка, вне фокуса — результат."></td>' +
         '<td><select data-k="unit">' + options(UNITS, data.unit || "шт.") + "</select></td>" +
-        '<td class="num"><input data-k="price" class="expr-field" value="' + esc(data.price) + '" inputmode="decimal"></td>' +
-        '<td class="num"><input data-k="disc" class="expr-field" value="' + esc(data.disc) + '" inputmode="decimal"></td>' +
+        '<td class="num"><input data-k="price" class="expr-field" value="' + esc(data.price) + '" inputmode="decimal" title="Можно формулу. Клик — правка, вне фокуса — результат."></td>' +
+        '<td class="num"><input data-k="disc" class="expr-field" value="' + esc(data.disc) + '" inputmode="decimal" title="Можно формулу. Клик — правка, вне фокуса — результат."></td>' +
         '<td><input data-k="date" type="date" value="' + esc(data.date) + '"></td>' +
-        '<td class="num"><input data-k="paid" class="expr-field" value="' + esc(data.paid) + '" inputmode="decimal"></td>' +
+        '<td class="num"><input data-k="paid" class="expr-field" value="' + esc(data.paid) + '" inputmode="decimal" title="Можно формулу. Клик — правка, вне фокуса — результат."></td>' +
         '<td><input data-k="pdate" type="date" value="' + esc(data.pdate) + '"></td>' +
         '<td class="num computed" data-k="unpaid"></td>' +
         '<td class="num computed" data-k="total"></td>' +
@@ -182,7 +220,7 @@
       costOn = false;
       addLine({});
       paint();
-      document.getElementById("story").textContent = "Пустая карточка. Нажмите «Проиграть заполнение» или впишите поля сами.";
+      document.getElementById("story").textContent = "Пустая карточка. Нажмите «Проиграть заполнение» или впишите поля сами. Вне ячейки формула показывается результатом.";
       document.getElementById("play").disabled = false;
     }
 
@@ -252,7 +290,11 @@
       const day = today();
       [...lines.querySelectorAll("tr")].forEach((row) => {
         const t = lineOf(row);
-        row.querySelector('[data-k="paid"]').value = String(Math.round(t.after * 100) / 100);
+        const paid = row.querySelector('[data-k="paid"]');
+        paid.dataset.showing = "expr";
+        paid.dataset.expr = String(Math.round(t.after * 100) / 100);
+        paid.value = paid.dataset.expr;
+        paid.classList.remove("invalid");
         row.querySelector('[data-k="pdate"]').value = day;
         row.querySelector('[data-k="status"]').value = "Оплачено";
       });
@@ -271,7 +313,12 @@
     document.getElementById("g-disc").addEventListener("input", () => {
       const v = document.getElementById("g-disc").value;
       if (!v) return;
-      lines.querySelectorAll('[data-k="disc"]').forEach((el) => { el.value = v; });
+      lines.querySelectorAll('[data-k="disc"]').forEach((el) => {
+        el.dataset.showing = "expr";
+        el.dataset.expr = v;
+        el.value = v;
+        el.classList.remove("invalid");
+      });
       paint();
     });
     document.getElementById("f-note").addEventListener("click", () => {
@@ -281,6 +328,14 @@
     });
     document.getElementById("f-notes").addEventListener("input", () => {
       document.getElementById("f-note").classList.toggle("has-note", !!document.getElementById("f-notes").value);
+    });
+    lines.addEventListener("focusin", (event) => {
+      if (event.target.classList && event.target.classList.contains("expr-field")) revealFormula(event.target);
+    });
+    lines.addEventListener("focusout", (event) => {
+      if (!event.target.classList || !event.target.classList.contains("expr-field")) return;
+      revealResult(event.target);
+      paint();
     });
     lines.addEventListener("click", (event) => {
       const btn = event.target.closest("button");
@@ -292,7 +347,12 @@
       }
       if (btn.dataset.act === "dup") {
         const read = (key) => row.querySelector('[data-k="' + key + '"]').value;
-        addLine({ type: read("type"), product: read("product"), qty: read("qty"), unit: read("unit"), price: read("price"), disc: read("disc"), date: read("date"), paid: read("paid"), pdate: read("pdate"), status: read("status") });
+        const expr = (key) => {
+          const el = row.querySelector('[data-k="' + key + '"]');
+          return el.dataset.showing === "result" ? (el.dataset.expr || el.value) : el.value;
+        };
+        const copy = addLine({ type: read("type"), product: read("product"), qty: expr("qty"), unit: read("unit"), price: expr("price"), disc: expr("disc"), date: read("date"), paid: expr("paid"), pdate: read("pdate"), status: read("status") });
+        copy.querySelectorAll(".expr-field").forEach(revealResult);
         paint();
       }
       if (btn.dataset.act === "done") btn.classList.toggle("is-done");

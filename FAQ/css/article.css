@@ -163,3 +163,12 @@ html[data-theme="dark"] mark.hit { background: #854d0e; color: #fff7ed; }
   display: grid;
   place-items: center;
 }
+
+.seealso {
+  margin-top: 28px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 14px;
+}
+.seealso a { font-weight: 650; }

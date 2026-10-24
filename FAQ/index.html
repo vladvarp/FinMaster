@@ -12,7 +12,15 @@
 <body>
   <div class="shell">
     <aside class="side">
-      <div class="brand"><strong>FinMaster</strong><span>справка</span></div>
+      <div class="brand">
+        <strong>FinMaster</strong>
+        <span>справка</span>
+        <button class="side-toggle" id="side-collapse" type="button" title="Свернуть разделы" aria-label="Свернуть разделы" aria-expanded="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M14 6 8 12l6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
       <input class="search" id="search" type="search" placeholder="Слова, &quot;фраза&quot;, -исключить" aria-label="Поиск по справке">
       <nav id="nav"></nav>
       <p class="side-copy"><span id="faq-copy">© V.Ar Production</span><br><a href="https://t.me/Var_production" target="_blank" rel="noopener">Telegram разработчика</a></p>

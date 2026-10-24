@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+  <style>
+    .board { position: relative; height: 280px; border: 1px solid var(--line); border-radius: 16px; background: var(--bg-2); overflow: hidden; }
+  </style>
+</head>
+<body>
+  <p class="hint">Три блока холста. Числа в программе приходят из нод калькулятора, здесь они учебные.</p>
+  <div class="board">
+    <div class="pres-block is-fill-gradient" style="left:16px;top:16px;width:240px;height:120px;--pres-bg:#0f766e;--pres-bg2:#14b8a6;--pres-fg:#fff">
+      <div class="pres-block-body"><div class="pres-block-kpi"><div class="pres-k">Выручка</div><div class="pres-v">186 000 ₽</div><div class="pres-sub">цель 200 000 ₽</div></div></div>
+    </div>
+    <div class="pres-block" style="left:272px;top:16px;width:200px;height:120px">
+      <div class="pres-block-body"><div class="pres-block-metric"><div class="pres-k">Долг</div><div class="pres-v">42 000 ₽</div></div></div>
+    </div>
+    <div class="pres-block" style="left:16px;top:152px;width:456px;height:110px">
+      <div class="pres-block-body"><div class="pres-block-note"><b>Заметка</b><p>Август закрыт по кухне, окно ещё в работе.</p></div></div>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+</head>
+<body>
+  <p class="hint">Пример сравнения. В программе цифры считаются по фильтрам открытого отчёта, графики — на холсте рядом.</p>
+  <div class="compare">
+    <div class="card">
+      <h3>Период A</h3>
+      <p class="hint" style="margin-top:0">авг 2026 — авг 2026</p>
+      <div class="kpis" style="grid-template-columns:1fr 1fr;margin:0">
+        <div class="kpi"><div class="label">Выручка</div><div class="value" style="font-size:18px">186 000 ₽</div></div>
+        <div class="kpi"><div class="label">Оплачено</div><div class="value" style="font-size:18px">144 000 ₽</div></div>
+        <div class="kpi warn"><div class="label">Долг</div><div class="value" style="font-size:18px">42 000 ₽</div></div>
+        <div class="kpi"><div class="label">Позиции / заказы</div><div class="value" style="font-size:18px">3 / 1</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Период B</h3>
+      <p class="hint" style="margin-top:0">июл 2026 — июл 2026</p>
+      <div class="kpis" style="grid-template-columns:1fr 1fr;margin:0">
+        <div class="kpi"><div class="label">Выручка</div><div class="value" style="font-size:18px">96 400 ₽</div></div>
+        <div class="kpi"><div class="label">Оплачено</div><div class="value" style="font-size:18px">84 000 ₽</div></div>
+        <div class="kpi warn"><div class="label">Долг</div><div class="value" style="font-size:18px">12 400 ₽</div></div>
+        <div class="kpi"><div class="label">Позиции / заказы</div><div class="value" style="font-size:18px">4 / 1</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:12px">
+    <h3>Найденные позиции</h3>
+    <div class="table-wrap"><table class="data"><thead><tr>
+      <th>№</th><th>Заказчик</th><th>Название</th><th>Продукт</th><th class="num">Итог</th><th class="num">Долг</th><th>Дата</th>
+    </tr></thead><tbody>
+      <tr><td>310</td><td>Иванов</td><td>КВ-310</td><td>Окно</td><td class="num">186 000 ₽</td><td class="num">42 000 ₽</td><td>14.08.2026</td></tr>
+      <tr class="is-expense"><td>310</td><td>Иванов</td><td>КВ-310</td><td>НДС</td><td class="num">−18 600 ₽</td><td class="num">—</td><td>14.08.2026</td></tr>
+    </tbody></table></div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

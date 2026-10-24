@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+</head>
+<body>
+  <p class="hint">Учебные цифры. В программе ряд строится по датам позиций открытого отчёта.</p>
+  <div class="kpis">
+    <div class="kpi"><div class="label">Ближайший месяц</div><div class="value">86 000 ₽</div><div class="sub">ноябрь 2026</div></div>
+    <div class="kpi"><div class="label">Ближайшие 12 месяцев</div><div class="value">1 040 000 ₽</div><div class="sub">+8% к прошлым 12 мес.</div></div>
+    <div class="kpi"><div class="label">Весь горизонт</div><div class="value">1 040 000 ₽</div><div class="sub">12 мес. · коридор 910 000 ₽ … 1 180 000 ₽</div></div>
+    <div class="kpi"><div class="label">История</div><div class="value">18</div><div class="sub">май 2025 — окт 2026</div></div>
+  </div>
+  <div class="card">
+    <h3>Факт и прогноз <span class="insights-sub">медианный ансамбль и коридор моделей</span></h3>
+    <div class="chart-legend">
+      <button type="button" class="chart-leg on" tabindex="-1"><i style="background:#0f766e"></i>Ансамбль</button>
+      <button type="button" class="chart-leg" tabindex="-1"><i style="background:#c9a227"></i>Сезонный наивный</button>
+      <button type="button" class="chart-leg" tabindex="-1"><i style="background:#64748b"></i>Дрейф</button>
+    </div>
+    <p class="hint">График рисуется в окне программы. Здесь видны плитки, легенда моделей и таблицы под ней.</p>
+  </div>
+  <div class="grid-2" style="margin-top:12px">
+    <div class="card">
+      <h3>По годам <span class="insights-sub">сумма месяцев прогноза внутри календарного года</span></h3>
+      <div class="table-wrap"><table class="data"><thead><tr><th>Год</th><th class="num">Прогноз</th><th class="num">Коридор</th><th class="num">Месяцев</th></tr></thead><tbody>
+        <tr><td>2026</td><td class="num">172 000 ₽</td><td class="num">150 000 ₽ … 196 000 ₽</td><td class="num">2</td></tr>
+        <tr><td>2027</td><td class="num">868 000 ₽</td><td class="num">760 000 ₽ … 984 000 ₽</td><td class="num">10</td></tr>
+      </tbody></table></div>
+    </div>
+    <div class="card">
+      <h3>Модели <span class="insights-sub">ошибка — на последних месяцах, без подглядывания вперёд</span></h3>
+      <div class="table-wrap"><table class="data"><thead><tr><th>Модель</th><th class="num">Сумма горизонта</th><th class="num">sMAPE</th></tr></thead><tbody>
+        <tr><td>Ансамбль</td><td class="num">1 040 000 ₽</td><td class="num">11.4%</td></tr>
+        <tr><td>Сезонный наивный</td><td class="num">980 000 ₽</td><td class="num">14.2%</td></tr>
+        <tr><td>Дрейф</td><td class="num">1 120 000 ₽</td><td class="num">18.0%</td></tr>
+      </tbody></table></div>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+</head>
+<body>
+  <p class="hint">Пример заполненных списков. Без открытого отчёта живой блок выше пустой: кнопки там настоящие, строки — из файла.</p>
+  <div class="catalog-grid">
+    <div class="card">
+      <h3>Статусы заказа</h3>
+      <div class="list-edit">
+        <div class="list-item">
+          <button type="button" class="item-drag" tabindex="-1" title="Перетащить"><span></span></button>
+          <input type="color" value="#0f766e" tabindex="-1" aria-label="Цвет">
+          <input value="Выполняется" readonly tabindex="-1" aria-label="Имя">
+          <label class="paid-toggle"><input type="radio" tabindex="-1"> Оплачено</label>
+          <button type="button" class="lock-btn" tabindex="-1" title="Замок">🔒</button>
+        </div>
+        <div class="list-item">
+          <button type="button" class="item-drag" tabindex="-1"><span></span></button>
+          <input type="color" value="#059669" tabindex="-1" aria-label="Цвет">
+          <input value="Оплачено" readonly tabindex="-1" aria-label="Имя">
+          <label class="paid-toggle"><input type="radio" checked tabindex="-1"> Оплачено</label>
+          <button type="button" class="lock-btn on" tabindex="-1" title="Замок">🔒</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Типы заказа</h3>
+      <div class="list-edit">
+        <div class="list-item">
+          <button type="button" class="item-drag" tabindex="-1"><span></span></button>
+          <input value="Производство" readonly tabindex="-1" aria-label="Тип">
+        </div>
+        <div class="list-item">
+          <button type="button" class="item-drag" tabindex="-1"><span></span></button>
+          <input value="НДС" readonly tabindex="-1" aria-label="Тип">
+          <label class="paid-toggle"><input type="checkbox" checked tabindex="-1"> Налог</label>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

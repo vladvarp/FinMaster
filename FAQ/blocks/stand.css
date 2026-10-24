@@ -1,0 +1,3 @@
+/* Фон стенда совпадает со справкой, а не с белым кадром браузера. */
+html, body { background: #f4f7fb !important; color-scheme: light; }
+html[data-theme="dark"], html[data-theme="dark"] body { background: #0b1220 !important; color-scheme: dark; }
