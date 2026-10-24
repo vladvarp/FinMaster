@@ -4400,7 +4400,7 @@
 
   function shareMetaPairs(order, fields) {
     const items = [];
-    if (fields.includes("number")) items.push(["№", order.number]);
+    if (fields.includes("number")) items.push(["Номер", order.number]);
     if (fields.includes("name")) items.push(["Заказ", order.name]);
     if (fields.includes("customer")) items.push(["Заказчик", order.customer]);
     if (fields.includes("organization")) items.push(["Организация", customerOrg(order.customer)]);
@@ -4411,7 +4411,7 @@
     return shareMetaPairs(order, fields).map(([label, value]) => {
       const v = value || "—";
       if (hideLabels) return v;
-      return label === "№" ? `№ ${v}` : `${label}: ${v}`;
+      return `${label}: ${v}`;
     });
   }
 
@@ -4526,7 +4526,7 @@
 
   function shareGrandCell(row, colId) {
     const { order, tot } = row;
-    if (colId === "order") return [order.number ? `№ ${order.number}` : "", order.name].filter(Boolean).join(" · ") || "—";
+    if (colId === "order") return [order.number || "", order.name].filter(Boolean).join(" · ") || "—";
     if (colId === "customer") return order.customer || "—";
     if (colId === "cost") return tot.cost > 0.005 ? `−${money(tot.cost)}` : "—";
     return money(tot[colId] || 0);

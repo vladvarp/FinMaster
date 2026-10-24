@@ -2134,7 +2134,7 @@
     const range = win?.from && win?.to ? `${win.from} — ${win.to}` : "";
     const order = focusedOrder();
     if (order) {
-      const base = `только заказ №${order.number || "—"}`;
+      const base = `только заказ ${order.number || "—"}`;
       return range ? `${base} · ${range}` : base;
     }
     if (remoteStatsActive()) {
@@ -2383,14 +2383,14 @@
       if (sub) sub.textContent = "считаются по всем заказам отчёта";
       return;
     }
-    if (sub) sub.textContent = `только заказ №${order.number || "—"}`;
+    if (sub) sub.textContent = `только заказ ${order.number || "—"}`;
     const t = orderTotals(order);
     const lines = order.lines || [];
     box.hidden = false;
     box.innerHTML = `
       <div class="focus-head">
         <span class="focus-tag">с телефона</span>
-        <b>№${esc(order.number || "—")}</b>
+        <b>${esc(order.number || "—")}</b>
         <span class="focus-name">${esc(order.name || "без названия")}</span>
         <span class="focus-cust">${esc(order.customer || "без заказчика")}</span>
         <div class="focus-acts">

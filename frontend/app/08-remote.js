@@ -923,7 +923,7 @@
       state.remoteStats = null;
       const sameOrder = state.focusOrderId === order.id;
       setFocusOrder(order.id, nav.line_id || "");
-      if (!sameOrder) toast(`Телефон открыл заказ №${order.number || "—"}`);
+      if (!sameOrder) toast(`Телефон открыл заказ ${order.number || "—"}`);
       return;
     }
     const hadFocus = !!state.focusOrderId;

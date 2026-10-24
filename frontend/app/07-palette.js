@@ -1227,6 +1227,15 @@
   }
 
   function askRow(row) {
+    if (row.kind === "fold") {
+      const box = document.createElement("details");
+      box.className = "ask-fold";
+      const summary = document.createElement("summary");
+      summary.textContent = row.label || "Показать ещё";
+      box.appendChild(summary);
+      (row.rows || []).forEach((child) => box.appendChild(askRow(child)));
+      return box;
+    }
     if (row.kind === "metrics") {
       const box = document.createElement("div");
       box.className = "ask-metrics";
@@ -1250,8 +1259,32 @@
       }
       return box;
     }
-    const line = document.createElement(row.kind === "item" ? "div" : "p");
-    line.className = row.kind === "item" ? "ask-item" : "ask-line";
+    if (row.kind === "note") {
+      const note = document.createElement("p");
+      note.className = "ask-note";
+      if (row.label) {
+        const tag = document.createElement("b");
+        tag.textContent = row.label;
+        note.appendChild(tag);
+      }
+      note.appendChild(document.createTextNode(row.text || ""));
+      return note;
+    }
+    if (row.kind === "item") {
+      const line = document.createElement("div");
+      line.className = "ask-item";
+      const name = document.createElement("b");
+      name.textContent = row.text || "";
+      line.appendChild(name);
+      if (row.meta) {
+        const meta = document.createElement("span");
+        meta.textContent = row.meta;
+        line.appendChild(meta);
+      }
+      return line;
+    }
+    const line = document.createElement("p");
+    line.className = "ask-line";
     line.textContent = row.text || "";
     return line;
   }

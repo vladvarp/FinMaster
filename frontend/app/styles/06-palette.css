@@ -377,14 +377,51 @@
 .ask-group b { font-size: 13px; }
 .ask-group span { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .ask-item {
-  margin: 2px 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 6px 4px 0;
   padding: 9px 10px;
   border-radius: 10px;
-  background: transparent;
+  background: color-mix(in srgb, var(--bg-2) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 1.35;
 }
-.ask-item:hover { background: color-mix(in srgb, var(--accent-2) 10%, transparent); }
+.ask-item b { font-weight: 700; }
+.ask-item span { color: var(--muted); font-size: 12px; }
+.ask-item:hover { background: color-mix(in srgb, var(--accent-2) 12%, var(--bg-2)); }
+.ask-note {
+  margin: 0 8px 2px 18px;
+  padding: 2px 0 2px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--accent-2) 70%, var(--line));
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.ask-note b {
+  margin-right: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ask-fold {
+  margin: 8px 4px 0;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+  background: color-mix(in srgb, var(--bg-2) 70%, transparent);
+}
+.ask-fold summary {
+  cursor: pointer;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--accent-2);
+}
+.ask-fold[open] summary {
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+}
 .ask-modal p.ask-line { margin: 2px 10px 0; color: var(--ink); font-size: 13px; line-height: 1.45; }
 html[data-theme="dark"] .modal-card.ask-modal {
   background:

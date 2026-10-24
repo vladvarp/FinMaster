@@ -180,7 +180,7 @@ THEMES = {
     },
 }
 
-MONEY_COLS = {"price", "total", "paid", "unpaid"}
+MONEY_COLS = {"total", "paid", "unpaid"}
 
 PDF_DEFAULTS = {
     "orient": "portrait",
@@ -229,6 +229,19 @@ def normalize_pdf_opts(raw: Any = None) -> dict[str, Any]:
 def normalize_fields(fields: Any) -> list[str]:
     ids = [str(item) for item in (fields or []) if str(item) in FIELD_BY_ID]
     return ids or list(PRESETS["invoice"])
+
+
+_PRICE_FIELDS = {"price", "discount", "total", "paid", "unpaid", "totals"}
+
+
+def without_prices(fields: list[str]) -> list[str]:
+    """Снимок без цен: колонки сумм и строка итога не попадают в таблицу."""
+    kept = [item for item in normalize_fields(fields) if item not in _PRICE_FIELDS]
+    if not any(FIELD_BY_ID[item]["kind"] == "col" for item in kept):
+        for item in ("product", "quantity"):
+            if item not in kept:
+                kept.append(item)
+    return kept
 
 
 def theme_key(name: str) -> str:
@@ -292,7 +305,7 @@ def line_value(
 def meta_items(order: dict[str, Any], doc: dict[str, Any], fields: list[str], hide_labels: bool) -> list[str]:
     pairs: list[tuple[str, str]] = []
     if "number" in fields:
-        pairs.append(("№", str(order.get("number") or "—")))
+        pairs.append(("Номер", str(order.get("number") or "—")))
     if "name" in fields:
         pairs.append(("Заказ", str(order.get("name") or "—")))
     if "customer" in fields:
@@ -303,8 +316,6 @@ def meta_items(order: dict[str, Any], doc: dict[str, Any], fields: list[str], hi
     for label, value in pairs:
         if hide_labels:
             out.append(value)
-        elif label == "№":
-            out.append(f"№ {value}")
         else:
             out.append(f"{label}: {value}")
     return out
@@ -325,15 +336,14 @@ def footer_cells(
     types: dict[str, str] | None = None,
     order: dict[str, Any] | None = None,
     decimals: int = 2,
+    hide_totals: bool = False,
 ) -> list[str] | None:
-    if not needs_money_footer(cols):
+    if hide_totals or not needs_money_footer(cols):
         return None
     tot = lines_totals(lines, types, order)
     cells: list[str] = []
     for col in cols:
-        if col["id"] == "price":
-            cells.append(money(tot["total"], currency, decimals))
-        elif col["id"] == "total":
+        if col["id"] == "total":
             cells.append(money(tot["net"] if tot["cost"] > 0.005 else tot["after"], currency, decimals))
         elif col["id"] == "paid":
             cells.append(money(tot["paid"], currency, decimals))
@@ -352,8 +362,9 @@ def totals_text(
     types: dict[str, str] | None = None,
     order: dict[str, Any] | None = None,
     decimals: int = 2,
+    hide_totals: bool = False,
 ) -> str:
-    if "totals" not in fields or needs_money_footer(cols):
+    if hide_totals or "totals" not in fields or needs_money_footer(cols):
         return ""
     tot = lines_totals(lines, types, order)
     bits: list[str] = []
@@ -387,16 +398,26 @@ def income_blocks(
     return out
 
 
+def order_caption(order: dict[str, Any]) -> str:
+    number = str(order.get("number") or "").strip()
+    name = str(order.get("name") or "").strip()
+    if number and name:
+        return f"{number} · {name}"
+    return number or name or "Заказ"
+
+
 def default_title(blocks: list[dict[str, Any]], custom: str = "") -> str:
     typed = str(custom or "").strip()
     if typed:
         return typed
+    if not blocks:
+        return "Снимок заказа"
     if len(blocks) == 1:
-        order = blocks[0]["order"]
-        return " · ".join(part for part in (str(order.get("number") or ""), str(order.get("name") or "")) if part) or "Снимок заказа"
-    if len(blocks) > 1:
-        return f"Заказы ({len(blocks)})"
-    return "Снимок заказа"
+        return order_caption(blocks[0]["order"])
+    labels = [order_caption(block["order"]) for block in blocks]
+    if len(labels) <= 3:
+        return "; ".join(labels)
+    return "; ".join(labels[:3]) + f" и ещё {len(labels) - 3}"
 
 
 def stamp_text() -> str:
@@ -420,6 +441,7 @@ def render_text(
     hide_labels: bool = False,
     hide_stamp: bool = False,
     title: str = "",
+    hide_totals: bool = False,
 ) -> str:
     fields = normalize_fields(fields)
     blocks = income_blocks(doc, blocks, fields)
@@ -436,11 +458,14 @@ def render_text(
         order = block["order"]
         lines = block["lines"]
         meta = meta_items(order, doc, fields, hide_labels)
+        if len(blocks) > 1:
+            out.append("")
+            out.append(order_caption(order))
         if meta:
             out.append("")
             out.extend(meta)
         if cols:
-            foot = footer_cells(cols, lines, currency, types, block["order"], decimals)
+            foot = footer_cells(cols, lines, currency, types, block["order"], decimals, hide_totals)
             rows = [ [col["label"] for col in cols] ]
             rows.extend(
                 [
@@ -456,7 +481,7 @@ def render_text(
                 out.append("  ".join(_pad(row[i], widths[i]) for i in range(len(cols))))
                 if row_i == 0:
                     out.append("  ".join("─" * widths[i] for i in range(len(cols))))
-        totals = totals_text(fields, cols, lines, currency, types, block["order"], decimals)
+        totals = totals_text(fields, cols, lines, currency, types, block["order"], decimals, hide_totals)
         if totals:
             out.append("")
             out.append(totals)
@@ -524,6 +549,7 @@ def render_png(
     hide_labels: bool = False,
     hide_stamp: bool = False,
     title: str = "",
+    hide_totals: bool = False,
 ) -> bytes:
     try:
         from PIL import Image, ImageDraw
@@ -547,7 +573,7 @@ def render_png(
 
     def col_widths(lines: list[dict[str, Any]], order: dict[str, Any] | None = None) -> list[int]:
         widths: list[int] = []
-        foot = footer_cells(cols, lines, currency, types, order, decimals)
+        foot = footer_cells(cols, lines, currency, types, order, decimals, hide_totals)
         for index, col in enumerate(cols):
             width = _text_w(th_font, col["label"].upper())
             for line in lines:
@@ -564,9 +590,11 @@ def render_png(
         table_w = sum(widths)
         layouts.append({**block, "widths": widths, "table_w": table_w})
         inner = max(inner, table_w)
+        if len(blocks) > 1:
+            inner = max(inner, _text_w(strong_font, order_caption(block["order"])))
         for line in meta_items(block["order"], doc, fields, hide_labels):
             inner = max(inner, _text_w(body_font, line))
-        totals = totals_text(fields, cols, block["lines"], currency, types, block["order"], decimals)
+        totals = totals_text(fields, cols, block["lines"], currency, types, block["order"], decimals, hide_totals)
         if totals:
             inner = max(inner, _text_w(strong_font, totals))
     if not hide_stamp:
@@ -575,11 +603,12 @@ def render_png(
     body_h = 16
     for index, block in enumerate(layouts):
         meta = meta_items(block["order"], doc, fields, hide_labels)
-        foot = footer_cells(cols, block["lines"], currency, types, block["order"], decimals)
+        foot = footer_cells(cols, block["lines"], currency, types, block["order"], decimals, hide_totals)
         body_h += (36 if index else 0)
+        body_h += 28 if len(layouts) > 1 else 0
         body_h += (len(meta) * 22 + 10) if meta else 0
         body_h += (32 + len(block["lines"]) * row_h + (row_h if foot else 0)) if cols else 28
-        body_h += 36 if totals_text(fields, cols, block["lines"], currency, types, block["order"], decimals) else 0
+        body_h += 36 if totals_text(fields, cols, block["lines"], currency, types, block["order"], decimals, hide_totals) else 0
         body_h += 16
     height = header_h + body_h + (16 if hide_stamp else 36)
     image = Image.new("RGB", (width, height), _hex(theme["bg"]))
@@ -609,6 +638,9 @@ def render_png(
             y += 16
             line(pad, y, width - pad, y, theme["accent"], 2)
             y += 20
+        if len(layouts) > 1:
+            text(pad, y, order_caption(block["order"]), strong_font, theme["ink"])
+            y += 28
         meta = meta_items(block["order"], doc, fields, hide_labels)
         for item in meta:
             text(pad, y, item, body_font, theme["meta"])
@@ -639,7 +671,7 @@ def render_png(
                     )
                     text(xs[i] + 8, y + 8, cell, body_font, theme["ink"])
                 y += row_h
-            foot = footer_cells(cols, block["lines"], currency, types, block["order"], decimals)
+            foot = footer_cells(cols, block["lines"], currency, types, block["order"], decimals, hide_totals)
             if foot:
                 fill(pad, y, table_w, row_h, theme["footBg"])
                 line(pad, y, pad + table_w, y, theme["accent"])
@@ -648,7 +680,7 @@ def render_png(
                         continue
                     text(xs[i] + 8, y + 8, _fit(strong_font, cell, block["widths"][i] - 12), strong_font, theme["ink"])
                 y += row_h
-        totals = totals_text(fields, cols, block["lines"], currency, types, block["order"], decimals)
+        totals = totals_text(fields, cols, block["lines"], currency, types, block["order"], decimals, hide_totals)
         if totals:
             y += 14
             text(pad, y, totals, strong_font, theme["ink"])
@@ -672,9 +704,10 @@ def render_pdf(
     hide_stamp: bool = False,
     title: str = "",
     opts: dict[str, Any] | None = None,
+    hide_totals: bool = False,
 ) -> bytes:
     """PDF по снимку: учитывает шаблон (ориентация, поля, масштаб, обрезка)."""
-    png = render_png(doc, blocks, fields, theme_name, hide_labels, hide_stamp, title)
+    png = render_png(doc, blocks, fields, theme_name, hide_labels, hide_stamp, title, hide_totals)
     try:
         from PIL import Image
     except ImportError as exc:

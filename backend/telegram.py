@@ -367,21 +367,285 @@ def _html_to_text(text: str) -> str:
     return plain.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
 
 
+def _md_text(value: str) -> str:
+    plain = _html_to_text(value)
+
+    def slash(match: re.Match[str]) -> str:
+        return "\\" + match.group(1)
+
+    return re.sub(r"([\\*_`~\[\]|])", slash, plain)
+
+
+_RICH_SECTIONS = {
+    "Сводка",
+    "Долги",
+    "Заказы",
+    "Календарь",
+    "Заказчики",
+    "Продукты",
+    "Расходы",
+    "Заметки",
+    "Замороженные",
+    "Напоминание",
+    "Коротко",
+    "Просрочено",
+    "Крупные",
+    "Статусы",
+    "Скидки",
+    "Ответ",
+}
+_MONEY_LABELS = (
+    "к оплате",
+    "оплачено",
+    "долг",
+    "расходы",
+    "чистыми",
+    "средний чек",
+    "собираемость",
+    "этот месяц",
+    "прошлый",
+    "прогноз месяца",
+    "дебиторка",
+    "просрочено",
+    "срок по договорённости",
+    "отменённые",
+    "средний срок оплаты",
+    "срок оплаты",
+)
+
+
+def _money_pairs(plain: str) -> list[tuple[str, str]] | None:
+    parts = [part.strip() for part in plain.split("·") if part.strip()]
+    if len(parts) < 2:
+        return None
+    pairs: list[tuple[str, str]] = []
+    for part in parts:
+        low = part.lower()
+        label = next((item for item in _MONEY_LABELS if low.startswith(item)), "")
+        if not label:
+            return None
+        pairs.append((part[: len(label)], part[len(label) :].strip()))
+    return pairs
+
+
+def _kv_table(pairs: list[tuple[str, str]]) -> str:
+    rows = ["| | |", "|:---|---:|"]
+    for key, value in pairs:
+        rows.append(f"| {_md_text(key)} | **{_md_text(value)}** |")
+    return "\n".join(rows)
+
+
+def _position_cells(plain: str) -> list[str] | None:
+    parts = [part.strip() for part in plain.split("·") if part.strip()]
+    debt_i = next((i for i, part in enumerate(parts) if part.lower().startswith("долг ")), -1)
+    if debt_i < 3:
+        return None
+    product = parts[0] if debt_i == 3 else " · ".join(parts[: debt_i - 2])
+    qty = parts[debt_i - 2]
+    total = parts[debt_i - 1]
+    debt = parts[debt_i][5:].strip()
+    rest = parts[debt_i + 1 :]
+    date = rest[0] if rest else ""
+    status = " · ".join(rest[1:]) if len(rest) > 1 else ""
+    return [product, qty, total, debt, date, status]
+
+
+def _positions_table(rows: list[list[str]]) -> str:
+    lines = [
+        "| Продукт | Кол-во | Сумма | Долг | Дата | Статус |",
+        "|:---|---:|---:|---:|:---:|:---|",
+    ]
+    for cells in rows:
+        lines.append("| " + " | ".join(_md_text(cell) for cell in cells) + " |")
+    return "\n".join(lines)
+
+
+def _rich_markdown(html: str, *, nested: bool = False) -> str:
+    """Ответ бота: заголовки, таблицы сумм и позиций, списки и цитаты заметок."""
+    out: list[str] = []
+    first = not nested
+    rows = str(html or "").split("\n")
+    index = 0
+    while index < len(rows):
+        raw = rows[index]
+        line = raw.strip()
+        if not line:
+            index += 1
+            continue
+        if line == "<details>":
+            summary = "Показать ещё"
+            inner: list[str] = []
+            index += 1
+            while index < len(rows):
+                cur = rows[index].strip()
+                if cur == "</details>":
+                    index += 1
+                    break
+                found = re.fullmatch(r"<summary>(.*?)</summary>", cur)
+                if found:
+                    summary = _html_to_text(found.group(1)).strip() or summary
+                    index += 1
+                    continue
+                inner.append(rows[index])
+                index += 1
+            body = _rich_markdown("\n".join(inner), nested=True)
+            out.append("<details>")
+            out.append(f"<summary>{html_esc(summary)}</summary>")
+            if body:
+                out.append("")
+                out.append(body)
+            out.append("</details>")
+            continue
+        mixed = re.fullmatch(r"<b>(.*?)</b>\s*(.*)", line)
+        if mixed:
+            title = _html_to_text(mixed.group(1)).strip()
+            rest = _html_to_text(mixed.group(2)).strip(" ·")
+            section = title in _RICH_SECTIONS
+            if not first and not section and out:
+                out.append("---")
+            level = "#" if first else ("##" if section else "###")
+            head = f"{level} {_md_text(title)}"
+            if rest and (section or "·" not in rest):
+                head += " — " + _md_text(rest)
+                rest = ""
+            out.append(head)
+            if first and rest:
+                out.append("*" + _md_text(rest) + "*")
+                rest = ""
+            if rest:
+                bits = [bit.strip() for bit in rest.split("·") if bit.strip()]
+                lead = f"**{_md_text(bits[0])}**" if bits else ""
+                if len(bits) > 1:
+                    lead += " · " + " · ".join(_md_text(bit) for bit in bits[1:])
+                if lead:
+                    out.append(lead)
+            first = False
+            index += 1
+            continue
+        plain = _html_to_text(line).strip()
+        if plain.lower().startswith("заметка:"):
+            out.append("> " + _md_text(plain.split(":", 1)[1].strip()))
+            index += 1
+            continue
+        pairs = _money_pairs(plain)
+        if not pairs and "·" not in plain:
+            low = plain.lower()
+            label = next((item for item in _MONEY_LABELS if low.startswith(item)), "")
+            if label:
+                pairs = [(plain[: len(label)], plain[len(label) :].strip())]
+        if pairs:
+            out.append("")
+            out.append(_kv_table(pairs))
+            index += 1
+            continue
+        if plain.startswith("•") or plain.startswith("-"):
+            positions: list[list[str]] = []
+            notes: list[tuple[int, str]] = []
+            plain_items: list[str] = []
+            while index < len(rows):
+                cur = rows[index]
+                stripped = _html_to_text(cur).strip()
+                if not stripped:
+                    break
+                if cur.startswith("  ") and not stripped.startswith(("•", "-")):
+                    if positions:
+                        notes.append((len(positions) - 1, stripped))
+                    elif plain_items:
+                        notes.append((-1, stripped))
+                    index += 1
+                    continue
+                if not stripped.startswith(("•", "-")):
+                    break
+                body = re.sub(r"^[•\-]\s*", "", stripped)
+                cells = _position_cells(body)
+                if cells and not plain_items:
+                    positions.append(cells)
+                elif positions:
+                    break
+                else:
+                    plain_items.append(body)
+                index += 1
+            if positions:
+                out.append("")
+                out.append(_positions_table(positions))
+                for row_i, note in notes:
+                    if row_i < 0:
+                        out.append("> " + _md_text(note))
+                        continue
+                    name = positions[row_i][0]
+                    out.append(f"> **{_md_text(name)}.** {_md_text(note)}")
+            else:
+                for item in plain_items:
+                    out.append("- " + _md_text(item))
+                for _row_i, note in notes:
+                    out.append("> " + _md_text(note))
+            continue
+        if plain.lower().startswith("ещё") or plain.lower().startswith("еще"):
+            out.append("*" + _md_text(plain) + "*")
+        elif " · " in plain:
+            bits = [bit.strip() for bit in plain.split("·") if bit.strip()]
+            for bit in bits:
+                out.append("- " + _md_text(bit))
+        else:
+            out.append(_md_text(plain))
+        first = False
+        index += 1
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+
+
+def _send_rich(token: str, chat_id: str, markdown: str, markup: dict[str, Any] | None) -> None:
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "rich_message": {"markdown": markdown},
+    }
+    if markup:
+        payload["reply_markup"] = markup
+    data = _call(token, "sendRichMessage", payload, timeout=30)
+    result = data.get("result") if isinstance(data.get("result"), dict) else {}
+    mid = result.get("message_id")
+    if mid is not None:
+        _bump_tail(chat_id, int(mid))
+
+
+def _html_chunks(text: str, limit: int = 3800) -> list[str]:
+    parts: list[str] = []
+    buf = ""
+    for line in str(text or "").split("\n"):
+        piece = line if not buf else "\n" + line
+        if buf and len(buf) + len(piece) > limit:
+            parts.append(buf)
+            buf = line
+            continue
+        buf += piece
+        while len(buf) > limit:
+            parts.append(buf[:limit])
+            buf = buf[limit:]
+    if buf.strip():
+        parts.append(buf)
+    return parts
+
+
 def send_long_html(token: str, chat_id: str, text: str, markup: dict[str, Any] | None = None) -> None:
-    """Короткий ответ остаётся в чате. Длинный сворачивается в текстовый файл."""
+    """Ответ остаётся в чате списком. Файл — только если он не влезает даже в длинное сообщение."""
     body = str(text or "").strip()
     if not body:
         return
     plain = _html_to_text(body).strip()
-    filled = [line for line in plain.splitlines() if line.strip()]
-    if len(plain) <= 900 and len(filled) <= 12:
-        send_html(token, chat_id, body, markup)
+    markdown = _rich_markdown(body)
+    if markdown and len(markdown) <= 30000 and markdown.count("\n") < 450:
+        try:
+            _send_rich(token, chat_id, markdown, markup)
+            return
+        except RuntimeError:
+            pass
+    chunks = _html_chunks(body)
+    if len(plain) > 30000 or len(chunks) > 6:
+        head = chunks[0] if chunks else html_esc(plain[:500])
+        send_html(token, chat_id, f"{head}\n<i>Дальше — в файле.</i>", markup)
+        send_document(token, chat_id, plain.encode("utf-8"), "finmaster-otvet.txt", "Полный ответ")
         return
-    head = body.split("\n", 1)[0].strip() or "Ответ"
-    if len(_html_to_text(head)) > 240:
-        head = html_esc(_html_to_text(head)[:239] + "…")
-    send_html(token, chat_id, f"{head}\n<i>Полный ответ — в файле.</i>", markup)
-    send_document(token, chat_id, plain.encode("utf-8"), "finmaster-otvet.txt", "Полный ответ")
+    for index, chunk in enumerate(chunks):
+        send_html(token, chat_id, chunk, markup if index == len(chunks) - 1 else None)
 
 
 def _tg_file(token: str, file_id: str) -> bytes:
@@ -689,6 +953,7 @@ class ChatSession:
         self.orders: list[str] = []
         self.order_id = ""
         self.awaiting = ""
+        self.pending_ask = ""
         self.message_id: int | None = None
         self.snap: dict[str, Any] = self._fresh_snap()
 
@@ -698,6 +963,7 @@ class ChatSession:
             "theme": "teal",
             "hide_labels": False,
             "hide_stamp": False,
+            "hide_totals": False,
             "title": "",
             "order_ids": [],
             "extra_orders": [],
@@ -983,6 +1249,7 @@ class TelegramBot:
         low = text.lower()
         info = self._status_for(chat_id)
         if low in ASK_MENU or not text:
+            self._chat(chat_id).pending_ask = ""
             send_welcome(token, chat_id, info)
             self._show(token, chat_id, "home")
             return
@@ -1073,18 +1340,26 @@ class TelegramBot:
             self._show(token, chat_id, "snap")
             return True
         if reply.needs_report and not self._has_report(session):
-            send_html(token, chat_id, "Сначала выберите отчёт.", self._reply_kb(chat_id))
+            session.pending_ask = text
+            send_html(
+                token,
+                chat_id,
+                "Сначала выберите отчёт. После выбора отвечу на этот вопрос.",
+                self._reply_kb(chat_id),
+            )
             self._show(token, chat_id, "reports")
             return True
         if reply.html:
             send_long_html(token, chat_id, reply.html, self._reply_kb(chat_id))
         if reply.action == "snap":
             self._prepare_snap(session, reset=True)
+            session.snap["hide_totals"] = bool(reply.hide_totals)
             self._show(token, chat_id, "snap")
         elif reply.action == "snap_send":
             self._prepare_snap(session, reset=True)
             if reply.order_ids:
                 session.snap["order_ids"] = list(reply.order_ids)
+            session.snap["hide_totals"] = bool(reply.hide_totals)
             self._send_snap(token, chat_id, reply.kind or "png")
         return True
 
@@ -1413,7 +1688,11 @@ class TelegramBot:
         session.filter = "all"
         session.opage = 0
         session.snap = session._fresh_snap()
+        pending = str(session.pending_ask or "")
+        session.pending_ask = ""
         self._show(token, chat_id, "orders")
+        if pending:
+            self._try_ask(token, chat_id, pending)
 
     def _open_order(self, token: str, chat_id: str, index: int) -> None:
         session = self._chat(chat_id)
@@ -1446,6 +1725,7 @@ class TelegramBot:
             session.snap["theme"] = snapmod.theme_key(str(ui.get("share_theme") or session.snap.get("theme") or "teal"))
             session.snap["hide_labels"] = False
             session.snap["hide_stamp"] = False
+            session.snap["hide_totals"] = False
             session.snap["title"] = ""
             session.snap["skip"] = {}
             session.snap["extra_orders"] = []
@@ -1813,6 +2093,9 @@ class TelegramBot:
         title = str(session.snap.get("title") or "")
         hide_labels = bool(session.snap.get("hide_labels"))
         hide_stamp = bool(session.snap.get("hide_stamp"))
+        hide_totals = bool(session.snap.get("hide_totals"))
+        if hide_totals:
+            fields = snapmod.without_prices(fields)
         caption = snapmod.default_title(blocks, title)
         try:
             if kind == "png":
@@ -1824,17 +2107,21 @@ class TelegramBot:
                     hide_labels,
                     hide_stamp,
                     title,
+                    hide_totals,
                 )
                 send_photo(token, chat_id, png, caption, "finmaster-snapshot.png")
             elif kind == "pdf":
                 opts = _pdf_opts(session.snap.get("pdf_opts") or _default_pdf_opts())
+                if len(blocks) > 1:
+                    opts["orderTitles"] = True
                 payload = {
                     "blocks": [{"order": block["order"], "lines": block["lines"]} for block in blocks],
                     "fields": fields,
                     "theme": str(session.snap.get("theme") or "teal"),
                     "hide_labels": hide_labels,
                     "hide_stamp": hide_stamp,
-                    "title": title,
+                    "hide_totals": hide_totals,
+                    "title": title or caption,
                     "opts": opts,
                     "path": session.path or "",
                 }
@@ -1842,7 +2129,7 @@ class TelegramBot:
                 name = f"{(caption or 'Заказы')[:80]}.pdf".replace("/", "_").replace("\\", "_")
                 send_document(token, chat_id, pdf, name, caption, "application/pdf")
             else:
-                text = snapmod.render_text(doc, blocks, fields, hide_labels, hide_stamp, title)
+                text = snapmod.render_text(doc, blocks, fields, hide_labels, hide_stamp, title, hide_totals)
                 if len(text) < 3800:
                     send_html(token, chat_id, f"<pre>{html_esc(text)}</pre>")
                 else:

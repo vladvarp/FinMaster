@@ -141,6 +141,7 @@
       : currentShareFields();
     const hideLabels = ctx?.hideLabels != null ? !!ctx.hideLabels : shareHideLabels();
     const hideStamp = ctx?.hideStamp != null ? !!ctx.hideStamp : shareHideStamp();
+    const hideTotals = !!ctx?.hideTotals;
     const cols = SHARE_FIELDS.filter((c) => c.kind === "col" && fields.includes(c.id));
     const customTitle = String(ctx?.title || "").trim();
     const title = customTitle || shareTitleText(blocks);
@@ -297,6 +298,7 @@
     const spec = cols.map((c) => ({ label: c.label, num: PDF_NUM_COLS.has(c.id) }));
     const blockRows = blocks.map(({ lines }) => lines.map((l) => cols.map((c) => String(shareLineValue(l, c.id) || "—"))));
     const blockFoot = blocks.map(({ lines }) => {
+      if (hideTotals) return null;
       const cells = shareFooterCells(cols, lines);
       return cells ? cells.map((v) => v || "") : null;
     });
@@ -324,7 +326,7 @@
         text(M, y + 8 * f, "Таблица работ скрыта — включите колонки в снимке.", font(400, 9.5 * f), theme.note);
         y += 20 * f;
       }
-      const totalsText = shareTotalsText(fields, cols, lines);
+      const totalsText = hideTotals ? "" : shareTotalsText(fields, cols, lines);
       if (totalsText) {
         if (y + 28 * f > bottom) y = newPage(label, sub);
         y += 12 * f;
@@ -335,7 +337,7 @@
       }
     });
 
-    if (o.grand && blocks.length > 1) {
+    if (o.grand && blocks.length > 1 && !hideTotals) {
       const grand = shareGrandData(blocks);
       const gcols = shareGrandCols(fields, grand);
       const s = grand.sum;
@@ -557,6 +559,7 @@
           fields: job.fields,
           hideLabels: job.hide_labels,
           hideStamp: job.hide_stamp,
+          hideTotals: !!job.hide_totals,
           title: job.title,
           themeKey: job.theme,
         });

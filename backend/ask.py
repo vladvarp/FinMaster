@@ -157,6 +157,7 @@ class Reply:
         kind: str = "",
         order_ids: list[str] | None = None,
         needs_report: bool = False,
+        hide_totals: bool = False,
     ) -> None:
         self.html = html
         self.action = action
@@ -164,19 +165,38 @@ class Reply:
         self.kind = kind
         self.order_ids = order_ids or []
         self.needs_report = needs_report
+        self.hide_totals = hide_totals
 
 
-def help_text() -> str:
+def help_text(surface: str = "bot") -> str:
+    if surface == "desk":
+        return (
+            "<b>Что можно спросить</b> · Ответ берётся из отчёта, который сейчас открыт. Это окно — Shift+Enter, ассистент — Ctrl+Пробел.\n"
+            "<b>Долги</b>\n"
+            "• кто должен, просрочка, старение, ближайшие оплаты\n"
+            "• сколько должен, топ, напоминание заказчику\n"
+            "<b>Сводка</b>\n"
+            "• выручка, оплачено, расходы, налоги, чистыми, средний чек\n"
+            "• итоги за август, май 2025, 5 августа, 1 квартал, этот месяц, за 30 дней\n"
+            "<b>Заказы</b>\n"
+            "• номер, имя, продукт, статус, тип, скидки\n"
+            "• последние 3 заказа, последний заказ, сколько заказов\n"
+            "<b>Календарь</b>\n"
+            "• в работе, запланировано, закрыто, без дат\n"
+            "<b>Заказчики</b>\n"
+            "• контакты, заметки, замороженные, весь отчёт"
+        )
     return (
         "<b>Спросите по открытому отчёту</b> — голосом или текстом. Ответ собирается из файла, который сейчас открыт.\n"
-        "• долги, кто должен, просрочка, старение, напоминание заказчику\n"
+        "• долги, кто должен, просрочка, старение, ближайшие оплаты, напоминание заказчику\n"
         "• сводка, выручка, оплаты, расходы, налоги, чистыми, средний чек\n"
-        "• заказы и позиции: по номеру, имени, продукту, статусу, типу\n"
+        "• сколько заказов, сколько должен, топ, кто больше всех, скидки, статусы\n"
+        "• заказы и позиции: по номеру, имени, продукту, статусу, типу, «последние 3 заказа»\n"
         "• период: сегодня, вчера, эта неделя, этот месяц, август, май 2025, 5 августа, 1 квартал, за 30 дней\n"
         "• календарь: в работе, запланировано, закрыто, без дат\n"
         "• заказчики и контакты, заметки, замороженные\n"
         "• «всё» или «весь отчёт» — сводка целиком\n"
-        "• «открой отчёт …», «снимок заказа 12», «открой на компьютере»\n"
+        "• «открой отчёт …», «снимок заказа 12», «снимок заказа 12 без итогов», «открой на компьютере»\n"
         "Кнопки внизу по-прежнему открывают отчёты, заказы, снимок и ссылку."
     )
 
@@ -192,6 +212,11 @@ _SECTION_TITLES = {
     "Заметки",
     "Замороженные",
     "Напоминание",
+    "Коротко",
+    "Просрочено",
+    "Крупные",
+    "Статусы",
+    "Скидки",
     "Ответ",
 }
 
@@ -223,9 +248,35 @@ def present(html: str) -> dict[str, Any]:
             sections.append(current)
         return current
 
-    for line in lines[1:]:
+    index = 1
+    while index < len(lines):
+        line = lines[index]
+        index += 1
         stripped = line.strip()
         if not stripped:
+            continue
+        if stripped == "<details>":
+            label = "Показать ещё"
+            inner: list[str] = []
+            while index < len(lines):
+                cur_line = lines[index]
+                index += 1
+                cur = cur_line.strip()
+                if cur == "</details>":
+                    break
+                summary = re.fullmatch(r"<summary>(.*?)</summary>", cur)
+                if summary:
+                    label = _unesc(re.sub(r"<[^>]+>", "", summary.group(1))).strip() or label
+                    continue
+                inner.append(cur_line)
+            body = "\n".join(inner).strip()
+            if body:
+                folded = present(f"<b>Скрыто</b>\n{body}")
+                rows: list[dict[str, Any]] = []
+                for section in folded["sections"]:
+                    rows.extend(section["rows"])
+                if rows:
+                    ensure()["rows"].append({"kind": "fold", "label": label, "rows": rows})
             continue
         mixed = re.fullmatch(r"<b>(.*?)</b>\s*(.*)", stripped)
         if mixed:
@@ -241,8 +292,22 @@ def present(html: str) -> dict[str, Any]:
         if not plain:
             continue
         box = ensure()
+        if line.startswith("  ") or plain.lower().startswith("заметка:"):
+            label = ""
+            text = plain
+            if plain.lower().startswith("заметка:"):
+                label = "Заметка"
+                text = plain.split(":", 1)[1].strip()
+            if text:
+                box["rows"].append({"kind": "note", "text": text, "label": label})
+            continue
         if plain.startswith("•"):
-            box["rows"].append({"kind": "item", "text": plain[1:].strip()})
+            body = plain[1:].strip()
+            bits = [bit.strip() for bit in body.split("·") if bit.strip()]
+            if len(bits) >= 2:
+                box["rows"].append({"kind": "item", "text": bits[0], "meta": " · ".join(bits[1:])})
+            else:
+                box["rows"].append({"kind": "item", "text": body})
             continue
         if " · " in plain and not plain.startswith("№"):
             parts = [bit.strip() for bit in plain.split("·") if bit.strip()]
@@ -262,7 +327,7 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
     if not low:
         return Reply(html="Не разобрал речь. Скажите ещё раз или напишите вопрос.") if voice else None
     if low in _HELP:
-        return Reply(html=help_text())
+        return Reply(html=help_text(surface))
     if low in _NAV:
         return Reply(action=_NAV[low], needs_report=_NAV[low] in {"orders", "snap", "pc"})
     opened = re.match(r"^(?:открой|открыть|выбери)\s+отч[её]т\s+(.+)$", low)
@@ -273,7 +338,11 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
     today = date.today()
     rows = _rows(source)
     raw = low
+    hide_totals = bool(re.search(r"без итог", raw))
+    if hide_totals:
+        raw = " ".join(re.sub(r"без итог\w*", " ", raw).split())
     period, period_label, raw = _take_period(raw)
+    recent_n, raw = _take_recent(raw)
     customers, raw = _take_names(raw, _customer_names(source, rows))
     products, raw = _take_names(raw, _product_names(rows))
     order_ids, raw = _take_orders(raw, source.get("orders") or [])
@@ -301,6 +370,7 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
         or work_state
         or snap
         or remind
+        or recent_n
         or _ASK.search(low)
         or voice
     )
@@ -314,8 +384,16 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
             explicit.add("remind")
         elif snap and not words:
             explicit.add("snap")
-        elif words or customers or products or order_ids or statuses or types:
-            explicit.update({"summary", "orders", "debt"})
+        elif order_ids and not (customers or products or words or statuses or types):
+            explicit.add("orders")
+        elif customers and not words:
+            explicit.update({"customers", "debt"})
+        elif products and not words:
+            explicit.add("products")
+        elif statuses:
+            explicit.update({"status", "orders"})
+        elif words or types or recent_n:
+            explicit.add("orders")
         else:
             explicit.add("summary")
     if remind:
@@ -326,6 +404,19 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
         explicit.add("orders")
     if "overdue" in explicit or "incoming" in explicit:
         explicit.add("debt")
+    show_lines = bool(re.search(r"список|покаж|позиц|подроб|строк|какие", low))
+    verbose = {"summary", "money", "orders", "debt", "products", "customers", "work", "notes", "expense", "frozen", "status"}
+    if "count" in explicit and not show_lines and "incoming" not in explicit:
+        overdue_only = "overdue" in explicit
+        explicit -= verbose
+        explicit.add("count")
+        if overdue_only:
+            explicit.add("overdue")
+    elif "rank" in explicit and "count" not in explicit and not show_lines:
+        explicit -= {"summary", "money", "orders", "debt", "products", "customers"}
+        explicit.add("rank")
+    if recent_n:
+        explicit.add("orders")
 
     date_kind = "order"
     if "work" in explicit and not ({"debt", "money", "orders", "summary", "expense"} & explicit):
@@ -375,9 +466,12 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
         ]
         if loose:
             matched = loose
+    if recent_n and matched:
+        matched = _latest_rows(matched, recent_n)
 
     title = str(source.get("title") or "Отчёт")
-    head = _header(title, live, explicit, customers, products, order_ids, period_label, pay, work_state, words)
+    recent_label = f"последние {recent_n}" if recent_n else ""
+    head = _header(title, live, explicit, customers, products, order_ids, period_label, pay, work_state, words, recent_label)
     if not rows and "snap" not in explicit:
         return Reply(
             html=f"{head}\nВ отчёте пока нет позиций.",
@@ -385,9 +479,9 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
         )
     if not matched and explicit != {"snap"} and "snap" not in explicit:
         tail = f"За {html_esc(period_label)} в отчёте ничего нет." if period_label else "В отчёте по этой просьбе ничего нет."
-        understood = bool(explicit or customers or products or order_ids or statuses or types or period != "all" or pay or work_state)
+        understood = bool(explicit or customers or products or order_ids or statuses or types or period != "all" or pay or work_state or recent_n)
         if (voice or _ASK.search(low)) and not understood:
-            tail += "\n" + help_text()
+            tail += "\n" + help_text(surface)
         return Reply(html=f"{head}\n{tail}", needs_report=True)
 
     parts = [head]
@@ -397,8 +491,16 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
     def cash(value: float) -> str:
         return html_esc(money(value, cur, decimals))
 
+    if "count" in explicit:
+        parts.append(_count(matched, cash, overdue_only="overdue" in explicit and "debt" not in explicit))
+    if "rank" in explicit:
+        parts.append(_rank(matched, cash, by_debt=bool(re.search(r"долг|долж", low))))
     if "summary" in explicit or "money" in explicit:
         parts.append(_summary(source, matched, today, cash, terms, delays, period))
+    if "status" in explicit:
+        parts.append(_statuses(matched, cash))
+    if "discount" in explicit:
+        parts.append(_discounts(matched, cash))
     if "debt" in explicit:
         parts.append(_debts(matched, today, terms, delays, cash, overdue_only="overdue" in explicit, incoming="incoming" in explicit, period=period))
     if "orders" in explicit:
@@ -434,10 +536,18 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
             parts = [head, "Открываю снимок. Отметьте заказы и нажмите PNG, PDF или текст."]
         elif explicit <= {"snap", "orders"}:
             who = ", ".join(customers) if customers else (f"{len(ids)} зак." if ids else "")
-            parts = [head, f"Собираю снимок{(' · ' + html_esc(who)) if who else ''}."]
+            bare = " без цен" if hide_totals else ""
+            parts = [head, f"Собираю снимок{bare}{(' · ' + html_esc(who)) if who else ''}."]
 
     html = "\n".join(part for part in parts if part).strip()
-    return Reply(html=html, action=action, kind=kind, order_ids=ids if action == "snap_send" else [], needs_report=True)
+    return Reply(
+        html=html,
+        action=action,
+        kind=kind,
+        order_ids=ids if action == "snap_send" else [],
+        needs_report=True,
+        hide_totals=hide_totals and action in {"snap", "snap_send"},
+    )
 
 
 def _norm(text: str) -> str:
@@ -457,6 +567,7 @@ def _header(
     pay: str,
     work_state: str,
     words: list[str],
+    recent_label: str = "",
 ) -> str:
     bits = [f"<b>{html_esc(title)}</b>"]
     if live:
@@ -477,8 +588,12 @@ def _header(
         "frozen": "замороженные",
         "remind": "напоминание",
         "snap": "снимок",
+        "count": "коротко",
+        "rank": "крупные",
+        "discount": "скидки",
+        "status": "статусы",
     }
-    for key in ("summary", "money", "debt", "overdue", "orders", "work", "customers", "products", "expense", "notes", "frozen", "remind"):
+    for key in ("summary", "money", "debt", "overdue", "orders", "work", "customers", "products", "expense", "notes", "frozen", "remind", "count", "rank", "discount", "status"):
         if key in topics and names.get(key):
             bits.append(names[key])
     if customers:
@@ -489,6 +604,8 @@ def _header(
         bits.append(f"{len(order_ids)} зак.")
     if period_label:
         bits.append(period_label)
+    if recent_label:
+        bits.append(html_esc(recent_label))
     if pay == "debt":
         bits.append("только долг")
     elif pay == "paid":
@@ -503,15 +620,18 @@ def _header(
 def _topics(text: str) -> tuple[set[str], str]:
     found: set[str] = set()
     rules = (
-        ("incoming", r"ожида\w*|поступ\w*"),
+        ("incoming", r"ожида\w*|поступ\w*|ближайш\w*"),
         ("overdue", r"просроч\w*"),
-        ("debt", r"долг\w*|дебитор\w*|задолж\w*|неоплач\w*|не оплач\w*|кто долж\w*"),
         ("expense", r"расход\w*|налог\w*|затрат\w*"),
         ("frozen", r"заморож\w*"),
         ("notes", r"заметк\w*|коммент\w*|примечан\w*"),
         ("work", r"календар\w*|в работе|ид[её]т|запланир\w*|закрыт\w*|без дат|финиш\w*|пауз\w*"),
         ("customers", r"заказчик\w*|клиент\w*|контакт\w*|телефон\w*|почт\w*|адрес\w*"),
         ("products", r"продукт\w*|товар\w*|услуг\w*|хит продаж\w*"),
+        ("debt", r"долг\w*|долж\w*|дебитор\w*|неоплач\w*|не оплач\w*"),
+        ("count", r"сколько"),
+        ("rank", r"самы\w+|больше всех|\bтоп\b|крупн\w+"),
+        ("discount", r"скидк\w*"),
         ("status", r"статус\w*"),
         ("money", r"выруч\w*|оборот\w*|оплат\w*|пришл\w*|касс\w*|чист\w*|прибыл\w*|средний чек|собираем\w*|сводк\w*|дашборд|как дела|что у меня|итог\w*"),
         ("orders", r"заказ(?!чик)\w*"),
@@ -563,6 +683,42 @@ _MONTHS = (
     (11, r"ноябр\w*", "ноябрь"),
     (12, r"декабр\w*", "декабрь"),
 )
+
+
+def _take_recent(text: str) -> tuple[int, str]:
+    """«Последние 3 заказа» — срез по свежести, не поиск слова «последние»."""
+    rules = (
+        (r"(?:последн\w+|недавн\w+|свеж\w+)\s+(\d{1,2})", "n"),
+        (r"(\d{1,2})\s+(?:последн\w+|недавн\w+|свеж\w+)", "n"),
+        (r"последн(?:ий|яя|ее|его|юю)\b", "one"),
+        (r"последн\w+|недавн\w+|свеж\w+", "few"),
+    )
+    for pattern, kind in rules:
+        found = re.search(pattern, text)
+        if not found:
+            continue
+        count = int(found.group(1)) if kind == "n" else (1 if kind == "one" else 5)
+        count = max(1, min(30, count))
+        cleaned = f"{text[:found.start()]} {text[found.end():]}"
+        return count, cleaned
+    return 0, text
+
+
+def _latest_rows(rows: list[dict[str, Any]], count: int) -> list[dict[str, Any]]:
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        oid = str(row["order"].get("id") or id(row["order"]))
+        groups.setdefault(oid, []).append(row)
+
+    def freshness(oid: str) -> date:
+        days = [row["order_day"] for row in groups[oid] if row["order_day"]]
+        return max(days) if days else date.min
+
+    chosen = sorted(groups, key=freshness, reverse=True)[:count]
+    out: list[dict[str, Any]] = []
+    for oid in chosen:
+        out.extend(groups[oid])
+    return out
 
 
 def _take_period(text: str) -> tuple[str, str, str]:
@@ -1051,10 +1207,118 @@ def _order_ref(order: dict[str, Any]) -> str:
     name = str(order.get("name") or "").strip()
     bits = []
     if num:
-        bits.append(f"№{num}")
+        bits.append(num)
     if name:
         bits.append(name)
     return html_esc(" ".join(bits) or "Заказ")
+
+
+def _fold(lines: list[str], hidden: list[str], count: int, one: str, few: str, many: str) -> None:
+    if count <= 0 or not any(str(line).strip() for line in hidden):
+        return
+    label = "Показать " + _pieces(count, one, few, many)
+    lines.append("<details>")
+    lines.append(f"<summary>{html_esc(label)}</summary>")
+    lines.extend(hidden)
+    lines.append("</details>")
+
+
+def _count(rows: list[dict[str, Any]], cash, *, overdue_only: bool = False) -> str:
+    picked = rows
+    if overdue_only:
+        picked = [row for row in rows if not row["tot"].get("kind") and (row["overdue"] or 0) > 0]
+    income = [row for row in picked if not row["tot"].get("kind") and not row["frozen"]]
+    after = sum(float(row["tot"]["after"]) for row in income)
+    paid = sum(float(row["tot"]["paid"]) for row in income)
+    unpaid = sum(float(row["tot"]["unpaid"]) for row in income if not row["cancelled"])
+    cost = sum(float(row["tot"]["cost"]) for row in picked if row["tot"].get("kind") and not row["frozen"])
+    orders = {str(row["order"].get("id") or id(row["order"])) for row in income}
+    title = "Просрочено" if overdue_only else "Коротко"
+    lines = [
+        f"<b>{title}</b>",
+        f"• {_pieces(len(orders), 'заказ', 'заказа', 'заказов')}",
+        f"• {_pieces(len(income), 'позиция', 'позиции', 'позиций')}",
+        f"• к оплате {cash(after)}",
+        f"• оплачено {cash(paid)}",
+        f"• долг {cash(unpaid)}",
+        f"• расходы {cash(cost)}",
+        f"• чистыми {cash(after - cost)}",
+    ]
+    if not income and cost <= 0.005:
+        lines.append("В этом срезе ничего нет.")
+    return "\n".join(lines)
+
+
+def _rank(rows: list[dict[str, Any]], cash, *, by_debt: bool = False) -> str:
+    income = [row for row in rows if not row["tot"].get("kind") and not row["frozen"]]
+    by_customer: dict[str, list[float]] = {}
+    by_order: dict[str, dict[str, Any]] = {}
+    for row in income:
+        cur = by_customer.setdefault(row["customer"], [0.0, 0.0])
+        cur[0] += float(row["tot"]["after"])
+        cur[1] += float(row["tot"]["unpaid"])
+        oid = str(row["order"].get("id") or id(row["order"]))
+        item = by_order.setdefault(
+            oid,
+            {"order": row["order"], "customer": row["customer"], "after": 0.0, "unpaid": 0.0},
+        )
+        item["after"] += float(row["tot"]["after"])
+        item["unpaid"] += float(row["tot"]["unpaid"])
+    lines = ["<b>Крупные</b>"]
+    if not income:
+        lines.append("В этом срезе сумм нет.")
+        return "\n".join(lines)
+    key_i = 1 if by_debt else 0
+    lines.append("Заказчики по долгу" if by_debt else "Заказчики по сумме")
+    for name, (after, unpaid) in sorted(by_customer.items(), key=lambda pair: -pair[1][key_i])[:5]:
+        lines.append(f"• {html_esc(name)} · {cash(after)} · долг {cash(unpaid)}")
+    lines.append("Заказы по долгу" if by_debt else "Заказы по сумме")
+    for item in sorted(by_order.values(), key=lambda bit: -(bit["unpaid"] if by_debt else bit["after"]))[:5]:
+        lines.append(
+            f"• {_order_ref(item['order'])} · {html_esc(item['customer'])} · {cash(item['after'])} · долг {cash(item['unpaid'])}"
+        )
+    return "\n".join(lines)
+
+
+def _statuses(rows: list[dict[str, Any]], cash) -> str:
+    acc: dict[str, list[float]] = {}
+    for row in rows:
+        if row["frozen"] or row["tot"].get("kind"):
+            continue
+        name = str(row["line"].get("status") or "").strip() or "Без статуса"
+        cur = acc.setdefault(name, [0.0, 0.0, 0.0])
+        cur[0] += 1
+        cur[1] += float(row["tot"]["after"])
+        cur[2] += float(row["tot"]["unpaid"])
+    ranked = sorted(acc.items(), key=lambda pair: -pair[1][0])
+    lines = [f"<b>Статусы</b> · {len(ranked)}"]
+    status_lines = [
+        f"• {html_esc(name)} · {_pieces(int(count), 'позиция', 'позиции', 'позиций')} · {cash(after)} · долг {cash(unpaid)}"
+        for name, (count, after, unpaid) in ranked
+    ]
+    lines.extend(status_lines[:24])
+    _fold(lines, status_lines[24:], len(status_lines) - 24, "статус", "статуса", "статусов")
+    if not ranked:
+        lines.append("Статусов в этом срезе нет.")
+    return "\n".join(lines)
+
+
+def _discounts(rows: list[dict[str, Any]], cash) -> str:
+    hits = [
+        row
+        for row in rows
+        if not row["frozen"] and not row["tot"].get("kind") and float(row["tot"].get("discount") or 0) > 0.005
+    ]
+    hits.sort(key=lambda row: -float(row["tot"].get("discount") or 0))
+    lines = [f"<b>Скидки</b> · {len(hits)}"]
+    for row in hits:
+        disc = float(row["tot"].get("discount") or 0)
+        percent = f"{disc:.2f}".rstrip("0").rstrip(".")
+        product = html_esc(str(row["line"].get("product") or "позиция"))
+        lines.append(f"• {_order_ref(row['order'])} · {product} · {percent} % · {cash(float(row['tot']['after']))}")
+    if not hits:
+        lines.append("Скидок в этом срезе нет.")
+    return "\n".join(lines)
 
 
 def _summary(doc: dict[str, Any], rows: list[dict[str, Any]], today: date, cash, terms: int, delays: tuple[float, bool, dict[str, float]], period: str = "all") -> str:
@@ -1173,14 +1437,21 @@ def _debts(
     for item in items:
         grouped.setdefault(item[0]["customer"], []).append(item)
     ranked = sorted(grouped.items(), key=lambda pair: -sum(bit[1] for bit in pair[1]))
-    for customer, bits in ranked:
-        lines.append(f"\n<b>{html_esc(customer)}</b> — {cash(sum(bit[1] for bit in bits))}")
-        for row, amount, _expected, _delay in bits:
-            due = _fmt(row["due"])
-            late = row["overdue"]
-            mark = "срок не задан" if late is None else ("срок ещё не вышел" if late <= 0 else f"просрочка {late} {_days(late)}")
-            product = html_esc(str(row["line"].get("product") or "позиция"))
-            lines.append(f"• {_order_ref(row['order'])} · {product} · {html_esc(qty_text(row['line']))} · {due} · {mark} · {cash(amount)}")
+
+    def write_people(target: list[str], people: list) -> None:
+        for customer, bits in people:
+            target.append(f"\n<b>{html_esc(customer)}</b> — {cash(sum(bit[1] for bit in bits))}")
+            for row, amount, _expected, _delay in bits:
+                due = _fmt(row["due"])
+                late = row["overdue"]
+                mark = "срок не задан" if late is None else ("срок ещё не вышел" if late <= 0 else f"просрочка {late} {_days(late)}")
+                product = html_esc(str(row["line"].get("product") or "позиция"))
+                target.append(f"• {_order_ref(row['order'])} · {product} · {html_esc(qty_text(row['line']))} · {due} · {mark} · {cash(amount)}")
+
+    write_people(lines, ranked[:12])
+    hidden_people: list[str] = []
+    write_people(hidden_people, ranked[12:])
+    _fold(lines, hidden_people, max(0, len(ranked) - 12), "заказчик", "заказчика", "заказчиков")
     if not items:
         lines.append("Неоплаченных позиций нет.")
     return "\n".join(lines)
@@ -1201,37 +1472,45 @@ def _orders(rows: list[dict[str, Any]], cash) -> str:
     if not grouped:
         lines.append("Подходящих заказов нет.")
         return "\n".join(lines)
-    for oid, bits in grouped.items():
-        order = order_of[oid]
-        after = sum(float(row["tot"]["after"]) for row in bits)
-        paid = sum(float(row["tot"]["paid"]) for row in bits)
-        unpaid = sum(float(row["tot"]["unpaid"]) for row in bits)
-        state = bits[0]["state"]
-        state_label = {"now": "в работе", "planned": "запланирован", "done": "закрыт", "nodate": "без дат"}[state]
-        lines.append(
-            f"\n<b>{_order_ref(order)}</b> · {html_esc(bits[0]['customer'])} · {state_label}\n"
-            f"к оплате {cash(after)} · оплачено {cash(paid)} · долг {cash(unpaid)}"
-        )
-        note = str(order.get("notes") or "").strip()
-        if note:
-            lines.append("заметка: " + html_esc(note))
-        for row in bits:
-            line = row["line"]
-            status = str(line.get("status") or "").strip()
-            extra = f" · {html_esc(status)}" if status else ""
-            when = _fmt(row["order_day"])
-            lines.append(
-                f"• {html_esc(str(line.get('product') or 'позиция'))} · {html_esc(qty_text(line))} · "
-                f"{cash(float(row['tot']['after']))} · долг {cash(float(row['tot']['unpaid']))} · {when}{extra}"
+    pairs = list(grouped.items())
+
+    def write_orders(target: list[str], chunk: list) -> None:
+        for oid, bits in chunk:
+            order = order_of[oid]
+            after = sum(float(row["tot"]["after"]) for row in bits)
+            paid = sum(float(row["tot"]["paid"]) for row in bits)
+            unpaid = sum(float(row["tot"]["unpaid"]) for row in bits)
+            state = bits[0]["state"]
+            state_label = {"now": "в работе", "planned": "запланирован", "done": "закрыт", "nodate": "без дат"}[state]
+            target.append(
+                f"\n<b>{_order_ref(order)}</b> · {html_esc(bits[0]['customer'])} · {state_label}\n"
+                f"к оплате {cash(after)} · оплачено {cash(paid)} · долг {cash(unpaid)}"
             )
-            comment = str(line.get("notes") or "").strip()
-            if comment:
-                lines.append("  " + html_esc(comment))
-        for row in costs.get(oid) or []:
-            kind = "налог" if row["tot"].get("kind") == "tax" else "затрата"
-            lines.append(
-                f"• {html_esc(str(row['line'].get('product') or kind))} · {kind} · {cash(float(row['tot']['cost']))}"
-            )
+            note = str(order.get("notes") or "").strip()
+            if note:
+                target.append("заметка: " + html_esc(note))
+            for row in bits:
+                line = row["line"]
+                status = str(line.get("status") or "").strip()
+                extra = f" · {html_esc(status)}" if status else ""
+                when = _fmt(row["order_day"])
+                target.append(
+                    f"• {html_esc(str(line.get('product') or 'позиция'))} · {html_esc(qty_text(line))} · "
+                    f"{cash(float(row['tot']['after']))} · долг {cash(float(row['tot']['unpaid']))} · {when}{extra}"
+                )
+                comment = str(line.get("notes") or "").strip()
+                if comment:
+                    target.append("  " + html_esc(comment))
+            for row in costs.get(oid) or []:
+                kind = "налог" if row["tot"].get("kind") == "tax" else "затрата"
+                target.append(
+                    f"• {html_esc(str(row['line'].get('product') or kind))} · {kind} · {cash(float(row['tot']['cost']))}"
+                )
+
+    write_orders(lines, pairs[:12])
+    hidden_orders: list[str] = []
+    write_orders(hidden_orders, pairs[12:])
+    _fold(lines, hidden_orders, max(0, len(pairs) - 12), "заказ", "заказа", "заказов")
     return "\n".join(lines)
 
 
@@ -1284,18 +1563,24 @@ def _customers(doc: dict[str, Any], rows: list[dict[str, Any]], cash) -> str:
         grouped.items(),
         key=lambda pair: -sum(float(row["tot"]["unpaid"]) for row in pair[1] if not row["tot"].get("kind")),
     )
-    for customer, bits in ranked:
-        card = book.get(_norm(customer), {})
-        unpaid = sum(float(row["tot"]["unpaid"]) for row in bits if not row["tot"].get("kind") and not row["cancelled"])
-        orders = {str(row["order"].get("id") or id(row["order"])) for row in bits}
-        lines.append(f"\n<b>{html_esc(customer)}</b> · долг {cash(unpaid)} · {_pieces(len(orders), 'заказ', 'заказа', 'заказов')}")
-        org = str(card.get("organization") or "").strip()
-        phone = str(card.get("phone") or "").strip()
-        email = str(card.get("email") or "").strip()
-        address = str(card.get("address") or "").strip()
-        extra = " · ".join(html_esc(bit) for bit in (org, phone, email, address) if bit)
-        if extra:
-            lines.append(extra)
+    def write_customers(target: list[str], people: list) -> None:
+        for customer, bits in people:
+            card = book.get(_norm(customer), {})
+            unpaid = sum(float(row["tot"]["unpaid"]) for row in bits if not row["tot"].get("kind") and not row["cancelled"])
+            orders = {str(row["order"].get("id") or id(row["order"])) for row in bits}
+            target.append(f"\n<b>{html_esc(customer)}</b> · долг {cash(unpaid)} · {_pieces(len(orders), 'заказ', 'заказа', 'заказов')}")
+            org = str(card.get("organization") or "").strip()
+            phone = str(card.get("phone") or "").strip()
+            email = str(card.get("email") or "").strip()
+            address = str(card.get("address") or "").strip()
+            extra = " · ".join(html_esc(bit) for bit in (org, phone, email, address) if bit)
+            if extra:
+                target.append(extra)
+
+    write_customers(lines, ranked[:20])
+    hidden_customers: list[str] = []
+    write_customers(hidden_customers, ranked[20:])
+    _fold(lines, hidden_customers, max(0, len(ranked) - 20), "заказчик", "заказчика", "заказчиков")
     if not grouped:
         lines.append("Заказчиков в этом срезе нет.")
     return "\n".join(lines)
@@ -1313,8 +1598,12 @@ def _products(rows: list[dict[str, Any]], cash) -> str:
         cur[2] += float(row["tot"]["unpaid"])
     ranked = sorted(acc.items(), key=lambda pair: -pair[1][0])
     lines = [f"<b>Продукты</b> · {len(ranked)}"]
-    for name, (after, paid, unpaid) in ranked:
-        lines.append(f"• {html_esc(name)} · {cash(after)} · оплачено {cash(paid)} · долг {cash(unpaid)}")
+    product_lines = [
+        f"• {html_esc(name)} · {cash(after)} · оплачено {cash(paid)} · долг {cash(unpaid)}"
+        for name, (after, paid, unpaid) in ranked
+    ]
+    lines.extend(product_lines[:20])
+    _fold(lines, product_lines[20:], len(product_lines) - 20, "продукт", "продукта", "продуктов")
     if not ranked:
         lines.append("Продуктов в этом срезе нет.")
     return "\n".join(lines)
@@ -1324,7 +1613,7 @@ def _expenses(rows: list[dict[str, Any]], matched: list[dict[str, Any]], custome
     order_filter = {str(row["order"].get("id") or "") for row in matched}
     lines_out = ["<b>Расходы</b>"]
     total = 0.0
-    count = 0
+    kept: list[str] = []
     for row in rows:
         if row["frozen"] or not row["tot"].get("kind"):
             continue
@@ -1336,10 +1625,12 @@ def _expenses(rows: list[dict[str, Any]], matched: list[dict[str, Any]], custome
             continue
         amount = float(row["tot"]["cost"])
         total += amount
-        count += 1
         kind = "налог" if row["tot"].get("kind") == "tax" else "затрата"
-        lines_out.append(f"• {_order_ref(row['order'])} · {html_esc(str(row['line'].get('product') or kind))} · {kind} · {cash(amount)}")
+        kept.append(f"• {_order_ref(row['order'])} · {html_esc(str(row['line'].get('product') or kind))} · {kind} · {cash(amount)}")
+    count = len(kept)
     lines_out.insert(1, f"{_pieces(count, 'строка', 'строки', 'строк')} · {cash(total)}")
+    lines_out.extend(kept[:24])
+    _fold(lines_out, kept[24:], count - 24, "строка", "строки", "строк")
     if count == 0:
         lines_out.append("Расходных строк нет.")
     return "\n".join(lines_out)
