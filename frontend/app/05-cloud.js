@@ -3738,6 +3738,11 @@
           $("remote-guide-modal").classList.remove("open");
           return;
         }
+        if (dictionaryIsOpen()) {
+          e.preventDefault();
+          closeDictionary();
+          return;
+        }
         if ($("remote-modal").classList.contains("open")) $("remote-modal").classList.remove("open");
         if (!$("file-menu")?.hidden) {
           e.preventDefault();
@@ -3826,13 +3831,23 @@
         return;
       }
       if (code === "KeyZ" && !e.shiftKey) {
-        if (assistantCapturesUndo()) return;
+        if (dictionaryTextUndo(e)) {
+          e.preventDefault();
+          document.execCommand("undo");
+          return;
+        }
+        if (dictionaryIsOpen() || assistantCapturesUndo()) return;
         e.preventDefault();
         undo();
         return;
       }
       if (code === "KeyY" || (code === "KeyZ" && e.shiftKey)) {
-        if (assistantCapturesUndo()) return;
+        if (dictionaryTextUndo(e)) {
+          e.preventDefault();
+          document.execCommand("redo");
+          return;
+        }
+        if (dictionaryIsOpen() || assistantCapturesUndo()) return;
         e.preventDefault();
         redo();
       }

@@ -1,7 +1,3 @@
-/* bundle-seam */
-(() => {
-  /* ==== Прогнозирование: месяцы и годы вперёд ==== */
-
   const FORECAST_MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
   const FORECAST_PERIOD = 12;
   const FORECAST_MODEL_COLORS = ["#c9a227", "#7c3aed", "#0891b2", "#db2777", "#ea580c", "#16a34a", "#64748b", "#0ea5e9"];
@@ -572,4 +568,3 @@
   }
 
   if (typeof document !== "undefined") bindForecast();
-})();

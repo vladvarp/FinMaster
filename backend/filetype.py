@@ -1,4 +1,4 @@
-"""Привязка .fmaster и .fbak к FinMaster.exe и их иконкам. Только для текущего пользователя."""
+"""Привязка .fmaster и .fbak к FinMaster.exe. У .fmwb только иконка книги: щелчок его не открывает."""
 
 from __future__ import annotations
 
@@ -48,6 +48,63 @@ def _write(key: str, value: str, extra: dict[str, str] | None = None) -> bool:
     return changed
 
 
+def _delete_key(key: str) -> bool:
+    import winreg
+
+    try:
+        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, key)
+        return True
+    except OSError:
+        return False
+
+
+def _delete_value(key: str, name: str) -> bool:
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key, 0, winreg.KEY_SET_VALUE) as handle:
+            winreg.DeleteValue(handle, name)
+        return True
+    except OSError:
+        return False
+
+
+def _drop_dictionary_launch() -> bool:
+    """Снять команду «Открыть» у словаря, если она уже записана."""
+    prog = "FinMaster.Dictionary"
+    changed = False
+    for key in (
+        f"{_CLASSES}\\{prog}\\shell\\open\\command",
+        f"{_CLASSES}\\{prog}\\shell\\open",
+        f"{_CLASSES}\\{prog}\\shell",
+    ):
+        changed |= _delete_key(key)
+    changed |= _delete_value(f"{_CLASSES}\\.fmwb\\OpenWithProgids", prog)
+    ext_key = r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.fmwb"
+    changed |= _delete_key(ext_key + r"\UserChoice")
+    changed |= _delete_key(ext_key + r"\OpenWithList")
+    changed |= _delete_key(ext_key + r"\OpenWithProgids")
+    changed |= _delete_key(ext_key)
+    return changed
+
+
+def _register_dictionary_icon(root: str) -> bool:
+    """Иконка книги без запуска программы."""
+    prog = "FinMaster.Dictionary"
+    icon = _icon(root, "dictionary.ico")
+    exe = _exe(root)
+    icon_value = f'"{icon}",0' if os.path.isfile(icon) else f'"{exe}",0'
+    changed = False
+    changed |= _write(
+        f"{_CLASSES}\\.fmwb",
+        prog,
+        {"PerceivedType": "Document", "Content Type": "application/x-finmaster-dictionary"},
+    )
+    changed |= _write(f"{_CLASSES}\\{prog}", "Словарь FinMaster")
+    changed |= _write(f"{_CLASSES}\\{prog}\\DefaultIcon", icon_value)
+    return changed
+
+
 def _notify() -> None:
     if sys.platform != "win32":
         return
@@ -88,5 +145,7 @@ def register_reports(root: str) -> None:
         "backup.ico",
         "application/x-finmaster-backup",
     )
+    changed |= _drop_dictionary_launch()
+    changed |= _register_dictionary_icon(root)
     if changed:
         _notify()

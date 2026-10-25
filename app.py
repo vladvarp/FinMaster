@@ -13,10 +13,19 @@ from typing import Any
 from flask import Flask, g, jsonify, redirect, request, send_from_directory
 
 from backend import ask
+from backend import dictionary
 from backend import netlog, qr, runtime, storage
 from backend.backup import is_backup_path
 from backend import backup as report_backup
-from backend.dialogs import open_report_dialog, save_csv_dialog, save_pdf_dialog, save_png_dialog, save_report_dialog
+from backend.dialogs import (
+    open_dictionary_dialog,
+    open_report_dialog,
+    save_csv_dialog,
+    save_dictionary_dialog,
+    save_pdf_dialog,
+    save_png_dialog,
+    save_report_dialog,
+)
 from backend.document import empty_document, normalize_document, now_iso
 from backend.remote import SESSION as REMOTE
 from backend.remote import lan_candidates
@@ -29,6 +38,7 @@ from backend.instance import (
     owns_instance,
     publish as publish_instance,
     queue as queue_instance,
+    requested_handoff,
     requested_report,
     take_pending,
 )
@@ -969,15 +979,172 @@ def api_ask():
         return jsonify({"error": "Доступ запрещён."}), 403
     data = request.get_json(silent=True) or {}
     query = str(data.get("query") or "").strip()
-    doc = data.get("doc")
+    doc = data.get("doc") if isinstance(data.get("doc"), dict) else None
     if not query:
         return jsonify({"error": "Введите запрос."}), 400
-    if not isinstance(doc, dict):
-        return jsonify({"error": "Нет открытого отчёта."}), 400
-    reply = ask.parse(query, doc, voice=True, surface="desk")
-    if reply is None or not str(reply.html or "").strip():
-        return jsonify({"title": "Ответ", "lead": "", "chips": [], "sections": [{"title": "Ответ", "rows": [{"kind": "text", "text": "В отчёте по этому запросу ничего нет."}]}]})
-    return jsonify(ask.present(reply.html))
+    raw_book = data.get("book")
+    book = dictionary.normalize_book(raw_book) if isinstance(raw_book, dict) else None
+    reply = ask.parse(query, doc, voice=True, surface="desk", book=book)
+    return jsonify(ask.api_body(reply, query, doc, "desk", book))
+
+
+def _dictionary_payload(book: dict[str, Any], status: str) -> dict[str, Any]:
+    return {
+        "ok": status != "broken",
+        "status": status,
+        "broken": status == "broken",
+        "path": dictionary.working_path(),
+        "book": book,
+        "catalog": dictionary.catalog(),
+    }
+
+
+@app.get("/api/dictionary")
+def api_dictionary_get():
+    if not _is_local() and not _desk_editor():
+        return jsonify({"error": "Доступ запрещён."}), 403
+    book, status = dictionary.load()
+    return jsonify(_dictionary_payload(book, status))
+
+
+@app.post("/api/dictionary")
+def api_dictionary_save():
+    if not _is_local() and not _desk_editor():
+        return jsonify({"error": "Доступ запрещён."}), 403
+    data = request.get_json(silent=True) or {}
+    raw = data.get("book")
+    if isinstance(raw, dict):
+        raw = dict(raw)
+        raw["kind"] = dictionary.KIND
+    book = dictionary.validate(raw)
+    if book is None:
+        return jsonify({"error": "Это не словарь FinMaster."}), 400
+    dictionary.save(book)
+    return jsonify(_dictionary_payload(book, "ok"))
+
+
+@app.post("/api/dictionary/reset")
+def api_dictionary_reset():
+    if not _is_local() and not _desk_editor():
+        return jsonify({"error": "Доступ запрещён."}), 403
+    data = request.get_json(silent=True) or {}
+    if data.get("all"):
+        book = dictionary.restore_all()
+        return jsonify(_dictionary_payload(book, "ok"))
+    raw = data.get("book")
+    current = None
+    if isinstance(raw, dict):
+        raw = dict(raw)
+        raw["kind"] = dictionary.KIND
+        current = dictionary.validate(raw)
+    if current is None:
+        current, _status = dictionary.load()
+    kind = {"commands": "command", "keywords": "keyword", "synonyms": "synonym"}.get(
+        str(data.get("kind") or ""), str(data.get("kind") or "")
+    )
+    book = dictionary.restore_entry(current, kind, str(data.get("id") or ""))
+    dictionary.save(book)
+    return jsonify(_dictionary_payload(book, "ok"))
+
+
+@app.post("/api/dictionary/export")
+def api_dictionary_export():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    path = save_dictionary_dialog("Словарь.fmwb", storage.load_config().get("last_dir") or "")
+    if not path:
+        return jsonify({"cancelled": True})
+    book, _status = dictionary.load()
+    dictionary.save(book, path)
+    return jsonify({"ok": True, "path": path, "cancelled": False})
+
+
+@app.post("/api/dictionary/pick")
+def api_dictionary_pick():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    path = open_dictionary_dialog(storage.load_config().get("last_dir") or "")
+    if not path:
+        return jsonify({"cancelled": True})
+    if dictionary.same_working(path):
+        book, status = dictionary.load()
+        return jsonify({"cancelled": False, "working": True, **_dictionary_payload(book, status)})
+    book, error = dictionary.read_import(path)
+    if book is None:
+        return jsonify({"cancelled": False, "ok": False, "error": error or "Это не словарь FinMaster."})
+    return jsonify({"cancelled": False, "ok": True, "working": False, "book": book, "path": path})
+
+
+@app.post("/api/dictionary/inspect")
+def api_dictionary_inspect():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    path = str(data.get("path") or "")
+    if dictionary.same_working(path):
+        book, status = dictionary.load()
+        return jsonify({"working": True, **_dictionary_payload(book, status)})
+    book, error = dictionary.read_import(path)
+    if book is None:
+        return jsonify({"ok": False, "working": False, "error": error or "Это не словарь FinMaster."})
+    return jsonify({"ok": True, "working": False, "book": book, "path": path})
+
+
+@app.post("/api/dictionary/probe")
+def api_dictionary_probe():
+    if not _is_local() and not _desk_editor():
+        return jsonify({"error": "Доступ запрещён."}), 403
+    data = request.get_json(silent=True) or {}
+    query = str(data.get("query") or "").strip()
+    surface = "bot" if data.get("surface") == "bot" else "desk"
+    doc = data.get("doc") if isinstance(data.get("doc"), dict) else None
+    raw_book = data.get("book")
+    book = None
+    if isinstance(raw_book, dict):
+        raw_book = dict(raw_book)
+        raw_book["kind"] = dictionary.KIND
+        book = dictionary.validate(raw_book)
+    if not query:
+        return jsonify({"title": "Проба", "lead": "", "chips": [], "sections": [], "hints": [], "hintOnly": False, "template": ""})
+    reply = ask.parse(query, doc, voice=False, surface=surface, book=book)
+    html = str(reply.html or "") if reply else ""
+    help = html.startswith("<b>Что можно спросить</b>") or html.startswith("<b>Спросите по открытому отчёту</b>")
+    if doc is None and not (reply and (reply.action or help)):
+        return jsonify(
+            {
+                "title": "Проба",
+                "lead": "Отчёт не открыт.",
+                "chips": [],
+                "sections": [{"title": "Проба", "rows": [{"kind": "text", "text": "Отчёт не открыт."}]}],
+                "hints": [],
+                "hintOnly": False,
+                "template": "",
+            }
+        )
+    if reply and reply.action and not str(reply.html or "").strip():
+        names = {
+            "reports": "Открываю список отчётов.",
+            "orders": "Открываю заказы.",
+            "snap": "Открываю снимок.",
+            "link": "Присылаю ссылку.",
+            "pc": "Открываю отчёт на компьютере.",
+            "open_report": "Открываю отчёт.",
+        }
+        return jsonify(
+            {
+                "title": "Проба",
+                "lead": "",
+                "chips": [],
+                "sections": [{"title": "Действие", "rows": [{"kind": "text", "text": names.get(reply.action, reply.action)}]}],
+                "hints": [],
+                "hintOnly": False,
+                "template": "",
+            }
+        )
+    payload = ask.api_body(reply, query, doc, surface, book)
+    if reply is not None and str(reply.html or "").strip():
+        payload["html"] = str(reply.html)
+    return jsonify(payload)
 
 
 @app.post("/api/ui-pref")
@@ -2190,7 +2357,7 @@ def run_server(port: int) -> None:
 def main(splash=None) -> None:
     global WINDOW, WINDOW_FULLSCREEN, FORCE_CLOSE, DIRTY, SERVER_PORT
 
-    if sys.platform == "win32" and not owns_instance() and claim_or_handoff(requested_report()):
+    if sys.platform == "win32" and not owns_instance() and claim_or_handoff(requested_handoff()):
         if splash is not None:
             try:
                 splash.close()
@@ -2239,6 +2406,10 @@ def main(splash=None) -> None:
 
     try:
         register_reports(ROOT)
+    except Exception:
+        pass
+    try:
+        dictionary.ensure()
     except Exception:
         pass
     try:

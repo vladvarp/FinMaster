@@ -1,7 +1,7 @@
 Option Explicit
 ' Удаление FinMaster. Запуск без аргументов — окно с галочками.
 ' launch.vbs вызывает: wscript uninstall.vbs /register
-' Галочки по умолчанию: папка программы (ярлыки, иконки .fmaster/.fbak, автозагрузка) и Python в Документы\FinMaster\python.
+' Галочки по умолчанию: папка программы (ярлыки, иконки .fmaster/.fbak/.fmwb, автозагрузка) и Python в Документы\FinMaster\python.
 ' Выключены: папка %APPDATA%\FinMaster (config.json), история, резервные копии, отчёты .fmaster. Эти четыре пункта уходят в корзину.
 
 Const HKCU = &H80000001
@@ -169,7 +169,7 @@ Function BuildHta(folder, resultPath)
   dir = AppDataDir()
   cfg = ConfigFile()
   progOn = True
-  progHint = HtmlEsc(folder) & "<br><span class=""warn"">" & T("Ярлыки, привязка .fmaster и .fbak, автозагрузка и запись в списке программ. Python внутри папки программы удаляется вместе с ней.") & "</span>"
+  progHint = HtmlEsc(folder) & "<br><span class=""warn"">" & T("Ярлыки, привязка .fmaster, .fbak и .fmwb, автозагрузка и запись в списке программ. Python внутри папки программы удаляется вместе с ней.") & "</span>"
   If IsRepo(folder) Then
     progOn = False
     progHint = HtmlEsc(folder) & "<br><span class=""warn"">" & T("Это папка репозитория, она не удаляется.") & "</span>"
@@ -570,8 +570,10 @@ Sub RemoveAssociations()
   On Error GoTo 0
   ClearExt reg, ".fmaster", "FinMaster.Report"
   ClearExt reg, ".fbak", "FinMaster.Backup"
+  ClearExt reg, ".fmwb", "FinMaster.Dictionary"
   DelTree reg, "Software\Classes\FinMaster.Report"
   DelTree reg, "Software\Classes\FinMaster.Backup"
+  DelTree reg, "Software\Classes\FinMaster.Dictionary"
   NotifyAssoc
 End Sub
 

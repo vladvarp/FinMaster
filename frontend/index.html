@@ -1116,6 +1116,7 @@
         <span class="ico">✦</span>
         <input id="ask-query" type="text" placeholder="Долги, номер, заказчик, продукт…" autocomplete="off" spellcheck="false" aria-label="Запрос по отчёту" />
       </label>
+      <div id="ask-hints" class="ask-hints" hidden></div>
       <div class="ask-scroll">
         <p class="ask-lead" id="ask-lead" hidden></p>
         <div class="ask-chips" id="ask-chips"></div>
@@ -1129,6 +1130,7 @@
       <div class="modal-title-row">
         <h3>Управление с телефона</h3>
         <div class="modal-title-actions">
+          <button type="button" class="btn small" id="dictionary-open">Словари</button>
           <button type="button" class="btn small" id="remote-console-open" title="Консоль сети (Ctrl+Ё)">Консоль</button>
           <button type="button" class="info-btn" id="remote-guide-open" title="Как подключить телефон" aria-label="Как подключить телефон">i</button>
         </div>
@@ -1479,6 +1481,65 @@
   </div>
   <div class="line-menu" id="line-menu" hidden role="menu">
     <button type="button" class="btn" id="line-menu-freeze" role="menuitem">Заморозить позицию</button>
+  </div>
+  <div id="dictionary-layer" class="dictionary-layer" hidden>
+    <header class="dictionary-bar">
+      <h2>Словари</h2>
+      <div class="dictionary-global">
+        <span>Весь словарь</span>
+        <button type="button" class="btn small primary" id="dictionary-save" title="Записать весь словарь в файл dictionary.fmwb">Сохранить</button>
+        <button type="button" class="btn small" id="dictionary-cancel" title="Отбросить несохранённые правки и прочитать словарь с диска">Отмена</button>
+        <button type="button" class="btn small" id="dictionary-export" title="Сохранить копию всего словаря в отдельный файл .fmwb">Экспорт</button>
+        <button type="button" class="btn small" id="dictionary-import" title="Заменить весь словарь другим файлом .fmwb. Открытый отчёт не меняется">Импорт</button>
+        <button type="button" class="btn small" id="dictionary-restore-all" title="Вернуть заводские команды и ключевые слова. Свои карточки пропадут">Заводской словарь</button>
+      </div>
+      <button type="button" class="ask-tool" id="dictionary-close" title="Закрыть словарь" aria-label="Закрыть">×</button>
+    </header>
+    <p id="dictionary-broken" class="dictionary-broken" hidden>Файл словаря повреждён. Запросы идут по заводскому словарю, пока не сохраните правку или не нажмёте «Заводской словарь».</p>
+    <div class="dictionary-body">
+      <aside class="dictionary-side">
+        <input id="dictionary-filter" type="text" placeholder="Фильтр списков" title="Оставляет карточки, в которых есть эти буквы" autocomplete="off" spellcheck="false" />
+        <section>
+          <div class="dictionary-head">
+            <h3>Синонимы</h3>
+            <button type="button" class="btn small" id="dictionary-add-synonyms" title="Новая карточка синонима. Например слово «кв» означает квартира, дом, комната">Добавить</button>
+          </div>
+          <div id="dictionary-synonyms" class="dictionary-list"></div>
+        </section>
+        <section>
+          <div class="dictionary-head">
+            <h3>Команды</h3>
+            <button type="button" class="btn small" id="dictionary-add-commands" title="Новая команда. Фразы слева, состав ответа справа">Добавить</button>
+          </div>
+          <div id="dictionary-commands" class="dictionary-list"></div>
+        </section>
+        <section>
+          <div class="dictionary-head">
+            <h3>Ключевые слова</h3>
+          </div>
+          <div id="dictionary-keywords" class="dictionary-list"></div>
+        </section>
+      </aside>
+      <div class="dictionary-main">
+        <h3 class="dictionary-local">Эта карточка</h3>
+        <div id="dictionary-editor" class="dictionary-editor"></div>
+      </div>
+      <aside id="dictionary-test" class="dictionary-test">
+        <button type="button" class="dictionary-test-toggle" id="dictionary-test-toggle" title="Скрыть тест словаря" aria-label="Скрыть тест словаря">›</button>
+        <div id="dictionary-test-resizer" class="dictionary-test-resizer" title="Потяните, чтобы изменить ширину"></div>
+        <div class="dictionary-test-body">
+          <div class="dictionary-test-head">
+            <h3>Тест словаря</h3>
+          </div>
+          <input id="dictionary-probe-query" type="text" placeholder="как спросит пользователь" title="Проверяет весь словарь, не только открытую карточку" autocomplete="off" spellcheck="false" />
+          <div class="dictionary-probe-switch">
+            <button type="button" class="btn small" id="dictionary-probe-bot" title="Ответ так, как его пришлёт бот">Как бот</button>
+            <button type="button" class="btn small" id="dictionary-probe-desk" title="Ответ так, как его покажет окно поиска на компьютере">Как поиск</button>
+          </div>
+          <div id="dictionary-probe-out" class="dictionary-probe-out"></div>
+        </div>
+      </aside>
+    </div>
   </div>
   <div class="toast" id="toast"></div>
   <input type="file" id="file-input" accept=".fmaster,.fbak,.json" hidden />

@@ -92,3 +92,13 @@ body {
 
 .stage .cloud-toolbar,
 .stage .cal-tools { flex-wrap: wrap; }
+
+.stage .dictionary-layer {
+  position: static !important;
+  inset: auto !important;
+  display: flex !important;
+  height: auto !important;
+  min-height: 560px !important;
+  z-index: auto !important;
+}
+.stage .dictionary-body { min-height: 480px; }

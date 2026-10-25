@@ -1126,7 +1126,6 @@
         } else {
           renderRemoteModal();
         }
-        if (!remote.enabled) remoteStart();
         remoteWatchStart();
       });
     });
@@ -1335,7 +1334,8 @@
     try {
       const data = await apiGet("/api/instance/pending");
       for (const path of data.paths || []) {
-        if (!path || (samePath(path, state.path) && state.doc)) continue;
+        if (!path || /\.fmwb$/i.test(path)) continue;
+        if (samePath(path, state.path) && state.doc) continue;
         const choice = await confirmSwitchReport();
         if (!choice || choice === "cancel") continue;
         if (choice === "save") {
@@ -1358,7 +1358,10 @@
       const pending = await apiGet("/api/instance/pending");
       const queued = (pending.paths || []).filter(Boolean);
       if (queued.length) {
-        for (const path of queued) await openPath(path);
+        for (const path of queued) {
+          if (/\.fmwb$/i.test(path)) continue;
+          await openPath(path);
+        }
         return;
       }
     } catch {

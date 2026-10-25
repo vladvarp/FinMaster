@@ -43,6 +43,14 @@
       },
       {
         group: "Действия",
+        ico: "Aa",
+        title: dictionaryIsOpen() ? "Скрыть словарь" : "Словарь запросов",
+        sub: "синонимы, команды и ключевые слова",
+        keys: "словари словарь",
+        run: () => (dictionaryIsOpen() ? closeDictionary() : openDictionary()),
+      },
+      {
+        group: "Действия",
         ico: ">_",
         title: netConsoleOpen() ? "Скрыть консоль сети" : "Консоль сети",
         sub: "подключения, синхронизация, Telegram и ngrok",
@@ -503,7 +511,7 @@
       .toLowerCase()
       .split(/\s+/)
       .filter(Boolean);
-    const all = [...paletteCommands(), ...paletteDataItems()];
+    const all = [...paletteCommands(), ...paletteDataItems(), ...dictionaryPaletteItems(tokens.join(" "))];
     const limit = tokens.length ? 16 : 5;
     let ranked = all.map((item, index) => ({ item, index, score: paletteScore(item, tokens) }));
     if (tokens.length) {
@@ -1325,14 +1333,26 @@
         chips: [],
         sections: [],
       });
+      paintAskHints([]);
       modal?.classList.remove("is-busy");
       return;
     }
-    if (!state.doc) return;
     modal?.classList.add("is-busy");
     try {
-      const data = await apiPost("/api/ask", { query, doc: state.doc });
+      const payload = { query, doc: state.doc || null };
+      if (dictionaryBook) payload.book = dictionaryBook;
+      const data = await apiPost("/api/ask", payload);
       if (token !== askToken) return;
+      paintAskHints(data.hints || []);
+      if (data.hintOnly) {
+        fillAskModal({
+          title: data.title || "Варианты",
+          lead: data.lead || "",
+          chips: [],
+          sections: data.sections || [],
+        });
+        return;
+      }
       fillAskModal(data);
     } catch (err) {
       if (token !== askToken) return;
@@ -1348,7 +1368,6 @@
   }
 
   function runAssistantAsk() {
-    if (!state.doc) return;
     openAskModal(String($("palette-input")?.value || "").trim());
   }
 

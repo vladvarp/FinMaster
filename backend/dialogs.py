@@ -310,3 +310,60 @@ def save_png_dialog(suggested: str = "Заказ.png", initial_dir: str = "") ->
             return path
         finally:
             root.destroy()
+
+
+def open_dictionary_dialog(initial_dir: str = "") -> str | None:
+    pairs = [("Словарь FinMaster", "*.fmwb"), ("Все файлы", "*.*")]
+    if not _tk_ready():
+        return _native_dialog(save=False, title="Открыть словарь FinMaster", pairs=pairs, initial_dir=initial_dir)
+    from tkinter import filedialog
+
+    with _lock:
+        root = _root()
+        try:
+            kwargs: dict[str, Any] = {"parent": root, "title": "Открыть словарь FinMaster", "filetypes": pairs}
+            if initial_dir:
+                kwargs["initialdir"] = initial_dir
+            path = filedialog.askopenfilename(**kwargs)
+            return path or None
+        finally:
+            root.destroy()
+
+
+def save_dictionary_dialog(suggested: str = "Словарь.fmwb", initial_dir: str = "") -> str | None:
+    pairs = [("Словарь FinMaster", "*.fmwb"), ("Все файлы", "*.*")]
+    if not _tk_ready():
+        return _with_extension(
+            _native_dialog(
+                save=True,
+                title="Сохранить словарь FinMaster",
+                pairs=pairs,
+                initial_dir=initial_dir,
+                initial_file=suggested,
+                default_ext=".fmwb",
+            ),
+            ".fmwb",
+        )
+    from tkinter import filedialog
+    import os
+
+    with _lock:
+        root = _root()
+        try:
+            kwargs: dict[str, Any] = {
+                "parent": root,
+                "title": "Сохранить словарь FinMaster",
+                "defaultextension": ".fmwb",
+                "filetypes": pairs,
+                "initialfile": suggested,
+            }
+            if initial_dir:
+                kwargs["initialdir"] = initial_dir
+            path = filedialog.asksaveasfilename(**kwargs)
+            if not path:
+                return None
+            if not os.path.splitext(path)[1]:
+                path += ".fmwb"
+            return path
+        finally:
+            root.destroy()

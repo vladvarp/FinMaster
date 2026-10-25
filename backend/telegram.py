@@ -450,6 +450,16 @@ def _position_cells(plain: str) -> list[str] | None:
     return [product, qty, total, debt, date, status]
 
 
+def _generic_table(header: list[str], rows: list[list[str]]) -> str:
+    lines = [
+        "| " + " | ".join(_md_text(cell) for cell in header) + " |",
+        "|" + "|".join("---" for _cell in header) + "|",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(_md_text(cell) for cell in row) + " |")
+    return "\n".join(lines)
+
+
 def _positions_table(rows: list[list[str]]) -> str:
     lines = [
         "| Продукт | Кол-во | Сумма | Долг | Дата | Статус |",
@@ -460,8 +470,33 @@ def _positions_table(rows: list[list[str]]) -> str:
     return "\n".join(lines)
 
 
+def _html_table_markdown(html: str) -> str:
+    """Таблица шаблона уходит в бот сеткой, а не списком ячеек."""
+
+    def one(match: re.Match[str]) -> str:
+        found = re.findall(r"<tr>(.*?)</tr>", match.group(1), flags=re.I | re.S)
+        body: list[list[str]] = []
+        for row in found:
+            cells = re.findall(r"<td>(.*?)</td>", row, flags=re.I | re.S)
+            body.append([_html_to_text(cell).strip() for cell in cells])
+        if not body:
+            return ""
+        width = max(len(row) for row in body)
+
+        def line(cells: list[str]) -> str:
+            padded = cells + [""] * (width - len(cells))
+            return "| " + " | ".join(_md_text(cell) for cell in padded) + " |"
+
+        lines = [line(body[0]), "|" + "|".join("---" for _index in range(width)) + "|"]
+        lines.extend(line(row) for row in body[1:])
+        return "\n" + "\n".join(lines) + "\n"
+
+    return re.sub(r"<table>(.*?)</table>", one, html, flags=re.I | re.S)
+
+
 def _rich_markdown(html: str, *, nested: bool = False) -> str:
     """Ответ бота: заголовки, таблицы сумм и позиций, списки и цитаты заметок."""
+    html = _html_table_markdown(html)
     out: list[str] = []
     first = not nested
     rows = str(html or "").split("\n")
@@ -470,6 +505,8 @@ def _rich_markdown(html: str, *, nested: bool = False) -> str:
         raw = rows[index]
         line = raw.strip()
         if not line:
+            if out and out[-1] != "":
+                out.append("")
             index += 1
             continue
         if line == "<details>":
@@ -582,10 +619,36 @@ def _rich_markdown(html: str, *, nested: bool = False) -> str:
                 for _row_i, note in notes:
                     out.append("> " + _md_text(note))
             continue
+        if plain.startswith("|"):
+            out.append(plain)
+            index += 1
+            continue
         if plain.lower().startswith("ещё") or plain.lower().startswith("еще"):
             out.append("*" + _md_text(plain) + "*")
         elif " · " in plain:
-            bits = [bit.strip() for bit in plain.split("·") if bit.strip()]
+            header = [bit.strip() for bit in plain.split("·") if bit.strip()]
+            look = index + 1
+            body_rows: list[list[str]] = []
+            while look < len(rows) and len(header) >= 2:
+                raw_next = rows[look]
+                nxt = _html_to_text(raw_next).strip()
+                if not nxt:
+                    look += 1
+                    continue
+                if raw_next.startswith("  ") or not nxt.startswith(("•", "-")):
+                    break
+                cells = [bit.strip() for bit in re.sub(r"^[•\-]\s*", "", nxt).split("·") if bit.strip()]
+                if len(cells) != len(header):
+                    break
+                body_rows.append(cells)
+                look += 1
+            if body_rows:
+                out.append("")
+                out.append(_generic_table(header, body_rows))
+                index = look
+                first = False
+                continue
+            bits = header
             for bit in bits:
                 out.append("- " + _md_text(bit))
         else:
@@ -958,6 +1021,7 @@ class ChatSession:
         self.order_id = ""
         self.awaiting = ""
         self.pending_ask = ""
+        self.ask_hints: list[str] = []
         self.message_id: int | None = None
         self.snap: dict[str, Any] = self._fresh_snap()
 
@@ -1125,8 +1189,9 @@ class TelegramBot:
         except Exception:
             return {"url": "", "access": False, "ngrok": False}
 
-    def _reply_kb(self, chat_id: str) -> dict[str, Any]:
-        return _menu_keyboard(str(self._status_for(chat_id).get("url") or ""))
+    def _reply_kb(self, chat_id: str) -> None:
+        """Нижние кнопки не прикладываются к ответу: иначе Telegram раскрывает их после каждого сообщения."""
+        return None
 
     def _chat(self, chat_id: str) -> ChatSession:
         with self._lock:
@@ -1304,10 +1369,13 @@ class TelegramBot:
                 self._reply_kb(chat_id),
             )
             return
-        if session.screen in {"orders", "order", "home"} and text:
+        if session.screen in {"orders", "order", "home"} and text and not ask.blocks_order_search(text):
             session.search = text
             session.opage = 0
             self._show(token, chat_id, "orders")
+            return
+        if ask.blocks_order_search(text):
+            send_html(token, chat_id, "Не разобрал эту фразу.", self._reply_kb(chat_id))
             return
         send_html(token, chat_id, "Нажмите <b>Отчёты</b>, <b>Заказы</b>, <b>Снимок</b> или <b>Меню</b>.", self._reply_kb(chat_id))
 
@@ -1338,6 +1406,12 @@ class TelegramBot:
             return True
         if reply.action == "pc":
             self._open_on_pc(token, chat_id)
+            return True
+        if reply.suggestions and not str(reply.html or "").strip() and not reply.action:
+            hints = [str(item) for item in reply.suggestions[:6]]
+            session.ask_hints = hints
+            rows = [[_btn(item[:48], f"Aq:{index}")] for index, item in enumerate(hints)]
+            send_html(token, chat_id, "Возможно, вы имели в виду:", _inline(rows))
             return True
         if reply.action == "snap" and not reply.html:
             self._prepare_snap(session, reset=not bool(session.snap.get("ready")))
@@ -1468,6 +1542,8 @@ class TelegramBot:
                 hint = "открыть отчёт"
             elif data.startswith("Of:"):
                 hint = "фильтр заказов"
+            elif data.startswith("Aq:"):
+                hint = "вариант запроса"
             else:
                 hint = data or "кнопка"
         netlog.add("telegram", f"Кнопка: {hint}", source=f"chat {chat_id}", key=f"tg-cb-{chat_id}")
@@ -1543,6 +1619,14 @@ class TelegramBot:
             self._show(token, chat_id, "orders")
         elif data.startswith("Oi:"):
             self._open_order(token, chat_id, int(data[3:] or -1))
+        elif data.startswith("Aq:"):
+            try:
+                index = int(data[3:] or -1)
+            except ValueError:
+                return
+            hints = list(session.ask_hints or [])
+            if 0 <= index < len(hints):
+                self._on_text(token, chat_id, hints[index])
         elif data == "D":
             self._show(token, chat_id, "order")
         elif data == "PC":

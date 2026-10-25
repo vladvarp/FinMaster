@@ -49,6 +49,11 @@ def requested_report() -> str:
     return ""
 
 
+def requested_handoff() -> str:
+    """Путь отчёта, который надо передать уже открытому окну. Словарь так не открывается."""
+    return requested_report()
+
+
 def _lock_path() -> str:
     return os.path.join(storage.config_dir(), "instance.json")
 

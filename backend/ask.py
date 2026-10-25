@@ -10,6 +10,7 @@ import re
 from datetime import date, timedelta
 from typing import Any
 
+from backend import dictionary
 from backend.document import DEFAULT_PAYMENT_TERMS
 from backend.finance import (
     html_esc,
@@ -158,6 +159,9 @@ class Reply:
         order_ids: list[str] | None = None,
         needs_report: bool = False,
         hide_totals: bool = False,
+        hints: list[str] | None = None,
+        suggestions: list[str] | None = None,
+        template_source: str = "",
     ) -> None:
         self.html = html
         self.action = action
@@ -166,39 +170,14 @@ class Reply:
         self.order_ids = order_ids or []
         self.needs_report = needs_report
         self.hide_totals = hide_totals
+        self.hints = hints or []
+        self.suggestions = suggestions or []
+        self.template_source = template_source
 
 
 def help_text(surface: str = "bot") -> str:
-    if surface == "desk":
-        return (
-            "<b>Что можно спросить</b> · Ответ берётся из отчёта, который сейчас открыт. Это окно — Shift+Enter, ассистент — Ctrl+Пробел.\n"
-            "<b>Долги</b>\n"
-            "• кто должен, просрочка, старение, ближайшие оплаты\n"
-            "• сколько должен, топ, напоминание заказчику\n"
-            "<b>Сводка</b>\n"
-            "• выручка, оплачено, расходы, налоги, чистыми, средний чек\n"
-            "• итоги за август, май 2025, 5 августа, 1 квартал, этот месяц, за 30 дней\n"
-            "<b>Заказы</b>\n"
-            "• номер, имя, продукт, статус, тип, скидки\n"
-            "• последние 3 заказа, последний заказ, сколько заказов\n"
-            "<b>Календарь</b>\n"
-            "• в работе, запланировано, закрыто, без дат\n"
-            "<b>Заказчики</b>\n"
-            "• контакты, заметки, замороженные, весь отчёт"
-        )
-    return (
-        "<b>Спросите по открытому отчёту</b> — голосом или текстом. Ответ собирается из файла, который сейчас открыт.\n"
-        "• долги, кто должен, просрочка, старение, ближайшие оплаты, напоминание заказчику\n"
-        "• сводка, выручка, оплаты, расходы, налоги, чистыми, средний чек\n"
-        "• сколько заказов, сколько должен, топ, кто больше всех, скидки, статусы\n"
-        "• заказы и позиции: по номеру, имени, продукту, статусу, типу, «последние 3 заказа»\n"
-        "• период: сегодня, вчера, эта неделя, этот месяц, август, май 2025, 5 августа, 1 квартал, за 30 дней\n"
-        "• календарь: в работе, запланировано, закрыто, без дат\n"
-        "• заказчики и контакты, заметки, замороженные\n"
-        "• «всё» или «весь отчёт» — сводка целиком\n"
-        "• «открой отчёт …», «снимок заказа 12», «pdf без цен», «текст без итогов», «открой на компьютере»\n"
-        "Кнопки внизу по-прежнему открывают отчёты, заказы, снимок и ссылку."
-    )
+    book, _status = dictionary.for_parse()
+    return dictionary.help_html(book, "desk" if surface == "desk" else "bot")
 
 
 _SECTION_TITLES = {
@@ -322,14 +301,217 @@ def present(html: str) -> dict[str, Any]:
     return {"title": title, "lead": lead, "chips": chips, "sections": sections}
 
 
-def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: bool = False, surface: str = "bot") -> Reply | None:
+_FILLER = {"весь", "вся", "все", "всего", "целиком", "полностью"}
+_SLICE_ORDER = (
+    "count",
+    "rank",
+    "summary",
+    "money",
+    "status",
+    "discount",
+    "debt",
+    "overdue",
+    "incoming",
+    "orders",
+    "lines",
+    "work",
+    "customers",
+    "products",
+    "expense",
+    "notes",
+    "frozen",
+    "remind",
+)
+
+
+def blocks_order_search(text: str) -> bool:
+    """«все», «весь», «весь отчёт» не становятся текстовым фильтром списка заказов."""
+    low = _norm(text)
+    if not low:
+        return False
+    return not [token for token in low.split() if token not in _STOP and token not in _FILLER]
+
+
+def _loose_tokens(text: str, source: dict[str, Any], rows: list[dict[str, Any]]) -> list[str]:
+    _period, _label, text = _take_period(text)
+    _recent, text = _take_recent(text)
+    _customers, text = _take_names(text, _customer_names(source, rows))
+    _products, text = _take_names(text, _product_names(rows))
+    _orders, text = _take_orders(text, source.get("orders") or [])
+    _statuses, text = _take_statuses(text, source)
+    _types, text = _take_names(text, _type_names(source))
+    return [
+        token
+        for token in text.split()
+        if token not in _STOP and token not in _FILLER and not token.isdigit() and len(token) >= 3
+    ]
+
+
+def _match_command(
+    text: str,
+    book: dict[str, Any],
+    surface: str,
+    source: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, str]:
+    """Самая длинная фраза. Остаток — срок, имя, продукт, номер, ключевое слово или пусто."""
+    tokens = text.split()
+    best: tuple[tuple[int, int, int, int], dict[str, Any], str] | None = None
+    for cmd in dictionary.commands_for(book, surface):
+        narrow = cmd.get("id") in {"count", "rank"}
+        for phrase in cmd.get("phrases") or []:
+            phrase_tokens = dictionary.normalize(phrase).split()
+            size = len(phrase_tokens)
+            if not size:
+                continue
+            for index in range(len(tokens) - size + 1):
+                if tokens[index : index + size] != phrase_tokens:
+                    continue
+                rest = " ".join(tokens[:index] + tokens[index + size :])
+                _delivery, _hide, cleaned = dictionary.take_keywords(rest, book, surface)
+                if not narrow and _loose_tokens(cleaned, source, rows):
+                    continue
+                rank = (-size, 0 if narrow else 1, index, -len(" ".join(phrase_tokens)))
+                if best is None or rank < best[0]:
+                    best = (rank, cmd, rest)
+    if not best:
+        return None, ""
+    return best[1], best[2]
+
+
+def _read_filters(text: str, source: dict[str, Any], rows: list[dict[str, Any]]):
+    period, period_label, text = _take_period(text)
+    recent_n, text = _take_recent(text)
+    customers, text = _take_names(text, _customer_names(source, rows))
+    products, text = _take_names(text, _product_names(rows))
+    order_ids, text = _take_orders(text, source.get("orders") or [])
+    statuses, text = _take_statuses(text, source)
+    types, text = _take_names(text, _type_names(source))
+    return text, period, period_label, recent_n, customers, products, order_ids, statuses, types
+
+
+def _expand_words(words: list[str], book: dict[str, Any]) -> tuple[list[str], list[list[str]]]:
+    show: list[str] = []
+    groups: list[list[str]] = []
+    for word in words:
+        if "\x1f" in word:
+            left, right = word.split("\x1f", 1)
+            pairs: list[str] = []
+            seen: set[str] = set()
+            for alt in dictionary.synonym_values(book, left):
+                if not alt or " " in alt or not re.fullmatch(r"[a-zа-я]+", alt):
+                    continue
+                pair = f"{alt}\x1f{right}"
+                if pair in seen:
+                    continue
+                seen.add(pair)
+                pairs.append(pair)
+            show.append(f"{left} {right}")
+            groups.append(pairs or [word])
+            continue
+        show.append(word)
+        groups.append(dictionary.synonym_values(book, word))
+    return show, groups
+
+
+def _hint_rows(
+    text: str,
+    doc: dict[str, Any] | None,
+    surface: str = "desk",
+    book: dict[str, Any] | None = None,
+) -> list[dict[str, str]]:
+    if book is None:
+        book, _status = dictionary.for_parse()
+    query = _norm(text)
+    if not query:
+        return []
+    surface_key = "desk" if surface == "desk" else "bot"
+    found: list[tuple[int, str, str]] = []
+
+    def add(score: int, title: str, sub: str) -> None:
+        if score <= 0 or not title:
+            return
+        found.append((score, title, sub))
+
+    def score(phrase: str) -> int:
+        mark = dictionary.normalize(phrase)
+        if not mark:
+            return 0
+        if mark == query:
+            return 50
+        if mark.startswith(query):
+            return 80 + min(len(query), 20)
+        shared = 0
+        for left, right in zip(query, mark):
+            if left != right:
+                break
+            shared += 1
+        if shared >= 3:
+            return 20 + shared
+        return 0
+
+    for cmd in dictionary.commands_for(book, surface_key):
+        if cmd.get("id") == "help":
+            continue
+        for phrase in cmd.get("phrases") or []:
+            add(score(str(phrase)), str(phrase), "команда")
+    action_title = {key: title for key, title in dictionary.ACTIONS}
+    for row in book.get("keywords") or []:
+        if not dictionary.surface_on(row, surface_key):
+            continue
+        add(score(str(row.get("word") or "")), str(row.get("word") or ""), action_title.get(str(row.get("action") or ""), "слово"))
+    for row in book.get("synonyms") or []:
+        if not row.get("enabled"):
+            continue
+        label = ", ".join(str(item) for item in (row.get("values") or [])[:4])
+        for word in row.get("words") or []:
+            add(score(str(word)), str(word), label or "синоним")
+    source = doc if isinstance(doc, dict) else {}
+    rows = _rows(source) if source else []
+    for name in _customer_names(source, rows)[:80]:
+        add(score(name), name, "заказчик")
+    for name in _product_names(rows)[:80]:
+        add(score(name), name, "продукт")
+    seen_numbers: set[str] = set()
+    for order in source.get("orders") or []:
+        if not isinstance(order, dict):
+            continue
+        number = str(order.get("number") or "").strip()
+        if number and number not in seen_numbers:
+            seen_numbers.add(number)
+            add(score(number), number, "номер")
+    found.sort(key=lambda item: (-item[0], item[1]))
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for _score, title, sub in found:
+        key = dictionary.normalize(title)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"title": title, "sub": sub})
+        if len(out) >= 8:
+            break
+    return out
+
+
+def parse(
+    text: str,
+    doc: dict[str, Any] | None,
+    *,
+    voice: bool = False,
+    live: bool = False,
+    surface: str = "bot",
+    book: dict[str, Any] | None = None,
+) -> Reply | None:
     low = _norm(text)
     if not low:
         return Reply(html="Не разобрал речь. Скажите ещё раз или напишите вопрос.") if voice else None
-    if low in _HELP:
-        return Reply(html=help_text(surface))
-    if low in _NAV:
-        return Reply(action=_NAV[low], needs_report=_NAV[low] in {"orders", "snap", "pc"})
+    surface_key = "desk" if surface == "desk" else "bot"
+    if book is None:
+        book, _dict_status = dictionary.for_parse()
+    else:
+        checked = dictionary.validate(book)
+        book = checked if checked is not None else dictionary.for_parse()[0]
     opened = re.match(r"^(?:открой|открыть|выбери)\s+отч[её]т\s+(.+)$", low)
     if opened:
         return Reply(action="open_report", target=opened.group(1).strip())
@@ -337,91 +519,115 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
     source = doc if isinstance(doc, dict) else {}
     today = date.today()
     rows = _rows(source)
-    raw = low
-    hide_totals = bool(re.search(r"без\s+(?:итог|цен)", raw))
-    if hide_totals:
-        raw = re.sub(r"без\s+(?:итог\w*|цен\w*)", " ", raw)
-    raw = re.sub(r"\b(?:снимок\w*|картинк\w*|pdf|png|пдф|текст\w*)\b", " ", raw)
-    raw = " ".join(raw.split())
-    period, period_label, raw = _take_period(raw)
-    recent_n, raw = _take_recent(raw)
-    customers, raw = _take_names(raw, _customer_names(source, rows))
-    products, raw = _take_names(raw, _product_names(rows))
-    order_ids, raw = _take_orders(raw, source.get("orders") or [])
-    statuses, raw = _take_statuses(raw, source)
-    types, raw = _take_names(raw, _type_names(source))
-    topics, raw = _topics(raw)
+    cmd, command_rest = _match_command(low, book, surface_key, source, rows)
+    if cmd and cmd.get("answer") == "help":
+        return Reply(html=dictionary.help_html(book, surface_key))
+    if cmd and cmd.get("answer") == "action":
+        action_name = str(cmd.get("action") or "")
+        return Reply(action=action_name, needs_report=action_name in {"orders", "snap", "pc"})
+
+    guided = cmd is not None
+    template_source = str(cmd.get("template") or "") if cmd and cmd.get("answer") == "template" else ""
+    cmd_answer = str(cmd.get("answer") or "") if cmd else ""
+    if guided:
+        delivery, hide_totals, raw = dictionary.take_keywords(command_rest, book, surface_key)
+        if not delivery and cmd.get("delivery"):
+            delivery = str(cmd.get("delivery") or "")
+        if cmd_answer == "snap" and not delivery:
+            delivery = {"pdf": "pdf", "text": "text"}.get(str(cmd.get("snapKind") or ""), "photo")
+        if cmd_answer == "snap" and cmd.get("snapHide"):
+            hide_totals = True
+    else:
+        delivery, hide_totals, raw = dictionary.take_keywords(low, book, surface_key)
+    kind = {"pdf": "pdf", "text": "text", "photo": "png"}.get(delivery, "png")
+    snap = delivery in {"pdf", "text", "photo"}
+    raw, period, period_label, recent_n, customers, products, order_ids, statuses, types = _read_filters(raw, source, rows)
+    if guided and cmd and cmd.get("id") in {"count", "rank"}:
+        _ignored_topics, raw = _topics(raw)
     pay = _pay_mode(low)
     work_state = _work_mode(low)
-    words = _words(raw)
-    wants_text = bool(re.search(r"(?<![а-яё])текст", low)) and bool(
-        re.search(r"без\s+(?:итог|цен)|снимок|заказ|pdf|пдф|png", low)
-    )
-    snap = bool(re.search(r"сним|картинк|\bpdf\b|\bpng\b|пдф", low) or wants_text)
-    kind = "pdf" if re.search(r"\bpdf\b|пдф", low) else ("text" if wants_text or (snap and "текст" in low) else "png")
-    remind = bool(re.search(r"напомн", low))
-    explicit = set(topics)
-    if re.search(r"все данные|весь отч|целиком|полностью|покажи вс[её]$|вс[её] подряд", low):
-        explicit.update({"summary", "debt", "orders", "work", "customers", "products", "expense", "notes", "frozen"})
-    asked = bool(
-        explicit
-        or customers
-        or products
-        or order_ids
-        or statuses
-        or types
-        or period != "all"
-        or pay
-        or work_state
-        or snap
-        or remind
-        or recent_n
-        or _ASK.search(low)
-        or voice
-    )
-    if not asked and words and any(all(_hit(row["blob"], word) for word in words) for row in rows if not row["frozen"]):
+    remind = bool(re.search(r"напомн", low)) and dictionary.enabled_command(book, "remind", surface_key)
+    show_words, words = _expand_words(_words(raw, book), book)
+    slice_order = list(_SLICE_ORDER)
+    if guided:
+        explicit = set(cmd.get("slices") or [])
+        if cmd_answer == "slices":
+            slice_order = [key for key in (cmd.get("slices") or []) if key in explicit]
+        elif cmd_answer == "snap":
+            explicit = set(cmd.get("slices") or []) or {"snap"}
+            slice_order = list(cmd.get("slices") or [])
+        else:
+            explicit = set()
         asked = True
-    if not asked:
-        return None
-
-    if not explicit:
+    else:
+        topics, raw_left = _topics(raw)
+        topics = {flag for flag in topics if dictionary.topic_allowed(book, flag, surface_key)}
+        raw = raw_left
+        show_words, words = _expand_words(_words(raw, book), book)
+        explicit = set(topics)
+        asked = bool(
+            explicit
+            or customers
+            or products
+            or order_ids
+            or statuses
+            or types
+            or period != "all"
+            or pay
+            or work_state
+            or snap
+            or remind
+            or recent_n
+            or _ASK.search(low)
+            or voice
+        )
+        if not asked and words and any(
+            all(any(_hit(row["blob"], part) for part in group) for group in words) for row in rows if not row["frozen"]
+        ):
+            asked = True
+        if not asked:
+            hints = [item["title"] for item in _hint_rows(low, source, surface_key)]
+            if hints:
+                return Reply(suggestions=hints[:6])
+            return None
+        if not explicit:
+            if remind:
+                explicit.add("remind")
+            elif snap and not show_words:
+                explicit.add("snap")
+            elif order_ids and not (customers or products or show_words or statuses or types):
+                explicit.add("orders")
+            elif customers and not show_words:
+                explicit.update({"customers", "debt"})
+            elif products and not show_words:
+                explicit.add("products")
+            elif statuses:
+                explicit.update({"status", "orders"})
+            elif show_words or types or recent_n:
+                explicit.add("orders")
+            else:
+                explicit.add("summary")
         if remind:
             explicit.add("remind")
-        elif snap and not words:
-            explicit.add("snap")
-        elif order_ids and not (customers or products or words or statuses or types):
+        if pay:
             explicit.add("orders")
-        elif customers and not words:
-            explicit.update({"customers", "debt"})
-        elif products and not words:
-            explicit.add("products")
-        elif statuses:
-            explicit.update({"status", "orders"})
-        elif words or types or recent_n:
+        if "lines" in explicit:
             explicit.add("orders")
-        else:
-            explicit.add("summary")
-    if remind:
-        explicit.add("remind")
-    if pay:
-        explicit.add("orders")
-    if "lines" in explicit:
-        explicit.add("orders")
-    if "overdue" in explicit or "incoming" in explicit:
-        explicit.add("debt")
-    show_lines = bool(re.search(r"список|покаж|позиц|подроб|строк|какие", low))
-    verbose = {"summary", "money", "orders", "debt", "products", "customers", "work", "notes", "expense", "frozen", "status"}
-    if "count" in explicit and not show_lines and "incoming" not in explicit:
-        overdue_only = "overdue" in explicit
-        explicit -= verbose
-        explicit.add("count")
-        if overdue_only:
-            explicit.add("overdue")
-    elif "rank" in explicit and "count" not in explicit and not show_lines:
-        explicit -= {"summary", "money", "orders", "debt", "products", "customers"}
-        explicit.add("rank")
-    if recent_n:
-        explicit.add("orders")
+        if "overdue" in explicit or "incoming" in explicit:
+            explicit.add("debt")
+        show_lines = bool(re.search(r"список|покаж|позиц|подроб|строк|какие", low))
+        verbose = {"summary", "money", "orders", "debt", "products", "customers", "work", "notes", "expense", "frozen", "status"}
+        if "count" in explicit and not show_lines and "incoming" not in explicit:
+            overdue_only = "overdue" in explicit
+            explicit -= verbose
+            explicit.add("count")
+            if overdue_only:
+                explicit.add("overdue")
+        elif "rank" in explicit and "count" not in explicit and not show_lines:
+            explicit -= {"summary", "money", "orders", "debt", "products", "customers"}
+            explicit.add("rank")
+        if recent_n:
+            explicit.add("orders")
 
     date_kind = "order"
     if "work" in explicit and not ({"debt", "money", "orders", "summary", "expense"} & explicit):
@@ -476,7 +682,7 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
 
     title = str(source.get("title") or "Отчёт")
     recent_label = f"последние {recent_n}" if recent_n else ""
-    head = _header(title, live, explicit, customers, products, order_ids, period_label, pay, work_state, words, recent_label)
+    head = _header(title, live, explicit, customers, products, order_ids, period_label, pay, work_state, show_words, recent_label)
     if not rows and "snap" not in explicit:
         return Reply(
             html=f"{head}\nВ отчёте пока нет позиций.",
@@ -486,7 +692,7 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
         tail = f"За {html_esc(period_label)} в отчёте ничего нет." if period_label else "В отчёте по этой просьбе ничего нет."
         understood = bool(explicit or customers or products or order_ids or statuses or types or period != "all" or pay or work_state or recent_n)
         if (voice or _ASK.search(low)) and not understood:
-            tail += "\n" + help_text(surface)
+            tail += "\n" + dictionary.help_html(book, surface_key)
         return Reply(html=f"{head}\n{tail}", needs_report=True)
 
     parts = [head]
@@ -496,34 +702,68 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
     def cash(value: float) -> str:
         return html_esc(money(value, cur, decimals))
 
-    if "count" in explicit:
-        parts.append(_count(matched, cash, overdue_only="overdue" in explicit and "debt" not in explicit))
-    if "rank" in explicit:
-        parts.append(_rank(matched, cash, by_debt=bool(re.search(r"долг|долж", low))))
-    if "summary" in explicit or "money" in explicit:
-        parts.append(_summary(source, matched, today, cash, terms, delays, period))
-    if "status" in explicit:
-        parts.append(_statuses(matched, cash))
-    if "discount" in explicit:
-        parts.append(_discounts(matched, cash))
-    if "debt" in explicit:
-        parts.append(_debts(matched, today, terms, delays, cash, overdue_only="overdue" in explicit, incoming="incoming" in explicit, period=period))
-    if "orders" in explicit:
-        parts.append(_orders(matched, cash))
-    if "work" in explicit:
-        parts.append(_work(matched if work_state or period != "all" else rows, today, work_state))
-    if "customers" in explicit:
-        parts.append(_customers(source, matched if customers or words or products else rows, cash))
-    if "products" in explicit:
-        parts.append(_products(matched, cash))
-    if "expense" in explicit:
-        parts.append(_expenses(rows, matched, customers, order_ids, cash))
-    if "notes" in explicit:
-        parts.append(_notes(matched))
-    if "frozen" in explicit:
-        parts.append(_frozen(rows, customers, products, order_ids))
-    if "remind" in explicit:
-        parts.append(_reminder(matched, source, terms, cash))
+    if guided and cmd_answer == "metrics":
+        label = str((cmd or {}).get("phrases", ["Показатели"])[0] or "Показатели")
+        parts.append(_metrics_html(label, (cmd or {}).get("metrics") or [], source, matched, today, cash, terms, delays, period, markdown=delivery == "md"))
+    elif guided and cmd_answer == "template":
+        parts.append(_template_html(template_source, source, matched, rows, today, cash, terms, delays, period, customers, products, order_ids, work_state, hide_totals))
+    else:
+        rendered: set[str] = set()
+        for key in slice_order:
+            if key == "money":
+                key = "summary"
+            if key in rendered:
+                continue
+            if key not in explicit and not (key == "summary" and "money" in explicit):
+                continue
+            rendered.add(key)
+            if not guided and key in {"overdue", "incoming", "lines"}:
+                continue
+            if key == "count":
+                parts.append(_count(matched, cash, overdue_only="overdue" in explicit and "debt" not in explicit and not guided))
+            elif key == "rank":
+                parts.append(_rank(matched, cash, by_debt=bool(re.search(r"долг|долж", low))))
+            elif key == "summary":
+                parts.append(_summary(source, matched, today, cash, terms, delays, period))
+            elif key == "status":
+                parts.append(_statuses(matched, cash))
+            elif key == "discount":
+                parts.append(_discounts(matched, cash))
+            elif key == "debt":
+                parts.append(
+                    _debts(
+                        matched,
+                        today,
+                        terms,
+                        delays,
+                        cash,
+                        overdue_only=False if guided else "overdue" in explicit,
+                        incoming=False if guided else "incoming" in explicit,
+                        period=period,
+                    )
+                )
+            elif key == "overdue":
+                parts.append(_debts(matched, today, terms, delays, cash, overdue_only=True, incoming=False, period=period))
+            elif key == "incoming":
+                parts.append(_debts(matched, today, terms, delays, cash, overdue_only=False, incoming=True, period=period))
+            elif key == "orders":
+                parts.append(_orders(matched, cash))
+            elif key == "lines":
+                parts.append(_orders(matched, cash).replace("<b>Заказы</b>", "<b>Позиции</b>", 1))
+            elif key == "work":
+                parts.append(_work(matched if work_state or period != "all" else rows, today, work_state))
+            elif key == "customers":
+                parts.append(_customers(source, matched if customers or words or products else rows, cash))
+            elif key == "products":
+                parts.append(_products(matched, cash))
+            elif key == "expense":
+                parts.append(_expenses(rows, matched, customers, order_ids, cash))
+            elif key == "notes":
+                parts.append(_notes(matched))
+            elif key == "frozen":
+                parts.append(_frozen(rows, customers, products, order_ids))
+            elif key == "remind":
+                parts.append(_reminder(matched, source, terms, cash))
 
     ids: list[str] = []
     seen: set[str] = set()
@@ -537,9 +777,9 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
     action = ""
     if snap and surface != "desk":
         action = "snap_send" if specific and ids else "snap"
-        if action == "snap":
+        if not guided and action == "snap":
             parts = [head, "Открываю снимок. Отметьте заказы и нажмите PNG, PDF или текст."]
-        elif explicit <= {"snap", "orders"}:
+        elif not guided and explicit <= {"snap", "orders"}:
             who = ", ".join(customers) if customers else (f"{len(ids)} зак." if ids else "")
             bare = " без цен" if hide_totals else ""
             parts = [head, f"Собираю снимок{bare}{(' · ' + html_esc(who)) if who else ''}."]
@@ -552,13 +792,12 @@ def parse(text: str, doc: dict[str, Any] | None, *, voice: bool = False, live: b
         order_ids=ids if action == "snap_send" else [],
         needs_report=True,
         hide_totals=hide_totals and action in {"snap", "snap_send"},
+        template_source=template_source,
     )
 
 
 def _norm(text: str) -> str:
-    low = str(text or "").lower().replace("ё", "е")
-    low = re.sub(r"[«»\"'.,!?()\[\]{}:;/\\|]+", " ", low)
-    return " ".join(low.split())
+    return dictionary.normalize(text)
 
 
 def _header(
@@ -864,27 +1103,66 @@ def _in_period(day: date | None, period: str, today: date) -> bool:
     return True
 
 
-def _words(text: str) -> list[str]:
+def _words(text: str, book: dict[str, Any] | None = None) -> list[str]:
+    tokens = text.split()
     out: list[str] = []
-    for token in text.split():
-        if token in _STOP:
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        nxt = tokens[index + 1] if index + 1 < len(tokens) else ""
+        linked = bool(book) and dictionary.synonym_values(book, token) != [dictionary.normalize(token)]
+        if nxt.isdigit() and re.fullmatch(r"[a-zа-я]+", token) and token not in _STOP and token not in _FILLER and (len(token) < 3 or linked):
+            out.append(f"{token}\x1f{nxt}")
+            index += 2
+            continue
+        if token in _STOP or token in _FILLER:
+            index += 1
             continue
         if token.isdigit():
             if len(token) >= 2:
                 out.append(token)
+            index += 1
             continue
-        if len(token) < 3:
+        if len(token) < 3 and not (book and dictionary.synonym_values(book, token) != [dictionary.normalize(token)]):
+            index += 1
             continue
         out.append(token)
+        index += 1
     return out[:8]
 
 
 def _hit(blob: str, word: str) -> bool:
+    tokens = blob.split()
+    if "\x1f" in word:
+        left, right = word.split("\x1f", 1)
+        return any(tokens[pos] == left and tokens[pos + 1] == right for pos in range(len(tokens) - 1))
     if word.isdigit():
         return re.search(rf"(?<!\d){re.escape(word)}(?!\d)", blob) is not None
+    if len(word) < 3:
+        return word in tokens
     if word in blob:
         return True
     return len(word) >= 5 and word[:4] in blob
+
+
+def _has_text(hay: str, needle: str) -> bool:
+    """Вхождение фразы. Цифра не совпадает с началом более длинного числа: 9 не находится в 90."""
+    if not needle:
+        return False
+    start = 0
+    while True:
+        index = hay.find(needle, start)
+        if index < 0:
+            return False
+        after = index + len(needle)
+        before = index - 1
+        if after < len(hay) and needle[-1].isdigit() and hay[after].isdigit():
+            start = index + 1
+            continue
+        if before >= 0 and needle[0].isdigit() and hay[before].isdigit():
+            start = index + 1
+            continue
+        return True
 
 
 def _take_names(text: str, names: list[str]) -> tuple[list[str], str]:
@@ -894,7 +1172,7 @@ def _take_names(text: str, names: list[str]) -> tuple[list[str], str]:
         key = _norm(name)
         if len(key) < 3 or key in _STOP:
             continue
-        if key not in work:
+        if not _has_text(work, key):
             continue
         hits.append(name)
         work = work.replace(key, " ", 1)
@@ -1176,7 +1454,8 @@ def _keep(
         if not _in_period(day, period, today):
             return False
     if words:
-        hits = [_hit(row["blob"], word) for word in words]
+        groups = [word if isinstance(word, list) else [word] for word in words]
+        hits = [any(_hit(row["blob"], part) for part in group) for group in groups]
         if any_word:
             if not any(hits):
                 return False
@@ -1366,6 +1645,534 @@ def _share(part: float, whole: float) -> str:
     if whole <= 0.005:
         return "—"
     return f"{round(part / whole * 100)}%"
+
+
+def _metric_pack(rows: list[dict[str, Any]], today: date, terms: int, delays: tuple[float, bool, dict[str, float]]) -> dict[str, tuple[Any, str]]:
+    income = [row for row in rows if not row["tot"].get("kind")]
+    live = [row for row in income if not row["cancelled"]]
+    after = sum(float(row["tot"]["after"]) for row in income)
+    after_live = sum(float(row["tot"]["after"]) for row in live)
+    paid = sum(float(row["tot"]["paid"]) for row in income)
+    unpaid = sum(float(row["tot"]["unpaid"]) for row in income)
+    cost = sum(float(row["tot"]["cost"]) for row in rows if row["tot"].get("kind"))
+    orders = {str(row["order"].get("id") or id(row["order"])) for row in income}
+    checks = [float(row["tot"]["after"]) for row in income if float(row["tot"]["after"]) > 0.005]
+    avg = sum(checks) / len(checks) if checks else 0.0
+    month = [row for row in income if _in_period(row["order_day"], "month", today)]
+    prev_day = today.replace(day=1) - timedelta(days=1)
+    prev = [row for row in income if row["order_day"] and (row["order_day"].year, row["order_day"].month) == (prev_day.year, prev_day.month)]
+    month_after = sum(float(row["tot"]["after"]) for row in month)
+    prev_after = sum(float(row["tot"]["after"]) for row in prev)
+    dim = (today.replace(day=1) + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+    forecast = month_after / today.day * dim.day if today.day else 0.0
+    dso, known, _delay_map = delays
+    dso_text = (
+        f"{int(round(dso))} {_days(int(round(dso)))}"
+        if known
+        else f"{terms} {_days(terms)}, истории оплат ещё нет"
+    )
+    return {
+        "orders": (len(orders), str(len(orders))),
+        "lines": (len(income), str(len(income))),
+        "due": (after, ""),
+        "due_live": (after_live, ""),
+        "paid": (paid, ""),
+        "share": (paid / after if after > 0.005 else 0.0, _share(paid, after)),
+        "unpaid": (unpaid, ""),
+        "cost": (cost, ""),
+        "net": (after - cost, ""),
+        "avg": (avg, ""),
+        "month": (month_after, ""),
+        "prev": (prev_after, ""),
+        "forecast": (forecast, ""),
+        "dso": (dso if known else None, dso_text),
+    }
+
+
+def _metric_text(key: str, fmt: str, pack: dict[str, tuple[Any, str]], cash) -> tuple[Any, str]:
+    raw, text = pack.get(key, (0, "—"))
+    if fmt == "text":
+        return raw, html_esc(text or "—")
+    if fmt == "percent":
+        return raw, html_esc(text or "—")
+    if fmt == "number":
+        try:
+            number = int(raw)
+        except (TypeError, ValueError):
+            number = 0
+        return number, html_esc(str(number))
+    try:
+        amount = float(raw or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    return amount, cash(amount)
+
+
+def _metric_blank(raw: Any) -> bool:
+    if raw is None:
+        return True
+    if isinstance(raw, (int, float)):
+        return abs(float(raw)) < 0.005
+    return str(raw).strip() in {"", "0", "—"}
+
+
+def _metrics_html(title: str, tiles: list[dict[str, Any]], source: dict[str, Any], rows: list[dict[str, Any]], today: date, cash, terms: int, delays, period: str, *, markdown: bool) -> str:
+    pack = _metric_pack(rows, today, terms, delays)
+    known = {key: (label, fmt) for key, label, fmt in dictionary.METRICS}
+    lines = [f"<b>{html_esc(title)}</b>"]
+    for tile in tiles:
+        key = str(tile.get("key") or "")
+        if key not in known:
+            continue
+        fmt = str(tile.get("format") or known[key][1])
+        raw, text = _metric_text(key, fmt, pack, cash)
+        if tile.get("hideZero") and _metric_blank(raw):
+            continue
+        label = html_esc(str(tile.get("label") or known[key][0]))
+        lines.append(f"<b>{label}</b> {text}" if markdown else f"{label} · {text}")
+    if len(lines) == 1:
+        lines.append("Показатели не выбраны.")
+    return "\n".join(lines)
+
+
+def _order_slice_html(
+    key: str,
+    columns: list[str],
+    source: dict[str, Any],
+    matched: list[dict[str, Any]],
+    hide_totals: bool,
+) -> str:
+    """Срез заказа в шаблоне: шапка из номера и названия, под ней выбранные колонки позиций."""
+    from backend import snapshot as snapmod
+
+    known = {item["id"] for item in snapmod.FIELDS}
+    picked = [item for item in columns if item in known]
+    if not picked:
+        picked = [item for item in dictionary.ORDER_SLICE_COLUMNS if item in known]
+    if hide_totals:
+        picked = snapmod.without_prices(picked)
+    types = type_index(source)
+    currency = str(source.get("currency") or "₽")
+    decimals = money_decimals(source.get("money_decimals"))
+    grouped: list[dict[str, Any]] = []
+    by_id: dict[str, dict[str, Any]] = {}
+    for row in matched:
+        if row.get("frozen"):
+            continue
+        oid = str(row["order"].get("id") or id(row["order"]))
+        block = by_id.get(oid)
+        if block is None:
+            block = {"order": row["order"], "lines": []}
+            by_id[oid] = block
+            grouped.append(block)
+        block["lines"].append(row)
+    title = "Позиции" if key == "lines" else "Заказы"
+    out = [f"<b>{title}</b> · {len(grouped)}"]
+    if not grouped:
+        out.append("Подходящих заказов нет.")
+        return "\n".join(out)
+    meta_ids = [item for item in picked if snapmod.FIELD_BY_ID[item]["kind"] == "meta" and item not in {"totals", "expenses"}]
+    col_ids = [item for item in picked if snapmod.FIELD_BY_ID[item]["kind"] == "col"]
+    show_expenses = "expenses" in picked
+    for block in grouped:
+        order = block["order"]
+        meta = snapmod.meta_items(order, source, meta_ids, False)
+        out.append("\n<b>" + " · ".join(html_esc(bit) for bit in meta) + "</b>" if meta else "")
+        visible = [
+            row
+            for row in block["lines"]
+            if show_expenses or not row["tot"].get("kind")
+        ]
+        if col_ids and visible:
+            out.append(" · ".join(html_esc(snapmod.FIELD_BY_ID[item]["label"]) for item in col_ids))
+            for row in visible:
+                cells = [
+                    snapmod.line_value(row["line"], item, currency, types, order, decimals) or "—"
+                    for item in col_ids
+                ]
+                out.append("• " + " · ".join(html_esc(cell) for cell in cells))
+                comment = str(row["line"].get("notes") or "").strip()
+                if comment:
+                    out.append("  " + html_esc(comment))
+        if "totals" in picked:
+            income = [row["line"] for row in block["lines"] if not row["tot"].get("kind")]
+            text = snapmod.totals_text(
+                picked, snapmod.cols_of(picked), income, currency, types, order, decimals, hide_totals
+            )
+            if text:
+                out.append(html_esc(text))
+    return "\n".join(line for line in out if line is not None)
+
+
+def _slice_rows(key: str, rows: list[dict[str, Any]], today: date, delays, period: str) -> list[dict[str, Any]]:
+    """Строки, которые этот срез вообще показывает, до выбора колонок."""
+    _, _, delay_map = delays if isinstance(delays, tuple) and len(delays) == 3 else (0, False, {})
+    horizon = 7
+    if str(period).startswith("days:"):
+        horizon = int(str(period).split(":", 1)[1] or 7)
+    elif period == "month":
+        horizon = 30
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        kind = row["tot"].get("kind")
+        frozen = bool(row.get("frozen"))
+        if key == "frozen":
+            if frozen and not kind:
+                kept.append(row)
+            continue
+        if frozen:
+            continue
+        if key == "expense":
+            if kind:
+                kept.append(row)
+            continue
+        if kind:
+            continue
+        unpaid = float(row["tot"]["unpaid"])
+        if key in {"debt", "remind"} and (unpaid <= 0.005 or row["cancelled"]):
+            continue
+        if key == "overdue" and ((row["overdue"] or 0) <= 0 or unpaid <= 0.005 or row["cancelled"]):
+            continue
+        if key == "incoming":
+            if unpaid <= 0.005 or row["cancelled"]:
+                continue
+            due = row["due"]
+            delay = int(round(delay_map.get(row["customer"]) or 0))
+            expected = None
+            if due:
+                shifted = due + timedelta(days=max(0, delay))
+                expected = shifted if shifted > today else today
+            if not expected or (expected - today).days > horizon:
+                continue
+        if key == "discount" and float(row["tot"].get("discount") or 0) <= 0:
+            continue
+        if key == "notes" and not (
+            str(row["order"].get("notes") or "").strip() or str(row["line"].get("notes") or "").strip()
+        ):
+            continue
+        kept.append(row)
+    return kept
+
+
+def _picked_slice_html(
+    key: str,
+    columns: list[str],
+    source: dict[str, Any],
+    matched: list[dict[str, Any]],
+    cash,
+    hide_totals: bool,
+    today: date,
+    delays,
+    period: str,
+) -> str:
+    """Срез с выбранными полями: шапка заказа и только отмеченные колонки."""
+    labels = dict(dictionary.SLICE_PICKS.get(key) or ())
+    chosen = [item for item in columns if item in labels]
+    if hide_totals:
+        chosen = [item for item in chosen if item not in {"amount"}]
+    title = dict(dictionary.SLICES).get(key, key)
+    rows = _slice_rows(key, matched, today, delays, period)
+    if not chosen:
+        return f"<b>{html_esc(title)}</b>\nПодходящих строк нет."
+    meta_ids = [item for item in chosen if item in {"number", "name", "customer", "organization", "phone", "note"}]
+    line_ids = [item for item in chosen if item not in meta_ids]
+    cards: dict[str, dict[str, Any]] = {}
+    for item in source.get("customers") or []:
+        if isinstance(item, dict) and str(item.get("name") or "").strip():
+            cards[_norm(item.get("name"))] = item
+    states = {"now": "в работе", "planned": "запланирован", "done": "закрыт", "nodate": "без дат"}
+
+    def cell(row: dict[str, Any], field: str) -> str:
+        order = row["order"]
+        line = row["line"]
+        card = cards.get(row["cust_key"], {})
+        if field == "number":
+            return str(order.get("number") or "—")
+        if field == "name":
+            return str(order.get("name") or "—")
+        if field == "customer":
+            return row["customer"]
+        if field == "organization":
+            return str(card.get("organization") or "—")
+        if field == "phone":
+            return str(card.get("phone") or "—")
+        if field == "note":
+            return str(order.get("notes") or "—")
+        if field == "product":
+            return str(line.get("product") or "—")
+        if field == "quantity":
+            return qty_text(line)
+        if field == "status":
+            return str(line.get("status") or "—")
+        if field == "due":
+            return _fmt(row["due"]) or "—"
+        if field == "start":
+            return _fmt(row["work_day"]) or "—"
+        if field == "end":
+            return _fmt(row["work_end"]) or "—"
+        if field == "state":
+            return states.get(row["state"], "—")
+        if field == "mark":
+            late = row["overdue"]
+            if late is None:
+                return "срок не задан"
+            if late <= 0:
+                return "срок ещё не вышел"
+            return f"просрочка {late} {_days(late)}"
+        if field == "comment":
+            return str(line.get("notes") or "—")
+        if field == "kind":
+            return "налог" if row["tot"].get("kind") == "tax" else "затрата"
+        if field == "percent":
+            return f"{row['tot'].get('discount') or 0:g} %"
+        if field == "amount":
+            if row["tot"].get("kind"):
+                value = float(row["tot"]["cost"])
+            elif key in {"debt", "overdue", "incoming", "remind", "customers"}:
+                value = float(row["tot"]["unpaid"])
+            else:
+                value = float(row["tot"]["after"])
+            return cash(value)
+        return "—"
+
+    grouped: list[dict[str, Any]] = []
+    by_id: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        oid = str(row["order"].get("id") or id(row["order"]))
+        block = by_id.get(oid)
+        if block is None:
+            block = {"rows": []}
+            by_id[oid] = block
+            grouped.append(block)
+        block["rows"].append(row)
+    out = [f"<b>{html_esc(title)}</b> · {len(grouped)}"]
+    if not grouped:
+        out.append("Подходящих строк нет.")
+        return "\n".join(out)
+    for block in grouped:
+        head = block["rows"][0]
+        bits = [f"{labels[item]}: {cell(head, item)}" for item in meta_ids]
+        if bits:
+            out.append("\n<b>" + " · ".join(html_esc(bit) if item != "amount" else bit for item, bit in zip(meta_ids, bits)) + "</b>")
+        else:
+            out.append("")
+        if not line_ids:
+            continue
+        out.append(" · ".join(html_esc(labels[item]) for item in line_ids))
+        for row in block["rows"]:
+            values = []
+            for item in line_ids:
+                value = cell(row, item)
+                values.append(value if item == "amount" else html_esc(value))
+            out.append("• " + " · ".join(values))
+    return "\n".join(line for line in out if line is not None)
+
+
+def _template_html(
+    template: str,
+    source: dict[str, Any],
+    matched: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+    today: date,
+    cash,
+    terms: int,
+    delays,
+    period: str,
+    customers: list[str],
+    products: list[str],
+    order_ids: set[str],
+    work_state: str,
+    hide_totals: bool = False,
+) -> str:
+    pack = _metric_pack(matched, today, terms, delays)
+    known = {key: fmt for key, _label, fmt in dictionary.METRICS}
+
+    def slice_html(key: str) -> str:
+        if key == "summary":
+            return _summary(source, matched, today, cash, terms, delays, period)
+        if key == "count":
+            return _count(matched, cash)
+        if key == "rank":
+            return _rank(matched, cash)
+        if key == "debt":
+            return _debts(matched, today, terms, delays, cash, overdue_only=False, incoming=False, period=period)
+        if key == "overdue":
+            return _debts(matched, today, terms, delays, cash, overdue_only=True, incoming=False, period=period)
+        if key == "incoming":
+            return _debts(matched, today, terms, delays, cash, overdue_only=False, incoming=True, period=period)
+        if key == "orders":
+            return _orders(matched, cash)
+        if key == "lines":
+            return _orders(matched, cash).replace("<b>Заказы</b>", "<b>Позиции</b>", 1)
+        if key == "work":
+            return _work(matched if work_state or period != "all" else rows, today, work_state)
+        if key == "customers":
+            return _customers(source, matched, cash)
+        if key == "products":
+            return _products(matched, cash)
+        if key == "expense":
+            return _expenses(rows, matched, customers, order_ids, cash)
+        if key == "notes":
+            return _notes(matched)
+        if key == "frozen":
+            return _frozen(rows, customers, products, order_ids)
+        if key == "discount":
+            return _discounts(matched, cash)
+        if key == "status":
+            return _statuses(matched, cash)
+        if key == "remind":
+            return _reminder(matched, source, terms, cash)
+        return ""
+
+    opens = {
+        "b": "<b>",
+        "i": "<i>",
+        "h": "\n<b>",
+        "li": "• ",
+        "q": "заметка: ",
+        "code": "<code>",
+        "table": "\n",
+        "th": "<b>",
+        "td": "",
+    }
+    closes = {
+        "b": "</b>",
+        "i": "</i>",
+        "h": "</b>\n",
+        "li": "\n",
+        "q": "\n",
+        "code": "</code>",
+        "table": "\n",
+        "th": "</b> · ",
+        "td": " · ",
+    }
+    parts: list[str] = []
+    rows: list[list[str]] = []
+    cells: list[str] = []
+    in_row = False
+
+    def flush_rows() -> None:
+        nonlocal rows
+        if not rows:
+            return
+        width = max(len(row) for row in rows)
+        html = ["<table>"]
+        for row in rows:
+            html.append("<tr>")
+            for index in range(width):
+                value = row[index].strip() if index < len(row) else ""
+                html.append(f"<td>{value}</td>")
+            html.append("</tr>")
+        html.append("</table>")
+        parts.append("".join(html))
+        rows = []
+
+    def add_outside(text: str) -> None:
+        if text.strip():
+            flush_rows()
+            parts.append(text)
+            return
+        if rows and text.count("\n") >= 2:
+            flush_rows()
+        parts.append(text)
+
+    def put(text: str) -> None:
+        if in_row:
+            cells[-1] += text
+        else:
+            add_outside(text)
+
+    cursor = 0
+    for match in re.finditer(r"\{\{([^}]+)\}\}", template or ""):
+        put(html_esc(template[cursor : match.start()]))
+        cursor = match.end()
+        token = match.group(1).strip()
+        if token == "table":
+            if not in_row:
+                in_row = True
+                cells = [""]
+            continue
+        if token == "|":
+            if in_row:
+                cells.append("")
+            else:
+                put(" · ")
+            continue
+        if token == "/table":
+            if in_row:
+                rows.append(cells)
+                cells = []
+                in_row = False
+            continue
+        if token in {"/td", "/th"} and in_row:
+            cells.append("")
+            continue
+        rendered = ""
+        if token.startswith("metric:"):
+            key = token.split(":", 1)[1].strip()
+            _raw, text = _metric_text(key, known.get(key, "text"), pack, cash)
+            rendered = text
+        elif token.startswith("slice:"):
+            rest = token.split(":", 1)[1].strip()
+            key, sep, cols_raw = rest.partition(":")
+            key = key.strip()
+            columns = [bit.strip() for bit in cols_raw.split(",") if bit.strip()] if sep else []
+            if key in dictionary.COLUMN_SLICES:
+                rendered = _order_slice_html(key, columns, source, matched, hide_totals)
+            elif columns and key in dictionary.SLICE_PICKS:
+                rendered = _picked_slice_html(key, columns, source, matched, cash, hide_totals, today, delays, period)
+            else:
+                rendered = slice_html(key)
+        elif token.startswith("/"):
+            rendered = closes.get(token[1:].strip(), "")
+        else:
+            name = token.split(":", 1)[0].strip()
+            rendered = opens[name] if name in opens else html_esc(match.group(0))
+        put(rendered)
+    put(html_esc((template or "")[cursor:]))
+    if in_row:
+        rows.append(cells)
+    flush_rows()
+    body = "".join(parts).strip()
+    return body or "Шаблон пуст."
+
+
+def api_body(
+    reply: Reply | None,
+    query: str = "",
+    doc: dict[str, Any] | None = None,
+    surface: str = "desk",
+    book: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    hints = _hint_rows(query, doc, surface, book) if str(query or "").strip() else []
+    if reply is not None and reply.suggestions and not str(reply.html or "").strip():
+        rows = [{"kind": "item", "text": item, "meta": "команда"} for item in reply.suggestions]
+        return {
+            "title": "Варианты",
+            "lead": "Похожие запросы",
+            "chips": [],
+            "sections": [{"title": "Варианты", "rows": rows}],
+            "hints": [{"title": item, "sub": "команда"} for item in reply.suggestions],
+            "hintOnly": True,
+            "template": "",
+        }
+    if reply is None or not str(reply.html or "").strip():
+        return {
+            "title": "Ответ",
+            "lead": "",
+            "chips": [],
+            "sections": [{"title": "Ответ", "rows": [{"kind": "text", "text": "В отчёте по этому запросу ничего нет."}]}],
+            "hints": hints,
+            "hintOnly": False,
+            "template": "",
+        }
+    body = present(reply.html)
+    body["hints"] = hints
+    body["hintOnly"] = False
+    body["template"] = reply.template_source or ""
+    if reply.action:
+        body["action"] = reply.action
+    return body
 
 
 def _bucket(overdue: int | None) -> str:

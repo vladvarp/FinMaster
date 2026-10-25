@@ -26,9 +26,9 @@ def _hide_console_early() -> None:
 
 def start() -> int:
     _hide_console_early()
-    from backend.instance import claim_or_handoff, requested_report
+    from backend.instance import claim_or_handoff, requested_handoff
 
-    if claim_or_handoff(requested_report()):
+    if claim_or_handoff(requested_handoff()):
         return 0
     from backend.splash import ensure_packages, hide_console, Splash
 
