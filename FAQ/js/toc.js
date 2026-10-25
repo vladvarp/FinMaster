@@ -29,7 +29,7 @@ window.FAQ_TOC = [
       { id: "calculator", title: "Калькулятор", keys: "нода схема формула связь блюпринт пример оператор константа результат провод итог" },
       { id: "presentation", title: "Презентация", keys: "блок kpi холст инфографика" },
       { id: "cloud", title: "Облако", keys: "карта галактика 3d долг" },
-      { id: "vault", title: "Хранилище", keys: "копилка пополнение снятие цель" },
+      { id: "vault", title: "Хранилище", keys: "копилка пополнение снятие цель bank телефон" },
     ],
   },
   {
@@ -55,8 +55,9 @@ window.FAQ_TOC = [
     items: [
       { id: "phone", title: "Подключение телефона", keys: "qr wi-fi доступ устройства экран вкладки стенд" },
       { id: "ngrok", title: "Интернет через ngrok", keys: "токен path store туннель" },
-      { id: "telegram", title: "Telegram-бот", keys: "botfather mini app снимок голос вопрос долги чат стенд токен" },
+      { id: "telegram", title: "Telegram-бот", keys: "botfather mini app снимок голос вопрос долги чат стенд токен хранилище bank" },
       { id: "mobile", title: "Экран телефона", keys: "вкладки свайп заказы календарь стенд проиграть" },
+      { id: "bank", title: "Хранилище на телефоне", keys: "bank копилка операции отчёты пополнение снятие страница все операции" },
       { id: "desk", title: "Интерфейс компьютера в браузере", keys: "desk ссылка web" },
     ],
   },

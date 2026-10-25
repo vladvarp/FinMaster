@@ -93,7 +93,22 @@ SLICE_PICKS = {
         ("amount", "Остаток"),
         ("due", "Срок"),
     ),
+    "vault": (
+        ("type", "Тип"),
+        ("name", "Название"),
+        ("amount", "Сумма"),
+        ("date", "Дата"),
+        ("page", "Страница"),
+    ),
 }
+# Итоги шапки страницы. В ответ попадают только отмеченные в карточке среза.
+VAULT_STATS = (
+    ("hand", "На руках"),
+    ("save", "В копилке"),
+    ("inc", "Пополнено"),
+    ("out", "Потрачено"),
+    ("goal", "Цель"),
+)
 COLUMN_SLICES = ("orders", "lines")
 ORDER_SLICE_COLUMNS = (
     "number",
@@ -126,6 +141,7 @@ SLICES = (
     ("discount", "Скидки"),
     ("status", "Статусы"),
     ("remind", "Напоминание"),
+    ("vault", "Хранилище"),
 )
 
 METRICS = (
@@ -189,6 +205,7 @@ TOPIC_OWNER = {
     "lines": "lines",
     "summary": "summary",
     "remind": "remind",
+    "vault": "vault",
 }
 
 _ACTION_HELP = {
@@ -263,6 +280,9 @@ def _cmd(
         "snapKind": snap_kind,
         "snapHide": snap_hide,
         "delivery": delivery,
+        "vaultPage": "",
+        "vaultStats": [],
+        "vaultTotalsOnly": False,
     }
 
 
@@ -311,6 +331,7 @@ def factory() -> dict[str, Any]:
         _cmd("discount", ["скидки"], slices=["discount"]),
         _cmd("status", ["статусы"], slices=["status"]),
         _cmd("remind", ["напомни"], slices=["remind"]),
+        _cmd("vault", ["строки хранилища", "операции хранилища", "что в хранилище"], slices=["vault"]),
         _cmd("nav-reports", ["открой отчёты", "открой отчеты", "открыть отчёты", "открыть отчеты"], answer="action", action="reports", desk=False),
         _cmd("nav-orders", ["открой заказы", "открыть заказы"], answer="action", action="orders", desk=False),
         _cmd("nav-snap", ["открой снимок", "открыть снимок"], answer="action", action="snap", desk=False),
@@ -319,6 +340,13 @@ def factory() -> dict[str, Any]:
             ["ссылка", "открой ссылку", "открыть ссылку", "пришли ссылку", "дай ссылку", "отправь ссылку"],
             answer="action",
             action="link",
+            desk=False,
+        ),
+        _cmd(
+            "nav-bank",
+            ["хранилище", "/bank", "открой хранилище", "открыть хранилище", "открой копилку", "открыть копилку"],
+            answer="action",
+            action="bank",
             desk=False,
         ),
         _cmd(
@@ -396,7 +424,7 @@ def _clean_command(raw: Any) -> dict[str, Any] | None:
             }
         )
     action = str(raw.get("action") or "")
-    if action not in {"reports", "orders", "snap", "link", "pc"}:
+    if action not in {"reports", "orders", "snap", "link", "bank", "pc"}:
         action = ""
     snap_kind = str(raw.get("snapKind") or "png")
     if snap_kind not in {"png", "pdf", "text"}:
@@ -404,6 +432,11 @@ def _clean_command(raw: Any) -> dict[str, Any] | None:
     delivery = str(raw.get("delivery") or "")
     if delivery not in {key for key, _title in DELIVERIES}:
         delivery = ""
+    vault_page = " ".join(str(raw.get("vaultPage") or "").split())[:80]
+    raw_stats = raw.get("vaultStats") if isinstance(raw.get("vaultStats"), list) else []
+    picked_stats = {str(item or "") for item in raw_stats}
+    vault_stats = [key for key, _title in VAULT_STATS if key in picked_stats]
+    vault_totals_only = bool(raw.get("vaultTotalsOnly"))
     bot = bool(raw.get("bot", True))
     desk = bool(raw.get("desk", True))
     enabled = bool(raw.get("enabled", bot or desk))
@@ -424,6 +457,9 @@ def _clean_command(raw: Any) -> dict[str, Any] | None:
         "snapKind": snap_kind,
         "snapHide": bool(raw.get("snapHide")),
         "delivery": delivery,
+        "vaultPage": vault_page,
+        "vaultStats": vault_stats,
+        "vaultTotalsOnly": vault_totals_only,
     }
 
 
@@ -801,7 +837,7 @@ def help_html(book: dict[str, Any], surface: str) -> str:
                 seen.add(normalize(word))
             keywords.append("• " + html_esc(", ".join(fresh)) + " — " + labels.get(action, action))
         lines.extend(_help_block("Ключевые слова", keywords))
-        lines.append("Кнопки внизу по-прежнему открывают отчёты, заказы, снимок и ссылку.")
+        lines.append("Кнопки внизу по-прежнему открывают отчёты, заказы, снимок, хранилище и ссылку.")
     return "\n".join(lines).strip()
 
 
@@ -815,6 +851,7 @@ def catalog() -> dict[str, Any]:
             key: [{"id": fid, "title": title} for fid, title in fields]
             for key, fields in SLICE_PICKS.items()
         },
+        "vaultStats": [{"id": fid, "title": title} for fid, title in VAULT_STATS],
         "metrics": [{"id": key, "title": title, "format": fmt} for key, title, fmt in METRICS],
         "actions": [{"id": key, "title": title} for key, title in ACTIONS],
         "answers": [{"id": key, "title": title} for key, title in ANSWERS],
@@ -824,6 +861,7 @@ def catalog() -> dict[str, Any]:
             {"id": "orders", "title": "Открыть заказы"},
             {"id": "snap", "title": "Открыть снимок"},
             {"id": "link", "title": "Ссылка"},
+            {"id": "bank", "title": "Открыть хранилище"},
             {"id": "pc", "title": "Открыть на компьютере"},
         ],
         "factory": {

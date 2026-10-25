@@ -205,17 +205,17 @@
             const bal = balances.get(row.id) || { hand: 0, save: 0 };
             const amount = row.type === "save" ? Number(row.amount) || 0 : Math.abs(Number(row.amount) || 0);
             return `<tr class="vault-row vt-${esc(row.type)}" data-vault-row="${esc(row.id)}">
-              <td><select data-vf="type">${Object.entries(TYPES)
+              <td data-label="Тип"><select data-vf="type">${Object.entries(TYPES)
                 .map(([id, m]) => `<option value="${id}" ${id === row.type ? "selected" : ""}>${esc(m.label)}</option>`)
                 .join("")}</select></td>
-              <td><input data-vf="name" maxlength="120" value="${esc(row.name || "")}" placeholder="без названия" spellcheck="false" /></td>
-              <td class="num"><div class="vault-amount"><span class="vault-sign">${signOf(row)}</span><input data-vf="amount" inputmode="decimal" value="${esc(
+              <td data-label="Название"><input data-vf="name" maxlength="120" value="${esc(row.name || "")}" placeholder="без названия" spellcheck="false" /></td>
+              <td class="num" data-label="Сумма"><div class="vault-amount"><span class="vault-sign">${signOf(row)}</span><input data-vf="amount" inputmode="decimal" value="${esc(
                 row.type === "save" ? amount : Math.abs(amount)
               )}" /></div></td>
-              <td class="num computed ${bal.hand < 0 ? "neg" : ""}">${esc(money(bal.hand))}</td>
-              <td class="num computed save">${esc(money(bal.save))}</td>
-              <td><input type="date" data-vf="date" value="${esc(row.date || "")}" /></td>
-              <td><button type="button" class="btn icon small danger" data-vault-del="${esc(row.id)}" title="Удалить строку">✕</button></td>
+              <td class="num computed ${bal.hand < 0 ? "neg" : ""}" data-label="На руках">${esc(money(bal.hand))}</td>
+              <td class="num computed save" data-label="В копилке">${esc(money(bal.save))}</td>
+              <td data-label="Дата"><input type="date" data-vf="date" value="${esc(row.date || "")}" /></td>
+              <td data-label=""><button type="button" class="btn icon small danger" data-vault-del="${esc(row.id)}" title="Удалить строку">✕</button></td>
             </tr>`;
           })
           .join("")
@@ -253,6 +253,9 @@
       ["90", "3 мес"],
       ["30", "Месяц"],
     ];
+    const zoomHint = document.documentElement.classList.contains("is-bank")
+      ? "кнопки — масштаб · сдвиг пальцем · двойное нажатие — всё"
+      : "колесо — масштаб · перетаскивание — сдвиг · двойной клик — всё";
     return `<div class="vault-zoom">
         <div class="vault-zoom-presets">${presets
           .map(
@@ -261,7 +264,7 @@
           )
           .join("")}</div>
         <span class="vault-zoom-range" id="vault-zoom-range"></span>
-        <span class="vault-zoom-hint">колесо — масштаб · перетаскивание — сдвиг · двойной клик — всё</span>
+        <span class="vault-zoom-hint">${esc(zoomHint)}</span>
       </div>`;
   }
 

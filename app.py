@@ -7,6 +7,7 @@ import re
 import sys
 import threading
 import time
+import urllib.parse
 import webbrowser
 from typing import Any
 
@@ -64,7 +65,19 @@ DIRTY = False
 SERVER_PORT = 0
 
 LOCAL_ADDRS = {"127.0.0.1", "::1", "localhost"}
-MOBILE_FILES = {"/m", "/mobile.html", "/mobile.js", "/mobile.css", "/favicon.ico", "/favicon.svg", "/favicon.png"}
+MOBILE_FILES = {
+    "/m",
+    "/mobile.html",
+    "/mobile.js",
+    "/mobile.css",
+    "/bank",
+    "/bank.html",
+    "/bank.js",
+    "/bank.css",
+    "/favicon.ico",
+    "/favicon.svg",
+    "/favicon.png",
+}
 ICON_PATH = os.path.join(FRONTEND, "favicon.ico")
 
 
@@ -308,8 +321,11 @@ def guard_remote_clients():
 @app.after_request
 def log_remote_http(response):
     path = request.path
-    if path in {"/m", "/mobile.html"} and response.status_code < 400:
-        netlog.add("http", "Телефон открыл страницу", source=_net_peer(), key="open-m")
+    if path in {"/m", "/mobile.html", "/bank", "/bank.html"} and response.status_code < 400:
+        if path.startswith("/bank"):
+            netlog.add("http", "Хранилище открыло страницу", source=_net_peer(), key="open-bank")
+        else:
+            netlog.add("http", "Телефон открыл страницу", source=_net_peer(), key="open-m")
         return response
     if not path.startswith("/api/remote/"):
         return response
@@ -352,6 +368,20 @@ def _no_cache(response):
 @app.get("/m")
 def mobile_index():
     return _no_cache(send_from_directory(FRONTEND, "mobile.html"))
+
+
+@app.get("/bank")
+def bank_index():
+    """Телефонное хранилище. Скрипты графика получают тот же токен, что и страница."""
+    path = os.path.join(FRONTEND, "bank.html")
+    with open(path, "rb") as fh:
+        html = fh.read()
+    token = urllib.parse.quote(str(request.args.get("t") or ""), safe="")
+    if token:
+        query = f"?t={token}".encode()
+        html = html.replace(b'src="/charts.js"', b'src="/charts.js' + query + b'"', 1)
+        html = html.replace(b'src="/vault.js"', b'src="/vault.js' + query + b'"', 1)
+    return _no_cache(app.response_class(html, mimetype="text/html"))
 
 
 @app.get("/desk")
@@ -575,7 +605,7 @@ def api_guide_open():
 @app.get("/<path:filename>")
 def static_files(filename: str):
     response = send_from_directory(FRONTEND, filename)
-    if filename in {"mobile.js", "mobile.css", "mobile.html", "app.js", "cloud.js", "calc.js", "presentation.js", "pdf.js", "vault.js", "datepicker.js", "styles.css", "charts.js"}:
+    if filename in {"mobile.js", "mobile.css", "mobile.html", "bank.js", "bank.css", "bank.html", "app.js", "cloud.js", "calc.js", "presentation.js", "pdf.js", "vault.js", "datepicker.js", "styles.css", "charts.js"}:
         return _no_cache(response)
     return response
 
@@ -2003,12 +2033,18 @@ def api_remote_pull():
     since = request.args.get("since", type=int) or 0
     cid = request.args.get("cid") or ""
     kind = request.args.get("kind") or "mobile"
+    if kind not in {"mobile", "bank", "desktop"}:
+        kind = "mobile"
     name = request.args.get("name") or ""
     info = _device_info()
     name = name or str(info.get("name") or "")
     REMOTE.touch(cid, kind, name)
-    if kind == "mobile" and cid:
+    if kind in {"mobile", "bank"} and cid:
         storage.remember_device(cid, name, request.remote_addr or "", info)
+    elif kind == "desktop" and cid and any(
+        item.get("id") == cid for item in (storage.remote_settings().get("devices") or [])
+    ):
+        storage.forget_device(cid)
     snap = REMOTE.wait(since)
     if "clients" not in snap:
         snap["clients"] = REMOTE.clients()
@@ -2033,12 +2069,19 @@ def api_remote_session():
     snap["cal_hide_pause"] = _cal_hide_pause()
     cid = request.args.get("cid") or ""
     name = request.args.get("name") or ""
+    kind = request.args.get("kind") or "mobile"
+    if kind not in {"mobile", "bank"}:
+        kind = "mobile"
     if cid:
         info = _device_info()
         name = name or str(info.get("name") or "")
-        REMOTE.touch(cid, "mobile", name)
+        REMOTE.touch(cid, kind, name)
         storage.remember_device(cid, name, request.remote_addr or "", info)
-        g.netlog_text = f"Телефон открыл сессию: {name or cid[:8]}"
+        g.netlog_text = (
+            f"Хранилище открыло сессию: {name or cid[:8]}"
+            if kind == "bank"
+            else f"Телефон открыл сессию: {name or cid[:8]}"
+        )
         g.netlog_level = "ok"
         g.netlog_key = f"sess-{cid}"
     return jsonify(snap)
@@ -2054,7 +2097,10 @@ def api_remote_push():
     if not isinstance(document, dict):
         return jsonify({"error": "Нет документа."}), 400
     cid = str(data.get("cid") or "mobile")
-    REMOTE.touch(cid, "mobile", str(data.get("name") or ""))
+    kind = str(data.get("kind") or request.args.get("kind") or "mobile")
+    if kind not in {"mobile", "bank"}:
+        kind = "mobile"
+    REMOTE.touch(cid, kind, str(data.get("name") or ""))
     version = REMOTE.publish(document, REMOTE.path, cid, True)
     return jsonify({"ok": True, "version": version})
 

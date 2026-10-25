@@ -36,6 +36,7 @@ from backend.pdf_bridge import PDF_BRIDGE
 
 
 ASK_DESK = {"интерфейс пк", "/desk"}
+ASK_BANK = {"хранилище", "/bank"}
 ASK_LINK = {
     "получить ссылку",
     "ссылка",
@@ -203,12 +204,20 @@ def _web_app_url(url: str) -> str:
     return link if link.startswith("https://") else ""
 
 
-def _desk_link(url: str) -> str:
+def _swap_link(url: str, path: str) -> str:
     link = str(url or "").strip()
     mark = "/m?"
     if mark not in link:
         return ""
-    return link.replace(mark, "/desk?", 1)
+    return link.replace(mark, f"/{path}?", 1)
+
+
+def _desk_link(url: str) -> str:
+    return _swap_link(url, "desk")
+
+
+def _bank_link(url: str) -> str:
+    return _swap_link(url, "bank")
 
 
 def _menu_keyboard(app_url: str = "") -> dict[str, Any]:
@@ -217,12 +226,21 @@ def _menu_keyboard(app_url: str = "") -> dict[str, Any]:
     if app:
         second = [{"text": "Открыть", "web_app": {"url": app}}, {"text": "Ссылка"}, {"text": "Меню"}]
     rows: list[list[dict[str, Any]]] = [[{"text": "Отчёты"}, {"text": "Заказы"}, {"text": "Снимок"}], second]
+    tools: list[dict[str, Any]] = []
+    bank = _bank_link(app_url)
+    bank_app = _web_app_url(bank)
+    if bank_app:
+        tools.append({"text": "Хранилище", "web_app": {"url": bank_app}})
+    elif bank:
+        tools.append({"text": "Хранилище"})
     desk = _desk_link(app_url)
     desk_app = _web_app_url(desk)
     if desk_app:
-        rows.append([{"text": "Интерфейс ПК", "web_app": {"url": desk_app}}])
+        tools.append({"text": "Интерфейс ПК", "web_app": {"url": desk_app}})
     elif desk:
-        rows.append([{"text": "Интерфейс ПК"}])
+        tools.append({"text": "Интерфейс ПК"})
+    if tools:
+        rows.append(tools)
     rows.append([{"text": "Новая ссылка"}])
     return {
         "keyboard": rows,
@@ -836,8 +854,8 @@ def welcome_text(info: Any = None) -> str:
         "<b>FinMaster</b>\n"
         "отчёты, заказы и снимки прямо здесь\n\n"
         f"{channel_block(info)}\n\n"
-        "Кнопки внизу: <b>Отчёты</b>, <b>Заказы</b>, <b>Снимок</b>, <b>Ссылка</b>, <b>Интерфейс ПК</b>, <b>Новая ссылка</b>.\n"
-        "«Открыть» — телефон. «Интерфейс ПК» — тот же экран, что на компьютере.\n"
+        "Кнопки внизу: <b>Отчёты</b>, <b>Заказы</b>, <b>Снимок</b>, <b>Ссылка</b>, <b>Хранилище</b>, <b>Интерфейс ПК</b>, <b>Новая ссылка</b>.\n"
+        "«Открыть» — телефон. «Хранилище» — копилки на телефоне. «Интерфейс ПК» — тот же экран, что на компьютере.\n"
         "Голосом или текстом можно спросить долги, заказы, кассу, календарь, заказчика — отвечу по открытому отчёту.\n"
         "В списке заказов можно написать имя или номер — найду."
     )
@@ -854,7 +872,10 @@ def access_text(url: str, info: Any = None) -> str:
         return f"{banner}\n\nПока нет ссылки. Проверьте окно <b>Телефон</b> на компьютере."
     how = "Откроется из любой сети, внутри Telegram." if is_internet(flags, link) else "Откроется только в той же Wi‑Fi."
     desk = _desk_link(link)
-    text = f"{banner}\n\n<b>Две ссылки.</b> {how}\n\n<b>Телефон</b>\n<code>{html_esc(link)}</code>"
+    bank = _bank_link(link)
+    text = f"{banner}\n\n<b>Три ссылки.</b> {how}\n\n<b>Телефон</b>\n<code>{html_esc(link)}</code>"
+    if bank:
+        text += f"\n\n<b>Хранилище</b>\n<code>{html_esc(bank)}</code>"
     if desk:
         text += f"\n\n<b>Интерфейс ПК</b>\n<code>{html_esc(desk)}</code>"
     if warns:
@@ -879,6 +900,9 @@ def access_rows(url: str, info: Any = None) -> list[list[dict[str, Any]]]:
     rows: list[list[dict[str, Any]]] = []
     if can_open:
         rows.append([_open_btn("Телефон", link)])
+        bank = _bank_link(link)
+        if bank:
+            rows.append([_open_btn("Хранилище", bank)])
         desk = _desk_link(link)
         if desk:
             rows.append([_open_btn("Интерфейс ПК", desk)])
@@ -888,6 +912,27 @@ def access_rows(url: str, info: Any = None) -> list[list[dict[str, Any]]]:
     rows.append([web_access_btn(flags, "Wa")])
     rows.append([_btn("Отчёты", "R"), _btn("Заказы", "O")])
     return rows
+
+
+def send_bank_link(token: str, chat_id: str, url: str, info: Any = None) -> None:
+    flags = _status(info)
+    link = _bank_link(str(url or flags.get("url") or ""))
+    if not flags.get("access") or not link:
+        send_html(
+            token,
+            chat_id,
+            "Хранилище откроется после кнопки <b>Включить доступ к веб</b>.",
+            _inline([[web_access_btn(flags)]]),
+        )
+        return
+    send_html(
+        token,
+        chat_id,
+        "<b>Хранилище</b>\n"
+        f"<code>{html_esc(link)}</code>\n"
+        "те же страницы, строки, цель и график, что на компьютере. Экран собран под телефон.",
+        _inline([[_open_btn("Открыть хранилище", link)]]),
+    )
 
 
 def send_desk_link(token: str, chat_id: str, url: str, info: Any = None) -> None:
@@ -945,6 +990,7 @@ def setup_bot(token: str) -> None:
                     {"command": "orders", "description": "Заказы"},
                     {"command": "snap", "description": "Снимок для заказчика"},
                     {"command": "link", "description": "Ссылка на телефон"},
+                    {"command": "bank", "description": "Хранилище на телефоне"},
                     {"command": "newlink", "description": "Новая ссылка на телефон"},
                     {"command": "ask", "description": "Спросить по открытому отчёту"},
                 ]
@@ -1341,6 +1387,9 @@ class TelegramBot:
         if low in ASK_DESK:
             send_desk_link(token, chat_id, str(info.get("url") or ""), info)
             return
+        if low in ASK_BANK:
+            send_bank_link(token, chat_id, str(info.get("url") or ""), info)
+            return
         if low in ASK_NEW_LINK:
             self._ask_new_link(token, chat_id)
             return
@@ -1377,7 +1426,7 @@ class TelegramBot:
         if ask.blocks_order_search(text):
             send_html(token, chat_id, "Не разобрал эту фразу.", self._reply_kb(chat_id))
             return
-        send_html(token, chat_id, "Нажмите <b>Отчёты</b>, <b>Заказы</b>, <b>Снимок</b> или <b>Меню</b>.", self._reply_kb(chat_id))
+        send_html(token, chat_id, "Нажмите <b>Отчёты</b>, <b>Заказы</b>, <b>Снимок</b>, <b>Хранилище</b> или <b>Меню</b>.", self._reply_kb(chat_id))
 
     def _has_report(self, session: ChatSession) -> bool:
         if session.path or _live_path():
@@ -1403,6 +1452,10 @@ class TelegramBot:
         if reply.action == "link":
             info = self._status_for(chat_id)
             send_access(token, chat_id, str(info.get("url") or ""), info)
+            return True
+        if reply.action == "bank":
+            info = self._status_for(chat_id)
+            send_bank_link(token, chat_id, str(info.get("url") or ""), info)
             return True
         if reply.action == "pc":
             self._open_on_pc(token, chat_id)
@@ -1494,6 +1547,8 @@ class TelegramBot:
         notice = ""
         if data == "L":
             notice = "Обновляю ссылку…"
+        elif data == "Bk":
+            notice = "Ссылка на хранилище…"
         elif data == "N":
             notice = "Новая ссылка…"
         elif data == "Ny":
@@ -1518,6 +1573,7 @@ class TelegramBot:
             "R": "отчёты",
             "O": "заказы",
             "L": "ссылка",
+            "Bk": "хранилище",
             "N": "новая ссылка",
             "Ny": "подтверждение новой ссылки",
             "Nn": "отмена новой ссылки",
@@ -1593,6 +1649,9 @@ class TelegramBot:
         session = self._chat(chat_id)
         if data in {"Wh", "Wa"}:
             self._toggle_web_access(token, chat_id, data == "Wh")
+        elif data == "Bk":
+            info = self._status_for(chat_id)
+            send_bank_link(token, chat_id, str(info.get("url") or ""), info)
         elif data == "H":
             self._show(token, chat_id, "home")
         elif data == "R":
@@ -2298,7 +2357,8 @@ class TelegramBot:
         rows = [
             [web_access_btn(info, "Wh")],
             [_btn("Отчёты", "R"), _btn("Заказы", "O")],
-            [_btn("Ссылка на телефон", "L"), _btn("Новая ссылка", "N")],
+            [_btn("Хранилище", "Bk"), _btn("Ссылка на телефон", "L")],
+            [_btn("Новая ссылка", "N")],
         ]
         return text, rows
 

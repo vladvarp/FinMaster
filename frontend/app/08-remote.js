@@ -245,7 +245,7 @@
   }
 
   function remoteBadge() {
-    const phones = remote.clients?.filter((c) => c.kind === "mobile").length || 0;
+    const phones = remote.clients?.filter((c) => c.kind === "mobile" || c.kind === "bank").length || 0;
     document.querySelectorAll(".phone-live").forEach((live) => {
       live.hidden = !remote.enabled;
       live.textContent = phones ? String(phones) : "";
@@ -298,7 +298,7 @@
   }
 
   function mobileClients() {
-    return (remote.clients || []).filter((c) => c.kind === "mobile");
+    return (remote.clients || []).filter((c) => c.kind === "mobile" || c.kind === "bank");
   }
 
   function renderRemoteLive() {
@@ -406,6 +406,29 @@
     const live = new Map(mobileClients().map((c) => [c.id, c]));
     const devices = remote.devices || [];
     const online = devices.filter((d) => live.has(d.id)).length;
+    // #region agent log
+    const devSig = devices.map((d) => `${String(d.id).slice(-6)}:${live.has(d.id) ? 1 : 0}:${d.name || ""}`).join("|");
+    if (devSig !== window.__fmDevSig) {
+      window.__fmDevSig = devSig;
+      fetch("http://127.0.0.1:7439/ingest/2217c639-1122-4f34-8d73-9f66df23a223", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "871c54" },
+        body: JSON.stringify({
+          sessionId: "871c54",
+          runId: "pre",
+          hypothesisId: "E",
+          location: "08-remote.js:renderRemoteDevices",
+          message: "device list",
+          data: {
+            online,
+            live: [...live.values()].map((c) => ({ tail: String(c.id).slice(-6), kind: c.kind, name: c.name })),
+            devices: devices.map((d) => ({ tail: String(d.id).slice(-6), name: d.name, on: live.has(d.id) })),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
     const title = $("remote-devices-title");
     if (title) {
       if (!devices.length) title.textContent = "Устройства";
@@ -475,6 +498,36 @@
     return String(remote.url || "").includes("/m?") ? remote.url.replace("/m?", "/desk?") : "";
   }
 
+  function remoteBankUrl() {
+    return String(remote.url || "").includes("/m?") ? remote.url.replace("/m?", "/bank?") : "";
+  }
+
+  function paintRemoteUrl(el, url, caption) {
+    if (!el) return;
+    el.replaceChildren();
+    if (!url) {
+      el.textContent = el.id === "remote-url" ? "—" : "";
+      return;
+    }
+    const label = document.createElement("span");
+    label.className = "remote-url-k";
+    label.textContent = caption;
+    el.append(label, document.createTextNode(" "));
+    String(url).split(/([/?&=.:_\-])/).forEach((part) => {
+      el.append(document.createTextNode(part));
+      if (/^[/?&=.:_\-]$/.test(part)) el.append(document.createElement("wbr"));
+    });
+  }
+
+  function paintRemoteLink(rowId, buttonId, urlId, url, caption) {
+    const row = $(rowId);
+    const button = $(buttonId);
+    const on = !!url;
+    if (row && rowId !== "remote-phone-row") row.hidden = !on;
+    if (button) button.hidden = !on;
+    paintRemoteUrl($(urlId), url, caption);
+  }
+
   async function copyRemoteLink(text, okText) {
     if (!text) return;
     try {
@@ -496,15 +549,9 @@
     const qrBox = $("remote-qr");
     if (remote.qr) qrBox.innerHTML = remote.qr;
     else if (!remote.enabled) qrBox.innerHTML = '<div class="remote-qr-empty">Сессия не запущена</div>';
-    $("remote-url").textContent = remote.url || "—";
-    const deskLink = remoteDeskUrl();
-    const deskEl = $("remote-desk-url");
-    const copyDesk = $("remote-copy-desk");
-    if (copyDesk) copyDesk.hidden = !deskLink;
-    if (deskEl) {
-      deskEl.hidden = !deskLink;
-      deskEl.textContent = deskLink ? `Интерфейс ПК: ${deskLink}` : "";
-    }
+    paintRemoteLink("remote-phone-row", "remote-copy", "remote-url", remote.url || "", "Телефон");
+    paintRemoteLink("remote-desk-row", "remote-copy-desk", "remote-desk-url", remoteDeskUrl(), "Интерфейс ПК");
+    paintRemoteLink("remote-bank-row", "remote-copy-bank", "remote-bank-url", remoteBankUrl(), "Хранилище");
     renderRemoteIps();
     const auto = $("remote-autostart");
     if (auto) auto.checked = !!remote.autostart;
@@ -762,6 +809,7 @@
       remote.deferredOrigin = origin;
       return;
     }
+    const fromBank = (remote.clients || []).some((c) => c.id === origin && c.kind === "bank");
     const fromDesk = String(origin || "").startsWith("web:") || origin === "desk" || (remote.clients || []).some((c) => c.id === origin && c.kind === "desk");
     if (fromDesk) {
       clearTimeout(state.autosaveTimer);
@@ -793,7 +841,7 @@
     syncDirty();
     remote.applying = false;
     scheduleAutosave();
-    toast("Изменения с телефона применены");
+    toast(fromBank ? "Изменения из хранилища применены" : "Изменения с телефона применены");
   }
 
   function showCloudOverview() {
@@ -1322,6 +1370,7 @@
     });
     $("remote-copy")?.addEventListener("click", () => copyRemoteLink(remote.url, "Ссылка на телефон скопирована"));
     $("remote-copy-desk")?.addEventListener("click", () => copyRemoteLink(remoteDeskUrl(), "Ссылка на интерфейс ПК скопирована"));
+    $("remote-copy-bank")?.addEventListener("click", () => copyRemoteLink(remoteBankUrl(), "Ссылка на хранилище скопирована"));
     document.addEventListener("focusout", () => setTimeout(flushRemoteDoc, 150));
   }
 

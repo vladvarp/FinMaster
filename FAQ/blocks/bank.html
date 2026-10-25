@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/bank.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+  <style>
+    .phone {
+      width: min(390px, 100%);
+      margin: 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      overflow: hidden;
+      background: var(--bg);
+      box-shadow: var(--shadow);
+    }
+    .phone .topbar { position: relative !important; }
+    .phone body, .phone { padding-top: 0; }
+    .phone .vault-view { padding-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <div class="phone">
+    <header class="topbar">
+      <div class="topbar-title">
+        <strong>Хранилище</strong>
+        <span id="sub">Отпуск</span>
+      </div>
+      <button type="button" class="text-btn" id="files">Отчёты</button>
+      <button type="button" class="icon-btn" aria-label="Тема" tabindex="-1">☾</button>
+    </header>
+    <main class="vault-view" id="vault">
+      <button type="button" class="calc-tab bank-ops" id="btn-ops">Все операции</button>
+      <div class="calc-tabbar">
+        <div class="calc-tabs" id="tabs"></div>
+        <button type="button" class="calc-tab add" id="add-page" title="Новая страница-копилка">+</button>
+      </div>
+      <div class="vault-body" id="body"></div>
+    </main>
+    <section class="empty" id="files-view" hidden>
+      <h2>Другой отчёт</h2>
+      <p>Выберите файл. Он откроется на компьютере.</p>
+      <h3 class="file-head">Папка FinMaster</h3>
+      <div class="file-list" id="lib"></div>
+      <h3 class="file-head">Недавние отчёты</h3>
+      <div class="file-list" id="recent"></div>
+    </section>
+  </div>
+  <script>
+    const reports = {
+      vacation: {
+        title: "Отпуск",
+        pages: [
+          { name: "Отпуск", rows: [
+            { type: "in", name: "Зарплата", amount: 80000, date: "2026-05-01" },
+            { type: "save", name: "В конверт", amount: 18000, date: "2026-05-02" },
+            { type: "out", name: "Билеты", amount: 20000, date: "2026-05-03" },
+          ]},
+          { name: "Телефон", rows: [
+            { type: "in", name: "Подработка", amount: 12000, date: "2026-04-20" },
+            { type: "save", name: "На аппарат", amount: 7000, date: "2026-04-21" },
+          ]},
+        ],
+      },
+      home: {
+        title: "Дом",
+        pages: [
+          { name: "Кухня", rows: [
+            { type: "in", name: "Перевод", amount: 15000, date: "2026-06-01" },
+            { type: "out", name: "Смеситель", amount: 4300, date: "2026-06-04" },
+          ]},
+        ],
+      },
+    };
+    const typeName = { in: "Пополнение", out: "Снятие", save: "Копилка" };
+    let reportId = "vacation";
+    let page = 0;
+    let ops = false;
+    let files = false;
+    const $ = (id) => document.getElementById(id);
+    const money = (n) => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n) + " ₽";
+    const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
+    function report() { return reports[reportId]; }
+    function totals(rows) {
+      const t = { inc: 0, out: 0, save: 0 };
+      rows.forEach((row) => {
+        const n = Math.abs(Number(row.amount) || 0);
+        if (row.type === "in") t.inc += n;
+        else if (row.type === "out") t.out += n;
+        else t.save += Number(row.amount) || 0;
+      });
+      t.hand = t.inc - t.out - t.save;
+      return t;
+    }
+    function ruDate(value) {
+      const m = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+      return m ? m[3] + "." + m[2] + "." + m[1] : "—";
+    }
+    function sign(row) {
+      const n = Number(row.amount) || 0;
+      if (row.type === "out") return "−" + money(Math.abs(n));
+      if (row.type === "save") return (n < 0 ? "−" : "+") + money(Math.abs(n));
+      return "+" + money(Math.abs(n));
+    }
+    function paintFiles() {
+      const card = (id, item) => `<article class="file-row${id === reportId ? " current" : ""}"><div><strong>${esc(item.title)}</strong><small>${esc(item.title)}.fmaster</small></div>${
+        id === reportId ? '<span class="pill">открыт</span>' : `<button type="button" class="btn small" data-open="${id}">Открыть</button>`
+      }</article>`;
+      $("lib").innerHTML = card("vacation", reports.vacation) + card("home", reports.home);
+      $("recent").innerHTML = card("home", reports.home);
+    }
+    function paint() {
+      const doc = report();
+      $("sub").textContent = doc.title;
+      $("files").textContent = files ? "К копилкам" : "Отчёты";
+      $("btn-ops").textContent = ops ? "Копилка" : "Все операции";
+      $("vault").hidden = files;
+      $("vault").classList.toggle("is-ops", ops);
+      $("files-view").hidden = !files;
+      if (files) {
+        paintFiles();
+        return;
+      }
+      const pages = doc.pages;
+      if (page >= pages.length) page = 0;
+      $("tabs").innerHTML = pages.map((item, index) => `<div class="calc-tab${index === page ? " active" : ""}" data-page="${index}"><span class="calc-tab-label">${esc(item.name)}</span></div>`).join("");
+      if (ops) {
+        const rows = [];
+        pages.forEach((item) => item.rows.forEach((row, index) => rows.push({ row, index, page: item.name })));
+        rows.sort((a, b) => (a.row.date === b.row.date ? b.index - a.index : a.row.date < b.row.date ? 1 : -1));
+        $("body").innerHTML = `<section class="card"><h3 class="file-head">Все операции</h3><div class="ops-list">${rows.map(({ row, page: name }) =>
+          `<article class="ops-row vt-${row.type}"><b>${esc(row.name)}</b><span class="ops-type">${typeName[row.type]}</span><span class="ops-amt">${esc(sign(row))}</span><span class="ops-page">${esc(name)}</span><span class="ops-date">${ruDate(row.date)}</span></article>`
+        ).join("")}</div></section>`;
+        return;
+      }
+      const current = pages[page];
+      const t = totals(current.rows);
+      $("body").innerHTML = `
+        <section class="card vault-head">
+          <div class="vault-name">${esc(current.name)}</div>
+          <div class="vault-kpis">
+            <div class="vault-kpi hand"><span>На руках</span><b>${money(t.hand)}</b><small>пополнения − снятия − копилка</small></div>
+            <div class="vault-kpi save"><span>В копилке</span><b>${money(t.save)}</b><small>отложено</small></div>
+            <div class="vault-kpi in"><span>Пополнено</span><b>+${money(t.inc)}</b><small>все пополнения</small></div>
+            <div class="vault-kpi out"><span>Потрачено</span><b>−${money(t.out)}</b><small>все снятия</small></div>
+          </div>
+        </section>
+        <section class="card vault-add">
+          <div class="vault-add-row">
+            <div class="vault-type-seg" role="radiogroup" aria-label="Тип строки">
+              <button type="button" class="vt-in active" data-kind="in">Пополнение</button>
+              <button type="button" class="vt-out" data-kind="out">Снятие</button>
+              <button type="button" class="vt-save" data-kind="save">Копилка</button>
+            </div>
+            <input id="name" class="vault-in-name" maxlength="120" placeholder="Название строки" value="Карманные">
+            <input id="amount" class="vault-in-amount" inputmode="decimal" placeholder="Сумма" value="5000">
+            <input id="date" class="vault-in-date" type="date" value="2026-05-10">
+            <button type="button" class="btn primary" id="add">Добавить</button>
+          </div>
+        </section>`;
+    }
+    document.body.addEventListener("click", (e) => {
+      if (e.target.closest("#files")) {
+        files = !files;
+        paint();
+        return;
+      }
+      const open = e.target.closest("[data-open]");
+      if (open) {
+        reportId = open.dataset.open;
+        page = 0;
+        ops = false;
+        files = false;
+        paint();
+        return;
+      }
+      const tab = e.target.closest("[data-page]");
+      if (tab) {
+        page = Number(tab.dataset.page);
+        ops = false;
+        paint();
+        return;
+      }
+      if (e.target.closest("#btn-ops")) {
+        ops = !ops;
+        paint();
+        return;
+      }
+      if (e.target.id === "add-page") {
+        report().pages.push({ name: "Копилка " + (report().pages.length + 1), rows: [] });
+        page = report().pages.length - 1;
+        ops = false;
+        paint();
+        return;
+      }
+      const kind = e.target.closest("[data-kind]");
+      if (kind) {
+        document.querySelectorAll("[data-kind]").forEach((btn) => btn.classList.toggle("active", btn === kind));
+        return;
+      }
+      if (e.target.id === "add") {
+        const amount = Number(String($("amount").value).replace(",", "."));
+        if (!amount) return;
+        const active = document.querySelector("[data-kind].active");
+        report().pages[page].rows.push({
+          type: active ? active.dataset.kind : "in",
+          name: $("name").value.trim() || "Строка",
+          amount,
+          date: $("date").value,
+        });
+        paint();
+      }
+    });
+    paint();
+  </script>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

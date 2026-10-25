@@ -321,6 +321,7 @@ _SLICE_ORDER = (
     "notes",
     "frozen",
     "remind",
+    "vault",
 )
 
 
@@ -369,7 +370,12 @@ def _match_command(
                     continue
                 rest = " ".join(tokens[:index] + tokens[index + size :])
                 _delivery, _hide, cleaned = dictionary.take_keywords(rest, book, surface)
-                if not narrow and _loose_tokens(cleaned, source, rows):
+                probe = cleaned
+                if "vault" in (cmd.get("slices") or []) or (
+                    cmd.get("answer") == "template" and "slice:vault" in str(cmd.get("template") or "")
+                ):
+                    _vault_types, _vault_pages, probe = _take_vault_words(probe, source)
+                if not narrow and _loose_tokens(probe, source, rows):
                     continue
                 rank = (-size, 0 if narrow else 1, index, -len(" ".join(phrase_tokens)))
                 if best is None or rank < best[0]:
@@ -629,6 +635,24 @@ def parse(
         if recent_n:
             explicit.add("orders")
 
+    vault_asked = "vault" in explicit or (guided and "slice:vault" in template_source)
+    vault_types: set[str] = set()
+    vault_pages: set[str] = set()
+    if vault_asked:
+        vault_types, vault_pages, raw = _take_vault_words(raw, source)
+        saved_page = str(cmd.get("vaultPage") or "") if cmd else ""
+        if saved_page:
+            chosen = {_norm(name) for name in _vault_page_names(source, saved_page)}
+            if chosen:
+                vault_pages = chosen if not vault_pages else vault_pages & chosen
+        show_words, words = _expand_words(_words(raw, book), book)
+    vault_stats = [
+        key
+        for key, _title in dictionary.VAULT_STATS
+        if cmd and key in set(cmd.get("vaultStats") or [])
+    ]
+    vault_totals_only = bool(cmd.get("vaultTotalsOnly")) if cmd else False
+
     date_kind = "order"
     if "work" in explicit and not ({"debt", "money", "orders", "summary", "expense"} & explicit):
         date_kind = "work"
@@ -683,12 +707,12 @@ def parse(
     title = str(source.get("title") or "Отчёт")
     recent_label = f"последние {recent_n}" if recent_n else ""
     head = _header(title, live, explicit, customers, products, order_ids, period_label, pay, work_state, show_words, recent_label)
-    if not rows and "snap" not in explicit:
+    if not rows and "snap" not in explicit and not vault_asked:
         return Reply(
             html=f"{head}\nВ отчёте пока нет позиций.",
             needs_report=True,
         )
-    if not matched and explicit != {"snap"} and "snap" not in explicit:
+    if not matched and explicit != {"snap"} and "snap" not in explicit and not vault_asked:
         tail = f"За {html_esc(period_label)} в отчёте ничего нет." if period_label else "В отчёте по этой просьбе ничего нет."
         understood = bool(explicit or customers or products or order_ids or statuses or types or period != "all" or pay or work_state or recent_n)
         if (voice or _ASK.search(low)) and not understood:
@@ -706,7 +730,7 @@ def parse(
         label = str((cmd or {}).get("phrases", ["Показатели"])[0] or "Показатели")
         parts.append(_metrics_html(label, (cmd or {}).get("metrics") or [], source, matched, today, cash, terms, delays, period, markdown=delivery == "md"))
     elif guided and cmd_answer == "template":
-        parts.append(_template_html(template_source, source, matched, rows, today, cash, terms, delays, period, customers, products, order_ids, work_state, hide_totals))
+        parts.append(_template_html(template_source, source, matched, rows, today, cash, terms, delays, period, customers, products, order_ids, work_state, hide_totals, vault_types, vault_pages, vault_stats, vault_totals_only))
     else:
         rendered: set[str] = set()
         for key in slice_order:
@@ -764,6 +788,8 @@ def parse(
                 parts.append(_frozen(rows, customers, products, order_ids))
             elif key == "remind":
                 parts.append(_reminder(matched, source, terms, cash))
+            elif key == "vault":
+                parts.append(_vault_html(source, cash, today, period, vault_types, vault_pages, hide_totals, stats=vault_stats, totals_only=vault_totals_only))
 
     ids: list[str] = []
     seen: set[str] = set()
@@ -836,8 +862,9 @@ def _header(
         "rank": "крупные",
         "discount": "скидки",
         "status": "статусы",
+        "vault": "хранилище",
     }
-    for key in ("summary", "money", "debt", "overdue", "orders", "work", "customers", "products", "expense", "notes", "frozen", "remind", "count", "rank", "discount", "status"):
+    for key in ("summary", "money", "debt", "overdue", "orders", "work", "customers", "products", "expense", "notes", "frozen", "remind", "count", "rank", "discount", "status", "vault"):
         if key in topics and names.get(key):
             bits.append(names[key])
     if customers:
@@ -880,6 +907,7 @@ def _topics(text: str) -> tuple[set[str], str]:
         ("money", r"выруч\w*|оборот\w*|оплат\w*|пришл\w*|касс\w*|чист\w*|прибыл\w*|средний чек|собираем\w*|сводк\w*|дашборд|как дела|что у меня|итог\w*"),
         ("orders", r"заказ(?!чик)\w*"),
         ("lines", r"позиц\w*|строк\w*"),
+        ("vault", r"хранилищ\w*"),
         ("summary", r"сводк\w*|обзор|что по отч"),
     )
     work = text
@@ -1163,6 +1191,62 @@ def _has_text(hay: str, needle: str) -> bool:
             start = index + 1
             continue
         return True
+
+
+_VAULT_WORD = {
+    "пополнение": "in",
+    "пополнения": "in",
+    "снятие": "out",
+    "снятия": "out",
+    "копилка": "save",
+    "копилки": "save",
+}
+_VAULT_LABEL = {"in": "Пополнение", "out": "Снятие", "save": "Копилка"}
+_VAULT_FIELDS = (
+    ("type", "Тип"),
+    ("name", "Название"),
+    ("amount", "Сумма"),
+    ("date", "Дата"),
+    ("page", "Страница"),
+)
+
+
+def _vault_pages(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    ui = doc.get("ui") if isinstance(doc.get("ui"), dict) else {}
+    vault = ui.get("vault") if isinstance(ui.get("vault"), dict) else {}
+    pages = vault.get("pages") if isinstance(vault.get("pages"), list) else []
+    return [page for page in pages if isinstance(page, dict)]
+
+
+def _vault_page_names(doc: dict[str, Any], page_id: str) -> list[str]:
+    """Имя страницы по id, выбранному в срезе. Чужой id не режет список."""
+    want = str(page_id or "").strip()
+    if not want:
+        return []
+    for page in _vault_pages(doc):
+        if str(page.get("id") or "") != want:
+            continue
+        name = str(page.get("name") or "").strip() or "Страница"
+        return [name]
+    return []
+
+
+def _take_vault_words(text: str, source: dict[str, Any]) -> tuple[set[str], set[str], str]:
+    """Тип строки и имя страницы — те же вычитания, что имя заказчика у других срезов."""
+    types: set[str] = set()
+    kept: list[str] = []
+    for token in str(text or "").split():
+        kind = _VAULT_WORD.get(token)
+        if kind:
+            types.add(kind)
+        else:
+            kept.append(token)
+    work = " ".join(kept)
+    names = [str(page.get("name") or "").strip() for page in _vault_pages(source)]
+    hits, work = _take_names(work, names)
+    pages = {_norm(name) for name in hits}
+    pages.difference_update(_VAULT_WORD)
+    return types, pages, work
 
 
 def _take_names(text: str, names: list[str]) -> tuple[list[str], str]:
@@ -1968,6 +2052,157 @@ def _picked_slice_html(
     return "\n".join(line for line in out if line is not None)
 
 
+def _vault_totals(page: dict[str, Any]) -> dict[str, float]:
+    """Те же итоги, что шапка страницы: все строки, без фильтра срока и типа."""
+    inc = spent = saved = 0.0
+    for row in page.get("rows") or []:
+        if not isinstance(row, dict):
+            continue
+        kind = str(row.get("type") or "")
+        try:
+            amount = float(row.get("amount") or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        if kind == "in":
+            inc += abs(amount)
+        elif kind == "out":
+            spent += abs(amount)
+        elif kind == "save":
+            saved += amount
+    try:
+        goal = float(page.get("goal") or 0)
+    except (TypeError, ValueError):
+        goal = 0.0
+    if goal < 0:
+        goal = 0.0
+    return {
+        "inc": round(inc, 2),
+        "out": round(spent, 2),
+        "save": round(saved, 2),
+        "hand": round(inc - spent - saved, 2),
+        "goal": round(goal, 2),
+    }
+
+
+def _vault_stat_lines(totals: dict[str, float], stat_ids: list[str], cash) -> list[str]:
+    goal = totals["goal"]
+    pct = int(max(0.0, min(100.0, totals["save"] / goal * 100)) + 0.5) if goal > 0 else 0
+    left = max(0.0, goal - totals["save"]) if goal > 0 else 0.0
+    lines: list[str] = []
+    for fid in stat_ids:
+        if fid == "hand":
+            lines.append(f"На руках: {cash(totals['hand'])}")
+        elif fid == "save":
+            note = f"{pct}% от цели" if goal > 0 else "отложено всего"
+            lines.append(f"В копилке: {cash(totals['save'])} · {note}")
+        elif fid == "inc":
+            lines.append(f"Пополнено: +{cash(totals['inc'])}")
+        elif fid == "out":
+            lines.append(f"Потрачено: −{cash(totals['out'])}")
+        elif fid == "goal":
+            if goal > 0:
+                note = "цель достигнута" if left <= 0.005 else f"осталось отложить {cash(left)}"
+                lines.append(f"Цель: {cash(goal)} · {note}")
+            else:
+                lines.append("Цель: не задана")
+    return lines
+
+
+def _vault_html(
+    source: dict[str, Any],
+    cash,
+    today: date,
+    period: str,
+    type_keys: set[str],
+    page_keys: set[str],
+    hide_totals: bool,
+    columns: list[str] | None = None,
+    stats: list[str] | None = None,
+    totals_only: bool = False,
+) -> str:
+    """Строки копилок. Это не выручка заказов."""
+    labels = dict(_VAULT_FIELDS)
+    chosen = [] if totals_only else [fid for fid, _title in _VAULT_FIELDS if columns is None or fid in set(columns)]
+    stat_ids = [key for key, _title in dictionary.VAULT_STATS if key in set(stats or [])]
+    if hide_totals:
+        chosen = [fid for fid in chosen if fid != "amount"]
+        stat_ids = []
+    title = "Хранилище"
+    if len(page_keys) == 1:
+        shown = next(
+            (
+                str(page.get("name") or "").strip() or "Страница"
+                for page in _vault_pages(source)
+                if _norm(str(page.get("name") or "").strip() or "Страница") in page_keys
+            ),
+            "",
+        )
+        if shown:
+            title = f"Хранилище · {shown}"
+    if not chosen and not stat_ids:
+        return f"<b>{html_esc(title)}</b>\nНе выручка заказов."
+    items: list[tuple[date, int, str, str, dict[str, Any]]] = []
+    for page in _vault_pages(source):
+        page_name = str(page.get("name") or "Страница").strip() or "Страница"
+        if page_keys and _norm(page_name) not in page_keys:
+            continue
+        for index, row in enumerate(page.get("rows") or []):
+            if not isinstance(row, dict):
+                continue
+            kind = str(row.get("type") or "")
+            if kind not in _VAULT_LABEL:
+                continue
+            if type_keys and kind not in type_keys:
+                continue
+            day = _iso(row.get("date"))
+            if not _in_period(day, period, today):
+                continue
+            items.append((day or date.min, index, page_name, kind, row))
+    items.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    head = f"<b>{html_esc(title)}</b>"
+    if chosen:
+        head += f" · {len(items)}"
+    out = [head, "Не выручка заказов."]
+    if stat_ids:
+        shown_pages = [
+            page
+            for page in _vault_pages(source)
+            if not page_keys or _norm(str(page.get("name") or "").strip() or "Страница") in page_keys
+        ]
+        many = len(shown_pages) != 1
+        for page in shown_pages:
+            if many:
+                out.append(f"<b>{html_esc(str(page.get('name') or '').strip() or 'Страница')}</b>")
+            out.extend(_vault_stat_lines(_vault_totals(page), stat_ids, cash))
+    if not chosen:
+        return "\n".join(out)
+    if not items:
+        out.append("Подходящих строк нет.")
+        return "\n".join(out)
+    out.append(" · ".join(html_esc(labels[fid]) for fid in chosen))
+    for day, _index, page_name, kind, row in items:
+        amount = float(row.get("amount") or 0)
+        values: list[str] = []
+        for fid in chosen:
+            if fid == "type":
+                values.append(html_esc(_VAULT_LABEL[kind]))
+            elif fid == "name":
+                values.append(html_esc(str(row.get("name") or "—")))
+            elif fid == "amount":
+                signed = abs(amount)
+                if kind == "out":
+                    signed = -abs(amount)
+                elif kind == "save":
+                    signed = amount
+                values.append(cash(signed))
+            elif fid == "date":
+                values.append(html_esc(_fmt(day) if day != date.min else "—"))
+            elif fid == "page":
+                values.append(html_esc(page_name))
+        out.append("• " + " · ".join(values))
+    return "\n".join(out)
+
+
 def _template_html(
     template: str,
     source: dict[str, Any],
@@ -1983,6 +2218,10 @@ def _template_html(
     order_ids: set[str],
     work_state: str,
     hide_totals: bool = False,
+    vault_types: set[str] | None = None,
+    vault_pages: set[str] | None = None,
+    vault_stats: list[str] | None = None,
+    vault_totals_only: bool = False,
 ) -> str:
     pack = _metric_pack(matched, today, terms, delays)
     known = {key: fmt for key, _label, fmt in dictionary.METRICS}
@@ -2022,6 +2261,8 @@ def _template_html(
             return _statuses(matched, cash)
         if key == "remind":
             return _reminder(matched, source, terms, cash)
+        if key == "vault":
+            return _vault_html(source, cash, today, period, vault_types or set(), vault_pages or set(), hide_totals, stats=vault_stats, totals_only=vault_totals_only)
         return ""
 
     opens = {
@@ -2117,7 +2358,20 @@ def _template_html(
             key, sep, cols_raw = rest.partition(":")
             key = key.strip()
             columns = [bit.strip() for bit in cols_raw.split(",") if bit.strip()] if sep else []
-            if key in dictionary.COLUMN_SLICES:
+            if key == "vault":
+                rendered = _vault_html(
+                    source,
+                    cash,
+                    today,
+                    period,
+                    vault_types or set(),
+                    vault_pages or set(),
+                    hide_totals,
+                    columns if sep else None,
+                    vault_stats,
+                    vault_totals_only,
+                )
+            elif key in dictionary.COLUMN_SLICES:
                 rendered = _order_slice_html(key, columns, source, matched, hide_totals)
             elif columns and key in dictionary.SLICE_PICKS:
                 rendered = _picked_slice_html(key, columns, source, matched, cash, hide_totals, today, delays, period)

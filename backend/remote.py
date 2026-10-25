@@ -305,6 +305,47 @@ class RemoteSession:
             client["kind"] = kind or client.get("kind") or "mobile"
             if name:
                 client["name"] = name
+            # #region agent log
+            try:
+                import json
+                from flask import has_request_context, request as _rq
+
+                req_path = ""
+                arg_kind = ""
+                ua_mark = ""
+                if has_request_context():
+                    req_path = _rq.path
+                    arg_kind = str(_rq.args.get("kind") or "")
+                    ua = _rq.headers.get("User-Agent") or ""
+                    ua_mark = "telegram" if "Telegram" in ua else "iphone" if "iPhone" in ua else "android" if "Android" in ua else "other"
+                live = [
+                    {"tail": str(k)[-6:], "kind": str(c.get("kind") or ""), "name": str(c.get("name") or "")[:40]}
+                    for k, c in self._clients.items()
+                    if str(c.get("kind") or "") != "desktop"
+                ]
+                rec = {
+                    "sessionId": "871c54",
+                    "runId": "pre",
+                    "hypothesisId": "A",
+                    "location": "remote.py:touch",
+                    "message": "client touch",
+                    "data": {
+                        "cidTail": str(cid)[-6:],
+                        "kind": kind,
+                        "name": str(name or "")[:40],
+                        "isNew": is_new,
+                        "path": req_path,
+                        "argKind": arg_kind,
+                        "ua": ua_mark,
+                        "live": live,
+                    },
+                    "timestamp": int(time.time() * 1000),
+                }
+                with open(r"C:\Users\user\Documents\GitHub\FinMaster\debug-871c54.log", "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
+            # #endregion
             pruned = self._prune_locked()
             if is_new:
                 if (kind or "") == "desktop":

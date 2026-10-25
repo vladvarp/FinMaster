@@ -240,7 +240,7 @@
     if (!sample) return false;
     const keys = kind === "keywords"
       ? ["words", "action", "enabled", "bot", "desk"]
-      : ["phrases", "answer", "slices", "metrics", "template", "action", "snapKind", "snapHide", "delivery", "enabled", "bot", "desk"];
+      : ["phrases", "answer", "slices", "metrics", "template", "action", "snapKind", "snapHide", "delivery", "vaultPage", "vaultStats", "vaultTotalsOnly", "enabled", "bot", "desk"];
     return keys.every((key) => JSON.stringify(item[key] ?? "") === JSON.stringify(sample[key] ?? ""));
   }
 
@@ -306,7 +306,17 @@
     return map;
   }
 
-  function chips(values, onChange, dupes, placeholder, accept) {
+  function sendPhraseToProbe(phrase) {
+    const input = $("dictionary-probe-query");
+    if (!input) return;
+    const panel = $("dictionary-test");
+    if (panel?.classList.contains("is-closed")) $("dictionary-test-toggle")?.click();
+    input.value = String(phrase || "");
+    input.focus();
+    scheduleProbe();
+  }
+
+  function chips(values, onChange, dupes, placeholder, accept, onPick) {
     const box = document.createElement("div");
     box.className = "dictionary-chips";
     const seen = dupes || new Map();
@@ -326,6 +336,14 @@
         if (key && seen.get(key) > 1) chip.classList.add("is-dup");
         const word = document.createElement("span");
         word.textContent = value;
+        if (onPick) {
+          word.title = "Правый клик подставляет фразу в тест словаря";
+          chip.addEventListener("contextmenu", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onPick(value);
+          });
+        }
         const drop = document.createElement("button");
         drop.type = "button";
         drop.textContent = "×";
@@ -444,7 +462,7 @@
           return false;
         }
         return true;
-      })));
+      }, sendPhraseToProbe)));
       const answers = [...(dictionaryCatalog?.answers || [])];
       if (item.answer && !answers.some((row) => row.id === item.answer)) {
         answers.unshift({ id: item.answer, title: item.answer });
@@ -487,6 +505,86 @@
     }
   }
 
+  function vaultPageRows() {
+    const pages = state.doc?.ui?.vault?.pages;
+    const rows = [{ id: "", title: "Все копилки" }];
+    if (!Array.isArray(pages)) return rows;
+    for (const page of pages) {
+      const id = String(page?.id || "");
+      if (!id) continue;
+      rows.push({ id, title: String(page?.name || "").trim() || "Без названия" });
+    }
+    return rows;
+  }
+
+  function vaultPageMenu(item, rerender) {
+    const rows = vaultPageRows();
+    if (item.vaultPage && !rows.some((row) => row.id === item.vaultPage)) {
+      rows.push({ id: item.vaultPage, title: "Выбранная копилка" });
+    }
+    return field(
+      "Копилка",
+      pickMenu(
+        item.vaultPage || "",
+        rows,
+        (id) => {
+          item.vaultPage = id;
+          noteDictionaryEdit();
+          if (rerender === true) renderDictionaryEditor();
+          else if (typeof rerender === "function") rerender();
+        },
+        "Какую копилку показать в срезе. «Все копилки» оставляет страницы вместе.",
+      ),
+    );
+  }
+
+  function vaultStatChecks(item, rerender) {
+    const rows = dictionaryCatalog?.vaultStats || [];
+    const box = document.createElement("div");
+    box.className = "dictionary-checks";
+    const order = rows.map((row) => row.id);
+    for (const row of rows) {
+      const mark = document.createElement("label");
+      mark.className = "dictionary-check";
+      mark.title = "Показать этот итог страницы в ответе среза";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.title = mark.title;
+      input.checked = (item.vaultStats || []).includes(row.id);
+      input.addEventListener("change", () => {
+        const on = new Set();
+        box.querySelectorAll("input").forEach((boxInput, index) => {
+          if (boxInput.checked) on.add(rows[index].id);
+        });
+        item.vaultStats = order.filter((id) => on.has(id));
+        noteDictionaryEdit();
+        if (rerender === true) renderDictionaryEditor();
+        else if (typeof rerender === "function") rerender();
+      });
+      mark.append(input, toggleTrack(), document.createTextNode(row.title));
+      box.append(mark);
+    }
+    return box;
+  }
+
+  function vaultTotalsOnly(item, rerender) {
+    const mark = document.createElement("label");
+    mark.className = "dictionary-check";
+    mark.title = "В ответе только отмеченные итоги. Колонки строк остаются как есть, но не показываются.";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.title = mark.title;
+    input.checked = Boolean(item.vaultTotalsOnly);
+    input.addEventListener("change", () => {
+      item.vaultTotalsOnly = input.checked;
+      noteDictionaryEdit();
+      if (rerender === true) renderDictionaryEditor();
+      else if (typeof rerender === "function") rerender();
+    });
+    mark.append(input, toggleTrack(), document.createTextNode("Только итоги"));
+    return mark;
+  }
+
   function answerEditor(item) {
     const box = document.createElement("div");
     if (item.answer === "slices") {
@@ -506,11 +604,15 @@
           else set.delete(slice.id);
           item.slices = (dictionaryCatalog.slices || []).map((row) => row.id).filter((id) => set.has(id));
           noteDictionaryEdit();
+          if (slice.id === "vault") renderDictionaryEditor();
         });
         mark.append(input, toggleTrack(), document.createTextNode(slice.title));
         list.append(mark);
       }
       box.append(list);
+      if ((item.slices || []).includes("vault")) {
+        box.append(vaultPageMenu(item, true), vaultTotalsOnly(item, true), vaultStatChecks(item, true));
+      }
     } else if (item.answer === "metrics") {
       box.append(metricEditor(item));
     } else if (item.answer === "template") {
@@ -1102,6 +1204,7 @@
       return dictionaryCatalog?.slicePicks?.[key] || [];
     };
     const sliceToken = (key, ids, fields) => {
+      if (key === "vault" && !ids.length) return "{{slice:vault:}}";
       const defaults = (dictionaryCatalog?.columnSlices || []).includes(key)
         ? (dictionaryCatalog?.sliceColumns || [])
         : fields.map((field) => field.id);
@@ -1113,7 +1216,9 @@
       panel.replaceChildren();
       const raw = String(chip.dataset.token || "");
       const body = raw.slice(2, -2).replace(/^slice:/, "");
-      const [key, cols] = body.split(":");
+      const sep = body.indexOf(":");
+      const key = sep < 0 ? body : body.slice(0, sep);
+      const cols = sep < 0 ? null : body.slice(sep + 1);
       const fields = sliceFields(key);
       const note = document.createElement("p");
       note.className = "dictionary-note";
@@ -1121,10 +1226,12 @@
         note.textContent = "Этот срез показывается целиком.";
         panel.append(note);
       } else {
-        note.textContent = "Отметьте, что показать. Номер и название — шапка, остальные поля — строки.";
+        note.textContent = key === "vault"
+          ? "Отметьте поля строк. Итоги страницы включаются тумблерами выше: они считаются по всей копилке, как шапка на экране."
+          : "Отметьте, что показать. Номер и название — шапка, остальные поля — строки.";
         const list = document.createElement("div");
         list.className = "dictionary-checks";
-        const picked = new Set(cols ? cols.split(",").filter(Boolean) : (
+        const picked = new Set(cols != null ? cols.split(",").filter(Boolean) : (
           (dictionaryCatalog?.columnSlices || []).includes(key) ? dictionaryCatalog?.sliceColumns || [] : fields.map((field) => field.id)
         ));
         for (const field of fields) {
@@ -1135,7 +1242,7 @@
           input.checked = picked.has(field.id);
           input.addEventListener("change", () => {
             const ids = [...list.querySelectorAll("input")].flatMap((boxInput, index) => (boxInput.checked ? [fields[index].id] : []));
-            if (!ids.length) {
+            if (!ids.length && key !== "vault") {
               input.checked = true;
               toast("Оставьте хотя бы одно поле");
               return;
@@ -1151,6 +1258,7 @@
         }
         panel.append(note, list);
       }
+      if (key === "vault") panel.prepend(vaultPageMenu(item, runPreview), vaultTotalsOnly(item, runPreview), vaultStatChecks(item, runPreview));
       panel.hidden = false;
     };
     const slice = pickMenu(
