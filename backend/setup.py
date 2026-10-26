@@ -1735,10 +1735,10 @@ def _commit_row(item: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _remote_commits(timeout: float) -> list[dict[str, Any]]:
+def _remote_commits(timeout: float, *, fresh: bool = False) -> list[dict[str, Any]]:
     global _LOG_CACHE
     now = time.time()
-    if _LOG_CACHE and now - _LOG_CACHE[0] < 120:
+    if not fresh and _LOG_CACHE and now - _LOG_CACHE[0] < 120:
         return [dict(item) for item in _LOG_CACHE[1]]
     found: list[dict[str, Any]] = []
     for page in range(1, 4):
@@ -1760,7 +1760,7 @@ def _remote_commits(timeout: float) -> list[dict[str, Any]]:
 def update_log(root: str) -> dict[str, Any]:
     """Коммиты GitHub: весь путь и отрезок от установленной версии до последней."""
     root = os.path.abspath(root)
-    commits = _remote_commits(12)
+    commits = _remote_commits(12, fresh=True)
     current = _read_sha(root)
     local = _parse_when(_read_stamp(root))
     latest = commits[0]["sha"] if commits else ""

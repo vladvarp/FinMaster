@@ -1753,19 +1753,32 @@
     return text ? text.slice(0, 7) : "—";
   }
 
+  function updateVersionsMatch() {
+    return !state.updateReady && !state.updateOffline && !state.updateDamaged
+      && !!state.updateCurrent && state.updateCurrent === state.updateLatest;
+  }
+
   function paintUpdateVersions() {
     const host = $("update-versions");
     if (!host) return;
     const current = state.updateCurrent || "дата неизвестна";
     const latest = state.updateOffline ? "сервер не ответил" : (state.updateLatest || "дата неизвестна");
+    const match = updateVersionsMatch();
+    const showGithub = !match;
+    const broken = !!state.updateIntegrity;
+    const stale = !broken && (!!state.updateReady || !!state.updateDamaged);
     const showInfo = !!state.updateReady || !!state.updateIntegrity;
-    const stale = !!state.updateReady || !!state.updateDamaged;
+    const installedClass = broken ? " is-bad" : stale ? " is-old" : "";
+    host.className = `update-versions${match ? " is-single" : ""}`;
     host.innerHTML = `
-      <div class="update-ver${stale ? " is-old" : ""}">
+      <div class="update-ver${installedClass}">
         <span class="update-ver-label">Сейчас установлена</span>
         <b>${esc(current)}</b>
-        <span class="update-code">${esc(shortCode(state.updateCurrentCode || state.updateCurrentSha))}</span>
-      </div>
+        <div class="update-ver-tools">
+          <span class="update-code">${esc(shortCode(state.updateCurrentCode || state.updateCurrentSha))}</span>
+          ${showInfo && !showGithub ? infoButton() : ""}
+        </div>
+      </div>${showGithub ? `
       <div class="update-ver is-new">
         <span class="update-ver-label">На GitHub</span>
         <b>${esc(latest)}</b>
@@ -1773,7 +1786,7 @@
           <span class="update-code">${esc(shortCode(state.updateLatestCode || state.updateLatestSha))}</span>
           ${showInfo ? infoButton() : ""}
         </div>
-      </div>`;
+      </div>` : ""}`;
   }
 
   function updateCommitItem(row) {
@@ -1877,7 +1890,7 @@
     updateLogData = null;
     diffCache = null;
     const ready = !!state.updateReady;
-    const versionsMatch = !ready && !state.updateOffline && !state.updateDamaged && !!state.updateCurrent && state.updateCurrent === state.updateLatest;
+    const versionsMatch = updateVersionsMatch();
     const title = $("update-title");
     if (title) title.textContent = ready ? (state.updateDamaged ? "Версия старая" : "Есть обновление") : "Обновление";
     const go = $("update-go");

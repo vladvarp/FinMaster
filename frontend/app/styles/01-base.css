@@ -1944,6 +1944,15 @@ html[data-theme="dark"] .line-menu { background: #1b2538; border-color: var(--li
   background: color-mix(in srgb, #f59e0b 16%, transparent);
   color: #f59e0b;
 }
+.update-ver.is-bad {
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--line));
+  background: color-mix(in srgb, var(--danger) 7%, var(--card));
+}
+.update-ver.is-bad .update-code {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+.update-versions.is-single { grid-template-columns: 1fr; }
 .update-ver.is-new { border-color: color-mix(in srgb, var(--accent) 48%, var(--line)); }
 .update-ver-label { display: block; color: var(--muted); font-size: 12px; font-weight: 650; }
 .update-ver b { display: block; margin-top: 4px; font-size: 14px; line-height: 1.35; }
