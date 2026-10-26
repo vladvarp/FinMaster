@@ -739,6 +739,7 @@ def parse(
             vault_stats, vault_totals_only,
             cmd.get("sliceOpts") if isinstance(cmd.get("sliceOpts"), dict) else None,
             cmd.get("sliceRules") if isinstance(cmd.get("sliceRules"), dict) else None,
+            bool(statuses),
         ))
     else:
         def picks_for(key: str) -> set[str] | None:
@@ -777,7 +778,7 @@ def parse(
             elif key == "summary":
                 parts.append(_summary(source, matched, today, cash, terms, delays, period, picks_for(key)))
             elif key == "status":
-                parts.append(_statuses(matched, cash, picks_for(key), rules_for(key)))
+                parts.append(_statuses(matched, cash, picks_for(key), rules_for(key), listed=bool(statuses)))
             elif key == "discount":
                 parts.append(_discounts(matched, cash, picks_for(key)))
             elif key == "debt":
@@ -1814,32 +1815,51 @@ def _rank(rows: list[dict[str, Any]], cash, *, by_debt: bool = False, picks: set
     return "\n".join(lines)
 
 
-def _statuses(rows: list[dict[str, Any]], cash, picks: set[str] | None = None, rules: set[str] | None = None) -> str:
-    acc: dict[str, list[float]] = {}
+def _statuses(rows: list[dict[str, Any]], cash, picks: set[str] | None = None, rules: set[str] | None = None, *, listed: bool = False) -> str:
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         if row["frozen"] or row["tot"].get("kind"):
             continue
         name = str(row["line"].get("status") or "").strip() or "Без статуса"
         if not _keep_rule("status", "empty" if name == "Без статуса" else "named", rules):
             continue
-        cur = acc.setdefault(name, [0.0, 0.0, 0.0])
-        cur[0] += 1
-        cur[1] += float(row["tot"]["after"])
-        cur[2] += float(row["tot"]["unpaid"])
-    ranked = sorted(acc.items(), key=lambda pair: -pair[1][0])
+        grouped.setdefault(name, []).append(row)
+    ranked = sorted(grouped.items(), key=lambda pair: -len(pair[1]))
     lines = [f"<b>Статусы</b> · {len(ranked)}"]
-    status_lines = []
-    for name, (count, after, unpaid) in ranked:
+    status_lines: list[str] = []
+    for name, items in ranked:
+        after = sum(float(row["tot"]["after"]) for row in items)
+        unpaid = sum(float(row["tot"]["unpaid"]) for row in items if not row["cancelled"])
         parts = [html_esc(name)]
         if _on(picks, "count"):
-            parts.append(_pieces(int(count), "позиция", "позиции", "позиций"))
+            parts.append(_pieces(len(items), "позиция", "позиции", "позиций"))
         if _on(picks, "amount"):
             parts.append(cash(after))
         if _on(picks, "debt"):
             parts.append(f"долг {cash(unpaid)}")
-        status_lines.append("• " + " · ".join(parts))
-    lines.extend(status_lines[:24])
-    _fold(lines, status_lines[24:], len(status_lines) - 24, "статус", "статуса", "статусов")
+        head = " · ".join(parts)
+        if not listed:
+            status_lines.append("• " + head)
+            continue
+        status_lines.append(f"\n<b>{head}</b>")
+        by_order: dict[str, list[dict[str, Any]]] = {}
+        for row in items:
+            by_order.setdefault(str(row["order"].get("id") or id(row["order"])), []).append(row)
+        orders = sorted(by_order.values(), key=lambda chunk: -sum(float(row["tot"]["unpaid"]) for row in chunk))
+        for chunk in orders:
+            bits = [_order_ref(chunk[0]["order"]), html_esc(chunk[0]["customer"])]
+            if _on(picks, "count"):
+                bits.append(_pieces(len(chunk), "позиция", "позиции", "позиций"))
+            if _on(picks, "amount"):
+                bits.append(cash(sum(float(row["tot"]["after"]) for row in chunk)))
+            if _on(picks, "debt"):
+                bits.append(f"долг {cash(sum(float(row['tot']['unpaid']) for row in chunk if not row['cancelled']))}")
+            status_lines.append("• " + " · ".join(bits))
+    if listed:
+        lines.extend(status_lines)
+    else:
+        lines.extend(status_lines[:24])
+        _fold(lines, status_lines[24:], len(status_lines) - 24, "статус", "статуса", "статусов")
     if not ranked:
         lines.append("Статусов в этом срезе нет.")
     return "\n".join(lines)
@@ -2483,6 +2503,7 @@ def _template_html(
     vault_totals_only: bool = False,
     slice_opts: dict[str, Any] | None = None,
     slice_rules: dict[str, Any] | None = None,
+    status_named: bool = False,
 ) -> str:
     pack = _metric_pack(matched, today, terms, delays)
     known = {key: fmt for key, _label, fmt in dictionary.METRICS}
@@ -2536,7 +2557,7 @@ def _template_html(
         if key == "discount":
             return _discounts(matched, cash, picks)
         if key == "status":
-            return _statuses(matched, cash, picks, rules)
+            return _statuses(matched, cash, picks, rules, listed=status_named)
         if key == "remind":
             return _reminder(matched, source, terms, cash, picks, columns)
         if key == "vault":
