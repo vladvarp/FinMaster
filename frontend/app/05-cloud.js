@@ -1828,12 +1828,14 @@
     $("confirm-modal")?.classList.remove("open");
     const aboutBtn = $("confirm-about");
     if (aboutBtn) aboutBtn.hidden = true;
+    const discardBtn = $("confirm-discard");
+    if (discardBtn) discardBtn.hidden = true;
     const wait = confirmWait;
     confirmWait = null;
-    wait?.(!!ok);
+    wait?.(ok === "discard" ? "discard" : !!ok);
   }
 
-  function askConfirm({ title, text, lines, ok = "Продолжить", cancel = "Отмена", danger = false, extra = "", about = false } = {}) {
+  function askConfirm({ title, text, lines, ok = "Продолжить", cancel = "Отмена", danger = false, extra = "", about = false, discard = "" } = {}) {
     closeConfirm(false);
     return new Promise((resolve) => {
       confirmWait = resolve;
@@ -1858,6 +1860,11 @@
         okBtn.className = danger ? "btn danger" : "btn primary";
       }
       if (cancelBtn) cancelBtn.textContent = cancel;
+      const discardBtn = $("confirm-discard");
+      if (discardBtn) {
+        discardBtn.hidden = !discard;
+        if (discard) discardBtn.textContent = discard;
+      }
       const aboutBtn = $("confirm-about");
       if (aboutBtn) aboutBtn.hidden = !about;
       confirmExtra(extra, (event) => checkProgramIntegrity(event.currentTarget));
@@ -3615,6 +3622,7 @@
       if (ok) await createNew();
     });
     $("confirm-cancel")?.addEventListener("click", () => closeConfirm(false));
+    $("confirm-discard")?.addEventListener("click", () => closeConfirm("discard"));
     $("confirm-about")?.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();

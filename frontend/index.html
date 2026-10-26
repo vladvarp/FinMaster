@@ -861,6 +861,7 @@
       <p id="confirm-text"></p>
       <div class="modal-actions">
         <button class="btn" type="button" id="confirm-cancel">Отмена</button>
+        <button class="btn danger" type="button" id="confirm-discard" hidden>Не сохранять</button>
         <button class="btn primary" type="button" id="confirm-ok">Продолжить</button>
       </div>
     </div>
@@ -1495,6 +1496,7 @@
   <div id="dictionary-layer" class="dictionary-layer" hidden>
     <header class="dictionary-bar">
       <h2>Словари</h2>
+      <span id="dictionary-save-state" class="dictionary-save-state" title="Словарь записан в dictionary.fmwb">сохранён</span>
       <div class="dictionary-global">
         <span>Весь словарь</span>
         <button type="button" class="btn small primary" id="dictionary-save" title="Записать весь словарь в файл dictionary.fmwb">Сохранить</button>

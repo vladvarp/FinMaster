@@ -33,8 +33,22 @@
     return JSON.stringify(dictionaryBook) !== dictionarySaved;
   }
 
+  function paintDictionarySaveState() {
+    const dirty = dictionaryDirty();
+    const el = $("dictionary-save-state");
+    if (el) {
+      el.textContent = dirty ? "не сохранён" : "сохранён";
+      el.classList.toggle("is-dirty", dirty);
+      el.title = dirty
+        ? "Правки ещё не записаны в dictionary.fmwb. Бот отвечает по старому файлу."
+        : "Словарь записан в dictionary.fmwb";
+    }
+    $("dictionary-fold")?.classList.toggle("is-dirty", dirty);
+  }
+
   function syncDictionaryDirty() {
     const dirty = dictionaryDirty();
+    paintDictionarySaveState();
     if (dirty === dictionaryDirtySent) return;
     dictionaryDirtySent = dirty;
     if (!state.desktop) return;
@@ -45,10 +59,20 @@
     if (!dictionaryDirty()) return true;
     const save = await askConfirm({
       title: "Сохранить словарь?",
-      text: "В словаре есть несохранённая правка. Пока она не сохранена, программа не закроется.",
+      text: "В словаре есть несохранённая правка. Если закрыть без сохранения, она пропадёт.",
       ok: "Сохранить",
       cancel: "Отмена",
+      discard: "Не сохранять",
     });
+    if (save === "discard") {
+      try {
+        await loadDictionary();
+      } catch (err) {
+        toast(err.message || "Словарь не прочитался");
+        return false;
+      }
+      return true;
+    }
     if (!save) return false;
     return saveDictionary();
   }

@@ -29,12 +29,14 @@
   inset: auto 16px 16px auto;
   width: 44px;
   height: 44px;
+  overflow: visible;
   background: transparent;
   pointer-events: none;
 }
 .dictionary-layer.is-fold > :not(.dictionary-fold) { display: none !important; }
 .dictionary-layer.is-fold .dictionary-fold {
-  position: static;
+  position: relative;
+  inset: auto;
   pointer-events: auto;
 }
 .dictionary-bar {
@@ -45,6 +47,24 @@
   border-bottom: 1px solid var(--line);
 }
 .dictionary-bar h2 { margin: 0; font-size: 18px; }
+.dictionary-save-state {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.dictionary-save-state.is-dirty { color: var(--gold); }
+.dictionary-fold.is-dirty::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 0 3px rgba(201, 162, 39, 0.18);
+}
 .dictionary-global {
   display: flex;
   flex-wrap: wrap;
