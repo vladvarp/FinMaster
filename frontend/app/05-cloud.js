@@ -1759,8 +1759,9 @@
     const current = state.updateCurrent || "дата неизвестна";
     const latest = state.updateOffline ? "сервер не ответил" : (state.updateLatest || "дата неизвестна");
     const showInfo = !!state.updateReady || !!state.updateIntegrity;
+    const stale = !!state.updateReady || !!state.updateDamaged;
     host.innerHTML = `
-      <div class="update-ver">
+      <div class="update-ver${stale ? " is-old" : ""}">
         <span class="update-ver-label">Сейчас установлена</span>
         <b>${esc(current)}</b>
         <span class="update-code">${esc(shortCode(state.updateCurrentCode || state.updateCurrentSha))}</span>
