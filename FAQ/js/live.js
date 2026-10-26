@@ -188,7 +188,8 @@
       frame.title = host.getAttribute("aria-label") || "Элемент FinMaster";
       if (host.dataset.width) frame.style.maxWidth = host.dataset.width + "px";
       if (host.dataset.block) {
-        frame.src = "blocks/" + encodeURIComponent(host.dataset.block) + ".html";
+        const part = host.dataset.part ? "?part=" + encodeURIComponent(host.dataset.part) : "";
+        frame.src = "blocks/" + encodeURIComponent(host.dataset.block) + ".html" + part;
         host.textContent = "";
         host.appendChild(frame);
         bind(frame);

@@ -109,6 +109,153 @@ VAULT_STATS = (
     ("out", "Потрачено"),
     ("goal", "Цель"),
 )
+# Свои тумблеры ответа. Пустой набор в карточке прячет эти части, отсутствие ключа — всё включено.
+SLICE_TOGGLES = {
+    "summary": (
+        ("count", "Заказы и позиции"),
+        ("money", "К оплате, оплачено, долг"),
+        ("cost", "Расходы и чистыми"),
+        ("avg", "Средний чек и собираемость"),
+        ("month", "Этот месяц и прошлый"),
+        ("forecast", "Прогноз месяца"),
+        ("term", "Срок оплаты"),
+    ),
+    "count": (
+        ("orders", "Заказы"),
+        ("lines", "Позиции"),
+        ("due", "К оплате"),
+        ("paid", "Оплачено"),
+        ("debt", "Долг"),
+        ("cost", "Расходы"),
+        ("net", "Чистыми"),
+    ),
+    "rank": (
+        ("customers", "Заказчики"),
+        ("orders", "Заказы"),
+    ),
+    "debt": (
+        ("total", "Дебиторка"),
+        ("late", "Просрочено"),
+        ("term", "Срок"),
+        ("buckets", "Корзины просрочки"),
+        ("customer", "Заказчик"),
+        ("order", "Заказ"),
+        ("product", "Продукт"),
+        ("qty", "Количество"),
+        ("due", "Дата срока"),
+        ("mark", "Отметка срока"),
+        ("amount", "Сумма"),
+    ),
+    "overdue": (
+        ("total", "Дебиторка"),
+        ("late", "Просрочено"),
+        ("term", "Срок"),
+        ("buckets", "Корзины просрочки"),
+        ("customer", "Заказчик"),
+        ("order", "Заказ"),
+        ("product", "Продукт"),
+        ("qty", "Количество"),
+        ("due", "Дата срока"),
+        ("mark", "Отметка срока"),
+        ("amount", "Сумма"),
+    ),
+    "incoming": (
+        ("total", "Дебиторка"),
+        ("late", "Просрочено"),
+        ("term", "Срок"),
+        ("buckets", "Корзины просрочки"),
+        ("customer", "Заказчик"),
+        ("order", "Заказ"),
+        ("product", "Продукт"),
+        ("qty", "Количество"),
+        ("due", "Дата срока"),
+        ("mark", "Отметка срока"),
+        ("amount", "Сумма"),
+    ),
+    "orders": (
+        ("head", "Шапка заказа"),
+        ("money", "Итоги заказа"),
+        ("note", "Заметка заказа"),
+        ("product", "Продукт"),
+        ("qty", "Количество"),
+        ("amount", "Сумма"),
+        ("debt", "Долг"),
+        ("date", "Дата"),
+        ("status", "Статус"),
+        ("comment", "Комментарий"),
+        ("expense", "Налоги и затраты"),
+    ),
+    "lines": (
+        ("head", "Шапка заказа"),
+        ("money", "Итоги заказа"),
+        ("note", "Заметка заказа"),
+        ("product", "Продукт"),
+        ("qty", "Количество"),
+        ("amount", "Сумма"),
+        ("debt", "Долг"),
+        ("date", "Дата"),
+        ("status", "Статус"),
+        ("comment", "Комментарий"),
+        ("expense", "Налоги и затраты"),
+    ),
+    "work": (
+        ("counts", "Счётчики"),
+        ("now", "В работе"),
+        ("planned", "Запланировано"),
+        ("done", "Закрыто"),
+        ("nodate", "Без дат"),
+        ("customer", "Заказчик"),
+        ("start", "Начало"),
+        ("end", "Конец"),
+    ),
+    "customers": (
+        ("debt", "Долг"),
+        ("orders", "Число заказов"),
+        ("organization", "Организация"),
+        ("phone", "Телефон"),
+        ("email", "Почта"),
+        ("address", "Адрес"),
+    ),
+    "products": (
+        ("amount", "Сумма"),
+        ("paid", "Оплачено"),
+        ("debt", "Долг"),
+    ),
+    "expense": (
+        ("total", "Итог"),
+        ("order", "Заказ"),
+        ("product", "Продукт"),
+        ("kind", "Вид"),
+        ("amount", "Сумма"),
+    ),
+    "notes": (
+        ("order", "Заметка заказа"),
+        ("comment", "Комментарий позиции"),
+    ),
+    "frozen": (
+        ("order", "Заказ"),
+        ("product", "Продукт"),
+        ("customer", "Заказчик"),
+    ),
+    "discount": (
+        ("order", "Заказ"),
+        ("product", "Продукт"),
+        ("percent", "Скидка"),
+        ("amount", "Сумма"),
+    ),
+    "status": (
+        ("count", "Число позиций"),
+        ("amount", "Сумма"),
+        ("debt", "Долг"),
+    ),
+    "remind": (
+        ("hello", "Обращение"),
+        ("due", "Срок и просрочка"),
+        ("product", "Позиции"),
+        ("total", "Итого"),
+        ("term", "Срок оплаты"),
+    ),
+}
 COLUMN_SLICES = ("orders", "lines")
 ORDER_SLICE_COLUMNS = (
     "number",
@@ -283,6 +430,7 @@ def _cmd(
         "vaultPage": "",
         "vaultStats": [],
         "vaultTotalsOnly": False,
+        "sliceOpts": {},
     }
 
 
@@ -437,6 +585,7 @@ def _clean_command(raw: Any) -> dict[str, Any] | None:
     picked_stats = {str(item or "") for item in raw_stats}
     vault_stats = [key for key, _title in VAULT_STATS if key in picked_stats]
     vault_totals_only = bool(raw.get("vaultTotalsOnly"))
+    slice_opts = _clean_slice_opts(raw.get("sliceOpts"))
     bot = bool(raw.get("bot", True))
     desk = bool(raw.get("desk", True))
     enabled = bool(raw.get("enabled", bot or desk))
@@ -460,7 +609,20 @@ def _clean_command(raw: Any) -> dict[str, Any] | None:
         "vaultPage": vault_page,
         "vaultStats": vault_stats,
         "vaultTotalsOnly": vault_totals_only,
+        "sliceOpts": slice_opts,
     }
+
+
+def _clean_slice_opts(raw: Any) -> dict[str, list[str]]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, list[str]] = {}
+    for key, fields in SLICE_TOGGLES.items():
+        if key not in raw or not isinstance(raw.get(key), list):
+            continue
+        picked = {str(item or "") for item in raw.get(key) or []}
+        out[key] = [fid for fid, _title in fields if fid in picked]
+    return out
 
 
 def _clean_keyword(raw: Any) -> dict[str, Any] | None:
@@ -852,6 +1014,10 @@ def catalog() -> dict[str, Any]:
             for key, fields in SLICE_PICKS.items()
         },
         "vaultStats": [{"id": fid, "title": title} for fid, title in VAULT_STATS],
+        "sliceToggles": {
+            key: [{"id": fid, "title": title} for fid, title in fields]
+            for key, fields in SLICE_TOGGLES.items()
+        },
         "metrics": [{"id": key, "title": title, "format": fmt} for key, title, fmt in METRICS],
         "actions": [{"id": key, "title": title} for key, title in ACTIONS],
         "answers": [{"id": key, "title": title} for key, title in ANSWERS],

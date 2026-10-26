@@ -10,6 +10,7 @@
   let indexPromise = null;
   let pending = null;
   let loadToken = 0;
+  let loadedId = "";
 
   function programTheme() {
     try { return localStorage.getItem("finmaster.theme") === "dark" ? "dark" : "light"; }
@@ -60,7 +61,10 @@
       if (!res.ok) return { ...item, headings: [], text: "" };
       const html = await res.text();
       const parsed = new DOMParser().parseFromString(html, "text/html");
-      const headings = [...parsed.querySelectorAll("h2, h3")].map((head) => head.textContent.trim());
+      const headings = [...parsed.querySelectorAll("h2, h3")].map((head) => ({
+        text: head.textContent.trim(),
+        sub: head.closest("[data-sub]")?.getAttribute("data-sub") || "",
+      }));
       const text = (parsed.body.textContent || "").replace(/\s+/g, " ").trim();
       return { ...item, headings, text };
     }));
@@ -109,12 +113,26 @@
     return (start ? "…" : "") + text.slice(start, end).trim() + (end < text.length ? "…" : "");
   }
 
+  function hashParts() {
+    const raw = decodeURIComponent((location.hash || "#about").slice(1));
+    const [id, sub] = raw.split("/");
+    return { id: flat.some((item) => item.id === id) ? id : "about", sub: sub || "" };
+  }
+
   function currentId() {
-    const id = decodeURIComponent((location.hash || "#about").slice(1)).split("/")[0];
-    return flat.some((item) => item.id === id) ? id : "about";
+    return hashParts().id;
+  }
+
+  function currentSub() {
+    const { id, sub } = hashParts();
+    const item = flat.find((row) => row.id === id);
+    const subs = item?.subs || [];
+    if (subs.some((row) => row.id === sub)) return sub;
+    return subs[0]?.id || "";
   }
 
   function renderNav(active) {
+    const sub = currentSub();
     nav.innerHTML = "";
     toc.forEach((group) => {
       const box = document.createElement("section");
@@ -128,10 +146,22 @@
         btn.className = "nav-btn" + (item.id === active ? " active" : "");
         btn.textContent = item.title;
         btn.addEventListener("click", () => {
-          location.hash = item.id;
+          const first = item.subs?.[0]?.id;
+          location.hash = first ? item.id + "/" + first : item.id;
           shell.classList.remove("nav-open");
         });
         box.appendChild(btn);
+        (item.subs || []).forEach((child) => {
+          const childBtn = document.createElement("button");
+          childBtn.type = "button";
+          childBtn.className = "nav-sub" + (item.id === active && child.id === sub ? " active" : "");
+          childBtn.textContent = child.title;
+          childBtn.addEventListener("click", () => {
+            location.hash = item.id + "/" + child.id;
+            shell.classList.remove("nav-open");
+          });
+          box.appendChild(childBtn);
+        });
       });
       nav.appendChild(box);
     });
@@ -180,16 +210,16 @@
     if ((search.value || "").trim() !== search.dataset.q) return;
     const needles = parsed.words.concat(parsed.phrases);
     const hits = rows.map((item) => {
-      const hay = item.title + " " + item.group + " " + (item.keys || "") + " " + item.headings.join(" ") + " " + item.text;
+      const hay = item.title + " " + item.group + " " + (item.keys || "") + " " + item.headings.map((head) => head.text).join(" ") + " " + item.text;
       if (parsed.exclude.some((word) => hay.toLowerCase().includes(word))) return null;
       if (!covers(hay, parsed.words, parsed.phrases)) return null;
       let score = 1;
       parsed.words.forEach((word) => { if (item.title.toLowerCase().includes(word)) score += 40; });
       parsed.phrases.forEach((phrase) => { if (item.title.toLowerCase().includes(phrase)) score += 50; });
-      const heading = item.headings.find((head) => covers(head, parsed.words, parsed.phrases)) || "";
-      if (heading) score += 25;
+      const found = item.headings.find((head) => covers(head.text, parsed.words, parsed.phrases)) || null;
+      if (found) score += 25;
       if (covers(item.keys || "", parsed.words, parsed.phrases)) score += 10;
-      return { item, score, heading, snippet: snippet(item.text, needles) };
+      return { item, score, heading: found?.text || "", sub: found?.sub || "", snippet: snippet(item.text, needles) };
     }).filter(Boolean).sort((a, b) => b.score - a.score).slice(0, 24);
 
     nav.innerHTML = "";
@@ -211,10 +241,11 @@
       text.textContent = hit.snippet;
       btn.append(title, group, text);
       btn.addEventListener("click", () => {
-        pending = { id: hit.item.id, words: parsed.words, phrases: parsed.phrases, heading: hit.heading };
+        const target = hit.item.id + (hit.sub ? "/" + hit.sub : "");
+        pending = { id: hit.item.id, sub: hit.sub || "", words: parsed.words, phrases: parsed.phrases, heading: hit.heading };
         shell.classList.remove("nav-open");
-        if (currentId() === hit.item.id) load(hit.item.id);
-        else location.hash = hit.item.id;
+        if ((location.hash || "").slice(1) === target) load(hit.item.id);
+        else location.hash = target;
       });
       btn.addEventListener("keydown", (event) => moveHit(event, index));
       nav.appendChild(btn);
@@ -234,18 +265,31 @@
     }
   }
 
+  function showSub() {
+    const sections = [...doc.querySelectorAll("[data-sub]")];
+    if (!sections.length) return;
+    const sub = currentSub();
+    sections.forEach((el) => { el.hidden = el.dataset.sub !== sub; });
+  }
+
+  function visibleRoot() {
+    const open = [...doc.querySelectorAll("[data-sub]")].find((el) => !el.hidden);
+    return open || doc;
+  }
+
   function fillHere() {
-    const heads = [...doc.querySelectorAll("h2, h3")];
+    const heads = [...visibleRoot().querySelectorAll("h2, h3")];
     if (!heads.length) {
       here.hidden = true;
       return;
     }
     here.hidden = false;
-    here.innerHTML = "<strong>На этой странице</strong>";
+    here.innerHTML = "<strong>В этом подразделе</strong>";
+    const stamp = currentId() + (currentSub() ? "/" + currentSub() : "");
     heads.forEach((head, index) => {
       if (!head.id) head.id = "s" + index;
       const link = document.createElement("a");
-      link.href = "#" + currentId();
+      link.href = "#" + stamp;
       link.textContent = head.textContent;
       link.addEventListener("click", (event) => {
         event.preventDefault();
@@ -266,14 +310,18 @@
       if (token !== loadToken) return;
       doc.innerHTML = await res.text();
       document.title = (doc.querySelector("h1")?.textContent || "Справка") + " — FinMaster";
-      if (window.FAQLive) await window.FAQLive.mount(doc);
+      loadedId = id;
+      showSub();
+      if (window.FAQLive) await window.FAQLive.mount(visibleRoot());
       if (token !== loadToken) return;
       const jump = pending && pending.id === id ? pending : null;
       pending = null;
       if (jump) highlight(doc, jump.words.concat(jump.phrases));
       fillHere();
+      if (!(search.value || "").trim()) renderNav(id);
+      const root = visibleRoot();
       if (jump && jump.heading) {
-        const head = [...doc.querySelectorAll("h2, h3")].find((item) => item.textContent.trim() === jump.heading);
+        const head = [...root.querySelectorAll("h2, h3")].find((item) => item.textContent.trim() === jump.heading);
         (head || doc.querySelector("mark.hit"))?.scrollIntoView({ behavior: "smooth", block: "start" });
       } else if (jump) {
         doc.querySelector("mark.hit")?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -321,7 +369,21 @@
     }
   });
 
-  window.addEventListener("hashchange", () => load(currentId()));
+  window.addEventListener("hashchange", () => {
+    const id = currentId();
+    if (loadedId === id && doc.querySelector("[data-sub]")) {
+      showSub();
+      fillHere();
+      if (!(search.value || "").trim()) renderNav(id);
+      const root = visibleRoot();
+      if (window.FAQLive && [...root.querySelectorAll(".live")].some((host) => !host.querySelector("iframe"))) {
+        window.FAQLive.mount(root);
+      }
+      window.scrollTo(0, 0);
+      return;
+    }
+    load(id);
+  });
   if (!location.hash) history.replaceState(null, "", "#about");
   warm();
   load(currentId());

@@ -1784,6 +1784,7 @@
         });
     if (!ok) return;
     await flushPendingSaves();
+    if (!(await keepDictionary())) return;
     if (state.dirty) {
       state._update = true;
       $("close-modal").classList.add("open");
@@ -1794,6 +1795,7 @@
 
   async function askClose() {
     await flushPendingSaves();
+    if (!(await keepDictionary())) return;
     if (!state.dirty) {
       if (state._home) {
         state._home = false;
@@ -3740,7 +3742,7 @@
         }
         if (dictionaryIsOpen()) {
           e.preventDefault();
-          closeDictionary();
+          foldDictionary();
           return;
         }
         if ($("remote-modal").classList.contains("open")) $("remote-modal").classList.remove("open");

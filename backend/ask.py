@@ -730,8 +730,22 @@ def parse(
         label = str((cmd or {}).get("phrases", ["Показатели"])[0] or "Показатели")
         parts.append(_metrics_html(label, (cmd or {}).get("metrics") or [], source, matched, today, cash, terms, delays, period, markdown=delivery == "md"))
     elif guided and cmd_answer == "template":
-        parts.append(_template_html(template_source, source, matched, rows, today, cash, terms, delays, period, customers, products, order_ids, work_state, hide_totals, vault_types, vault_pages, vault_stats, vault_totals_only))
+        parts.append(_template_html(
+            template_source, source, matched, rows, today, cash, terms, delays, period,
+            customers, products, order_ids, work_state, hide_totals, vault_types, vault_pages,
+            vault_stats, vault_totals_only,
+            cmd.get("sliceOpts") if isinstance(cmd.get("sliceOpts"), dict) else None,
+        ))
     else:
+        def picks_for(key: str) -> set[str] | None:
+            if not guided or not cmd:
+                return None
+            opts = cmd.get("sliceOpts")
+            if not isinstance(opts, dict) or key not in opts:
+                return None
+            allowed = {fid for fid, _title in dictionary.SLICE_TOGGLES.get(key, ())}
+            return {str(item) for item in (opts.get(key) or []) if str(item) in allowed}
+
         rendered: set[str] = set()
         for key in slice_order:
             if key == "money":
@@ -744,15 +758,15 @@ def parse(
             if not guided and key in {"overdue", "incoming", "lines"}:
                 continue
             if key == "count":
-                parts.append(_count(matched, cash, overdue_only="overdue" in explicit and "debt" not in explicit and not guided))
+                parts.append(_count(matched, cash, overdue_only="overdue" in explicit and "debt" not in explicit and not guided, picks=picks_for(key)))
             elif key == "rank":
-                parts.append(_rank(matched, cash, by_debt=bool(re.search(r"долг|долж", low))))
+                parts.append(_rank(matched, cash, by_debt=bool(re.search(r"долг|долж", low)), picks=picks_for(key)))
             elif key == "summary":
-                parts.append(_summary(source, matched, today, cash, terms, delays, period))
+                parts.append(_summary(source, matched, today, cash, terms, delays, period, picks_for(key)))
             elif key == "status":
-                parts.append(_statuses(matched, cash))
+                parts.append(_statuses(matched, cash, picks_for(key)))
             elif key == "discount":
-                parts.append(_discounts(matched, cash))
+                parts.append(_discounts(matched, cash, picks_for(key)))
             elif key == "debt":
                 parts.append(
                     _debts(
@@ -764,30 +778,31 @@ def parse(
                         overdue_only=False if guided else "overdue" in explicit,
                         incoming=False if guided else "incoming" in explicit,
                         period=period,
+                        picks=picks_for(key),
                     )
                 )
             elif key == "overdue":
-                parts.append(_debts(matched, today, terms, delays, cash, overdue_only=True, incoming=False, period=period))
+                parts.append(_debts(matched, today, terms, delays, cash, overdue_only=True, incoming=False, period=period, picks=picks_for(key)))
             elif key == "incoming":
-                parts.append(_debts(matched, today, terms, delays, cash, overdue_only=False, incoming=True, period=period))
+                parts.append(_debts(matched, today, terms, delays, cash, overdue_only=False, incoming=True, period=period, picks=picks_for(key)))
             elif key == "orders":
-                parts.append(_orders(matched, cash))
+                parts.append(_orders(matched, cash, picks_for(key)))
             elif key == "lines":
-                parts.append(_orders(matched, cash).replace("<b>Заказы</b>", "<b>Позиции</b>", 1))
+                parts.append(_orders(matched, cash, picks_for(key)).replace("<b>Заказы</b>", "<b>Позиции</b>", 1))
             elif key == "work":
-                parts.append(_work(matched if work_state or period != "all" else rows, today, work_state))
+                parts.append(_work(matched if work_state or period != "all" else rows, today, work_state, picks_for(key)))
             elif key == "customers":
-                parts.append(_customers(source, matched if customers or words or products else rows, cash))
+                parts.append(_customers(source, matched if customers or words or products else rows, cash, picks_for(key)))
             elif key == "products":
-                parts.append(_products(matched, cash))
+                parts.append(_products(matched, cash, picks_for(key)))
             elif key == "expense":
-                parts.append(_expenses(rows, matched, customers, order_ids, cash))
+                parts.append(_expenses(rows, matched, customers, order_ids, cash, picks_for(key)))
             elif key == "notes":
-                parts.append(_notes(matched))
+                parts.append(_notes(matched, picks_for(key)))
             elif key == "frozen":
-                parts.append(_frozen(rows, customers, products, order_ids))
+                parts.append(_frozen(rows, customers, products, order_ids, picks_for(key)))
             elif key == "remind":
-                parts.append(_reminder(matched, source, terms, cash))
+                parts.append(_reminder(matched, source, terms, cash, picks_for(key)))
             elif key == "vault":
                 parts.append(_vault_html(source, cash, today, period, vault_types, vault_pages, hide_totals, stats=vault_stats, totals_only=vault_totals_only))
 
@@ -1170,11 +1185,13 @@ def _hit(blob: str, word: str) -> bool:
         return word in tokens
     if word in blob:
         return True
+    if " " in word:
+        return False
     return len(word) >= 5 and word[:4] in blob
 
 
 def _has_text(hay: str, needle: str) -> bool:
-    """Вхождение фразы. Цифра не совпадает с началом более длинного числа: 9 не находится в 90."""
+    """Вхождение фразы целиком. 9 не находится в 90, «плитка» не вырезается из «санплитка»."""
     if not needle:
         return False
     start = 0
@@ -1188,6 +1205,12 @@ def _has_text(hay: str, needle: str) -> bool:
             start = index + 1
             continue
         if before >= 0 and needle[0].isdigit() and hay[before].isdigit():
+            start = index + 1
+            continue
+        if after < len(hay) and needle[-1].isalpha() and hay[after].isalpha():
+            start = index + 1
+            continue
+        if before >= 0 and needle[0].isalpha() and hay[before].isalpha():
             start = index + 1
             continue
         return True
@@ -1591,7 +1614,11 @@ def _fold(lines: list[str], hidden: list[str], count: int, one: str, few: str, m
     lines.append("</details>")
 
 
-def _count(rows: list[dict[str, Any]], cash, *, overdue_only: bool = False) -> str:
+def _on(picks: set[str] | None, key: str) -> bool:
+    return picks is None or key in picks
+
+
+def _count(rows: list[dict[str, Any]], cash, *, overdue_only: bool = False, picks: set[str] | None = None) -> str:
     picked = rows
     if overdue_only:
         picked = [row for row in rows if not row["tot"].get("kind") and (row["overdue"] or 0) > 0]
@@ -1602,22 +1629,28 @@ def _count(rows: list[dict[str, Any]], cash, *, overdue_only: bool = False) -> s
     cost = sum(float(row["tot"]["cost"]) for row in picked if row["tot"].get("kind") and not row["frozen"])
     orders = {str(row["order"].get("id") or id(row["order"])) for row in income}
     title = "Просрочено" if overdue_only else "Коротко"
-    lines = [
-        f"<b>{title}</b>",
-        f"• {_pieces(len(orders), 'заказ', 'заказа', 'заказов')}",
-        f"• {_pieces(len(income), 'позиция', 'позиции', 'позиций')}",
-        f"• к оплате {cash(after)}",
-        f"• оплачено {cash(paid)}",
-        f"• долг {cash(unpaid)}",
-        f"• расходы {cash(cost)}",
-        f"• чистыми {cash(after - cost)}",
-    ]
+    bits = []
+    if _on(picks, "orders"):
+        bits.append(f"• {_pieces(len(orders), 'заказ', 'заказа', 'заказов')}")
+    if _on(picks, "lines"):
+        bits.append(f"• {_pieces(len(income), 'позиция', 'позиции', 'позиций')}")
+    if _on(picks, "due"):
+        bits.append(f"• к оплате {cash(after)}")
+    if _on(picks, "paid"):
+        bits.append(f"• оплачено {cash(paid)}")
+    if _on(picks, "debt"):
+        bits.append(f"• долг {cash(unpaid)}")
+    if _on(picks, "cost"):
+        bits.append(f"• расходы {cash(cost)}")
+    if _on(picks, "net"):
+        bits.append(f"• чистыми {cash(after - cost)}")
+    lines = [f"<b>{title}</b>", *bits]
     if not income and cost <= 0.005:
         lines.append("В этом срезе ничего нет.")
     return "\n".join(lines)
 
 
-def _rank(rows: list[dict[str, Any]], cash, *, by_debt: bool = False) -> str:
+def _rank(rows: list[dict[str, Any]], cash, *, by_debt: bool = False, picks: set[str] | None = None) -> str:
     income = [row for row in rows if not row["tot"].get("kind") and not row["frozen"]]
     by_customer: dict[str, list[float]] = {}
     by_order: dict[str, dict[str, Any]] = {}
@@ -1637,18 +1670,20 @@ def _rank(rows: list[dict[str, Any]], cash, *, by_debt: bool = False) -> str:
         lines.append("В этом срезе сумм нет.")
         return "\n".join(lines)
     key_i = 1 if by_debt else 0
-    lines.append("Заказчики по долгу" if by_debt else "Заказчики по сумме")
-    for name, (after, unpaid) in sorted(by_customer.items(), key=lambda pair: -pair[1][key_i])[:5]:
-        lines.append(f"• {html_esc(name)} · {cash(after)} · долг {cash(unpaid)}")
-    lines.append("Заказы по долгу" if by_debt else "Заказы по сумме")
-    for item in sorted(by_order.values(), key=lambda bit: -(bit["unpaid"] if by_debt else bit["after"]))[:5]:
-        lines.append(
-            f"• {_order_ref(item['order'])} · {html_esc(item['customer'])} · {cash(item['after'])} · долг {cash(item['unpaid'])}"
-        )
+    if _on(picks, "customers"):
+        lines.append("Заказчики по долгу" if by_debt else "Заказчики по сумме")
+        for name, (after, unpaid) in sorted(by_customer.items(), key=lambda pair: -pair[1][key_i])[:5]:
+            lines.append(f"• {html_esc(name)} · {cash(after)} · долг {cash(unpaid)}")
+    if _on(picks, "orders"):
+        lines.append("Заказы по долгу" if by_debt else "Заказы по сумме")
+        for item in sorted(by_order.values(), key=lambda bit: -(bit["unpaid"] if by_debt else bit["after"]))[:5]:
+            lines.append(
+                f"• {_order_ref(item['order'])} · {html_esc(item['customer'])} · {cash(item['after'])} · долг {cash(item['unpaid'])}"
+            )
     return "\n".join(lines)
 
 
-def _statuses(rows: list[dict[str, Any]], cash) -> str:
+def _statuses(rows: list[dict[str, Any]], cash, picks: set[str] | None = None) -> str:
     acc: dict[str, list[float]] = {}
     for row in rows:
         if row["frozen"] or row["tot"].get("kind"):
@@ -1660,10 +1695,16 @@ def _statuses(rows: list[dict[str, Any]], cash) -> str:
         cur[2] += float(row["tot"]["unpaid"])
     ranked = sorted(acc.items(), key=lambda pair: -pair[1][0])
     lines = [f"<b>Статусы</b> · {len(ranked)}"]
-    status_lines = [
-        f"• {html_esc(name)} · {_pieces(int(count), 'позиция', 'позиции', 'позиций')} · {cash(after)} · долг {cash(unpaid)}"
-        for name, (count, after, unpaid) in ranked
-    ]
+    status_lines = []
+    for name, (count, after, unpaid) in ranked:
+        parts = [html_esc(name)]
+        if _on(picks, "count"):
+            parts.append(_pieces(int(count), "позиция", "позиции", "позиций"))
+        if _on(picks, "amount"):
+            parts.append(cash(after))
+        if _on(picks, "debt"):
+            parts.append(f"долг {cash(unpaid)}")
+        status_lines.append("• " + " · ".join(parts))
     lines.extend(status_lines[:24])
     _fold(lines, status_lines[24:], len(status_lines) - 24, "статус", "статуса", "статусов")
     if not ranked:
@@ -1671,7 +1712,7 @@ def _statuses(rows: list[dict[str, Any]], cash) -> str:
     return "\n".join(lines)
 
 
-def _discounts(rows: list[dict[str, Any]], cash) -> str:
+def _discounts(rows: list[dict[str, Any]], cash, picks: set[str] | None = None) -> str:
     hits = [
         row
         for row in rows
@@ -1682,14 +1723,23 @@ def _discounts(rows: list[dict[str, Any]], cash) -> str:
     for row in hits:
         disc = float(row["tot"].get("discount") or 0)
         percent = f"{disc:.2f}".rstrip("0").rstrip(".")
-        product = html_esc(str(row["line"].get("product") or "позиция"))
-        lines.append(f"• {_order_ref(row['order'])} · {product} · {percent} % · {cash(float(row['tot']['after']))}")
+        parts = []
+        if _on(picks, "order"):
+            parts.append(_order_ref(row["order"]))
+        if _on(picks, "product"):
+            parts.append(html_esc(str(row["line"].get("product") or "позиция")))
+        if _on(picks, "percent"):
+            parts.append(f"{percent} %")
+        if _on(picks, "amount"):
+            parts.append(cash(float(row["tot"]["after"])))
+        if parts:
+            lines.append("• " + " · ".join(parts))
     if not hits:
         lines.append("Скидок в этом срезе нет.")
     return "\n".join(lines)
 
 
-def _summary(doc: dict[str, Any], rows: list[dict[str, Any]], today: date, cash, terms: int, delays: tuple[float, bool, dict[str, float]], period: str = "all") -> str:
+def _summary(doc: dict[str, Any], rows: list[dict[str, Any]], today: date, cash, terms: int, delays: tuple[float, bool, dict[str, float]], period: str = "all", picks: set[str] | None = None) -> str:
     income = [row for row in rows if not row["tot"].get("kind")]
     after = sum(float(row["tot"]["after"]) for row in income)
     paid = sum(float(row["tot"]["paid"]) for row in income)
@@ -1704,24 +1754,27 @@ def _summary(doc: dict[str, Any], rows: list[dict[str, Any]], today: date, cash,
     month_after = sum(float(row["tot"]["after"]) for row in month)
     prev_after = sum(float(row["tot"]["after"]) for row in prev)
     dso, known, _ = delays
-    lines = [
-        "<b>Сводка</b>",
-        f"{_pieces(len(orders), 'заказ', 'заказа', 'заказов')} · {_pieces(len(income), 'позиция', 'позиции', 'позиций')}",
-        f"К оплате {cash(after)} · оплачено {cash(paid)} · долг {cash(unpaid)}",
-        f"Расходы {cash(cost)} · чистыми {cash(after - cost)}",
-        f"Средний чек {cash(avg)} · собираемость {html_esc(_share(paid, after))}",
-    ]
-    if period == "all":
+    lines = ["<b>Сводка</b>"]
+    if _on(picks, "count"):
+        lines.append(f"{_pieces(len(orders), 'заказ', 'заказа', 'заказов')} · {_pieces(len(income), 'позиция', 'позиции', 'позиций')}")
+    if _on(picks, "money"):
+        lines.append(f"К оплате {cash(after)} · оплачено {cash(paid)} · долг {cash(unpaid)}")
+    if _on(picks, "cost"):
+        lines.append(f"Расходы {cash(cost)} · чистыми {cash(after - cost)}")
+    if _on(picks, "avg"):
+        lines.append(f"Средний чек {cash(avg)} · собираемость {html_esc(_share(paid, after))}")
+    if _on(picks, "month") and period == "all":
         lines.append(f"Этот месяц {cash(month_after)} · прошлый {cash(prev_after)}")
-    if period == "all" and today.day:
+    if _on(picks, "forecast") and period == "all" and today.day:
         dim = (today.replace(day=1) + timedelta(days=32)).replace(day=1) - timedelta(days=1)
         forecast = month_after / today.day * dim.day if today.day else 0
         lines.append(f"Прогноз месяца {cash(forecast)}")
-    lines.append(
-        f"Средний срок оплаты {int(round(dso))} {_days(int(round(dso)))}"
-        if known
-        else f"Срок оплаты по договорённости {terms} {_days(terms)}, истории оплат ещё нет"
-    )
+    if _on(picks, "term"):
+        lines.append(
+            f"Средний срок оплаты {int(round(dso))} {_days(int(round(dso)))}"
+            if known
+            else f"Срок оплаты по договорённости {terms} {_days(terms)}, истории оплат ещё нет"
+        )
     return "\n".join(lines)
 
 
@@ -1819,12 +1872,42 @@ def _metrics_html(title: str, tiles: list[dict[str, Any]], source: dict[str, Any
     return "\n".join(lines)
 
 
+_ORDER_COL_TOGGLE = {
+    "number": "head",
+    "name": "head",
+    "product": "product",
+    "quantity": "qty",
+    "order_type": "head",
+    "status": "status",
+    "total": "amount",
+    "paid": "money",
+    "unpaid": "debt",
+    "order_date": "date",
+    "expenses": "expense",
+}
+
+
+def _field_toggle(key: str, field: str) -> str | None:
+    """Какой тумблер среза прячет это поле шаблона. None — поле от тумблеров не зависит."""
+    if key in {"debt", "overdue", "incoming", "discount", "frozen", "expense"} and field in {"number", "name"}:
+        return "order"
+    if key == "notes" and field == "note":
+        return "order"
+    if key == "customers" and field == "amount":
+        return "debt"
+    if field == "quantity":
+        return "qty"
+    allowed = {fid for fid, _title in dictionary.SLICE_TOGGLES.get(key, ())}
+    return field if field in allowed else None
+
+
 def _order_slice_html(
     key: str,
     columns: list[str],
     source: dict[str, Any],
     matched: list[dict[str, Any]],
     hide_totals: bool,
+    picks: set[str] | None = None,
 ) -> str:
     """Срез заказа в шаблоне: шапка из номера и названия, под ней выбранные колонки позиций."""
     from backend import snapshot as snapmod
@@ -1835,6 +1918,8 @@ def _order_slice_html(
         picked = [item for item in dictionary.ORDER_SLICE_COLUMNS if item in known]
     if hide_totals:
         picked = snapmod.without_prices(picked)
+    if picks is not None:
+        picked = [item for item in picked if item not in _ORDER_COL_TOGGLE or _on(picks, _ORDER_COL_TOGGLE[item])]
     types = type_index(source)
     currency = str(source.get("currency") or "₽")
     decimals = money_decimals(source.get("money_decimals"))
@@ -1857,7 +1942,7 @@ def _order_slice_html(
         return "\n".join(out)
     meta_ids = [item for item in picked if snapmod.FIELD_BY_ID[item]["kind"] == "meta" and item not in {"totals", "expenses"}]
     col_ids = [item for item in picked if snapmod.FIELD_BY_ID[item]["kind"] == "col"]
-    show_expenses = "expenses" in picked
+    show_expenses = "expenses" in picked and _on(picks, "expense")
     for block in grouped:
         order = block["order"]
         meta = snapmod.meta_items(order, source, meta_ids, False)
@@ -1876,9 +1961,9 @@ def _order_slice_html(
                 ]
                 out.append("• " + " · ".join(html_esc(cell) for cell in cells))
                 comment = str(row["line"].get("notes") or "").strip()
-                if comment:
+                if comment and _on(picks, "comment"):
                     out.append("  " + html_esc(comment))
-        if "totals" in picked:
+        if "totals" in picked and _on(picks, "money"):
             income = [row["line"] for row in block["lines"] if not row["tot"].get("kind")]
             text = snapmod.totals_text(
                 picked, snapmod.cols_of(picked), income, currency, types, order, decimals, hide_totals
@@ -1948,12 +2033,15 @@ def _picked_slice_html(
     today: date,
     delays,
     period: str,
+    picks: set[str] | None = None,
 ) -> str:
     """Срез с выбранными полями: шапка заказа и только отмеченные колонки."""
     labels = dict(dictionary.SLICE_PICKS.get(key) or ())
     chosen = [item for item in columns if item in labels]
     if hide_totals:
         chosen = [item for item in chosen if item not in {"amount"}]
+    if picks is not None:
+        chosen = [item for item in chosen if (toggle := _field_toggle(key, item)) is None or _on(picks, toggle)]
     title = dict(dictionary.SLICES).get(key, key)
     rows = _slice_rows(key, matched, today, delays, period)
     if not chosen:
@@ -2222,45 +2310,54 @@ def _template_html(
     vault_pages: set[str] | None = None,
     vault_stats: list[str] | None = None,
     vault_totals_only: bool = False,
+    slice_opts: dict[str, Any] | None = None,
 ) -> str:
     pack = _metric_pack(matched, today, terms, delays)
     known = {key: fmt for key, _label, fmt in dictionary.METRICS}
+    opts = slice_opts if isinstance(slice_opts, dict) else {}
+
+    def picks_for(key: str) -> set[str] | None:
+        if key not in opts:
+            return None
+        allowed = {fid for fid, _title in dictionary.SLICE_TOGGLES.get(key, ())}
+        return {str(item) for item in (opts.get(key) or []) if str(item) in allowed}
 
     def slice_html(key: str) -> str:
+        picks = picks_for(key)
         if key == "summary":
-            return _summary(source, matched, today, cash, terms, delays, period)
+            return _summary(source, matched, today, cash, terms, delays, period, picks)
         if key == "count":
-            return _count(matched, cash)
+            return _count(matched, cash, picks=picks)
         if key == "rank":
-            return _rank(matched, cash)
+            return _rank(matched, cash, picks=picks)
         if key == "debt":
-            return _debts(matched, today, terms, delays, cash, overdue_only=False, incoming=False, period=period)
+            return _debts(matched, today, terms, delays, cash, overdue_only=False, incoming=False, period=period, picks=picks)
         if key == "overdue":
-            return _debts(matched, today, terms, delays, cash, overdue_only=True, incoming=False, period=period)
+            return _debts(matched, today, terms, delays, cash, overdue_only=True, incoming=False, period=period, picks=picks)
         if key == "incoming":
-            return _debts(matched, today, terms, delays, cash, overdue_only=False, incoming=True, period=period)
+            return _debts(matched, today, terms, delays, cash, overdue_only=False, incoming=True, period=period, picks=picks)
         if key == "orders":
-            return _orders(matched, cash)
+            return _orders(matched, cash, picks)
         if key == "lines":
-            return _orders(matched, cash).replace("<b>Заказы</b>", "<b>Позиции</b>", 1)
+            return _orders(matched, cash, picks).replace("<b>Заказы</b>", "<b>Позиции</b>", 1)
         if key == "work":
-            return _work(matched if work_state or period != "all" else rows, today, work_state)
+            return _work(matched if work_state or period != "all" else rows, today, work_state, picks)
         if key == "customers":
-            return _customers(source, matched, cash)
+            return _customers(source, matched, cash, picks)
         if key == "products":
-            return _products(matched, cash)
+            return _products(matched, cash, picks)
         if key == "expense":
-            return _expenses(rows, matched, customers, order_ids, cash)
+            return _expenses(rows, matched, customers, order_ids, cash, picks)
         if key == "notes":
-            return _notes(matched)
+            return _notes(matched, picks)
         if key == "frozen":
-            return _frozen(rows, customers, products, order_ids)
+            return _frozen(rows, customers, products, order_ids, picks)
         if key == "discount":
-            return _discounts(matched, cash)
+            return _discounts(matched, cash, picks)
         if key == "status":
-            return _statuses(matched, cash)
+            return _statuses(matched, cash, picks)
         if key == "remind":
-            return _reminder(matched, source, terms, cash)
+            return _reminder(matched, source, terms, cash, picks)
         if key == "vault":
             return _vault_html(source, cash, today, period, vault_types or set(), vault_pages or set(), hide_totals, stats=vault_stats, totals_only=vault_totals_only)
         return ""
@@ -2371,10 +2468,10 @@ def _template_html(
                     vault_stats,
                     vault_totals_only,
                 )
-            elif key in dictionary.COLUMN_SLICES:
-                rendered = _order_slice_html(key, columns, source, matched, hide_totals)
+            elif key in dictionary.COLUMN_SLICES and (sep or picks_for(key) is None):
+                rendered = _order_slice_html(key, columns, source, matched, hide_totals, picks_for(key))
             elif columns and key in dictionary.SLICE_PICKS:
-                rendered = _picked_slice_html(key, columns, source, matched, cash, hide_totals, today, delays, period)
+                rendered = _picked_slice_html(key, columns, source, matched, cash, hide_totals, today, delays, period, picks_for(key))
             else:
                 rendered = slice_html(key)
         elif token.startswith("/"):
@@ -2453,6 +2550,7 @@ def _debts(
     overdue_only: bool,
     incoming: bool,
     period: str,
+    picks: set[str] | None = None,
 ) -> str:
     _, _, delay_map = delays
     items = []
@@ -2487,18 +2585,20 @@ def _debts(
     overdue_sum = sum(item[1] for item in items if (item[0]["overdue"] or 0) > 0)
     overdue_n = sum(1 for item in items if (item[0]["overdue"] or 0) > 0)
     orders = {str(item[0]["order"].get("id") or id(item[0]["order"])) for item in items}
-    lines = [
-        "<b>Долги</b>",
-        f"Дебиторка {cash(total)} · {_pieces(len(items), 'позиция', 'позиции', 'позиций')} в {_pieces(len(orders), 'заказе', 'заказах', 'заказах')}",
-        f"Просрочено {cash(overdue_sum)} · {_pieces(overdue_n, 'позиция', 'позиции', 'позиций')}",
-        f"Срок по договорённости {terms} {_days(terms)}",
-    ]
-    if cancelled > 0.005:
+    lines = ["<b>Долги</b>"]
+    if _on(picks, "total"):
+        lines.append(f"Дебиторка {cash(total)} · {_pieces(len(items), 'позиция', 'позиции', 'позиций')} в {_pieces(len(orders), 'заказе', 'заказах', 'заказах')}")
+    if _on(picks, "late"):
+        lines.append(f"Просрочено {cash(overdue_sum)} · {_pieces(overdue_n, 'позиция', 'позиции', 'позиций')}")
+    if _on(picks, "term"):
+        lines.append(f"Срок по договорённости {terms} {_days(terms)}")
+    if cancelled > 0.005 and _on(picks, "total"):
         lines.append(f"Отменённые {cash(cancelled)} в дебиторку не входят")
-    for key, label in _BUCKETS:
-        bucket_sum = sum(item[1] for item in items if _bucket(item[0]["overdue"]) == key)
-        if bucket_sum > 0.005:
-            lines.append(f"• {label}: {cash(bucket_sum)}")
+    if _on(picks, "buckets"):
+        for key, label in _BUCKETS:
+            bucket_sum = sum(item[1] for item in items if _bucket(item[0]["overdue"]) == key)
+            if bucket_sum > 0.005:
+                lines.append(f"• {label}: {cash(bucket_sum)}")
     grouped: dict[str, list[tuple[dict[str, Any], float, date | None, int]]] = {}
     for item in items:
         grouped.setdefault(item[0]["customer"], []).append(item)
@@ -2506,13 +2606,27 @@ def _debts(
 
     def write_people(target: list[str], people: list) -> None:
         for customer, bits in people:
-            target.append(f"\n<b>{html_esc(customer)}</b> — {cash(sum(bit[1] for bit in bits))}")
+            if _on(picks, "customer"):
+                target.append(f"\n<b>{html_esc(customer)}</b> — {cash(sum(bit[1] for bit in bits))}")
             for row, amount, _expected, _delay in bits:
                 due = _fmt(row["due"])
                 late = row["overdue"]
                 mark = "срок не задан" if late is None else ("срок ещё не вышел" if late <= 0 else f"просрочка {late} {_days(late)}")
-                product = html_esc(str(row["line"].get("product") or "позиция"))
-                target.append(f"• {_order_ref(row['order'])} · {product} · {html_esc(qty_text(row['line']))} · {due} · {mark} · {cash(amount)}")
+                parts = []
+                if _on(picks, "order"):
+                    parts.append(_order_ref(row["order"]))
+                if _on(picks, "product"):
+                    parts.append(html_esc(str(row["line"].get("product") or "позиция")))
+                if _on(picks, "qty"):
+                    parts.append(html_esc(qty_text(row["line"])))
+                if _on(picks, "due"):
+                    parts.append(due)
+                if _on(picks, "mark"):
+                    parts.append(mark)
+                if _on(picks, "amount"):
+                    parts.append(cash(amount))
+                if parts:
+                    target.append("• " + " · ".join(parts))
 
     write_people(lines, ranked[:12])
     hidden_people: list[str] = []
@@ -2523,7 +2637,7 @@ def _debts(
     return "\n".join(lines)
 
 
-def _orders(rows: list[dict[str, Any]], cash) -> str:
+def _orders(rows: list[dict[str, Any]], cash, picks: set[str] | None = None) -> str:
     grouped: dict[str, list[dict[str, Any]]] = {}
     costs: dict[str, list[dict[str, Any]]] = {}
     order_of: dict[str, dict[str, Any]] = {}
@@ -2548,25 +2662,36 @@ def _orders(rows: list[dict[str, Any]], cash) -> str:
             unpaid = sum(float(row["tot"]["unpaid"]) for row in bits)
             state = bits[0]["state"]
             state_label = {"now": "в работе", "planned": "запланирован", "done": "закрыт", "nodate": "без дат"}[state]
-            target.append(
-                f"\n<b>{_order_ref(order)}</b> · {html_esc(bits[0]['customer'])} · {state_label}\n"
-                f"к оплате {cash(after)} · оплачено {cash(paid)} · долг {cash(unpaid)}"
-            )
+            if _on(picks, "head"):
+                target.append(f"\n<b>{_order_ref(order)}</b> · {html_esc(bits[0]['customer'])} · {state_label}")
+            if _on(picks, "money"):
+                target.append(f"к оплате {cash(after)} · оплачено {cash(paid)} · долг {cash(unpaid)}")
             note = str(order.get("notes") or "").strip()
-            if note:
+            if note and _on(picks, "note"):
                 target.append("заметка: " + html_esc(note))
             for row in bits:
                 line = row["line"]
                 status = str(line.get("status") or "").strip()
-                extra = f" · {html_esc(status)}" if status else ""
-                when = _fmt(row["order_day"])
-                target.append(
-                    f"• {html_esc(str(line.get('product') or 'позиция'))} · {html_esc(qty_text(line))} · "
-                    f"{cash(float(row['tot']['after']))} · долг {cash(float(row['tot']['unpaid']))} · {when}{extra}"
-                )
+                cells = []
+                if _on(picks, "product"):
+                    cells.append(html_esc(str(line.get("product") or "позиция")))
+                if _on(picks, "qty"):
+                    cells.append(html_esc(qty_text(line)))
+                if _on(picks, "amount"):
+                    cells.append(cash(float(row["tot"]["after"])))
+                if _on(picks, "debt"):
+                    cells.append(f"долг {cash(float(row['tot']['unpaid']))}")
+                if _on(picks, "date"):
+                    cells.append(_fmt(row["order_day"]))
+                if status and _on(picks, "status"):
+                    cells.append(html_esc(status))
+                if cells:
+                    target.append("• " + " · ".join(cells))
                 comment = str(line.get("notes") or "").strip()
-                if comment:
+                if comment and _on(picks, "comment"):
                     target.append("  " + html_esc(comment))
+            if not _on(picks, "expense"):
+                continue
             for row in costs.get(oid) or []:
                 kind = "налог" if row["tot"].get("kind") == "tax" else "затрата"
                 target.append(
@@ -2580,7 +2705,7 @@ def _orders(rows: list[dict[str, Any]], cash) -> str:
     return "\n".join(lines)
 
 
-def _work(rows: list[dict[str, Any]], today: date, only: str) -> str:
+def _work(rows: list[dict[str, Any]], today: date, only: str, picks: set[str] | None = None) -> str:
     orders: dict[str, dict[str, Any]] = {}
     for row in rows:
         if row["frozen"] or row["tot"].get("kind"):
@@ -2595,12 +2720,13 @@ def _work(rows: list[dict[str, Any]], today: date, only: str) -> str:
     counts = {key: 0 for key in ("now", "planned", "done", "nodate")}
     for item in orders.values():
         counts[item["state"]] += 1
-    lines = [
-        "<b>Календарь</b>",
-        f"В работе {counts['now']} · план {counts['planned']} · закрыто {counts['done']} · без дат {counts['nodate']}",
-    ]
+    lines = ["<b>Календарь</b>"]
+    if _on(picks, "counts"):
+        lines.append(f"В работе {counts['now']} · план {counts['planned']} · закрыто {counts['done']} · без дат {counts['nodate']}")
     labels = (("now", "В работе"), ("planned", "Запланировано"), ("done", "Закрыто"), ("nodate", "Без дат"))
     for key, label in labels:
+        if not _on(picks, key):
+            continue
         if only and key != only:
             continue
         chunk = [item for item in orders.values() if item["state"] == key]
@@ -2608,13 +2734,18 @@ def _work(rows: list[dict[str, Any]], today: date, only: str) -> str:
             continue
         lines.append(f"\n<b>{label}</b>")
         for item in chunk:
-            end = "без конца" if not item["end"] else f"до {_fmt(item['end'])}"
-            start = "без старта" if not item["start"] else f"с {_fmt(item['start'])}"
-            lines.append(f"• {_order_ref(item['order'])} · {html_esc(item['customer'])} · {start} · {end}")
+            cells = [_order_ref(item["order"])]
+            if _on(picks, "customer"):
+                cells.append(html_esc(item["customer"]))
+            if _on(picks, "start"):
+                cells.append("без старта" if not item["start"] else f"с {_fmt(item['start'])}")
+            if _on(picks, "end"):
+                cells.append("без конца" if not item["end"] else f"до {_fmt(item['end'])}")
+            lines.append("• " + " · ".join(cells))
     return "\n".join(lines)
 
 
-def _customers(doc: dict[str, Any], rows: list[dict[str, Any]], cash) -> str:
+def _customers(doc: dict[str, Any], rows: list[dict[str, Any]], cash, picks: set[str] | None = None) -> str:
     book: dict[str, dict[str, Any]] = {}
     for item in doc.get("customers") or []:
         if isinstance(item, dict) and str(item.get("name") or "").strip():
@@ -2634,11 +2765,16 @@ def _customers(doc: dict[str, Any], rows: list[dict[str, Any]], cash) -> str:
             card = book.get(_norm(customer), {})
             unpaid = sum(float(row["tot"]["unpaid"]) for row in bits if not row["tot"].get("kind") and not row["cancelled"])
             orders = {str(row["order"].get("id") or id(row["order"])) for row in bits}
-            target.append(f"\n<b>{html_esc(customer)}</b> · долг {cash(unpaid)} · {_pieces(len(orders), 'заказ', 'заказа', 'заказов')}")
-            org = str(card.get("organization") or "").strip()
-            phone = str(card.get("phone") or "").strip()
-            email = str(card.get("email") or "").strip()
-            address = str(card.get("address") or "").strip()
+            head = [f"\n<b>{html_esc(customer)}</b>"]
+            if _on(picks, "debt"):
+                head.append(f"долг {cash(unpaid)}")
+            if _on(picks, "orders"):
+                head.append(_pieces(len(orders), "заказ", "заказа", "заказов"))
+            target.append(" · ".join(head))
+            org = str(card.get("organization") or "").strip() if _on(picks, "organization") else ""
+            phone = str(card.get("phone") or "").strip() if _on(picks, "phone") else ""
+            email = str(card.get("email") or "").strip() if _on(picks, "email") else ""
+            address = str(card.get("address") or "").strip() if _on(picks, "address") else ""
             extra = " · ".join(html_esc(bit) for bit in (org, phone, email, address) if bit)
             if extra:
                 target.append(extra)
@@ -2652,7 +2788,7 @@ def _customers(doc: dict[str, Any], rows: list[dict[str, Any]], cash) -> str:
     return "\n".join(lines)
 
 
-def _products(rows: list[dict[str, Any]], cash) -> str:
+def _products(rows: list[dict[str, Any]], cash, picks: set[str] | None = None) -> str:
     acc: dict[str, list[float]] = {}
     for row in rows:
         if row["frozen"] or row["tot"].get("kind"):
@@ -2664,10 +2800,16 @@ def _products(rows: list[dict[str, Any]], cash) -> str:
         cur[2] += float(row["tot"]["unpaid"])
     ranked = sorted(acc.items(), key=lambda pair: -pair[1][0])
     lines = [f"<b>Продукты</b> · {len(ranked)}"]
-    product_lines = [
-        f"• {html_esc(name)} · {cash(after)} · оплачено {cash(paid)} · долг {cash(unpaid)}"
-        for name, (after, paid, unpaid) in ranked
-    ]
+    product_lines = []
+    for name, (after, paid, unpaid) in ranked:
+        parts = [html_esc(name)]
+        if _on(picks, "amount"):
+            parts.append(cash(after))
+        if _on(picks, "paid"):
+            parts.append(f"оплачено {cash(paid)}")
+        if _on(picks, "debt"):
+            parts.append(f"долг {cash(unpaid)}")
+        product_lines.append("• " + " · ".join(parts))
     lines.extend(product_lines[:20])
     _fold(lines, product_lines[20:], len(product_lines) - 20, "продукт", "продукта", "продуктов")
     if not ranked:
@@ -2675,10 +2817,11 @@ def _products(rows: list[dict[str, Any]], cash) -> str:
     return "\n".join(lines)
 
 
-def _expenses(rows: list[dict[str, Any]], matched: list[dict[str, Any]], customers: list[str], order_ids: set[str], cash) -> str:
+def _expenses(rows: list[dict[str, Any]], matched: list[dict[str, Any]], customers: list[str], order_ids: set[str], cash, picks: set[str] | None = None) -> str:
     order_filter = {str(row["order"].get("id") or "") for row in matched}
     lines_out = ["<b>Расходы</b>"]
     total = 0.0
+    seen = 0
     kept: list[str] = []
     for row in rows:
         if row["frozen"] or not row["tot"].get("kind"):
@@ -2691,35 +2834,46 @@ def _expenses(rows: list[dict[str, Any]], matched: list[dict[str, Any]], custome
             continue
         amount = float(row["tot"]["cost"])
         total += amount
+        seen += 1
         kind = "налог" if row["tot"].get("kind") == "tax" else "затрата"
-        kept.append(f"• {_order_ref(row['order'])} · {html_esc(str(row['line'].get('product') or kind))} · {kind} · {cash(amount)}")
-    count = len(kept)
-    lines_out.insert(1, f"{_pieces(count, 'строка', 'строки', 'строк')} · {cash(total)}")
+        parts = []
+        if _on(picks, "order"):
+            parts.append(_order_ref(row["order"]))
+        if _on(picks, "product"):
+            parts.append(html_esc(str(row["line"].get("product") or kind)))
+        if _on(picks, "kind"):
+            parts.append(kind)
+        if _on(picks, "amount"):
+            parts.append(cash(amount))
+        if parts:
+            kept.append("• " + " · ".join(parts))
+    if _on(picks, "total"):
+        lines_out.insert(1, f"{_pieces(seen, 'строка', 'строки', 'строк')} · {cash(total)}")
     lines_out.extend(kept[:24])
-    _fold(lines_out, kept[24:], count - 24, "строка", "строки", "строк")
-    if count == 0:
+    _fold(lines_out, kept[24:], len(kept) - 24, "строка", "строки", "строк")
+    if seen == 0:
         lines_out.append("Расходных строк нет.")
     return "\n".join(lines_out)
 
 
-def _notes(rows: list[dict[str, Any]]) -> str:
+def _notes(rows: list[dict[str, Any]], picks: set[str] | None = None) -> str:
     lines = ["<b>Заметки</b>"]
     seen: set[str] = set()
     for row in rows:
         oid = str(row["order"].get("id") or id(row["order"]))
         note = str(row["order"].get("notes") or "").strip()
-        if note and oid not in seen:
+        if note and oid not in seen and _on(picks, "order"):
             seen.add(oid)
             lines.append(f"• {_order_ref(row['order'])}: {html_esc(note)}")
         comment = str(row["line"].get("notes") or "").strip()
-        if comment:
+        if comment and _on(picks, "comment"):
             lines.append(f"• {_order_ref(row['order'])} · {html_esc(str(row['line'].get('product') or 'позиция'))}: {html_esc(comment)}")
     if len(lines) == 1:
         lines.append("Заметок нет.")
     return "\n".join(lines)
 
 
-def _frozen(rows: list[dict[str, Any]], customers: list[str], products: list[str], order_ids: set[str]) -> str:
+def _frozen(rows: list[dict[str, Any]], customers: list[str], products: list[str], order_ids: set[str], picks: set[str] | None = None) -> str:
     lines = ["<b>Замороженные</b>"]
     count = 0
     for row in rows:
@@ -2732,7 +2886,15 @@ def _frozen(rows: list[dict[str, Any]], customers: list[str], products: list[str
         if order_ids and str(row["order"].get("id") or "") not in order_ids:
             continue
         count += 1
-        lines.append(f"• {_order_ref(row['order'])} · {html_esc(str(row['line'].get('product') or 'позиция'))} · {html_esc(row['customer'])}")
+        parts = []
+        if _on(picks, "order"):
+            parts.append(_order_ref(row["order"]))
+        if _on(picks, "product"):
+            parts.append(html_esc(str(row["line"].get("product") or "позиция")))
+        if _on(picks, "customer"):
+            parts.append(html_esc(row["customer"]))
+        if parts:
+            lines.append("• " + " · ".join(parts))
     if count == 0:
         lines.append("Замороженных позиций нет.")
     else:
@@ -2740,7 +2902,7 @@ def _frozen(rows: list[dict[str, Any]], customers: list[str], products: list[str
     return "\n".join(lines)
 
 
-def _reminder(rows: list[dict[str, Any]], doc: dict[str, Any], terms: int, cash) -> str:
+def _reminder(rows: list[dict[str, Any]], doc: dict[str, Any], terms: int, cash, picks: set[str] | None = None) -> str:
     items = [
         row
         for row in rows
@@ -2754,8 +2916,9 @@ def _reminder(rows: list[dict[str, Any]], doc: dict[str, Any], terms: int, cash)
     blocks = ["<b>Напоминание</b>"]
     for customer, bits in by_customer.items():
         total = sum(float(row["tot"]["unpaid"]) for row in bits)
-        blocks.append(f"\nЗдравствуйте, {html_esc(customer)}!")
-        blocks.append("Напоминаем об оплате:")
+        if _on(picks, "hello"):
+            blocks.append(f"\nЗдравствуйте, {html_esc(customer)}!")
+            blocks.append("Напоминаем об оплате:")
         by_order: dict[str, list[dict[str, Any]]] = {}
         for row in bits:
             by_order.setdefault(str(row["order"].get("id") or id(row["order"])), []).append(row)
@@ -2765,13 +2928,16 @@ def _reminder(rows: list[dict[str, Any]], doc: dict[str, Any], terms: int, cash)
             due = min((row["due"] for row in chunk if row["due"]), default=None)
             worst = max((row["overdue"] or 0) for row in chunk)
             due_text = ""
-            if due:
+            if due and _on(picks, "due"):
                 due_text = f", срок {_fmt(due)}"
                 if worst > 0:
                     due_text += f", просрочка {worst} {_days(worst)}"
             blocks.append(f"{_order_ref(order)} — остаток {cash(amount)}{due_text}")
-            for row in chunk:
-                blocks.append(f"  • {html_esc(str(row['line'].get('product') or 'позиция'))} — {cash(float(row['tot']['unpaid']))}")
-        blocks.append(f"Итого к оплате: {cash(total)}")
-        blocks.append(f"Срок оплаты — {terms} {_days(terms)} от даты заказа.")
+            if _on(picks, "product"):
+                for row in chunk:
+                    blocks.append(f"  • {html_esc(str(row['line'].get('product') or 'позиция'))} — {cash(float(row['tot']['unpaid']))}")
+        if _on(picks, "total"):
+            blocks.append(f"Итого к оплате: {cash(total)}")
+        if _on(picks, "term"):
+            blocks.append(f"Срок оплаты — {terms} {_days(terms)} от даты заказа.")
     return "\n".join(blocks)

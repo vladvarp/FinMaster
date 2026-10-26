@@ -26,12 +26,61 @@
     return `${prefix}-${Math.random().toString(16).slice(2, 10)}`;
   }
 
+  let dictionaryDirtySent = false;
+
   function dictionaryDirty() {
-    return JSON.stringify(dictionaryBook || {}) !== dictionarySaved;
+    if (!dictionaryBook || dictionarySaved === "") return false;
+    return JSON.stringify(dictionaryBook) !== dictionarySaved;
+  }
+
+  function syncDictionaryDirty() {
+    const dirty = dictionaryDirty();
+    if (dirty === dictionaryDirtySent) return;
+    dictionaryDirtySent = dirty;
+    if (!state.desktop) return;
+    apiPost("/api/dirty", { dictionary: dirty }).catch(() => {});
+  }
+
+  async function keepDictionary() {
+    if (!dictionaryDirty()) return true;
+    const save = await askConfirm({
+      title: "Сохранить словарь?",
+      text: "В словаре есть несохранённая правка. Пока она не сохранена, программа не закроется.",
+      ok: "Сохранить",
+      cancel: "Отмена",
+    });
+    if (!save) return false;
+    return saveDictionary();
   }
 
   function dictionaryIsOpen() {
-    return Boolean($("dictionary-layer")?.classList.contains("open"));
+    const layer = $("dictionary-layer");
+    return Boolean(layer && !layer.hidden && layer.classList.contains("open") && !layer.classList.contains("is-fold"));
+  }
+
+  function paintDictionaryFold() {
+    const btn = $("dictionary-fold");
+    const folded = $("dictionary-layer")?.classList.contains("is-fold");
+    if (!btn) return;
+    btn.title = folded ? "Развернуть словарь" : "Свернуть словарь. Повторное нажатие разворачивает";
+    btn.setAttribute("aria-label", folded ? "Развернуть словарь" : "Свернуть словарь");
+  }
+
+  function foldDictionary() {
+    const layer = $("dictionary-layer");
+    if (!layer || layer.hidden) return;
+    layer.hidden = false;
+    layer.classList.add("open", "is-fold");
+    paintDictionaryFold();
+  }
+
+  function unfoldDictionary() {
+    const layer = $("dictionary-layer");
+    if (!layer) return;
+    layer.hidden = false;
+    layer.classList.add("open");
+    layer.classList.remove("is-fold");
+    paintDictionaryFold();
   }
 
   function dictionaryTextUndo(event) {
@@ -71,6 +120,7 @@
     paintDictionaryLists();
     renderDictionaryEditor();
     refreshDictionaryProbe();
+    syncDictionaryDirty();
   }
 
   function paintDictionaryLists() {
@@ -105,6 +155,7 @@
   function noteDictionaryEdit() {
     paintDictionaryLists();
     refreshDictionaryProbe();
+    syncDictionaryDirty();
   }
 
   function renderDictionaryList(kind, box, label) {
@@ -240,7 +291,7 @@
     if (!sample) return false;
     const keys = kind === "keywords"
       ? ["words", "action", "enabled", "bot", "desk"]
-      : ["phrases", "answer", "slices", "metrics", "template", "action", "snapKind", "snapHide", "delivery", "vaultPage", "vaultStats", "vaultTotalsOnly", "enabled", "bot", "desk"];
+      : ["phrases", "answer", "slices", "metrics", "template", "action", "snapKind", "snapHide", "delivery", "vaultPage", "vaultStats", "vaultTotalsOnly", "sliceOpts", "enabled", "bot", "desk"];
     return keys.every((key) => JSON.stringify(item[key] ?? "") === JSON.stringify(sample[key] ?? ""));
   }
 
@@ -426,11 +477,11 @@
       const dupes = synonymDupes();
       const hint = document.createElement("p");
       hint.className = "dictionary-note";
-      hint.textContent = "Слева — как слово стоит в заказе: ст, п, эт. Справа — как вы пишете в запросе: строение, подъезд, этаж. Ищутся оба.";
+      hint.textContent = "Как в отчёте — как слово стоит в заказе: ст, п, эт. Как в запросе — как вы пишете в запросе: строение, подъезд, этаж. Ищутся оба.";
       box.append(
         hint,
-        field("Как в отчёте", chips(item.words, redraw, dupes, "ст и Enter")),
-        field("Как в запросе", chips(item.values, redraw, dupes, "строение и Enter")),
+        field("Как в отчёте", chips(item.words, redraw, dupes, "ст и Enter", null, sendPhraseToProbe)),
+        field("Как в запросе", chips(item.values, redraw, dupes, "строение и Enter", null, sendPhraseToProbe)),
       );
     } else if (dictionaryPick.kind === "keywords") {
       item.words = item.words || [];
@@ -585,6 +636,38 @@
     return mark;
   }
 
+  function sliceToggleChecks(item, sliceId, rows, rerender) {
+    const box = document.createElement("div");
+    box.className = "dictionary-checks";
+    const order = rows.map((row) => row.id);
+    const saved = item.sliceOpts && Object.prototype.hasOwnProperty.call(item.sliceOpts, sliceId)
+      ? item.sliceOpts[sliceId]
+      : null;
+    const on = new Set(saved || order);
+    for (const row of rows) {
+      const mark = document.createElement("label");
+      mark.className = "dictionary-check";
+      mark.title = "Показать эту часть в ответе среза";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.title = mark.title;
+      input.checked = on.has(row.id);
+      input.addEventListener("change", () => {
+        const picked = new Set();
+        box.querySelectorAll("input").forEach((boxInput, index) => {
+          if (boxInput.checked) picked.add(rows[index].id);
+        });
+        item.sliceOpts = item.sliceOpts || {};
+        item.sliceOpts[sliceId] = order.filter((id) => picked.has(id));
+        noteDictionaryEdit();
+        if (typeof rerender === "function") rerender();
+      });
+      mark.append(input, toggleTrack(), document.createTextNode(row.title));
+      box.append(mark);
+    }
+    return box;
+  }
+
   function answerEditor(item) {
     const box = document.createElement("div");
     if (item.answer === "slices") {
@@ -604,14 +687,24 @@
           else set.delete(slice.id);
           item.slices = (dictionaryCatalog.slices || []).map((row) => row.id).filter((id) => set.has(id));
           noteDictionaryEdit();
-          if (slice.id === "vault") renderDictionaryEditor();
+          renderDictionaryEditor();
         });
         mark.append(input, toggleTrack(), document.createTextNode(slice.title));
         list.append(mark);
       }
       box.append(list);
-      if ((item.slices || []).includes("vault")) {
-        box.append(vaultPageMenu(item, true), vaultTotalsOnly(item, true), vaultStatChecks(item, true));
+      for (const slice of dictionaryCatalog?.slices || []) {
+        if (!(item.slices || []).includes(slice.id)) continue;
+        if (slice.id === "vault") {
+          box.append(vaultPageMenu(item, true), vaultTotalsOnly(item, true), vaultStatChecks(item, true));
+          continue;
+        }
+        const rows = dictionaryCatalog?.sliceToggles?.[slice.id] || [];
+        if (!rows.length) continue;
+        const caption = document.createElement("p");
+        caption.className = "dictionary-note";
+        caption.textContent = slice.title;
+        box.append(caption, sliceToggleChecks(item, slice.id, rows));
       }
     } else if (item.answer === "metrics") {
       box.append(metricEditor(item));
@@ -1220,12 +1313,19 @@
       const key = sep < 0 ? body : body.slice(0, sep);
       const cols = sep < 0 ? null : body.slice(sep + 1);
       const fields = sliceFields(key);
+      const toggles = dictionaryCatalog?.sliceToggles?.[key] || [];
       const note = document.createElement("p");
       note.className = "dictionary-note";
-      if (!fields.length) {
+      if (toggles.length) {
+        const caption = document.createElement("p");
+        caption.className = "dictionary-note";
+        caption.textContent = "Части ответа. Выключенная в шаблон не попадает.";
+        panel.append(caption, sliceToggleChecks(item, key, toggles, runPreview));
+      }
+      if (!fields.length && !toggles.length) {
         note.textContent = "Этот срез показывается целиком.";
         panel.append(note);
-      } else {
+      } else if (fields.length) {
         note.textContent = key === "vault"
           ? "Отметьте поля строк. Итоги страницы включаются тумблерами выше: они считаются по всей копилке, как шапка на экране."
           : "Отметьте, что показать. Номер и название — шапка, остальные поля — строки.";
@@ -1351,8 +1451,16 @@
   }
 
   async function openDictionary() {
-    $("dictionary-layer").hidden = false;
-    $("dictionary-layer").classList.add("open");
+    const layer = $("dictionary-layer");
+    const folded = layer.classList.contains("is-fold") && !layer.hidden;
+    layer.hidden = false;
+    layer.classList.add("open");
+    layer.classList.remove("is-fold");
+    paintDictionaryFold();
+    if (folded && dictionaryBook) {
+      renderDictionary();
+      return;
+    }
     try {
       await loadDictionary();
     } catch (err) {
@@ -1648,6 +1756,11 @@
     });
     $("dictionary-open")?.addEventListener("click", () => openDictionary());
     $("dictionary-close")?.addEventListener("click", () => closeDictionary());
+    $("dictionary-fold")?.addEventListener("click", () => {
+      const layer = $("dictionary-layer");
+      if (layer?.classList.contains("is-fold")) unfoldDictionary();
+      else foldDictionary();
+    });
     $("dictionary-filter")?.addEventListener("input", () => renderDictionary());
     $("dictionary-add-synonyms")?.addEventListener("click", () => addDictionaryEntry("synonyms"));
     $("dictionary-add-commands")?.addEventListener("click", () => addDictionaryEntry("commands"));

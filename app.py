@@ -62,6 +62,7 @@ GUIDE_WINDOW = None
 WINDOW_FULLSCREEN = False
 FORCE_CLOSE = False
 DIRTY = False
+DICT_DIRTY = False
 SERVER_PORT = 0
 
 LOCAL_ADDRS = {"127.0.0.1", "::1", "localhost"}
@@ -862,10 +863,13 @@ def api_runtime_install():
 
 @app.post("/api/dirty")
 def api_dirty():
-    global DIRTY
+    global DIRTY, DICT_DIRTY
     data = request.get_json(silent=True) or {}
-    DIRTY = bool(data.get("dirty"))
-    return jsonify({"ok": True, "dirty": DIRTY})
+    if "dirty" in data:
+        DIRTY = bool(data.get("dirty"))
+    if "dictionary" in data:
+        DICT_DIRTY = bool(data.get("dictionary"))
+    return jsonify({"ok": True, "dirty": DIRTY, "dictionary": DICT_DIRTY})
 
 
 @app.post("/api/autosave")
@@ -1050,6 +1054,8 @@ def api_dictionary_save():
     if book is None:
         return jsonify({"error": "Это не словарь FinMaster."}), 400
     dictionary.save(book)
+    global DICT_DIRTY
+    DICT_DIRTY = False
     return jsonify(_dictionary_payload(book, "ok"))
 
 
@@ -1057,9 +1063,11 @@ def api_dictionary_save():
 def api_dictionary_reset():
     if not _is_local() and not _desk_editor():
         return jsonify({"error": "Доступ запрещён."}), 403
+    global DICT_DIRTY
     data = request.get_json(silent=True) or {}
     if data.get("all"):
         book = dictionary.restore_all()
+        DICT_DIRTY = False
         return jsonify(_dictionary_payload(book, "ok"))
     raw = data.get("book")
     current = None
@@ -1074,6 +1082,7 @@ def api_dictionary_reset():
     )
     book = dictionary.restore_entry(current, kind, str(data.get("id") or ""))
     dictionary.save(book)
+    DICT_DIRTY = False
     return jsonify(_dictionary_payload(book, "ok"))
 
 
@@ -2352,9 +2361,10 @@ def api_update():
 
 @app.post("/api/quit")
 def api_quit():
-    global FORCE_CLOSE, DIRTY
+    global FORCE_CLOSE, DIRTY, DICT_DIRTY
     FORCE_CLOSE = True
     DIRTY = False
+    DICT_DIRTY = False
     _close_guide_window()
     REMOTE.stop()
     TUNNEL.stop()
@@ -2540,7 +2550,7 @@ def main(splash=None) -> None:
     def on_closing():
         persist_window_state()
         # Never call evaluate_js on this stack: WebView2 deadlocks the window.
-        if FORCE_CLOSE or not DIRTY:
+        if FORCE_CLOSE or not (DIRTY or DICT_DIRTY):
             threading.Timer(0.05, _close_guide_window).start()
             return True
         window = WINDOW

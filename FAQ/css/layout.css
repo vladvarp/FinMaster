@@ -113,6 +113,27 @@
   font-weight: 650;
 }
 
+.nav-sub {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 5px 10px 5px 22px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.nav-sub:hover { background: var(--accent-soft); color: var(--ink); }
+
+.nav-sub.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 650;
+}
+
 .empty {
   color: var(--muted);
   font-size: 13px;
