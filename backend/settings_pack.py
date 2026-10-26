@@ -258,7 +258,7 @@ def _label(name: str) -> str:
 
 
 def _default_on(pid: str) -> bool:
-    return pid not in ("voice", "history", "extra:cloudflared.exe")
+    return pid != "voice"
 
 
 def _parts_from_tree(root: str) -> list[dict[str, Any]]:
