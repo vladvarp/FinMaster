@@ -1183,6 +1183,12 @@ def api_dictionary_probe():
     payload = ask.api_body(reply, query, doc, surface, book)
     if reply is not None and str(reply.html or "").strip():
         payload["html"] = str(reply.html)
+    if surface == "bot" and payload.get("html"):
+        from backend import telegram as tg
+
+        payload["rich"] = tg._rich_markdown(str(payload.get("html") or ""))
+    if surface == "bot" and reply is not None and reply.action in {"snap", "snap_send"}:
+        payload["snap"] = ask.snap_preview(doc, reply)
     return jsonify(payload)
 
 

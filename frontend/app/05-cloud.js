@@ -3665,6 +3665,8 @@
     document.addEventListener("keydown", (e) => {
       const ctrl = e.ctrlKey || e.metaKey;
       const code = e.code;
+      // Словарь поверх отчёта. Клавиши календаря и заказов сюда не доходят, иначе «123» в шаблоне переключает вид.
+      if (dictionaryIsOpen() && e.key !== "Escape" && e.key !== "F1") return;
       if (e.key === "F1") {
         e.preventDefault();
         openHelp();

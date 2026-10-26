@@ -18,6 +18,8 @@ from backend.finance import (
     line_totals,
     money,
     money_decimals,
+    num_expr,
+    num_text,
     qty_text,
     type_index,
 )
@@ -537,15 +539,16 @@ def parse(
     cmd_answer = str(cmd.get("answer") or "") if cmd else ""
     if guided:
         delivery, hide_totals, raw = dictionary.take_keywords(command_rest, book, surface_key)
-        if not delivery and cmd.get("delivery"):
-            delivery = str(cmd.get("delivery") or "")
+        if not delivery and cmd_answer != "help":
+            side = "deliveryBot" if surface_key == "bot" else "deliveryDesk"
+            delivery = str(cmd.get(side) or "")
         if cmd_answer == "snap" and not delivery:
             delivery = {"pdf": "pdf", "text": "text"}.get(str(cmd.get("snapKind") or ""), "photo")
         if cmd_answer == "snap" and cmd.get("snapHide"):
             hide_totals = True
     else:
         delivery, hide_totals, raw = dictionary.take_keywords(low, book, surface_key)
-    kind = {"pdf": "pdf", "text": "text", "photo": "png"}.get(delivery, "png")
+    kind = {"pdf": "pdf", "text": "text", "photo": "png"}.get(delivery, "")
     snap = delivery in {"pdf", "text", "photo"}
     raw, period, period_label, recent_n, customers, products, order_ids, statuses, types = _read_filters(raw, source, rows)
     if guided and cmd and cmd.get("id") in {"count", "rank"}:
@@ -735,6 +738,7 @@ def parse(
             customers, products, order_ids, work_state, hide_totals, vault_types, vault_pages,
             vault_stats, vault_totals_only,
             cmd.get("sliceOpts") if isinstance(cmd.get("sliceOpts"), dict) else None,
+            cmd.get("sliceRules") if isinstance(cmd.get("sliceRules"), dict) else None,
         ))
     else:
         def picks_for(key: str) -> set[str] | None:
@@ -745,6 +749,15 @@ def parse(
                 return None
             allowed = {fid for fid, _title in dictionary.SLICE_TOGGLES.get(key, ())}
             return {str(item) for item in (opts.get(key) or []) if str(item) in allowed}
+
+        def rules_for(key: str) -> set[str] | None:
+            if not guided or not cmd:
+                return None
+            raw_rules = cmd.get("sliceRules")
+            if not isinstance(raw_rules, dict) or key not in raw_rules:
+                return None
+            allowed = {fid for fid, _title, _flag in dictionary.SLICE_RULES.get(key, ())}
+            return {str(item) for item in (raw_rules.get(key) or []) if str(item) in allowed}
 
         rendered: set[str] = set()
         for key in slice_order:
@@ -764,7 +777,7 @@ def parse(
             elif key == "summary":
                 parts.append(_summary(source, matched, today, cash, terms, delays, period, picks_for(key)))
             elif key == "status":
-                parts.append(_statuses(matched, cash, picks_for(key)))
+                parts.append(_statuses(matched, cash, picks_for(key), rules_for(key)))
             elif key == "discount":
                 parts.append(_discounts(matched, cash, picks_for(key)))
             elif key == "debt":
@@ -779,24 +792,25 @@ def parse(
                         incoming=False if guided else "incoming" in explicit,
                         period=period,
                         picks=picks_for(key),
+                        rules=rules_for(key),
                     )
                 )
             elif key == "overdue":
-                parts.append(_debts(matched, today, terms, delays, cash, overdue_only=True, incoming=False, period=period, picks=picks_for(key)))
+                parts.append(_debts(matched, today, terms, delays, cash, overdue_only=True, incoming=False, period=period, picks=picks_for(key), rules=rules_for(key)))
             elif key == "incoming":
-                parts.append(_debts(matched, today, terms, delays, cash, overdue_only=False, incoming=True, period=period, picks=picks_for(key)))
+                parts.append(_debts(matched, today, terms, delays, cash, overdue_only=False, incoming=True, period=period, picks=picks_for(key), rules=rules_for(key)))
             elif key == "orders":
-                parts.append(_orders(matched, cash, picks_for(key)))
+                parts.append(_orders(matched, cash, picks_for(key), rules_for(key)))
             elif key == "lines":
-                parts.append(_orders(matched, cash, picks_for(key)).replace("<b>Заказы</b>", "<b>Позиции</b>", 1))
+                parts.append(_positions(matched, cash, picks_for(key), rules_for(key)))
             elif key == "work":
-                parts.append(_work(matched if work_state or period != "all" else rows, today, work_state, picks_for(key)))
+                parts.append(_work(matched if work_state or period != "all" else rows, today, work_state, picks_for(key), rules_for(key)))
             elif key == "customers":
-                parts.append(_customers(source, matched if customers or words or products else rows, cash, picks_for(key)))
+                parts.append(_customers(source, matched if customers or words or products else rows, cash, picks_for(key), rules_for(key)))
             elif key == "products":
-                parts.append(_products(matched, cash, picks_for(key)))
+                parts.append(_products(matched, cash, picks_for(key), rules_for(key)))
             elif key == "expense":
-                parts.append(_expenses(rows, matched, customers, order_ids, cash, picks_for(key)))
+                parts.append(_expenses(rows, matched, customers, order_ids, cash, picks_for(key), rules_for(key)))
             elif key == "notes":
                 parts.append(_notes(matched, picks_for(key)))
             elif key == "frozen":
@@ -804,7 +818,7 @@ def parse(
             elif key == "remind":
                 parts.append(_reminder(matched, source, terms, cash, picks_for(key)))
             elif key == "vault":
-                parts.append(_vault_html(source, cash, today, period, vault_types, vault_pages, hide_totals, stats=vault_stats, totals_only=vault_totals_only))
+                parts.append(_vault_html(source, cash, today, period, vault_types, vault_pages, hide_totals, stats=vault_stats, totals_only=vault_totals_only, rules=rules_for(key)))
 
     ids: list[str] = []
     seen: set[str] = set()
@@ -826,6 +840,8 @@ def parse(
             parts = [head, f"Собираю снимок{bare}{(' · ' + html_esc(who)) if who else ''}."]
 
     html = "\n".join(part for part in parts if part).strip()
+    if delivery == "md" and cmd_answer != "help":
+        html = _bold_labels(html)
     return Reply(
         html=html,
         action=action,
@@ -1604,6 +1620,20 @@ def _order_ref(order: dict[str, Any]) -> str:
     return html_esc(" ".join(bits) or "Заказ")
 
 
+def _order_bits(order: dict[str, Any], columns: list[str] | None) -> str:
+    """Номер и название по колонкам чипа. Пустая строка — оба поля сняты."""
+    num = str(order.get("number") or "").strip()
+    name = str(order.get("name") or "").strip()
+    bits = []
+    if _col(columns, "number") and num:
+        bits.append(num)
+    if _col(columns, "name") and name:
+        bits.append(name)
+    if columns is None and not bits:
+        return "Заказ"
+    return html_esc(" ".join(bits))
+
+
 def _fold(lines: list[str], hidden: list[str], count: int, one: str, few: str, many: str) -> None:
     if count <= 0 or not any(str(line).strip() for line in hidden):
         return
@@ -1616,6 +1646,107 @@ def _fold(lines: list[str], hidden: list[str], count: int, one: str, few: str, m
 
 def _on(picks: set[str] | None, key: str) -> bool:
     return picks is None or key in picks
+
+
+def _col(columns: list[str] | None, key: str) -> bool:
+    return columns is None or key in columns
+
+
+def _keep_rule(key: str, tag: str, rules: set[str] | None) -> bool:
+    """Правило строки. Нет сохранённого набора — берётся заводское включение."""
+    spec = {fid: flag for fid, _title, flag in dictionary.SLICE_RULES.get(key, ())}
+    if tag not in spec:
+        return True
+    if rules is None:
+        return bool(spec[tag])
+    return tag in rules
+
+
+def _mask_picks(key: str, columns: list[str] | None, picks: set[str] | None) -> set[str] | None:
+    """Колонки прячут поля строки. Тумблеры шапки остаются."""
+    if columns is None:
+        return picks
+    mapping = dictionary.COLUMN_TO_TOGGLES.get(key) or {}
+    if not mapping:
+        return picks
+    allowed: set[str] = set()
+    for column in columns:
+        allowed.update(mapping.get(column, ()))
+    covered: set[str] = set()
+    for toggles in mapping.values():
+        covered.update(toggles)
+    headers = set(dictionary.HEADER_TOGGLES.get(key, ()))
+    base = {fid for fid, _title in dictionary.SLICE_TOGGLES.get(key, ())} if picks is None else set(picks)
+    return {fid for fid in base if fid in headers or fid not in covered or fid in allowed}
+
+
+def _read_slice_token(rest: str) -> tuple[str, list[str] | None, set[str] | None, set[str] | None, str, bool]:
+    """Срез в шаблоне. Свой чип: колонки; части; правила; копилка. Без «;» — старый вид."""
+    own = ";" in rest
+    if own:
+        segs = rest.split(";")
+        head = segs[0]
+        parts_raw = segs[1] if len(segs) > 1 else "*"
+        rules_raw = segs[2] if len(segs) > 2 else "*"
+        vault_raw = segs[3] if len(segs) > 3 else ""
+    else:
+        head, parts_raw, rules_raw, vault_raw = rest, None, None, ""
+    key, sep, cols_raw = head.partition(":")
+    key = key.strip()
+    cols_raw = cols_raw.strip()
+    if not own:
+        columns = [bit.strip() for bit in cols_raw.split(",") if bit.strip()] if sep else None
+        return key, columns, None, None, "", False
+
+    def as_set(raw: str | None) -> set[str] | None:
+        text = str(raw or "").strip()
+        if text in {"", "*"}:
+            return None
+        if text in {"-", "off"}:
+            return set()
+        return {bit.strip() for bit in text.split(",") if bit.strip()}
+
+    if cols_raw in {"", "*"}:
+        columns = None
+    elif cols_raw == "-":
+        columns = []
+    else:
+        columns = [bit.strip() for bit in cols_raw.split(",") if bit.strip()]
+    # У календаря «-» остался от чипов, где правил строк ещё не было: это все типы, не пустой набор.
+    rules = None if key == "work" and str(rules_raw or "").strip() == "-" else as_set(rules_raw)
+    return key, columns, as_set(parts_raw), rules, vault_raw, True
+
+
+def _bold_piece(part: str) -> str:
+    """Подпись до числа — жирным, как у показателя в Markdown."""
+    lead = part[: len(part) - len(part.lstrip())]
+    text = part.strip()
+    if not text or "<b>" in text or text.startswith("<"):
+        return part
+    match = re.match(r"^(•\s*)?([A-Za-zА-Яа-яЁё][^0-9<]{0,48}?)(\s+\d.*)$", text)
+    if not match or not match.group(2).strip():
+        return part
+    bullet = match.group(1) or ""
+    label = match.group(2).strip()
+    return f"{lead}{bullet}<b>{label}</b>{match.group(3)}"
+
+
+def _counter_line(line: str) -> bool:
+    """Счётчики календаря: подпись и целое в каждом куске. Жирным их не делать — иначе строка станет шапкой «В работе»."""
+    bits = [bit.strip() for bit in line.split(" · ") if bit.strip()]
+    if len(bits) < 2:
+        return False
+    return all(re.fullmatch(r"[A-Za-zА-Яа-яЁё][^0-9]{0,24}\s+\d+", bit) for bit in bits)
+
+
+def _bold_labels(html: str) -> str:
+    out: list[str] = []
+    for line in str(html or "").split("\n"):
+        if "<table" in line or line.strip().startswith("<t") or _counter_line(line):
+            out.append(line)
+            continue
+        out.append(" · ".join(_bold_piece(bit) for bit in line.split(" · ")))
+    return "\n".join(out)
 
 
 def _count(rows: list[dict[str, Any]], cash, *, overdue_only: bool = False, picks: set[str] | None = None) -> str:
@@ -1683,12 +1814,14 @@ def _rank(rows: list[dict[str, Any]], cash, *, by_debt: bool = False, picks: set
     return "\n".join(lines)
 
 
-def _statuses(rows: list[dict[str, Any]], cash, picks: set[str] | None = None) -> str:
+def _statuses(rows: list[dict[str, Any]], cash, picks: set[str] | None = None, rules: set[str] | None = None) -> str:
     acc: dict[str, list[float]] = {}
     for row in rows:
         if row["frozen"] or row["tot"].get("kind"):
             continue
         name = str(row["line"].get("status") or "").strip() or "Без статуса"
+        if not _keep_rule("status", "empty" if name == "Без статуса" else "named", rules):
+            continue
         cur = acc.setdefault(name, [0.0, 0.0, 0.0])
         cur[0] += 1
         cur[1] += float(row["tot"]["after"])
@@ -1887,8 +2020,43 @@ _ORDER_COL_TOGGLE = {
 }
 
 
+def _lines_column(column: str) -> str | None:
+    """Тумблер позиции для колонки снимка. Пустая строка — колонку не показывать, если набор задан."""
+    mapped = {
+        "number": "order",
+        "name": "order",
+        "order_type": "order",
+        "product": "product",
+        "quantity": "qty",
+        "status": "status",
+        "total": "amount",
+        "unpaid": "debt",
+        "order_date": "date",
+        "expenses": "expense",
+        "paid": "",
+        "totals": "",
+    }
+    if column in mapped:
+        return mapped[column] or None
+    return _ORDER_COL_TOGGLE.get(column)
+
+
+def _column_on(key: str, column: str, picks: set[str] | None) -> bool:
+    if picks is None:
+        return True
+    if key == "lines":
+        toggle = _lines_column(column)
+        return bool(toggle) and _on(picks, toggle)
+    toggle = _ORDER_COL_TOGGLE.get(column)
+    return True if toggle is None else _on(picks, toggle)
+
+
 def _field_toggle(key: str, field: str) -> str | None:
     """Какой тумблер среза прячет это поле шаблона. None — поле от тумблеров не зависит."""
+    if key == "lines" and field in {"number", "name", "order_type"}:
+        return "order"
+    if key == "lines" and field in {"paid", "totals", "note"}:
+        return "__lines_off__"
     if key in {"debt", "overdue", "incoming", "discount", "frozen", "expense"} and field in {"number", "name"}:
         return "order"
     if key == "notes" and field == "note":
@@ -1919,7 +2087,7 @@ def _order_slice_html(
     if hide_totals:
         picked = snapmod.without_prices(picked)
     if picks is not None:
-        picked = [item for item in picked if item not in _ORDER_COL_TOGGLE or _on(picks, _ORDER_COL_TOGGLE[item])]
+        picked = [item for item in picked if _column_on(key, item, picks)]
     types = type_index(source)
     currency = str(source.get("currency") or "₽")
     decimals = money_decimals(source.get("money_decimals"))
@@ -2207,6 +2375,7 @@ def _vault_html(
     columns: list[str] | None = None,
     stats: list[str] | None = None,
     totals_only: bool = False,
+    rules: set[str] | None = None,
 ) -> str:
     """Строки копилок. Это не выручка заказов."""
     labels = dict(_VAULT_FIELDS)
@@ -2241,6 +2410,8 @@ def _vault_html(
             if kind not in _VAULT_LABEL:
                 continue
             if type_keys and kind not in type_keys:
+                continue
+            if rules is not None and kind not in rules:
                 continue
             day = _iso(row.get("date"))
             if not _in_period(day, period, today):
@@ -2311,10 +2482,12 @@ def _template_html(
     vault_stats: list[str] | None = None,
     vault_totals_only: bool = False,
     slice_opts: dict[str, Any] | None = None,
+    slice_rules: dict[str, Any] | None = None,
 ) -> str:
     pack = _metric_pack(matched, today, terms, delays)
     known = {key: fmt for key, _label, fmt in dictionary.METRICS}
     opts = slice_opts if isinstance(slice_opts, dict) else {}
+    rule_book = slice_rules if isinstance(slice_rules, dict) else {}
 
     def picks_for(key: str) -> set[str] | None:
         if key not in opts:
@@ -2322,8 +2495,16 @@ def _template_html(
         allowed = {fid for fid, _title in dictionary.SLICE_TOGGLES.get(key, ())}
         return {str(item) for item in (opts.get(key) or []) if str(item) in allowed}
 
-    def slice_html(key: str) -> str:
-        picks = picks_for(key)
+    def rules_for(key: str) -> set[str] | None:
+        if key not in rule_book:
+            return None
+        allowed = {fid for fid, _title, _flag in dictionary.SLICE_RULES.get(key, ())}
+        return {str(item) for item in (rule_book.get(key) or []) if str(item) in allowed}
+
+    def slice_html(key: str, picks: set[str] | None = None, rules: set[str] | None = None, columns: list[str] | None = None, *, forced: bool = False) -> str:
+        if not forced:
+            picks = picks_for(key)
+            rules = rules_for(key)
         if key == "summary":
             return _summary(source, matched, today, cash, terms, delays, period, picks)
         if key == "count":
@@ -2331,35 +2512,35 @@ def _template_html(
         if key == "rank":
             return _rank(matched, cash, picks=picks)
         if key == "debt":
-            return _debts(matched, today, terms, delays, cash, overdue_only=False, incoming=False, period=period, picks=picks)
+            return _debts(matched, today, terms, delays, cash, overdue_only=False, incoming=False, period=period, picks=picks, rules=rules)
         if key == "overdue":
-            return _debts(matched, today, terms, delays, cash, overdue_only=True, incoming=False, period=period, picks=picks)
+            return _debts(matched, today, terms, delays, cash, overdue_only=True, incoming=False, period=period, picks=picks, rules=rules)
         if key == "incoming":
-            return _debts(matched, today, terms, delays, cash, overdue_only=False, incoming=True, period=period, picks=picks)
+            return _debts(matched, today, terms, delays, cash, overdue_only=False, incoming=True, period=period, picks=picks, rules=rules)
         if key == "orders":
-            return _orders(matched, cash, picks)
+            return _orders(matched, cash, picks, rules)
         if key == "lines":
-            return _orders(matched, cash, picks).replace("<b>Заказы</b>", "<b>Позиции</b>", 1)
+            return _positions(matched, cash, picks, rules)
         if key == "work":
-            return _work(matched if work_state or period != "all" else rows, today, work_state, picks)
+            return _work(matched if work_state or period != "all" else rows, today, work_state, picks, rules, columns)
         if key == "customers":
-            return _customers(source, matched, cash, picks)
+            return _customers(source, matched, cash, picks, rules)
         if key == "products":
-            return _products(matched, cash, picks)
+            return _products(matched, cash, picks, rules, columns)
         if key == "expense":
-            return _expenses(rows, matched, customers, order_ids, cash, picks)
+            return _expenses(rows, matched, customers, order_ids, cash, picks, rules)
         if key == "notes":
-            return _notes(matched, picks)
+            return _notes(matched, picks, columns)
         if key == "frozen":
-            return _frozen(rows, customers, products, order_ids, picks)
+            return _frozen(rows, customers, products, order_ids, picks, columns)
         if key == "discount":
             return _discounts(matched, cash, picks)
         if key == "status":
-            return _statuses(matched, cash, picks)
+            return _statuses(matched, cash, picks, rules)
         if key == "remind":
-            return _reminder(matched, source, terms, cash, picks)
+            return _reminder(matched, source, terms, cash, picks, columns)
         if key == "vault":
-            return _vault_html(source, cash, today, period, vault_types or set(), vault_pages or set(), hide_totals, stats=vault_stats, totals_only=vault_totals_only)
+            return _vault_html(source, cash, today, period, vault_types or set(), vault_pages or set(), hide_totals, stats=vault_stats, totals_only=vault_totals_only, rules=rules)
         return ""
 
     opens = {
@@ -2385,17 +2566,17 @@ def _template_html(
         "td": " · ",
     }
     parts: list[str] = []
-    rows: list[list[str]] = []
+    grid: list[list[str]] = []
     cells: list[str] = []
     in_row = False
 
     def flush_rows() -> None:
-        nonlocal rows
-        if not rows:
+        nonlocal grid
+        if not grid:
             return
-        width = max(len(row) for row in rows)
+        width = max(len(row) for row in grid)
         html = ["<table>"]
-        for row in rows:
+        for row in grid:
             html.append("<tr>")
             for index in range(width):
                 value = row[index].strip() if index < len(row) else ""
@@ -2403,14 +2584,14 @@ def _template_html(
             html.append("</tr>")
         html.append("</table>")
         parts.append("".join(html))
-        rows = []
+        grid = []
 
     def add_outside(text: str) -> None:
         if text.strip():
             flush_rows()
             parts.append(text)
             return
-        if rows and text.count("\n") >= 2:
+        if grid and text.count("\n") >= 2:
             flush_rows()
         parts.append(text)
 
@@ -2438,7 +2619,7 @@ def _template_html(
             continue
         if token == "/table":
             if in_row:
-                rows.append(cells)
+                grid.append(cells)
                 cells = []
                 in_row = False
             continue
@@ -2451,29 +2632,41 @@ def _template_html(
             _raw, text = _metric_text(key, known.get(key, "text"), pack, cash)
             rendered = text
         elif token.startswith("slice:"):
-            rest = token.split(":", 1)[1].strip()
-            key, sep, cols_raw = rest.partition(":")
-            key = key.strip()
-            columns = [bit.strip() for bit in cols_raw.split(",") if bit.strip()] if sep else []
+            key, columns, chip_parts, chip_rules, vault_raw, own = _read_slice_token(token.split(":", 1)[1].strip())
+            picks = chip_parts if own else picks_for(key)
+            rules = chip_rules if own else rules_for(key)
+            picks = _mask_picks(key, columns, picks)
             if key == "vault":
+                pages, stats, totals_only = vault_pages or set(), vault_stats, vault_totals_only
+                if own and vault_raw:
+                    page_id, _, tail = vault_raw.partition("|")
+                    stats_raw, _, flag = tail.partition("|")
+                    if page_id:
+                        chosen = {_norm(name) for name in _vault_page_names(source, page_id)}
+                        if chosen:
+                            pages = chosen
+                    allowed_stats = {fid for fid, _title in dictionary.VAULT_STATS}
+                    if stats_raw.strip() == "-":
+                        stats = []
+                    elif stats_raw.strip() not in {"", "*"}:
+                        stats = [bit for bit in stats_raw.split(",") if bit in allowed_stats]
+                    if flag in {"0", "1"}:
+                        totals_only = flag == "1"
                 rendered = _vault_html(
                     source,
                     cash,
                     today,
                     period,
                     vault_types or set(),
-                    vault_pages or set(),
+                    pages,
                     hide_totals,
-                    columns if sep else None,
-                    vault_stats,
-                    vault_totals_only,
+                    columns,
+                    stats,
+                    totals_only,
+                    rules,
                 )
-            elif key in dictionary.COLUMN_SLICES and (sep or picks_for(key) is None):
-                rendered = _order_slice_html(key, columns, source, matched, hide_totals, picks_for(key))
-            elif columns and key in dictionary.SLICE_PICKS:
-                rendered = _picked_slice_html(key, columns, source, matched, cash, hide_totals, today, delays, period, picks_for(key))
             else:
-                rendered = slice_html(key)
+                rendered = slice_html(key, picks, rules, columns, forced=True)
         elif token.startswith("/"):
             rendered = closes.get(token[1:].strip(), "")
         else:
@@ -2482,7 +2675,7 @@ def _template_html(
         put(rendered)
     put(html_esc((template or "")[cursor:]))
     if in_row:
-        rows.append(cells)
+        grid.append(cells)
     flush_rows()
     body = "".join(parts).strip()
     return body or "Шаблон пуст."
@@ -2523,7 +2716,69 @@ def api_body(
     body["template"] = reply.template_source or ""
     if reply.action:
         body["action"] = reply.action
+    if reply.kind:
+        body["kind"] = reply.kind
+        body["hideTotals"] = bool(reply.hide_totals)
     return body
+
+
+def snap_preview(doc: dict[str, Any] | None, reply: Reply | None) -> dict[str, Any]:
+    """Файл, который бот приложит к ответу: то же фото, PDF или текст, что уходит в чат."""
+    if reply is None or reply.action not in {"snap", "snap_send"}:
+        return {}
+    kind = reply.kind or "png"
+    payload: dict[str, Any] = {"kind": kind, "hideTotals": bool(reply.hide_totals)}
+    if not isinstance(doc, dict):
+        payload["error"] = "Отчёт не открыт."
+        return payload
+    import base64
+
+    from backend import snapshot as snapmod
+
+    ids = [str(item) for item in (reply.order_ids or []) if item]
+    if not ids:
+        for order in doc.get("orders") or []:
+            if isinstance(order, dict) and order.get("id"):
+                ids = [str(order.get("id"))]
+                break
+    by_id: dict[str, dict[str, Any]] = {}
+    for order in doc.get("orders") or []:
+        if isinstance(order, dict):
+            by_id[str(order.get("id") or "")] = order
+    blocks: list[dict[str, Any]] = []
+    for oid in ids:
+        order = by_id.get(oid)
+        if not order:
+            continue
+        lines = [line for line in (order.get("lines") or []) if isinstance(line, dict)]
+        if lines:
+            blocks.append({"order": order, "lines": lines})
+    if not blocks:
+        payload["error"] = "Нечего снимать: нет позиций."
+        return payload
+    ui = doc.get("ui") if isinstance(doc.get("ui"), dict) else {}
+    saved = ui.get("share_fields") if isinstance(ui.get("share_fields"), list) else []
+    fields = snapmod.normalize_fields(saved or list(snapmod.PRESETS["invoice"]))
+    if reply.hide_totals:
+        fields = snapmod.without_prices(fields)
+    theme = snapmod.theme_key(str(ui.get("share_theme") or "teal"))
+    try:
+        if kind == "text":
+            payload["text"] = snapmod.render_text(doc, blocks, fields, False, False, "", reply.hide_totals)
+            return payload
+        png = snapmod.render_png(doc, blocks, fields, theme, False, False, "", reply.hide_totals)
+        payload["page"] = base64.b64encode(png).decode("ascii")
+        if kind == "pdf":
+            pdf = snapmod.render_pdf(doc, blocks, fields, theme, False, False, "", None, reply.hide_totals)
+            payload["file"] = base64.b64encode(pdf).decode("ascii")
+            payload["mime"] = "application/pdf"
+        else:
+            payload["file"] = payload["page"]
+            payload["mime"] = "image/png"
+        return payload
+    except Exception as exc:
+        payload["error"] = str(exc) or "Снимок не собрался"
+        return payload
 
 
 def _bucket(overdue: int | None) -> str:
@@ -2551,6 +2806,7 @@ def _debts(
     incoming: bool,
     period: str,
     picks: set[str] | None = None,
+    rules: set[str] | None = None,
 ) -> str:
     _, _, delay_map = delays
     items = []
@@ -2562,8 +2818,9 @@ def _debts(
         if unpaid <= 0.005:
             continue
         if row["cancelled"]:
-            cancelled += unpaid
-            continue
+            if not _keep_rule("debt", "cancelled", rules):
+                cancelled += unpaid
+                continue
         delay = int(round(delay_map.get(row["customer"]) or 0))
         due = row["due"]
         expected = None
@@ -2571,8 +2828,23 @@ def _debts(
             shifted = due + timedelta(days=max(0, delay))
             expected = shifted if shifted > today else today
         items.append((row, unpaid, expected, delay))
+
+    def debt_tag(item: tuple) -> str:
+        row = item[0]
+        if row["cancelled"]:
+            return "cancelled"
+        late = row["overdue"]
+        if late is None:
+            return "nodue"
+        if late > 0:
+            return "late"
+        return "open"
+
+    if not overdue_only and not incoming:
+        items = [item for item in items if _keep_rule("debt", debt_tag(item), rules)]
     if overdue_only:
         items = [item for item in items if (item[0]["overdue"] or 0) > 0]
+        items = [item for item in items if _keep_rule("overdue", _bucket(item[0]["overdue"]), rules)]
     if incoming:
         horizon = 7
         if period.startswith("days:"):
@@ -2580,21 +2852,27 @@ def _debts(
         elif period == "month":
             horizon = 30
         items = [item for item in items if item[2] and (item[2] - today).days <= horizon]
+        items = [
+            item
+            for item in items
+            if _keep_rule("incoming", "ahead" if item[2] and item[2] > today else "due", rules)
+        ]
     items.sort(key=lambda item: ((item[0]["due"] or date.max), -item[1]))
     total = sum(item[1] for item in items)
     overdue_sum = sum(item[1] for item in items if (item[0]["overdue"] or 0) > 0)
     overdue_n = sum(1 for item in items if (item[0]["overdue"] or 0) > 0)
     orders = {str(item[0]["order"].get("id") or id(item[0]["order"])) for item in items}
     lines = ["<b>Долги</b>"]
-    if _on(picks, "total"):
-        lines.append(f"Дебиторка {cash(total)} · {_pieces(len(items), 'позиция', 'позиции', 'позиций')} в {_pieces(len(orders), 'заказе', 'заказах', 'заказах')}")
-    if _on(picks, "late"):
+    if _on(picks, "total") and not overdue_only:
+        title = "Ожидается" if incoming else "Дебиторка"
+        lines.append(f"{title} {cash(total)} · {_pieces(len(items), 'позиция', 'позиции', 'позиций')} в {_pieces(len(orders), 'заказе', 'заказах', 'заказах')}")
+    if _on(picks, "late") and not incoming:
         lines.append(f"Просрочено {cash(overdue_sum)} · {_pieces(overdue_n, 'позиция', 'позиции', 'позиций')}")
     if _on(picks, "term"):
         lines.append(f"Срок по договорённости {terms} {_days(terms)}")
-    if cancelled > 0.005 and _on(picks, "total"):
+    if cancelled > 0.005 and _on(picks, "total") and not overdue_only and not incoming:
         lines.append(f"Отменённые {cash(cancelled)} в дебиторку не входят")
-    if _on(picks, "buckets"):
+    if _on(picks, "buckets") and not incoming:
         for key, label in _BUCKETS:
             bucket_sum = sum(item[1] for item in items if _bucket(item[0]["overdue"]) == key)
             if bucket_sum > 0.005:
@@ -2637,7 +2915,7 @@ def _debts(
     return "\n".join(lines)
 
 
-def _orders(rows: list[dict[str, Any]], cash, picks: set[str] | None = None) -> str:
+def _orders(rows: list[dict[str, Any]], cash, picks: set[str] | None = None, rules: set[str] | None = None) -> str:
     grouped: dict[str, list[dict[str, Any]]] = {}
     costs: dict[str, list[dict[str, Any]]] = {}
     order_of: dict[str, dict[str, Any]] = {}
@@ -2656,6 +2934,13 @@ def _orders(rows: list[dict[str, Any]], cash, picks: set[str] | None = None) -> 
 
     def write_orders(target: list[str], chunk: list) -> None:
         for oid, bits in chunk:
+            bits = [
+                row
+                for row in bits
+                if _keep_rule("orders", "debt" if float(row["tot"]["unpaid"]) > 0.005 else "clear", rules)
+            ]
+            if not bits:
+                continue
             order = order_of[oid]
             after = sum(float(row["tot"]["after"]) for row in bits)
             paid = sum(float(row["tot"]["paid"]) for row in bits)
@@ -2705,7 +2990,74 @@ def _orders(rows: list[dict[str, Any]], cash, picks: set[str] | None = None) -> 
     return "\n".join(lines)
 
 
-def _work(rows: list[dict[str, Any]], today: date, only: str, picks: set[str] | None = None) -> str:
+def _positions(rows: list[dict[str, Any]], cash, picks: set[str] | None = None, rules: set[str] | None = None) -> str:
+    """Позиции списком: у строки свой заказ, без шапки и итогов заказа."""
+    income = [
+        row
+        for row in rows
+        if not row["tot"].get("kind")
+        and not row.get("frozen")
+        and _keep_rule("lines", "debt" if float(row["tot"]["unpaid"]) > 0.005 else "clear", rules)
+    ]
+    costs = [row for row in rows if row["tot"].get("kind") and not row.get("frozen")]
+    lines = [f"<b>Позиции</b> · {len(income)}"]
+
+    def write_row(target: list[str], row: dict[str, Any], expense: bool = False) -> None:
+        cells: list[str] = []
+        if _on(picks, "order"):
+            cells.append(_order_ref(row["order"]))
+        if expense:
+            kind = "налог" if row["tot"].get("kind") == "tax" else "затрата"
+            if _on(picks, "product"):
+                cells.append(html_esc(str(row["line"].get("product") or kind)))
+                cells.append(kind)
+            if _on(picks, "amount"):
+                cells.append(cash(float(row["tot"]["cost"])))
+        else:
+            if _on(picks, "product"):
+                cells.append(html_esc(str(row["line"].get("product") or "позиция")))
+            if _on(picks, "qty"):
+                cells.append(html_esc(qty_text(row["line"])))
+            if _on(picks, "amount"):
+                cells.append(cash(float(row["tot"]["after"])))
+            if _on(picks, "debt"):
+                cells.append(f"долг {cash(float(row['tot']['unpaid']))}")
+            if _on(picks, "date"):
+                cells.append(_fmt(row["order_day"]))
+            status = str(row["line"].get("status") or "").strip()
+            if status and _on(picks, "status"):
+                cells.append(html_esc(status))
+        if cells:
+            target.append("• " + " · ".join(cells))
+        if expense:
+            return
+        comment = str(row["line"].get("notes") or "").strip()
+        if comment and _on(picks, "comment"):
+            target.append("  " + html_esc(comment))
+
+    if not income and not (_on(picks, "expense") and costs):
+        lines.append("Подходящих позиций нет.")
+        return "\n".join(lines)
+    for row in income[:40]:
+        write_row(lines, row)
+    hidden: list[str] = []
+    for row in income[40:]:
+        write_row(hidden, row)
+    if _on(picks, "expense"):
+        for row in costs:
+            write_row(lines, row, expense=True)
+    _fold(lines, hidden, max(0, len(income) - 40), "позиция", "позиции", "позиций")
+    return "\n".join(lines)
+
+
+def _work(
+    rows: list[dict[str, Any]],
+    today: date,
+    only: str,
+    picks: set[str] | None = None,
+    rules: set[str] | None = None,
+    columns: list[str] | None = None,
+) -> str:
     orders: dict[str, dict[str, Any]] = {}
     for row in rows:
         if row["frozen"] or row["tot"].get("kind"):
@@ -2721,11 +3073,26 @@ def _work(rows: list[dict[str, Any]], today: date, only: str, picks: set[str] | 
     for item in orders.values():
         counts[item["state"]] += 1
     lines = ["<b>Календарь</b>"]
-    if _on(picks, "counts"):
-        lines.append(f"В работе {counts['now']} · план {counts['planned']} · закрыто {counts['done']} · без дат {counts['nodate']}")
-    labels = (("now", "В работе"), ("planned", "Запланировано"), ("done", "Закрыто"), ("nodate", "Без дат"))
-    for key, label in labels:
-        if not _on(picks, key):
+    # Старый тумблер «Счётчики» включал всю строку, пока отдельных чисел в наборе не было.
+    legacy = bool(picks is not None and "counts" in picks and not ({"now", "planned", "done", "nodate"} & picks))
+
+    def head(fid: str) -> bool:
+        return picks is None or fid in picks or legacy
+
+    head_bits = []
+    if head("now"):
+        head_bits.append(f"В работе {counts['now']}")
+    if head("planned"):
+        head_bits.append(f"план {counts['planned']}")
+    if head("done"):
+        head_bits.append(f"закрыто {counts['done']}")
+    if head("nodate"):
+        head_bits.append(f"без дат {counts['nodate']}")
+    if head_bits:
+        lines.append(" · ".join(head_bits))
+    labels = (("now", "В работе", "в работе"), ("planned", "Запланировано", "запланирован"), ("done", "Закрыто", "закрыт"), ("nodate", "Без дат", "без дат"))
+    for key, label, state_name in labels:
+        if not _keep_rule("work", key, rules):
             continue
         if only and key != only:
             continue
@@ -2734,18 +3101,24 @@ def _work(rows: list[dict[str, Any]], today: date, only: str, picks: set[str] | 
             continue
         lines.append(f"\n<b>{label}</b>")
         for item in chunk:
-            cells = [_order_ref(item["order"])]
-            if _on(picks, "customer"):
+            cells = []
+            ref = _order_bits(item["order"], columns)
+            if ref:
+                cells.append(ref)
+            if _col(columns, "customer") and _on(picks, "customer"):
                 cells.append(html_esc(item["customer"]))
-            if _on(picks, "start"):
+            if _col(columns, "start") and _on(picks, "start"):
                 cells.append("без старта" if not item["start"] else f"с {_fmt(item['start'])}")
-            if _on(picks, "end"):
+            if _col(columns, "end") and _on(picks, "end"):
                 cells.append("без конца" if not item["end"] else f"до {_fmt(item['end'])}")
-            lines.append("• " + " · ".join(cells))
+            if _col(columns, "state"):
+                cells.append(state_name)
+            if cells:
+                lines.append("• " + " · ".join(cells))
     return "\n".join(lines)
 
 
-def _customers(doc: dict[str, Any], rows: list[dict[str, Any]], cash, picks: set[str] | None = None) -> str:
+def _customers(doc: dict[str, Any], rows: list[dict[str, Any]], cash, picks: set[str] | None = None, rules: set[str] | None = None) -> str:
     book: dict[str, dict[str, Any]] = {}
     for item in doc.get("customers") or []:
         if isinstance(item, dict) and str(item.get("name") or "").strip():
@@ -2760,6 +3133,15 @@ def _customers(doc: dict[str, Any], rows: list[dict[str, Any]], cash, picks: set
         grouped.items(),
         key=lambda pair: -sum(float(row["tot"]["unpaid"]) for row in pair[1] if not row["tot"].get("kind")),
     )
+    ranked = [
+        pair
+        for pair in ranked
+        if _keep_rule(
+            "customers",
+            "debt" if sum(float(row["tot"]["unpaid"]) for row in pair[1] if not row["tot"].get("kind") and not row["cancelled"]) > 0.005 else "clear",
+            rules,
+        )
+    ]
     def write_customers(target: list[str], people: list) -> None:
         for customer, bits in people:
             card = book.get(_norm(customer), {})
@@ -2788,28 +3170,44 @@ def _customers(doc: dict[str, Any], rows: list[dict[str, Any]], cash, picks: set
     return "\n".join(lines)
 
 
-def _products(rows: list[dict[str, Any]], cash, picks: set[str] | None = None) -> str:
-    acc: dict[str, list[float]] = {}
+def _products(rows: list[dict[str, Any]], cash, picks: set[str] | None = None, rules: set[str] | None = None, columns: list[str] | None = None) -> str:
+    acc: dict[str, list[Any]] = {}
     for row in rows:
         if row["frozen"] or row["tot"].get("kind"):
             continue
         name = str(row["line"].get("product") or "").strip() or "Без продукта"
-        cur = acc.setdefault(name, [0.0, 0.0, 0.0])
+        cur = acc.setdefault(name, [0.0, 0.0, 0.0, 0.0, ""])
         cur[0] += float(row["tot"]["after"])
         cur[1] += float(row["tot"]["paid"])
         cur[2] += float(row["tot"]["unpaid"])
+        try:
+            cur[3] += float(num_expr(row["line"], "qty_expr", "quantity") or 0)
+        except (TypeError, ValueError):
+            pass
+        unit = str(row["line"].get("unit") or "").strip()
+        if cur[4] == "" and unit:
+            cur[4] = unit
+        elif unit and cur[4] not in {"", unit}:
+            cur[4] = "*"
     ranked = sorted(acc.items(), key=lambda pair: -pair[1][0])
+    ranked = [pair for pair in ranked if _keep_rule("products", "debt" if pair[1][2] > 0.005 else "clear", rules)]
     lines = [f"<b>Продукты</b> · {len(ranked)}"]
     product_lines = []
-    for name, (after, paid, unpaid) in ranked:
-        parts = [html_esc(name)]
-        if _on(picks, "amount"):
+    for name, (after, paid, unpaid, qty, unit) in ranked:
+        parts = []
+        if _col(columns, "product"):
+            parts.append(html_esc(name))
+        if _col(columns, "quantity"):
+            shown = num_text(qty)
+            parts.append(html_esc(f"{shown} {unit}".strip() if unit and unit != "*" else shown))
+        if _col(columns, "amount") and _on(picks, "amount"):
             parts.append(cash(after))
         if _on(picks, "paid"):
             parts.append(f"оплачено {cash(paid)}")
         if _on(picks, "debt"):
             parts.append(f"долг {cash(unpaid)}")
-        product_lines.append("• " + " · ".join(parts))
+        if parts:
+            product_lines.append("• " + " · ".join(parts))
     lines.extend(product_lines[:20])
     _fold(lines, product_lines[20:], len(product_lines) - 20, "продукт", "продукта", "продуктов")
     if not ranked:
@@ -2817,7 +3215,7 @@ def _products(rows: list[dict[str, Any]], cash, picks: set[str] | None = None) -
     return "\n".join(lines)
 
 
-def _expenses(rows: list[dict[str, Any]], matched: list[dict[str, Any]], customers: list[str], order_ids: set[str], cash, picks: set[str] | None = None) -> str:
+def _expenses(rows: list[dict[str, Any]], matched: list[dict[str, Any]], customers: list[str], order_ids: set[str], cash, picks: set[str] | None = None, rules: set[str] | None = None) -> str:
     order_filter = {str(row["order"].get("id") or "") for row in matched}
     lines_out = ["<b>Расходы</b>"]
     total = 0.0
@@ -2832,10 +3230,13 @@ def _expenses(rows: list[dict[str, Any]], matched: list[dict[str, Any]], custome
             continue
         if order_filter and str(row["order"].get("id") or "") not in order_filter and (customers or order_ids):
             continue
+        kind_name = "налог" if row["tot"].get("kind") == "tax" else "затрата"
+        if not _keep_rule("expense", "tax" if kind_name == "налог" else "cost", rules):
+            continue
         amount = float(row["tot"]["cost"])
         total += amount
         seen += 1
-        kind = "налог" if row["tot"].get("kind") == "tax" else "затрата"
+        kind = kind_name
         parts = []
         if _on(picks, "order"):
             parts.append(_order_ref(row["order"]))
@@ -2856,24 +3257,29 @@ def _expenses(rows: list[dict[str, Any]], matched: list[dict[str, Any]], custome
     return "\n".join(lines_out)
 
 
-def _notes(rows: list[dict[str, Any]], picks: set[str] | None = None) -> str:
+def _notes(rows: list[dict[str, Any]], picks: set[str] | None = None, columns: list[str] | None = None) -> str:
     lines = ["<b>Заметки</b>"]
     seen: set[str] = set()
     for row in rows:
         oid = str(row["order"].get("id") or id(row["order"]))
         note = str(row["order"].get("notes") or "").strip()
-        if note and oid not in seen and _on(picks, "order"):
+        ref = _order_bits(row["order"], columns)
+        if note and oid not in seen and _on(picks, "order") and _col(columns, "note"):
             seen.add(oid)
-            lines.append(f"• {_order_ref(row['order'])}: {html_esc(note)}")
+            lines.append(f"• {ref}: {html_esc(note)}" if ref else f"• {html_esc(note)}")
         comment = str(row["line"].get("notes") or "").strip()
-        if comment and _on(picks, "comment"):
-            lines.append(f"• {_order_ref(row['order'])} · {html_esc(str(row['line'].get('product') or 'позиция'))}: {html_esc(comment)}")
+        if comment and _on(picks, "comment") and _col(columns, "comment"):
+            bits = [ref] if ref else []
+            if _col(columns, "product"):
+                bits.append(html_esc(str(row["line"].get("product") or "позиция")))
+            head = " · ".join(bits)
+            lines.append(f"• {head}: {html_esc(comment)}" if head else f"• {html_esc(comment)}")
     if len(lines) == 1:
         lines.append("Заметок нет.")
     return "\n".join(lines)
 
 
-def _frozen(rows: list[dict[str, Any]], customers: list[str], products: list[str], order_ids: set[str], picks: set[str] | None = None) -> str:
+def _frozen(rows: list[dict[str, Any]], customers: list[str], products: list[str], order_ids: set[str], picks: set[str] | None = None, columns: list[str] | None = None) -> str:
     lines = ["<b>Замороженные</b>"]
     count = 0
     for row in rows:
@@ -2888,10 +3294,12 @@ def _frozen(rows: list[dict[str, Any]], customers: list[str], products: list[str
         count += 1
         parts = []
         if _on(picks, "order"):
-            parts.append(_order_ref(row["order"]))
-        if _on(picks, "product"):
+            ref = _order_bits(row["order"], columns)
+            if ref:
+                parts.append(ref)
+        if _on(picks, "product") and _col(columns, "product"):
             parts.append(html_esc(str(row["line"].get("product") or "позиция")))
-        if _on(picks, "customer"):
+        if _on(picks, "customer") and _col(columns, "customer"):
             parts.append(html_esc(row["customer"]))
         if parts:
             lines.append("• " + " · ".join(parts))
@@ -2902,7 +3310,7 @@ def _frozen(rows: list[dict[str, Any]], customers: list[str], products: list[str
     return "\n".join(lines)
 
 
-def _reminder(rows: list[dict[str, Any]], doc: dict[str, Any], terms: int, cash, picks: set[str] | None = None) -> str:
+def _reminder(rows: list[dict[str, Any]], doc: dict[str, Any], terms: int, cash, picks: set[str] | None = None, columns: list[str] | None = None) -> str:
     items = [
         row
         for row in rows
@@ -2917,7 +3325,8 @@ def _reminder(rows: list[dict[str, Any]], doc: dict[str, Any], terms: int, cash,
     for customer, bits in by_customer.items():
         total = sum(float(row["tot"]["unpaid"]) for row in bits)
         if _on(picks, "hello"):
-            blocks.append(f"\nЗдравствуйте, {html_esc(customer)}!")
+            who = html_esc(customer) if _col(columns, "customer") else ""
+            blocks.append(f"\nЗдравствуйте, {who}!" if who else "\nЗдравствуйте!")
             blocks.append("Напоминаем об оплате:")
         by_order: dict[str, list[dict[str, Any]]] = {}
         for row in bits:
@@ -2928,11 +3337,17 @@ def _reminder(rows: list[dict[str, Any]], doc: dict[str, Any], terms: int, cash,
             due = min((row["due"] for row in chunk if row["due"]), default=None)
             worst = max((row["overdue"] or 0) for row in chunk)
             due_text = ""
-            if due and _on(picks, "due"):
+            if due and _on(picks, "due") and _col(columns, "due"):
                 due_text = f", срок {_fmt(due)}"
                 if worst > 0:
                     due_text += f", просрочка {worst} {_days(worst)}"
-            blocks.append(f"{_order_ref(order)} — остаток {cash(amount)}{due_text}")
+            ref = _order_bits(order, columns)
+            money_bit = f"остаток {cash(amount)}" if _col(columns, "amount") else ""
+            head = " — ".join(bit for bit in (ref, money_bit) if bit)
+            if due_text:
+                head = f"{head}{due_text}" if head else due_text.lstrip(", ")
+            if head:
+                blocks.append(head)
             if _on(picks, "product"):
                 for row in chunk:
                     blocks.append(f"  • {html_esc(str(row['line'].get('product') or 'позиция'))} — {cash(float(row['tot']['unpaid']))}")

@@ -463,7 +463,10 @@ def _position_cells(plain: str) -> list[str] | None:
     total = parts[debt_i - 1]
     debt = parts[debt_i][5:].strip()
     rest = parts[debt_i + 1 :]
-    date = rest[0] if rest else ""
+    # Сводки продуктов и статусов кончаются на долге. Дата и статус — только у строки позиции.
+    if not rest:
+        return None
+    date = rest[0]
     status = " · ".join(rest[1:]) if len(rest) > 1 else ""
     return [product, qty, total, debt, date, status]
 

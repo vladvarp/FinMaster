@@ -83,7 +83,6 @@ SLICE_PICKS = {
         ("number", "Номер заказа"),
         ("name", "Название заказа"),
         ("product", "Продукт"),
-        ("status", "Статус"),
         ("amount", "Сумма"),
     ),
     "remind": (
@@ -147,7 +146,6 @@ SLICE_TOGGLES = {
         ("amount", "Сумма"),
     ),
     "overdue": (
-        ("total", "Дебиторка"),
         ("late", "Просрочено"),
         ("term", "Срок"),
         ("buckets", "Корзины просрочки"),
@@ -160,10 +158,8 @@ SLICE_TOGGLES = {
         ("amount", "Сумма"),
     ),
     "incoming": (
-        ("total", "Дебиторка"),
-        ("late", "Просрочено"),
+        ("total", "Сумма ожидаемых"),
         ("term", "Срок"),
-        ("buckets", "Корзины просрочки"),
         ("customer", "Заказчик"),
         ("order", "Заказ"),
         ("product", "Продукт"),
@@ -186,9 +182,7 @@ SLICE_TOGGLES = {
         ("expense", "Налоги и затраты"),
     ),
     "lines": (
-        ("head", "Шапка заказа"),
-        ("money", "Итоги заказа"),
-        ("note", "Заметка заказа"),
+        ("order", "Заказ"),
         ("product", "Продукт"),
         ("qty", "Количество"),
         ("amount", "Сумма"),
@@ -199,9 +193,8 @@ SLICE_TOGGLES = {
         ("expense", "Налоги и затраты"),
     ),
     "work": (
-        ("counts", "Счётчики"),
         ("now", "В работе"),
-        ("planned", "Запланировано"),
+        ("planned", "План"),
         ("done", "Закрыто"),
         ("nodate", "Без дат"),
         ("customer", "Заказчик"),
@@ -255,6 +248,115 @@ SLICE_TOGGLES = {
         ("total", "Итого"),
         ("term", "Срок оплаты"),
     ),
+}
+# Какие строки среза можно снять. Третье поле — включено, пока набор не сохранён.
+SLICE_RULES = {
+    "debt": (
+        ("open", "Срок ещё не вышел", True),
+        ("late", "Просроченные", True),
+        ("nodue", "Без срока", True),
+        ("cancelled", "Отменённые", False),
+    ),
+    "overdue": (
+        ("d7", "1–7 дней", True),
+        ("d30", "8–30 дней", True),
+        ("d60", "31–60 дней", True),
+        ("d60p", "Дольше 60 дней", True),
+    ),
+    "incoming": (
+        ("ahead", "Срок впереди", True),
+        ("due", "Ожидается сегодня", True),
+    ),
+    "orders": (
+        ("debt", "С долгом", True),
+        ("clear", "Без долга", True),
+    ),
+    "lines": (
+        ("debt", "С долгом", True),
+        ("clear", "Без долга", True),
+    ),
+    "customers": (
+        ("debt", "С долгом", True),
+        ("clear", "Без долга", True),
+    ),
+    "products": (
+        ("debt", "С долгом", True),
+        ("clear", "Без суммы", True),
+    ),
+    "expense": (
+        ("tax", "Налоги", True),
+        ("cost", "Затраты", True),
+    ),
+    "status": (
+        ("named", "Со статусом", True),
+        ("empty", "Без статуса", True),
+    ),
+    "vault": (
+        ("in", "Пополнения", True),
+        ("out", "Снятия", True),
+        ("save", "Копилка", True),
+    ),
+    "work": (
+        ("now", "В работе", True),
+        ("planned", "Запланировано", True),
+        ("done", "Закрыто", True),
+        ("nodate", "Без дат", True),
+    ),
+}
+# Тумблеры шапки. Колонки строки их не снимают.
+HEADER_TOGGLES = {
+    "debt": ("total", "late", "term", "buckets"),
+    "overdue": ("late", "term", "buckets"),
+    "incoming": ("total", "term"),
+    "orders": ("head", "money", "note"),
+    "summary": ("count", "money", "cost", "avg", "month", "forecast", "term"),
+    "count": ("orders", "lines", "due", "paid", "debt", "cost", "net"),
+    "rank": ("customers", "orders"),
+    "work": ("now", "planned", "done", "nodate"),
+    "expense": ("total",),
+    "remind": ("hello", "due", "total", "term"),
+}
+# Колонка шаблона → тумблеры строки. Нет в карте — колонка шапку не трогает.
+_DEBT_COLUMNS = {
+    "customer": ("customer",),
+    "number": ("order",),
+    "name": ("order",),
+    "product": ("product",),
+    "quantity": ("qty",),
+    "due": ("due",),
+    "mark": ("mark",),
+    "amount": ("amount",),
+}
+COLUMN_TO_TOGGLES = {
+    "debt": _DEBT_COLUMNS,
+    "overdue": _DEBT_COLUMNS,
+    "incoming": _DEBT_COLUMNS,
+    "orders": {
+        "number": ("head",),
+        "name": ("head",),
+        "order_type": ("head",),
+        "product": ("product",),
+        "quantity": ("qty",),
+        "status": ("status",),
+        "total": ("amount",),
+        "paid": ("money",),
+        "totals": ("money",),
+        "unpaid": ("debt",),
+        "order_date": ("date",),
+        "expenses": ("expense",),
+    },
+    "lines": {
+        "number": ("order",),
+        "name": ("order",),
+        "order_type": ("order",),
+        "product": ("product",),
+        "quantity": ("qty",),
+        "status": ("status",),
+        "total": ("amount",),
+        "unpaid": ("debt",),
+        "order_date": ("date",),
+        "expenses": ("expense",),
+    },
 }
 COLUMN_SLICES = ("orders", "lines")
 ORDER_SLICE_COLUMNS = (
@@ -427,10 +529,13 @@ def _cmd(
         "snapKind": snap_kind,
         "snapHide": snap_hide,
         "delivery": delivery,
+        "deliveryBot": delivery,
+        "deliveryDesk": delivery,
         "vaultPage": "",
         "vaultStats": [],
         "vaultTotalsOnly": False,
         "sliceOpts": {},
+        "sliceRules": {},
     }
 
 
@@ -577,15 +682,24 @@ def _clean_command(raw: Any) -> dict[str, Any] | None:
     snap_kind = str(raw.get("snapKind") or "png")
     if snap_kind not in {"png", "pdf", "text"}:
         snap_kind = "png"
-    delivery = str(raw.get("delivery") or "")
-    if delivery not in {key for key, _title in DELIVERIES}:
-        delivery = ""
+    known_delivery = {key for key, _title in DELIVERIES}
+
+    def one_delivery(value: Any) -> str:
+        text = str(value or "")
+        return text if text in known_delivery else ""
+
+    delivery = one_delivery(raw.get("delivery"))
+    delivery_bot = one_delivery(raw.get("deliveryBot")) if "deliveryBot" in raw else delivery
+    delivery_desk = one_delivery(raw.get("deliveryDesk")) if "deliveryDesk" in raw else delivery
+    if delivery_desk not in {"", "md"}:
+        delivery_desk = ""
     vault_page = " ".join(str(raw.get("vaultPage") or "").split())[:80]
     raw_stats = raw.get("vaultStats") if isinstance(raw.get("vaultStats"), list) else []
     picked_stats = {str(item or "") for item in raw_stats}
     vault_stats = [key for key, _title in VAULT_STATS if key in picked_stats]
     vault_totals_only = bool(raw.get("vaultTotalsOnly"))
     slice_opts = _clean_slice_opts(raw.get("sliceOpts"))
+    slice_rules = _clean_slice_rules(raw.get("sliceRules"))
     bot = bool(raw.get("bot", True))
     desk = bool(raw.get("desk", True))
     enabled = bool(raw.get("enabled", bot or desk))
@@ -606,11 +720,30 @@ def _clean_command(raw: Any) -> dict[str, Any] | None:
         "snapKind": snap_kind,
         "snapHide": bool(raw.get("snapHide")),
         "delivery": delivery,
+        "deliveryBot": delivery_bot,
+        "deliveryDesk": delivery_desk,
         "vaultPage": vault_page,
         "vaultStats": vault_stats,
         "vaultTotalsOnly": vault_totals_only,
         "sliceOpts": slice_opts,
+        "sliceRules": slice_rules,
     }
+
+
+def _clean_named(raw: Any, spec: dict[str, tuple]) -> dict[str, list[str]]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, list[str]] = {}
+    for key, fields in spec.items():
+        if key not in raw or not isinstance(raw.get(key), list):
+            continue
+        picked = {str(item or "") for item in raw.get(key) or []}
+        out[key] = [fid for fid, *_rest in fields if fid in picked]
+    return out
+
+
+def _clean_slice_rules(raw: Any) -> dict[str, list[str]]:
+    return _clean_named(raw, SLICE_RULES)
 
 
 def _clean_slice_opts(raw: Any) -> dict[str, list[str]]:
@@ -1017,6 +1150,10 @@ def catalog() -> dict[str, Any]:
         "sliceToggles": {
             key: [{"id": fid, "title": title} for fid, title in fields]
             for key, fields in SLICE_TOGGLES.items()
+        },
+        "sliceRules": {
+            key: [{"id": fid, "title": title, "on": flag} for fid, title, flag in fields]
+            for key, fields in SLICE_RULES.items()
         },
         "metrics": [{"id": key, "title": title, "format": fmt} for key, title, fmt in METRICS],
         "actions": [{"id": key, "title": title} for key, title in ACTIONS],

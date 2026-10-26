@@ -8,6 +8,7 @@
   let dictionaryBroken = false;
   let dictionaryPick = { kind: "commands", id: "" };
   let dictionaryProbeSurface = "desk";
+  const dictionarySeenSide = new Map();
   let dictionaryProbeTimer = 0;
   let askHintItems = [];
   let askHintIndex = 0;
@@ -315,7 +316,7 @@
     if (!sample) return false;
     const keys = kind === "keywords"
       ? ["words", "action", "enabled", "bot", "desk"]
-      : ["phrases", "answer", "slices", "metrics", "template", "action", "snapKind", "snapHide", "delivery", "vaultPage", "vaultStats", "vaultTotalsOnly", "sliceOpts", "enabled", "bot", "desk"];
+      : ["phrases", "answer", "slices", "metrics", "template", "action", "snapKind", "snapHide", "delivery", "deliveryBot", "deliveryDesk", "vaultPage", "vaultStats", "vaultTotalsOnly", "sliceOpts", "sliceRules", "enabled", "bot", "desk"];
     return keys.every((key) => JSON.stringify(item[key] ?? "") === JSON.stringify(sample[key] ?? ""));
   }
 
@@ -692,8 +693,66 @@
     return box;
   }
 
+  function sliceRuleChecks(item, sliceId, rows, rerender) {
+    const box = document.createElement("div");
+    box.className = "dictionary-checks";
+    const order = rows.map((row) => row.id);
+    const saved = item.sliceRules && Object.prototype.hasOwnProperty.call(item.sliceRules, sliceId)
+      ? item.sliceRules[sliceId]
+      : null;
+    const on = new Set(saved || rows.filter((row) => row.on).map((row) => row.id));
+    for (const row of rows) {
+      const mark = document.createElement("label");
+      mark.className = "dictionary-check";
+      mark.title = "Показать такие строки в ответе среза";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.title = mark.title;
+      input.checked = on.has(row.id);
+      input.addEventListener("change", () => {
+        const picked = new Set();
+        box.querySelectorAll("input").forEach((boxInput, index) => {
+          if (boxInput.checked) picked.add(rows[index].id);
+        });
+        item.sliceRules = item.sliceRules || {};
+        item.sliceRules[sliceId] = order.filter((id) => picked.has(id));
+        noteDictionaryEdit();
+        if (typeof rerender === "function") rerender();
+      });
+      mark.append(input, toggleTrack(), document.createTextNode(row.title));
+      box.append(mark);
+    }
+    return box;
+  }
+
   function answerEditor(item) {
     const box = document.createElement("div");
+    const answerSides = commandSides(item);
+    let answerSide = seenSide(item, answerSides);
+    const answerOut = document.createElement("div");
+    answerOut.className = "dictionary-probe-out";
+    let answerTimer = 0;
+    function runAnswerPreview() {
+      clearTimeout(answerTimer);
+      answerTimer = setTimeout(async () => {
+        const phrase = (item.phrases || []).find((value) => String(value).trim());
+        if (!phrase) {
+          answerOut.textContent = "Добавьте фразу команды — здесь появится ответ по открытому отчёту.";
+          return;
+        }
+        try {
+          const data = await apiPost("/api/dictionary/probe", {
+            query: phrase,
+            surface: answerSide,
+            doc: state.doc || null,
+            book: dictionaryBook,
+          });
+          paintProbeResult(answerOut, data, answerSide);
+        } catch (err) {
+          answerOut.textContent = err.message || "Просмотр не вышел";
+        }
+      }, 280);
+    }
     if (item.answer === "slices") {
       const list = document.createElement("div");
       list.className = "dictionary-checks";
@@ -719,16 +778,23 @@
       box.append(list);
       for (const slice of dictionaryCatalog?.slices || []) {
         if (!(item.slices || []).includes(slice.id)) continue;
-        if (slice.id === "vault") {
-          box.append(vaultPageMenu(item, true), vaultTotalsOnly(item, true), vaultStatChecks(item, true));
-          continue;
-        }
-        const rows = dictionaryCatalog?.sliceToggles?.[slice.id] || [];
-        if (!rows.length) continue;
         const caption = document.createElement("p");
         caption.className = "dictionary-note";
         caption.textContent = slice.title;
-        box.append(caption, sliceToggleChecks(item, slice.id, rows));
+        box.append(caption);
+        if (slice.id === "vault") {
+          box.append(vaultPageMenu(item, true), vaultTotalsOnly(item, true), vaultStatChecks(item, true));
+        } else {
+          const rows = dictionaryCatalog?.sliceToggles?.[slice.id] || [];
+          if (rows.length) box.append(sliceToggleChecks(item, slice.id, rows, runAnswerPreview));
+        }
+        const ruleRows = dictionaryCatalog?.sliceRules?.[slice.id] || [];
+        if (ruleRows.length) {
+          const ruleNote = document.createElement("p");
+          ruleNote.className = "dictionary-note";
+          ruleNote.textContent = "Строки. Снятая галочка прячет такие строки.";
+          box.append(ruleNote, sliceRuleChecks(item, slice.id, ruleRows, runAnswerPreview));
+        }
       }
     } else if (item.answer === "metrics") {
       box.append(metricEditor(item));
@@ -775,17 +841,40 @@
       if (!row.id) continue;
       deliveryRows.push({ id: row.id, title: row.title });
     }
-    const delivery = pickMenu(
-      item.delivery || "",
-      deliveryRows,
-      (id) => {
-        item.delivery = id;
-        noteDictionaryEdit();
-        renderDictionaryEditor();
-      },
-      "Как отдавать ответ, если в самой фразе нет слова pdf, текст, фото или md",
+    const deskRows = deliveryRows.filter((row) => row.id === "" || row.id === "md");
+    const deliveryMenu = (key, label, tip, rows) => field(
+      label,
+      pickMenu(
+        rows.some((row) => row.id === (item[key] || "")) ? (item[key] || "") : "",
+        rows,
+        (id) => {
+          item[key] = id;
+          noteDictionaryEdit();
+          renderDictionaryEditor();
+        },
+        tip,
+      ),
     );
-    if (item.answer !== "help") box.append(field("Отдача по умолчанию", delivery));
+    if (item.answer !== "help") {
+      if (item.bot !== false) {
+        box.append(deliveryMenu("deliveryBot", "Отдача в боте", "Как отдать ответ в боте, если во фразе нет своего слова", deliveryRows));
+      }
+      if (item.desk !== false) {
+        box.append(deliveryMenu("deliveryDesk", "Отдача в поиске", "В поиске только текст: как в фразе или Markdown. Файл туда не уходит.", deskRows));
+      }
+    }
+    if (item.answer === "template") {
+      const seen = box.querySelector(".dictionary-seen");
+      if (seen) box.append(seen);
+    } else if (item.answer !== "help") {
+      const sideSwitch = replySideSwitch(answerSides, () => answerSide, (next) => {
+        answerSide = next;
+        dictionarySeenSide.set(item.id, next);
+        runAnswerPreview();
+      });
+      box.append(seenFold(answerOut, sideSwitch));
+      runAnswerPreview();
+    }
     return box;
   }
 
@@ -1150,9 +1239,13 @@
     };
     const preview = document.createElement("div");
     preview.className = "dictionary-probe-out";
-    const previewTitle = document.createElement("span");
-    previewTitle.className = "dictionary-note";
-    previewTitle.textContent = "Как увидит пользователь";
+    const previewSides = commandSides(item);
+    let previewSide = seenSide(item, previewSides);
+    const previewSwitch = replySideSwitch(previewSides, () => previewSide, (next) => {
+      previewSide = next;
+      dictionarySeenSide.set(item.id, next);
+      runPreview();
+    });
     let previewTimer = 0;
     const runPreview = () => {
       clearTimeout(previewTimer);
@@ -1165,11 +1258,11 @@
         try {
           const data = await apiPost("/api/dictionary/probe", {
             query: phrase,
-            surface: item.desk === false && item.bot ? "bot" : "desk",
+            surface: previewSide,
             doc: state.doc || null,
             book: dictionaryBook,
           });
-          paintAnswer(preview, data);
+          paintProbeResult(preview, data, previewSide);
         } catch (err) {
           preview.textContent = err.message || "Просмотр не вышел";
         }
@@ -1320,69 +1413,150 @@
       if ((dictionaryCatalog?.columnSlices || ["orders", "lines"]).includes(key)) return dictionaryCatalog?.columns || [];
       return dictionaryCatalog?.slicePicks?.[key] || [];
     };
-    const sliceToken = (key, ids, fields) => {
-      if (key === "vault" && !ids.length) return "{{slice:vault:}}";
-      const defaults = (dictionaryCatalog?.columnSlices || []).includes(key)
-        ? (dictionaryCatalog?.sliceColumns || [])
-        : fields.map((field) => field.id);
-      const same = ids.length === defaults.length && defaults.every((id) => ids.includes(id));
-      return same || !ids.length ? `{{slice:${key}}}` : `{{slice:${key}:${ids.join(",")}}}`;
+    const defaultCols = (key, fields) => (
+      (dictionaryCatalog?.columnSlices || []).includes(key)
+        ? (dictionaryCatalog?.sliceColumns || []).slice()
+        : fields.map((field) => field.id)
+    );
+    const readChip = (chip) => {
+      const body = String(chip.dataset.token || "").slice(2, -2).replace(/^slice:/, "");
+      const own = body.includes(";");
+      const segs = own ? body.split(";") : [body];
+      const head = segs[0] || "";
+      const sep = head.indexOf(":");
+      const key = (sep < 0 ? head : head.slice(0, sep)).split(";")[0];
+      const fields = sliceFields(key);
+      const defaults = defaultCols(key, fields);
+      const colsRaw = sep < 0 ? "*" : head.slice(sep + 1);
+      let cols;
+      if (colsRaw === "*" || (sep < 0 && !own)) cols = defaults.slice();
+      else if (colsRaw === "-" || colsRaw === "") cols = [];
+      else cols = colsRaw.split(",").filter(Boolean);
+      const toggles = dictionaryCatalog?.sliceToggles?.[key] || [];
+      const ruleRows = dictionaryCatalog?.sliceRules?.[key] || [];
+      const listed = (raw, fallback) => {
+        if (raw == null || raw === "*") return fallback.slice();
+        if (raw === "-" || raw === "") return [];
+        return raw.split(",").filter(Boolean);
+      };
+      const parts = own
+        ? listed(segs[1], toggles.map((row) => row.id))
+        : (item.sliceOpts && Object.prototype.hasOwnProperty.call(item.sliceOpts, key) ? item.sliceOpts[key].slice() : toggles.map((row) => row.id));
+      let rulesRaw = segs[2];
+      if (key === "work" && rulesRaw === "-") rulesRaw = "*";
+      if (rulesRaw === "off") rulesRaw = "-";
+      const rules = own
+        ? listed(rulesRaw, ruleRows.filter((row) => row.on).map((row) => row.id))
+        : (item.sliceRules && Object.prototype.hasOwnProperty.call(item.sliceRules, key) ? item.sliceRules[key].slice() : ruleRows.filter((row) => row.on).map((row) => row.id));
+      const vault = { page: item.vaultPage || "", stats: (item.vaultStats || []).slice(), totals: Boolean(item.vaultTotalsOnly) };
+      if (own && segs.length > 3 && segs[3] !== "") {
+        const [page, statsRaw, flag] = segs[3].split("|");
+        vault.page = page || "";
+        vault.stats = listed(statsRaw, vault.stats);
+        if (flag === "0" || flag === "1") vault.totals = flag === "1";
+      }
+      return { key, cols, parts, rules, vault, fields, toggles, ruleRows, defaults };
+    };
+    const writeChip = (chip, spec) => {
+      const sameCols = spec.cols.length === spec.defaults.length && spec.defaults.every((id) => spec.cols.includes(id));
+      const colPart = sameCols ? "*" : (spec.cols.length ? spec.cols.join(",") : "-");
+      const parts = spec.parts.length ? spec.parts.join(",") : "-";
+      const rules = spec.rules.length ? spec.rules.join(",") : (spec.key === "work" && spec.ruleRows.length ? "off" : "-");
+      const vault = spec.key === "vault"
+        ? `${spec.vault.page}|${(spec.vault.stats || []).join(",")}|${spec.vault.totals ? "1" : "0"}`
+        : "";
+      chip.dataset.token = `{{slice:${spec.key}:${colPart};${parts};${rules};${vault}}}`;
+      remember();
+      serialize();
+    };
+    const checkList = (rows, selected, onChange) => {
+      const list = document.createElement("div");
+      list.className = "dictionary-checks";
+      const on = new Set(selected);
+      for (const row of rows) {
+        const label = document.createElement("label");
+        label.className = "dictionary-check";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = on.has(row.id);
+        input.addEventListener("change", () => {
+          const ids = [...list.querySelectorAll("input")].flatMap((boxInput, index) => (boxInput.checked ? [rows[index].id] : []));
+          onChange(ids, input);
+        });
+        const caption = document.createElement("span");
+        caption.textContent = row.title;
+        label.append(input, toggleTrack(), caption);
+        list.append(label);
+      }
+      return list;
     };
     const openSlicePanel = (chip) => {
       panelChip = chip;
       panel.replaceChildren();
-      const raw = String(chip.dataset.token || "");
-      const body = raw.slice(2, -2).replace(/^slice:/, "");
-      const sep = body.indexOf(":");
-      const key = sep < 0 ? body : body.slice(0, sep);
-      const cols = sep < 0 ? null : body.slice(sep + 1);
-      const fields = sliceFields(key);
-      const toggles = dictionaryCatalog?.sliceToggles?.[key] || [];
-      const note = document.createElement("p");
-      note.className = "dictionary-note";
-      if (toggles.length) {
+      const spec = readChip(chip);
+      const save = () => writeChip(chip, spec);
+      if (spec.key === "vault") {
+        const pages = vaultPageRows();
+        if (spec.vault.page && !pages.some((row) => row.id === spec.vault.page)) {
+          pages.push({ id: spec.vault.page, title: "Выбранная копилка" });
+        }
+        panel.append(field("Копилка", pickMenu(spec.vault.page, pages, (id) => {
+          spec.vault.page = id;
+          save();
+        }, "Какую копилку показать в этом срезе")));
+        const only = document.createElement("label");
+        only.className = "dictionary-check";
+        const onlyInput = document.createElement("input");
+        onlyInput.type = "checkbox";
+        onlyInput.checked = spec.vault.totals;
+        onlyInput.addEventListener("change", () => {
+          spec.vault.totals = onlyInput.checked;
+          save();
+        });
+        only.append(onlyInput, toggleTrack(), document.createTextNode("Только итоги"));
+        panel.append(only);
+        const statNote = document.createElement("p");
+        statNote.className = "dictionary-note";
+        statNote.textContent = "Итоги этой копии среза. Второй такой же срез их не меняет.";
+        panel.append(statNote, checkList(dictionaryCatalog?.vaultStats || [], spec.vault.stats, (ids) => {
+          spec.vault.stats = ids;
+          save();
+        }));
+      }
+      if (spec.toggles.length) {
         const caption = document.createElement("p");
         caption.className = "dictionary-note";
-        caption.textContent = "Части ответа. Выключенная в шаблон не попадает.";
-        panel.append(caption, sliceToggleChecks(item, key, toggles, runPreview));
+        caption.textContent = "Части ответа, только этого среза. Шапка остаётся, пока её тумблер включён.";
+        panel.append(caption, checkList(spec.toggles, spec.parts, (ids) => {
+          spec.parts = ids;
+          save();
+        }));
       }
-      if (!fields.length && !toggles.length) {
-        note.textContent = "Этот срез показывается целиком.";
-        panel.append(note);
-      } else if (fields.length) {
-        note.textContent = key === "vault"
-          ? "Отметьте поля строк. Итоги страницы включаются тумблерами выше: они считаются по всей копилке, как шапка на экране."
-          : "Отметьте, что показать. Номер и название — шапка, остальные поля — строки.";
-        const list = document.createElement("div");
-        list.className = "dictionary-checks";
-        const picked = new Set(cols != null ? cols.split(",").filter(Boolean) : (
-          (dictionaryCatalog?.columnSlices || []).includes(key) ? dictionaryCatalog?.sliceColumns || [] : fields.map((field) => field.id)
-        ));
-        for (const field of fields) {
-          const label = document.createElement("label");
-          label.className = "dictionary-check";
-          const input = document.createElement("input");
-          input.type = "checkbox";
-          input.checked = picked.has(field.id);
-          input.addEventListener("change", () => {
-            const ids = [...list.querySelectorAll("input")].flatMap((boxInput, index) => (boxInput.checked ? [fields[index].id] : []));
-            if (!ids.length && key !== "vault") {
-              input.checked = true;
-              toast("Оставьте хотя бы одно поле");
-              return;
-            }
-            chip.dataset.token = sliceToken(key, ids, fields);
-            remember();
-            serialize();
-          });
-          const caption = document.createElement("span");
-          caption.textContent = field.title;
-          label.append(input, toggleTrack(), caption);
-          list.append(label);
-        }
-        panel.append(note, list);
+      if (spec.ruleRows.length) {
+        const caption = document.createElement("p");
+        caption.className = "dictionary-note";
+        caption.textContent = "Строки. Снятая галочка прячет такие строки и не трогает шапку.";
+        panel.append(caption, checkList(spec.ruleRows, spec.rules, (ids) => {
+          spec.rules = ids;
+          save();
+        }));
       }
-      if (key === "vault") panel.prepend(vaultPageMenu(item, runPreview), vaultTotalsOnly(item, runPreview), vaultStatChecks(item, runPreview));
+      if (spec.fields.length) {
+        const note = document.createElement("p");
+        note.className = "dictionary-note";
+        note.textContent = spec.key === "vault"
+          ? "Поля строк этой копии. Итоги выше считаются по всей копилке."
+          : "Колонки прячут поля строки. Шапка с суммами от этих галочек не пропадает.";
+        panel.append(note, checkList(spec.fields, spec.cols, (ids, input) => {
+          if (!ids.length && spec.key !== "vault") {
+            input.checked = true;
+            toast("Оставьте хотя бы одно поле");
+            return;
+          }
+          spec.cols = ids;
+          save();
+        }));
+      }
       panel.hidden = false;
     };
     const slice = pickMenu(
@@ -1394,7 +1568,7 @@
       (id) => {
         if (!id) return;
         const row = (dictionaryCatalog?.slices || []).find((entry) => entry.id === id);
-        insertHtml(chipNode(`{{slice:${id}}}`, "slice", "", "", "▣", "", row?.title || id).outerHTML);
+        insertHtml(chipNode(`{{slice:${id}:*;*;*;}}`, "slice", "", "", "▣", "", row?.title || id).outerHTML);
       },
       "Вставить срез в шаблон",
     );
@@ -1470,7 +1644,7 @@
     paintTemplate(item.template || "");
     snapshot = editor.innerHTML;
     runPreview();
-    box.append(tools, metric, slice, editor, panel, previewTitle, preview);
+    box.append(tools, metric, slice, editor, panel, seenFold(preview, previewSwitch));
     return box;
   }
 
@@ -1557,6 +1731,10 @@
         snapKind: "png",
         snapHide: false,
         delivery: "",
+        deliveryBot: "",
+        deliveryDesk: "",
+        sliceOpts: {},
+        sliceRules: {},
       };
     }
     dictionaryBook[kind].unshift(item);
@@ -1693,19 +1871,314 @@
     return root;
   }
 
-  function paintAnswer(box, data) {
-    if (!box) return;
-    box.replaceChildren();
-    if (!data) return;
-    if (data.html) {
+  function commandSides(item) {
+    const bot = item?.bot !== false;
+    const desk = item?.desk !== false;
+    if (bot && !desk) return ["bot"];
+    if (desk && !bot) return ["desk"];
+    return ["desk", "bot"];
+  }
+
+  function seenSide(item, sides) {
+    const saved = dictionarySeenSide.get(item?.id);
+    if (saved && sides.includes(saved)) return saved;
+    return sides[0];
+  }
+
+  function replySideSwitch(sides, current, onPick) {
+    if (!sides || sides.length < 2) return null;
+    const bar = document.createElement("div");
+    bar.className = "dictionary-probe-switch";
+    for (const [id, title] of [["desk", "Как поиск"], ["bot", "Как бот"]]) {
+      if (!sides.includes(id)) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn small" + (current() === id ? " primary" : "");
+      button.textContent = title;
+      button.addEventListener("click", () => {
+        onPick(id);
+        bar.querySelectorAll("button").forEach((node) => node.classList.toggle("primary", node === button));
+      });
+      bar.append(button);
+    }
+    return bar;
+  }
+
+  function seenFold(body, sideSwitch) {
+    const fold = document.createElement("details");
+    fold.className = "dictionary-seen";
+    fold.open = true;
+    const summary = document.createElement("summary");
+    summary.textContent = "Как увидит пользователь";
+    fold.append(summary);
+    if (sideSwitch) fold.append(sideSwitch);
+    fold.append(body);
+    return fold;
+  }
+
+  function paintSnapFile(host, snap) {
+    if (!snap) return;
+    const box = document.createElement("div");
+    box.className = "dictionary-snap";
+    if (snap.error) {
+      const note = document.createElement("p");
+      note.className = "dictionary-note";
+      note.textContent = snap.error;
+      box.append(note);
+    }
+    if (snap.kind === "text" && snap.text) {
+      const pre = document.createElement("pre");
+      pre.textContent = snap.text;
+      box.append(pre);
+    } else if (snap.kind === "pdf" && snap.file) {
+      const frame = document.createElement("embed");
+      frame.type = "application/pdf";
+      frame.src = `data:application/pdf;base64,${snap.file}`;
+      box.append(frame);
+    } else if (snap.page || (snap.mime === "image/png" && snap.file)) {
+      const img = document.createElement("img");
+      img.alt = "Фото снимка";
+      img.src = `data:image/png;base64,${snap.page || snap.file}`;
+      box.append(img);
+    }
+    if (box.childNodes.length) host.append(box);
+  }
+
+  function replyRow(row) {
+    if (!row) return document.createTextNode("");
+    if (row.kind === "fold") {
+      const box = document.createElement("details");
+      box.className = "ask-fold";
+      const summary = document.createElement("summary");
+      summary.textContent = row.label || "Показать ещё";
+      box.append(summary);
+      for (const child of row.rows || []) box.append(replyRow(child));
+      return box;
+    }
+    if (row.kind === "metrics") {
+      const box = document.createElement("div");
+      box.className = "ask-metrics";
+      for (const item of row.items || []) {
+        const span = document.createElement("span");
+        span.textContent = item;
+        box.append(span);
+      }
+      return box;
+    }
+    if (row.kind === "group") {
+      const box = document.createElement("div");
+      box.className = "ask-group";
+      const title = document.createElement("b");
+      title.textContent = row.title || "";
+      box.append(title);
+      if (row.meta) {
+        const meta = document.createElement("span");
+        meta.textContent = row.meta;
+        box.append(meta);
+      }
+      return box;
+    }
+    if (row.kind === "note") {
+      const note = document.createElement("p");
+      note.className = "ask-note";
+      if (row.label) {
+        const tag = document.createElement("b");
+        tag.textContent = row.label;
+        note.append(tag);
+      }
+      note.append(document.createTextNode(row.text || ""));
+      return note;
+    }
+    if (row.kind === "item") {
+      const line = document.createElement("div");
+      line.className = "ask-item";
+      const name = document.createElement("b");
+      name.textContent = row.text || "";
+      line.append(name);
+      if (row.meta) {
+        const meta = document.createElement("span");
+        meta.textContent = row.meta;
+        line.append(meta);
+      }
+      return line;
+    }
+    const line = document.createElement("p");
+    line.className = "ask-line";
+    line.textContent = row.text || "";
+    return line;
+  }
+
+  function paintDeskReply(box, data) {
+    if (data.kind) {
+      const note = document.createElement("p");
+      note.className = "dictionary-note";
+      const name = { pdf: "PDF", text: "текст", png: "фото" }[data.kind] || data.kind;
+      note.textContent = `В поиске файл не отправляется. В боте к ответу приложится снимок: ${name}.`;
+      box.append(note);
+    }
+    if (data.lead) {
+      const lead = document.createElement("p");
+      lead.className = "ask-line";
+      lead.textContent = data.lead;
+      box.append(lead);
+    }
+    if ((data.chips || []).length) {
+      const chips = document.createElement("div");
+      chips.className = "ask-chips";
+      for (const chip of data.chips) {
+        const span = document.createElement("span");
+        span.textContent = chip;
+        chips.append(span);
+      }
+      box.append(chips);
+    }
+    const sections = data.sections || [];
+    if (!sections.length && data.html) {
       box.append(askHtmlNode(data.html));
       return;
     }
-    box.textContent = probeText(data);
+    for (const section of sections) {
+      const card = document.createElement("section");
+      card.className = "ask-section";
+      const heading = document.createElement("h4");
+      heading.textContent = section.title || "Найти";
+      card.append(heading);
+      for (const row of section.rows || []) card.append(replyRow(row));
+      box.append(card);
+    }
+  }
+
+  function richInline(text) {
+    const frag = document.createDocumentFragment();
+    const re = /\*\*(.+?)\*\*|\*(.+?)\*/g;
+    let cursor = 0;
+    let match = re.exec(text);
+    while (match) {
+      if (match.index > cursor) frag.append(document.createTextNode(text.slice(cursor, match.index)));
+      const node = document.createElement(match[1] != null ? "b" : "i");
+      node.textContent = match[1] != null ? match[1] : match[2];
+      frag.append(node);
+      cursor = match.index + match[0].length;
+      match = re.exec(text);
+    }
+    if (cursor < text.length) frag.append(document.createTextNode(text.slice(cursor)));
+    return frag;
+  }
+
+  function richTable(lines) {
+    const table = document.createElement("table");
+    const body = document.createElement("tbody");
+    for (const line of lines) {
+      if (/^\|\s*:?-{3,}/.test(line)) continue;
+      const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
+      if (!cells.length || cells.every((cell) => !cell)) continue;
+      const tr = document.createElement("tr");
+      for (const cell of cells) {
+        const td = document.createElement("td");
+        td.append(richInline(cell));
+        tr.append(td);
+      }
+      body.append(tr);
+    }
+    table.append(body);
+    return table;
+  }
+
+  function paintRichMessage(box, markdown) {
+    const host = document.createElement("div");
+    host.className = "dictionary-rich-msg";
+    const lines = String(markdown || "").split("\n");
+    let index = 0;
+    while (index < lines.length) {
+      const line = lines[index];
+      if (!line.trim()) {
+        index += 1;
+        continue;
+      }
+      if (line.startsWith("|")) {
+        const chunk = [];
+        while (index < lines.length && lines[index].startsWith("|")) chunk.push(lines[index++]);
+        host.append(richTable(chunk));
+        continue;
+      }
+      if (line.startsWith("<details>")) {
+        const fold = document.createElement("details");
+        fold.className = "ask-fold";
+        const summary = document.createElement("summary");
+        summary.textContent = "Показать ещё";
+        index += 1;
+        const inner = [];
+        while (index < lines.length && lines[index].trim() !== "</details>") {
+          const found = lines[index].match(/^<summary>(.*)<\/summary>$/);
+          if (found) summary.textContent = found[1];
+          else inner.push(lines[index]);
+          index += 1;
+        }
+        index += 1;
+        fold.append(summary);
+        const nest = document.createElement("div");
+        paintRichMessage(nest, inner.join("\n"));
+        fold.append(nest.firstChild || nest);
+        host.append(fold);
+        continue;
+      }
+      if (line.startsWith("> ")) {
+        const quote = document.createElement("blockquote");
+        quote.append(richInline(line.slice(2)));
+        host.append(quote);
+        index += 1;
+        continue;
+      }
+      if (line === "---") {
+        host.append(document.createElement("hr"));
+        index += 1;
+        continue;
+      }
+      const heading = /^(#{1,3})\s+(.*)$/.exec(line);
+      if (heading) {
+        const title = document.createElement(heading[1].length === 1 ? "h3" : "h4");
+        title.append(richInline(heading[2]));
+        host.append(title);
+        index += 1;
+        continue;
+      }
+      if (line.startsWith("- ")) {
+        const list = document.createElement("ul");
+        while (index < lines.length && lines[index].startsWith("- ")) {
+          const item = document.createElement("li");
+          item.append(richInline(lines[index].slice(2)));
+          list.append(item);
+          index += 1;
+        }
+        host.append(list);
+        continue;
+      }
+      const para = document.createElement("p");
+      para.append(richInline(line));
+      host.append(para);
+      index += 1;
+    }
+    box.append(host);
+  }
+
+  function paintBotReply(box, data) {
+    if (data.rich) paintRichMessage(box, data.rich);
+    else if (data.html) box.append(askHtmlNode(data.html));
+    else if ((data.sections || []).length) paintDeskReply(box, { ...data, kind: "" });
+    else box.textContent = data.lead || probeText(data);
+    paintSnapFile(box, data.snap);
+  }
+
+  function paintProbeResult(box, data, surface) {
+    if (!box) return;
+    box.replaceChildren();
+    if (!data) return;
+    if (surface === "desk") paintDeskReply(box, data);
+    else paintBotReply(box, data);
   }
 
   function paintProbe(data) {
-    paintAnswer($("dictionary-probe-out"), data);
+    paintProbeResult($("dictionary-probe-out"), data, dictionaryProbeSurface);
   }
 
   function scheduleProbe() {
