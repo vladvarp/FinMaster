@@ -22,11 +22,12 @@ _SKIP = {
     "startup.status",
     "requirements.scan.txt",
     "stdlib.scan.txt",
+    "history",
+    "config.yml",
 }
 _HEAD = (
     ("config.json", "config", "Настройки"),
     ("dictionary.fmwb", "dictionary", "Словарь"),
-    ("history", "history", "История"),
 )
 _VOICE = ("voice", "voice", "Голос")
 _LOCK = threading.Lock()
@@ -233,7 +234,7 @@ def _clean_ids(ids: list[str]) -> list[str]:
 def _safe_top(name: str) -> bool:
     if not name or name in (".", "..") or name.startswith("."):
         return False
-    if name in _SKIP or name == _MANIFEST:
+    if name.lower() in _SKIP or name == _MANIFEST:
         return False
     low = name.lower()
     if low.endswith(".partial") or low.endswith(".fms") or low.endswith(".tmp") or low.endswith(".log"):
@@ -258,7 +259,7 @@ def _label(name: str) -> str:
 
 
 def _default_on(pid: str) -> bool:
-    return pid != "voice"
+    return pid not in ("voice", "extra:cloudflared.exe")
 
 
 def _parts_from_tree(root: str) -> list[dict[str, Any]]:
