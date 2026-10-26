@@ -3,7 +3,7 @@
 Полный снимок качается при установке и при обновлении.
 FinMaster.exe с GitHub не скачивается. Запущенный файл копирует себя в папку
 программы, чтобы не качать ту же копию ещё раз.
-В папке программы commit.txt — время этого коммита.
+В папке программы commit.txt — дата и код этого коммита.
 """
 
 from __future__ import annotations
@@ -204,20 +204,24 @@ def _sha_ok(sha: str) -> bool:
     return len(text) == 40 and all(ch in "0123456789abcdef" for ch in text)
 
 
-def _read_json(url: str, timeout: float) -> dict[str, Any]:
+def _read_api(url: str, timeout: float) -> Any:
     request = urllib.request.Request(
         url,
         headers={"User-Agent": "FinMaster", "Accept": "application/vnd.github+json"},
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         if exc.code == 403:
             raise RuntimeError("GitHub отклонил запрос") from exc
         raise RuntimeError(f"GitHub ответил {exc.code}") from exc
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise RuntimeError("Нет связи с GitHub") from exc
+
+
+def _read_json(url: str, timeout: float) -> dict[str, Any]:
+    payload = _read_api(url, timeout)
     if not isinstance(payload, dict):
         raise RuntimeError("GitHub прислал не тот ответ")
     return payload
@@ -279,17 +283,31 @@ def _read_stamp(dest: str) -> str:
     return lines[0] if lines else ""
 
 
+def _read_sha(dest: str) -> str:
+    for line in _stamp_lines(dest)[1:]:
+        if _sha_ok(line):
+            return line.lower()
+    return ""
+
+
 def _broken_flag(dest: str) -> bool:
     return any(line.lower() == _BROKEN_MARK for line in _stamp_lines(dest)[1:])
 
 
-def _write_stamp(dest: str, when: str | None = None, *, broken: bool | None = None) -> None:
-    """Первая строка — дата версии. Вторая, если есть, — пометка о нарушении целостности."""
+def _write_stamp(dest: str, when: str | None = None, *, broken: bool | None = None, sha: str | None = None) -> None:
+    """Первая строка — дата версии. Дальше код коммита и, если есть, пометка целостности."""
     text = _read_stamp(dest) if when is None else str(when or "").strip()
     flag = _broken_flag(dest) if broken is None else bool(broken)
+    code = _read_sha(dest) if sha is None else str(sha or "").strip().lower()
+    if code and not _sha_ok(code):
+        code = _read_sha(dest)
     lines: list[str] = []
     if text:
         lines.append(text)
+    if code:
+        if not lines:
+            lines.append("")
+        lines.append(code)
     if flag:
         if not lines:
             lines.append("")
@@ -858,7 +876,7 @@ def _pull(
     try:
         remote, when = _remote_head(10)
         if remote == sha:
-            _write_stamp(dest, when, broken=False)
+            _write_stamp(dest, when, broken=False, sha=remote)
     except Exception:
         pass
     report("Готово", 100)
@@ -919,7 +937,7 @@ def _perform_install(dest: str, desktop: bool, start_menu: bool) -> str:
         saved = not holder["shortcut"]
         bundled = "bundled" if os.path.isfile(os.path.join(dest, "python", "pythonw.exe")) else ""
         _mark_installed(dest, sha, bundled, desktop and saved, start_menu and saved)
-        _write_stamp(dest, when, broken=False)
+        _write_stamp(dest, when, broken=False, sha=holder.get("sha") or "")
         report("Готово", 100)
 
     _run_splash(_icon(_here()) or _icon(dest), "Скачиваю FinMaster…", work)
@@ -1381,7 +1399,7 @@ def _refresh_snapshot(dest: str, wait_pid: int, copy_exe: bool = True, full: boo
         if copy_exe:
             report("Копирую FinMaster.exe…", 90)
             _copy_self(dest)
-        _write_stamp(dest, when, broken=False)
+        _write_stamp(dest, when, broken=False, sha=sha)
         _save_commit(dest, sha)
         report("Готово", 100)
 
@@ -1608,64 +1626,157 @@ def check_integrity(root: str, remember: bool = False) -> dict[str, Any]:
     return result
 
 
+def _with_codes(root: str, latest_sha: str, payload: dict[str, Any]) -> dict[str, Any]:
+    local = _read_sha(root)
+    remote = latest_sha if _sha_ok(latest_sha) else ""
+    payload["current_sha"] = local
+    payload["latest_sha"] = remote
+    payload["current_code"] = local[:7] if local else ""
+    payload["latest_code"] = remote[:7] if remote else ""
+    return payload
+
+
 def update_status(root: str) -> dict[str, Any]:
-    """Есть ли версия новее. Даты — для вопроса в окне, без номеров коммитов."""
+    """Есть ли версия новее. В ответе даты и коды коммитов."""
     empty = {"available": False, "current": "", "latest": "", "damaged": False, "integrity": False}
     root = os.path.abspath(root)
     if _repo_folder(root):
-        return {**empty, "enabled": False}
+        return _with_codes(root, "", {**empty, "enabled": False})
     if not os.path.isfile(os.path.join(root, "run.vbs")):
-        return empty
+        return _with_codes(root, "", empty)
     try:
         sha, when = _remote_head(4)
     except Exception:
-        return {
+        return _with_codes(root, "", {
             "available": False,
             "current": _local_version(root),
             "latest": "",
             "damaged": False,
             "integrity": _broken_flag(root),
             "offline": True,
-        }
+        })
     remote = _parse_when(when)
     latest = _version_label(remote)
     local = _parse_when(_read_stamp(root))
+    local_sha = _read_sha(root)
     if local is None:
         matched = _readme_same(root)
         if matched is None:
-            return {
+            return _with_codes(root, sha, {
                 "available": False,
                 "current": _local_version(root),
                 "latest": latest,
                 "damaged": False,
                 "integrity": _settle_integrity(root, sha),
                 "offline": True,
-            }
+            })
         if matched:
-            _write_stamp(root, when)
+            _write_stamp(root, when, sha=sha)
             _quiet_old_exe(root, sha)
-            return {
+            return _with_codes(root, sha, {
                 "available": False,
                 "current": latest,
                 "latest": latest,
                 "damaged": False,
                 "integrity": _settle_integrity(root, sha),
-            }
+            })
         _quiet_old_exe(root, sha)
-        return {
+        return _with_codes(root, sha, {
             "available": True,
             "current": "Вероятно, есть повреждённые файлы",
             "latest": latest,
             "damaged": True,
             "integrity": _settle_integrity(root, sha),
-        }
+        })
     available = remote is not None and remote > local
+    if local_sha and local_sha == sha:
+        available = False
+    elif local_sha and local_sha != sha and remote is not None and remote >= local:
+        available = True
     if available:
         _quiet_old_exe(root, sha)
-    return {
+    elif remote is not None and remote == local and local_sha != sha:
+        _write_stamp(root, None, sha=sha)
+    return _with_codes(root, sha, {
         "available": available,
         "current": _version_label(local),
         "latest": latest,
         "damaged": False,
         "integrity": _settle_integrity(root, sha),
+    })
+
+
+_LOG_CACHE: tuple[float, list[dict[str, Any]]] | None = None
+
+
+def _commit_row(item: dict[str, Any]) -> dict[str, Any] | None:
+    sha = str(item.get("sha") or "").strip().lower()
+    if not _sha_ok(sha):
+        return None
+    commit = item.get("commit") if isinstance(item.get("commit"), dict) else {}
+    message = str(commit.get("message") or "").replace("\r\n", "\n").strip()
+    title, _, body = message.partition("\n")
+    body = body.strip()
+    if len(body) > 700:
+        body = body[:700].rstrip() + "…"
+    when = ""
+    for key in ("committer", "author"):
+        person = commit.get(key) if isinstance(commit.get(key), dict) else {}
+        when = str(person.get("date") or "").strip()
+        if when:
+            break
+    return {
+        "sha": sha,
+        "code": sha[:7],
+        "title": title.strip() or "без описания",
+        "body": body,
+        "when": when,
+        "label": _version_label(_parse_when(when)),
     }
+
+
+def _remote_commits(timeout: float) -> list[dict[str, Any]]:
+    global _LOG_CACHE
+    now = time.time()
+    if _LOG_CACHE and now - _LOG_CACHE[0] < 120:
+        return [dict(item) for item in _LOG_CACHE[1]]
+    found: list[dict[str, Any]] = []
+    for page in range(1, 4):
+        payload = _read_api(f"{API}/commits?per_page=100&page={page}", timeout)
+        if not isinstance(payload, list) or not payload:
+            break
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            row = _commit_row(item)
+            if row:
+                found.append(row)
+        if len(payload) < 100:
+            break
+    _LOG_CACHE = (now, found)
+    return [dict(item) for item in found]
+
+
+def update_log(root: str) -> dict[str, Any]:
+    """Коммиты GitHub: весь путь и отрезок от установленной версии до последней."""
+    root = os.path.abspath(root)
+    commits = _remote_commits(12)
+    current = _read_sha(root)
+    local = _parse_when(_read_stamp(root))
+    latest = commits[0]["sha"] if commits else ""
+    for row in commits:
+        row["current"] = bool(current) and row["sha"] == current
+        row["latest"] = row["sha"] == latest
+    index = next((i for i, row in enumerate(commits) if row["current"]), -1)
+    if index >= 0:
+        ahead = [dict(row) for row in commits[: index + 1]]
+    elif local is not None:
+        ahead = []
+        for row in commits:
+            moment = _parse_when(str(row.get("when") or ""))
+            if moment is None or moment < local:
+                break
+            ahead.append(dict(row))
+    else:
+        ahead = []
+    return {"commits": commits, "ahead": ahead, "current_sha": current, "latest_sha": latest}

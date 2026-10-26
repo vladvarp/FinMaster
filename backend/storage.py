@@ -120,6 +120,16 @@ def load_config() -> dict[str, Any]:
             return _blank_config()
 
 
+def reload_config() -> dict[str, Any]:
+    """Забыть кэш и прочитать config.json с диска. Секреты берутся из этого файла."""
+    global _CACHE
+    with _LOCK:
+        _CACHE = None
+        for key in _SECRETS:
+            _SECRETS[key] = ""
+    return load_config()
+
+
 def save_config(data: dict[str, Any]) -> None:
     global _CACHE
     if not isinstance(data, dict):

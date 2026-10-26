@@ -1,4 +1,4 @@
-"""Привязка .fmaster и .fbak к FinMaster.exe. У .fmwb только иконка книги: щелчок его не открывает."""
+"""Привязка .fmaster и .fbak к FinMaster.exe. У .fmwb и .fms только иконка: щелчок их не открывает."""
 
 from __future__ import annotations
 
@@ -69,9 +69,8 @@ def _delete_value(key: str, name: str) -> bool:
         return False
 
 
-def _drop_dictionary_launch() -> bool:
-    """Снять команду «Открыть» у словаря, если она уже записана."""
-    prog = "FinMaster.Dictionary"
+def _drop_launch(prog: str, ext: str) -> bool:
+    """Снять команду «Открыть», если она уже записана."""
     changed = False
     for key in (
         f"{_CLASSES}\\{prog}\\shell\\open\\command",
@@ -79,8 +78,8 @@ def _drop_dictionary_launch() -> bool:
         f"{_CLASSES}\\{prog}\\shell",
     ):
         changed |= _delete_key(key)
-    changed |= _delete_value(f"{_CLASSES}\\.fmwb\\OpenWithProgids", prog)
-    ext_key = r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.fmwb"
+    changed |= _delete_value(f"{_CLASSES}\\{ext}\\OpenWithProgids", prog)
+    ext_key = rf"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\{ext}"
     changed |= _delete_key(ext_key + r"\UserChoice")
     changed |= _delete_key(ext_key + r"\OpenWithList")
     changed |= _delete_key(ext_key + r"\OpenWithProgids")
@@ -88,19 +87,14 @@ def _drop_dictionary_launch() -> bool:
     return changed
 
 
-def _register_dictionary_icon(root: str) -> bool:
-    """Иконка книги без запуска программы."""
-    prog = "FinMaster.Dictionary"
-    icon = _icon(root, "dictionary.ico")
+def _register_icon(root: str, ext: str, prog: str, description: str, icon_name: str, content_type: str) -> bool:
+    """Иконка без запуска программы."""
+    icon = _icon(root, icon_name)
     exe = _exe(root)
     icon_value = f'"{icon}",0' if os.path.isfile(icon) else f'"{exe}",0'
     changed = False
-    changed |= _write(
-        f"{_CLASSES}\\.fmwb",
-        prog,
-        {"PerceivedType": "Document", "Content Type": "application/x-finmaster-dictionary"},
-    )
-    changed |= _write(f"{_CLASSES}\\{prog}", "Словарь FinMaster")
+    changed |= _write(f"{_CLASSES}\\{ext}", prog, {"PerceivedType": "Document", "Content Type": content_type})
+    changed |= _write(f"{_CLASSES}\\{prog}", description)
     changed |= _write(f"{_CLASSES}\\{prog}\\DefaultIcon", icon_value)
     return changed
 
@@ -145,7 +139,9 @@ def register_reports(root: str) -> None:
         "backup.ico",
         "application/x-finmaster-backup",
     )
-    changed |= _drop_dictionary_launch()
-    changed |= _register_dictionary_icon(root)
+    changed |= _drop_launch("FinMaster.Dictionary", ".fmwb")
+    changed |= _register_icon(root, ".fmwb", "FinMaster.Dictionary", "Словарь FinMaster", "dictionary.ico", "application/x-finmaster-dictionary")
+    changed |= _drop_launch("FinMaster.Settings", ".fms")
+    changed |= _register_icon(root, ".fms", "FinMaster.Settings", "Настройки FinMaster", "settings.ico", "application/x-finmaster-settings")
     if changed:
         _notify()

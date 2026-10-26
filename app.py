@@ -15,17 +15,19 @@ from flask import Flask, g, jsonify, redirect, request, send_from_directory
 
 from backend import ask
 from backend import dictionary
-from backend import netlog, qr, runtime, storage
+from backend import netlog, qr, runtime, settings_pack, storage
 from backend.backup import is_backup_path
 from backend import backup as report_backup
 from backend.dialogs import (
     open_dictionary_dialog,
     open_report_dialog,
+    open_settings_dialog,
     save_csv_dialog,
     save_dictionary_dialog,
     save_pdf_dialog,
     save_png_dialog,
     save_report_dialog,
+    save_settings_dialog,
 )
 from backend.document import empty_document, normalize_document, now_iso
 from backend.remote import SESSION as REMOTE
@@ -1687,6 +1689,75 @@ def api_remote_windows_login():
     return jsonify({"ok": True, "windows_login": on})
 
 
+def _settings_folder() -> str:
+    return storage.load_config().get("last_dir") or ""
+
+
+@app.get("/api/settings/bundle")
+def api_settings_bundle():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    return jsonify({"ok": True, "parts": settings_pack.list_parts()})
+
+
+@app.get("/api/settings/job")
+def api_settings_job():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    snap = settings_pack.job_snapshot()
+    if snap.get("ok") and snap.get("dictionary"):
+        global DICT_DIRTY
+        DICT_DIRTY = False
+    return jsonify(snap)
+
+
+@app.post("/api/settings/export")
+def api_settings_export():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    path = save_settings_dialog("Настройки.fms", _settings_folder())
+    if not path:
+        return jsonify({"ok": True, "cancelled": True})
+    try:
+        snap = settings_pack.start_export(path, list(data.get("ids") or []))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 409
+    snap["path"] = path
+    return jsonify(snap)
+
+
+@app.post("/api/settings/import/pick")
+def api_settings_import_pick():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    path = open_settings_dialog(_settings_folder())
+    if not path:
+        return jsonify({"ok": True, "cancelled": True})
+    try:
+        parts = settings_pack.inspect_archive(path)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, "path": path, "parts": parts})
+
+
+@app.post("/api/settings/import")
+def api_settings_import():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    path = str(data.get("path") or "")
+    try:
+        snap = settings_pack.start_import(path, list(data.get("ids") or []))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 409
+    return jsonify(snap)
+
+
 @app.post("/api/remote/start")
 def api_remote_start():
     data = request.get_json(silent=True) or {}
@@ -2319,6 +2390,18 @@ def api_update_status():
     payload = update_status(ROOT)
     payload["year"] = installed_year(ROOT)
     return jsonify(payload)
+
+
+@app.get("/api/update/log")
+def api_update_log():
+    if not _is_local():
+        return jsonify({"error": "Только в окне программы."}), 403
+    try:
+        from backend.setup import update_log
+
+        return jsonify(update_log(ROOT))
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 _ABOUT_LINKS = {

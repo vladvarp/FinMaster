@@ -76,7 +76,7 @@ window.FAQ_TOC = [
     title: "Если что-то не так",
     items: [
       { id: "safety", title: "Что видит телефон", keys: "токен безопасность ссылка" },
-      { id: "settings", title: "Где лежат настройки", keys: "appdata config документы" },
+      { id: "settings", title: "Где лежат настройки", keys: "appdata config документы экспорт импорт fms архив голос словарь" },
       { id: "trouble", title: "Частые неполадки", keys: "не открывается порт ngrok бот корзина" },
     ],
   },

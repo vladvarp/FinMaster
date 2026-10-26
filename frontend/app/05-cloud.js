@@ -1582,6 +1582,10 @@
       state.updateIntegrity = !!data.integrity;
       state.updateOffline = !!data.offline;
       state.updateYear = Number(data.year) || 0;
+      state.updateCurrentSha = data.current_sha || "";
+      state.updateLatestSha = data.latest_sha || "";
+      state.updateCurrentCode = data.current_code || "";
+      state.updateLatestCode = data.latest_code || "";
     } catch {
       state.updateReady = false;
       state.updateDamaged = false;
@@ -1741,48 +1745,176 @@
     if (!old && actions) actions.insertBefore(btn, actions.firstChild);
   }
 
-  async function askProgramUpdate() {
-    const ready = !!state.updateReady;
+  let updateLogMode = "ahead";
+  let updateLogData = null;
+
+  function shortCode(value) {
+    const text = String(value || "").trim();
+    return text ? text.slice(0, 7) : "—";
+  }
+
+  function paintUpdateVersions() {
+    const host = $("update-versions");
+    if (!host) return;
     const current = state.updateCurrent || "дата неизвестна";
-    const latest = state.updateLatest || "дата неизвестна";
+    const latest = state.updateOffline ? "сервер не ответил" : (state.updateLatest || "дата неизвестна");
+    const showInfo = !!state.updateReady || !!state.updateIntegrity;
+    host.innerHTML = `
+      <div class="update-ver">
+        <span class="update-ver-label">Сейчас установлена</span>
+        <b>${esc(current)}</b>
+        <span class="update-code">${esc(shortCode(state.updateCurrentCode || state.updateCurrentSha))}</span>
+      </div>
+      <div class="update-ver is-new">
+        <span class="update-ver-label">На GitHub</span>
+        <b>${esc(latest)}</b>
+        <div class="update-ver-tools">
+          <span class="update-code">${esc(shortCode(state.updateLatestCode || state.updateLatestSha))}</span>
+          ${showInfo ? infoButton() : ""}
+        </div>
+      </div>`;
+  }
+
+  function updateCommitItem(row) {
+    const badges = [
+      row.latest ? "<em>последняя</em>" : "",
+      row.current ? "<em>установлена</em>" : "",
+    ].filter(Boolean).join("");
+    return `<li class="${row.latest ? "is-latest" : ""} ${row.current ? "is-current" : ""}">
+      <i></i>
+      <div>
+        <header><code>${esc(row.code || "")}</code><time>${esc(row.label || "")}</time>${badges}</header>
+        <strong>${esc(row.title || "без описания")}</strong>
+        ${row.body ? `<p>${esc(row.body)}</p>` : ""}
+      </div>
+    </li>`;
+  }
+
+  function paintUpdateLog() {
+    const all = updateLogMode === "all";
+    const title = $("update-log-title");
+    const allBtn = $("update-log-all");
+    const log = $("update-log");
+    if (title) title.textContent = all ? "Путь изменений" : "От этой версии до последней";
+    if (allBtn) allBtn.textContent = all ? "Только новое" : "Вся история";
+    if (!log) return;
+    if (!updateLogData) {
+      log.innerHTML = '<p class="update-wait">Смотрю историю коммитов…</p>';
+      return;
+    }
+    const rows = (all ? updateLogData.commits : updateLogData.ahead) || [];
+    if (!rows.length) {
+      log.innerHTML = `<p class="update-wait">${all ? "История коммитов пуста." : "От установленной версии до последней изменений нет."}</p>`;
+      return;
+    }
+    if (!all && rows.length === 1 && rows[0].current) {
+      log.innerHTML = '<p class="update-wait">Это последняя версия. Весь путь открывает кнопка «Вся история».</p>';
+      return;
+    }
+    log.innerHTML = `<ol class="update-path">${rows.map(updateCommitItem).join("")}</ol>`;
+  }
+
+  async function toggleUpdateDiff(btn) {
+    const panel = $("update-diff");
+    if (!panel) return;
+    if (panel.classList.contains("open")) {
+      panel.classList.remove("open");
+      btn?.classList.remove("open");
+      return;
+    }
+    btn?.classList.add("open");
+    panel.innerHTML = '<p class="confirm-diff-wait">Смотрю файлы…</p>';
+    panel.classList.add("open");
+    try {
+      const data = diffCache || await apiPost("/api/integrity", { remember: false });
+      diffCache = data;
+      const files = data.files || [];
+      if (!files.length) {
+        panel.innerHTML = '<p class="confirm-diff-wait">Отличий нет. Файлы совпадают с GitHub.</p>';
+        return;
+      }
+      panel.innerHTML = `<div class="confirm-diff-head">${esc(filesWord(files.length))}</div><ul>${files.map((file, index) =>
+        `<li class="${file.kind === "missing" ? "is-missing" : "is-changed"}" style="--i:${index}"><span>${esc(file.path)}</span><em>${file.kind === "missing" ? "нет файла" : "изменён"}</em></li>`
+      ).join("")}</ul>`;
+    } catch (err) {
+      panel.innerHTML = `<p class="confirm-diff-wait">${esc(err && err.message ? err.message : "Не удалось сверить файлы")}</p>`;
+    }
+  }
+
+  async function runUpdateIntegrity(btn) {
+    if (!btn || btn.dataset.busy === "1") return;
+    btn.dataset.busy = "1";
+    const previous = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Проверяю…";
+    try {
+      const data = await apiPost("/api/integrity", { remember: true });
+      diffCache = data;
+      const broken = !data.ok;
+      state.updateIntegrity = broken;
+      paintUpdateButton();
+      const check = $("update-check");
+      if (check) {
+        check.hidden = false;
+        check.className = broken ? "update-check is-bad" : "update-check is-ok";
+        check.textContent = broken ? "Целостность программы нарушена" : "Целостность не нарушена";
+      }
+      paintUpdateVersions();
+      if (!broken) $("update-diff")?.classList.remove("open");
+      toast(broken ? "Целостность программы нарушена" : "Целостность не нарушена");
+    } catch (err) {
+      toast(err && err.message ? err.message : "Не удалось проверить целостность");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = previous;
+      delete btn.dataset.busy;
+    }
+  }
+
+  async function openUpdateModal() {
+    updateLogMode = "ahead";
+    updateLogData = null;
+    diffCache = null;
+    const ready = !!state.updateReady;
     const versionsMatch = !ready && !state.updateOffline && !state.updateDamaged && !!state.updateCurrent && state.updateCurrent === state.updateLatest;
-    const integrityLine = state.updateIntegrity
-      ? { label: "Проверка", value: "Целостность программы нарушена", warn: true, info: true, integrity: true }
-      : null;
-    const ok = await askConfirm(ready
-      ? {
-          title: state.updateDamaged ? "Версия старая" : "Есть обновление",
-          lines: [
-            ...(state.updateDamaged
-              ? [
-                  { label: "Новая версия", value: latest, info: !integrityLine },
-                  { label: "Сейчас", value: current, warn: true },
-                ]
-              : [
-                  { label: "Новая версия", value: latest, info: !integrityLine },
-                  { label: "Сейчас установлена", value: current },
-                ]),
-            ...(integrityLine ? [integrityLine] : []),
-          ],
-          ok: "Обновить",
-          cancel: "Не сейчас",
-          about: true,
-        }
-      : {
-          title: "Обновление",
-          lines: [
-            { label: "Сейчас установлена", value: current },
-            state.updateOffline
-              ? { label: "GitHub", value: "Не удалось проверить обновление: сервер не ответил", warn: true }
-              : { label: "Версия", value: "Это последняя версия" },
-            ...(integrityLine ? [integrityLine] : []),
-          ],
-          ok: "Скачать",
-          cancel: "Отмена",
-          extra: versionsMatch ? "Проверить целостность" : "",
-          about: true,
-        });
-    if (!ok) return;
+    const title = $("update-title");
+    if (title) title.textContent = ready ? (state.updateDamaged ? "Версия старая" : "Есть обновление") : "Обновление";
+    const go = $("update-go");
+    if (go) go.textContent = ready ? "Обновить" : "Скачать";
+    const cancel = $("update-cancel");
+    if (cancel) cancel.textContent = ready ? "Не сейчас" : "Закрыть";
+    const integrity = $("update-integrity");
+    if (integrity) integrity.hidden = !versionsMatch;
+    const check = $("update-check");
+    if (check) {
+      check.hidden = !state.updateIntegrity;
+      check.className = "update-check is-bad";
+      check.textContent = state.updateIntegrity ? "Целостность программы нарушена" : "";
+    }
+    $("update-diff")?.classList.remove("open");
+    paintUpdateVersions();
+    paintUpdateLog();
+    $("update-modal")?.classList.add("open");
+    try {
+      updateLogData = await apiGet("/api/update/log");
+      if (updateLogData.current_sha) {
+        state.updateCurrentSha = updateLogData.current_sha;
+        state.updateCurrentCode = String(updateLogData.current_sha).slice(0, 7);
+      }
+      if (updateLogData.latest_sha) {
+        state.updateLatestSha = updateLogData.latest_sha;
+        state.updateLatestCode = String(updateLogData.latest_sha).slice(0, 7);
+      }
+      paintUpdateVersions();
+      paintUpdateLog();
+    } catch (err) {
+      const log = $("update-log");
+      if (log) log.innerHTML = `<p class="update-wait">${esc(err && err.message ? err.message : "Не удалось получить историю")}</p>`;
+    }
+  }
+
+  async function acceptProgramUpdate() {
+    $("update-modal")?.classList.remove("open");
     await flushPendingSaves();
     if (!(await keepDictionary())) return;
     if (state.dirty) {
@@ -2689,6 +2821,22 @@
     });
     $("btn-help").addEventListener("click", openHelp);
     $("btn-guide")?.addEventListener("click", openGuide);
+    $("update-cancel")?.addEventListener("click", () => $("update-modal")?.classList.remove("open"));
+    $("update-about")?.addEventListener("click", () => $("confirm-about")?.click());
+    $("update-go")?.addEventListener("click", () => { acceptProgramUpdate(); });
+    $("update-integrity")?.addEventListener("click", (event) => { runUpdateIntegrity(event.currentTarget); });
+    $("update-log-all")?.addEventListener("click", () => {
+      updateLogMode = updateLogMode === "all" ? "ahead" : "all";
+      paintUpdateLog();
+    });
+    $("update-modal")?.addEventListener("click", (event) => {
+      if (event.target === $("update-modal")) {
+        $("update-modal").classList.remove("open");
+        return;
+      }
+      const info = event.target.closest(".confirm-info");
+      if (info) toggleUpdateDiff(info);
+    });
     $("btn-update")?.addEventListener("click", async () => {
       const btn = $("btn-update");
       if (!btn || btn.dataset.busy === "1") return;
@@ -2707,7 +2855,7 @@
           return;
         }
         if (btn.disabled) return;
-        await askProgramUpdate();
+        await openUpdateModal();
       } finally {
         btn.classList.remove("update-checking");
         btn.removeAttribute("aria-busy");

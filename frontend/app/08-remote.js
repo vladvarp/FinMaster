@@ -1160,7 +1160,239 @@
     }
   }
 
+  let settingsPackTimer = 0;
+  let settingsPackMode = "";
+  let settingsPackPath = "";
+  let settingsPackBusy = false;
+  let settingsPackSettled = false;
+
+  function settingsPackIds() {
+    return [...document.querySelectorAll("#settings-pack-list input[data-pack-id]:checked")].map((input) => input.dataset.packId);
+  }
+
+  function paintSettingsPack(parts) {
+    const list = $("settings-pack-list");
+    if (!list) return;
+    const rows = parts || [];
+    list.innerHTML = rows.map((part) => `
+      <label class="report-settings-check settings-pack-check"${part.title ? ` title="${esc(part.title)}"` : ""}>
+        <input type="checkbox" data-pack-id="${esc(part.id)}"${part.on ? " checked" : ""}>
+        <span>${esc(part.label)}</span>
+        <small>${esc(part.size || "")}</small>
+      </label>
+    `).join("");
+    if (!rows.length) {
+      list.innerHTML = '<p class="report-settings-hint">В папке настроек нечего упаковывать.</p>';
+    }
+    const go = $("settings-pack-go");
+    if (go) go.disabled = !settingsPackIds().length;
+  }
+
+  function settingsPackProgress(on, percent, text) {
+    const box = $("settings-pack-progress");
+    if (box) box.hidden = !on;
+    const bar = $("settings-pack-bar");
+    if (bar) bar.style.width = `${Math.max(0, Math.min(100, percent || 0))}%`;
+    const pct = $("settings-pack-pct");
+    if (pct) pct.textContent = `${Math.max(0, Math.min(100, percent || 0))}%`;
+    const status = $("settings-pack-status");
+    if (status && text) status.textContent = text;
+  }
+
+  function closeSettingsPack() {
+    if (settingsPackBusy) return;
+    clearInterval(settingsPackTimer);
+    settingsPackTimer = 0;
+    settingsPackMode = "";
+    settingsPackPath = "";
+    $("settings-pack-modal")?.classList.remove("open");
+  }
+
+  function openSettingsPack(mode, parts, path) {
+    settingsPackMode = mode;
+    settingsPackPath = path || "";
+    settingsPackBusy = false;
+    const importing = mode === "import";
+    const title = $("settings-pack-title");
+    if (title) title.textContent = importing ? "Импорт настроек" : "Экспорт настроек";
+    const lead = $("settings-pack-lead");
+    if (lead) {
+      lead.hidden = importing;
+      lead.textContent = "Отмеченное из папки настроек попадёт в архив .fms.";
+    }
+    const warn = $("settings-pack-warn");
+    if (warn) warn.hidden = !importing;
+    const go = $("settings-pack-go");
+    if (go) go.textContent = importing ? "Импортировать" : "Упаковать";
+    const cancel = $("settings-pack-cancel");
+    if (cancel) {
+      cancel.disabled = false;
+      cancel.textContent = "Отмена";
+    }
+    paintSettingsPack(parts);
+    settingsPackProgress(false, 0, importing ? "Распаковка…" : "Упаковка…");
+    $("settings-pack-modal")?.classList.add("open");
+  }
+
+  async function finishSettingsPack(job) {
+    if (settingsPackSettled) return;
+    settingsPackSettled = true;
+    settingsPackBusy = false;
+    clearInterval(settingsPackTimer);
+    settingsPackTimer = 0;
+    const cancel = $("settings-pack-cancel");
+    if (cancel) cancel.disabled = false;
+    const go = $("settings-pack-go");
+    if (go) go.disabled = !settingsPackIds().length;
+    if (job.error) {
+      settingsPackProgress(true, job.progress || 0, job.text || "Ошибка");
+      toast(job.error);
+      return;
+    }
+    settingsPackProgress(true, 100, "Готово");
+    if (cancel) cancel.textContent = "Закрыть";
+    if (settingsPackMode === "import") {
+      if (job.config) {
+        try {
+          const bootData = await apiGet("/api/bootstrap");
+          state.autosave = window.FM_DESK ? false : !!bootData.autosave;
+          const box = $("autosave");
+          if (box) box.checked = state.autosave;
+          hydratePrefs(bootData.ui_prefs);
+          applyTheme(bootData.theme || "light", false);
+          if (bootData.history_limit) history.limit = clampHistoryLimit(bootData.history_limit);
+          await renderStartLists(bootData);
+        } catch {
+          /* файл уже записан */
+        }
+      }
+      if (job.dictionary) {
+        try { await loadDictionary(); } catch { /* словарь уже на диске */ }
+      }
+      toast("Настройки импортированы");
+    } else {
+      toast("Настройки экспортированы");
+    }
+    settingsPackMode = "";
+    settingsPackPath = "";
+  }
+
+  function watchSettingsPack() {
+    clearInterval(settingsPackTimer);
+    settingsPackTimer = setInterval(async () => {
+      try {
+        const job = await apiGet("/api/settings/job");
+        settingsPackProgress(true, job.progress, job.text || (settingsPackMode === "import" ? "Распаковка…" : "Упаковка…"));
+        if (job.running) return;
+        await finishSettingsPack(job);
+      } catch (err) {
+        settingsPackSettled = true;
+        settingsPackBusy = false;
+        clearInterval(settingsPackTimer);
+        settingsPackTimer = 0;
+        const go = $("settings-pack-go");
+        const cancel = $("settings-pack-cancel");
+        if (go) go.disabled = false;
+        if (cancel) cancel.disabled = false;
+        toast(err.message || "Не удалось дождаться окончания");
+      }
+    }, 200);
+  }
+
+  async function runSettingsPack() {
+    const ids = settingsPackIds();
+    if (!ids.length || settingsPackBusy) return;
+    const go = $("settings-pack-go");
+    const cancel = $("settings-pack-cancel");
+    if (go) go.disabled = true;
+    if (cancel) cancel.disabled = true;
+    settingsPackBusy = true;
+    settingsPackSettled = false;
+    try {
+      if (settingsPackMode === "export") {
+        const data = await apiPost("/api/settings/export", { ids });
+        if (data.cancelled) {
+          settingsPackBusy = false;
+          if (go) go.disabled = !settingsPackIds().length;
+          if (cancel) cancel.disabled = false;
+          return;
+        }
+        settingsPackProgress(true, data.progress || 0, data.text || "Упаковка…");
+        if (!data.running) {
+          await finishSettingsPack(data);
+          return;
+        }
+        watchSettingsPack();
+        return;
+      }
+      const data = await apiPost("/api/settings/import", { path: settingsPackPath, ids });
+      settingsPackProgress(true, data.progress || 0, data.text || "Распаковка…");
+      if (!data.running) {
+        await finishSettingsPack(data);
+        return;
+      }
+      watchSettingsPack();
+    } catch (err) {
+      settingsPackBusy = false;
+      settingsPackSettled = true;
+      if (go) go.disabled = !settingsPackIds().length;
+      if (cancel) cancel.disabled = false;
+      settingsPackProgress(false, 0, "");
+      toast(err.message || "Не удалось обработать архив");
+    }
+  }
+
+  function bindSettingsPack() {
+    $("btn-settings-export")?.addEventListener("click", async () => {
+      if (!state.desktop) {
+        toast("Только на этом компьютере");
+        return;
+      }
+      try {
+        const data = await apiGet("/api/settings/bundle");
+        openSettingsPack("export", data.parts || []);
+      } catch (err) {
+        toast(err.message || "Не удалось прочитать настройки");
+      }
+    });
+    $("btn-settings-import")?.addEventListener("click", async () => {
+      if (!state.desktop) {
+        toast("Только на этом компьютере");
+        return;
+      }
+      const ok = await askConfirm({
+        title: "Импорт настроек",
+        text: "Старые настройки потеряются. Отмеченные файлы из архива заменят текущие, остальные останутся.",
+        ok: "Выбрать архив",
+        cancel: "Отмена",
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        const data = await apiPost("/api/settings/import/pick", {});
+        if (data.cancelled) return;
+        if (!data.parts || !data.parts.length) {
+          toast("В архиве нет настроек");
+          return;
+        }
+        openSettingsPack("import", data.parts, data.path);
+      } catch (err) {
+        toast(err.message || "Не удалось открыть архив");
+      }
+    });
+    $("settings-pack-list")?.addEventListener("change", () => {
+      const go = $("settings-pack-go");
+      if (go && !settingsPackBusy) go.disabled = !settingsPackIds().length;
+    });
+    $("settings-pack-cancel")?.addEventListener("click", closeSettingsPack);
+    $("settings-pack-go")?.addEventListener("click", () => { runSettingsPack(); });
+    $("settings-pack-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("settings-pack-modal")) closeSettingsPack();
+    });
+  }
+
   function bindRemote() {
+    bindSettingsPack();
     bindNetConsole();
     document.querySelectorAll(".js-open-remote").forEach((btn) => {
       btn.addEventListener("click", async () => {
@@ -1383,7 +1615,7 @@
     try {
       const data = await apiGet("/api/instance/pending");
       for (const path of data.paths || []) {
-        if (!path || /\.fmwb$/i.test(path)) continue;
+        if (!path || /\.(fmwb|fms)$/i.test(path)) continue;
         if (samePath(path, state.path) && state.doc) continue;
         const choice = await confirmSwitchReport();
         if (!choice || choice === "cancel") continue;
@@ -1408,7 +1640,7 @@
       const queued = (pending.paths || []).filter(Boolean);
       if (queued.length) {
         for (const path of queued) {
-          if (/\.fmwb$/i.test(path)) continue;
+          if (/\.(fmwb|fms)$/i.test(path)) continue;
           await openPath(path);
         }
         return;

@@ -101,6 +101,8 @@
               <span>Автозагрузка</span>
               <input type="checkbox" id="remote-windows-login" />
             </label>
+            <button type="button" class="btn ghost" id="btn-settings-export" role="menuitem" title="Упаковать настройки в архив .fms">Экспорт настроек</button>
+            <button type="button" class="btn ghost" id="btn-settings-import" role="menuitem" title="Заменить отмеченные настройки архивом .fms">Импорт настроек</button>
             <div class="file-menu-sep" id="runtime-menu-sep" role="separator"></div>
             <button type="button" class="btn ghost" id="btn-runtime" role="menuitem">Среда запуска</button>
           </div>
@@ -867,6 +869,28 @@
     </div>
   </div>
 
+  <div class="modal" id="update-modal">
+    <div class="modal-card update-modal" role="dialog" aria-modal="true" aria-labelledby="update-title">
+      <div class="modal-title-row">
+        <h3 id="update-title">Обновление</h3>
+        <button class="btn" type="button" id="update-about">О программе</button>
+      </div>
+      <div class="update-versions" id="update-versions"></div>
+      <div id="update-check"></div>
+      <div class="confirm-diff" id="update-diff"></div>
+      <div class="update-log-head">
+        <h4 id="update-log-title">От этой версии до последней</h4>
+        <button type="button" class="btn small" id="update-log-all">Вся история</button>
+      </div>
+      <div class="update-log" id="update-log"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" id="update-integrity" hidden>Проверить целостность</button>
+        <button class="btn" type="button" id="update-cancel">Не сейчас</button>
+        <button class="btn primary" type="button" id="update-go">Обновить</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal" id="program-about-modal">
     <div class="modal-card confirm-modal">
       <div class="modal-title-row">
@@ -1552,6 +1576,22 @@
           <div id="dictionary-probe-out" class="dictionary-probe-out"></div>
         </div>
       </aside>
+    </div>
+  </div>
+  <div class="modal" id="settings-pack-modal">
+    <div class="modal-card settings-pack-modal" role="dialog" aria-modal="true" aria-labelledby="settings-pack-title">
+      <h3 id="settings-pack-title">Экспорт настроек</h3>
+      <p id="settings-pack-lead">Отмеченное из папки настроек попадёт в архив .fms.</p>
+      <p class="settings-pack-warn" id="settings-pack-warn" hidden>Старые настройки потеряются: отмеченные файлы заменят текущие. Остальные файлы останутся как есть.</p>
+      <div id="settings-pack-list" class="settings-pack-list"></div>
+      <div class="settings-pack-progress" id="settings-pack-progress" hidden>
+        <div class="settings-pack-bar"><span id="settings-pack-bar"></span></div>
+        <div class="settings-pack-meta"><span id="settings-pack-status">Упаковка…</span><b id="settings-pack-pct">0%</b></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" type="button" id="settings-pack-cancel">Отмена</button>
+        <button class="btn primary" type="button" id="settings-pack-go">Упаковать</button>
+      </div>
     </div>
   </div>
   <div class="toast" id="toast"></div>

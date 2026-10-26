@@ -367,3 +367,63 @@ def save_dictionary_dialog(suggested: str = "Словарь.fmwb", initial_dir: 
             return path
         finally:
             root.destroy()
+
+
+def _as_fms(path: str | None) -> str | None:
+    if not path:
+        return None
+    root, ext = os.path.splitext(path)
+    if ext.lower() != ".fms":
+        path = root + ".fms"
+    return path
+
+
+def open_settings_dialog(initial_dir: str = "") -> str | None:
+    pairs = [("Настройки FinMaster", "*.fms"), ("Все файлы", "*.*")]
+    if not _tk_ready():
+        return _native_dialog(save=False, title="Импорт настроек FinMaster", pairs=pairs, initial_dir=initial_dir)
+    from tkinter import filedialog
+
+    with _lock:
+        root = _root()
+        try:
+            kwargs: dict[str, Any] = {"parent": root, "title": "Импорт настроек FinMaster", "filetypes": pairs}
+            if initial_dir:
+                kwargs["initialdir"] = initial_dir
+            path = filedialog.askopenfilename(**kwargs)
+            return path or None
+        finally:
+            root.destroy()
+
+
+def save_settings_dialog(suggested: str = "Настройки.fms", initial_dir: str = "") -> str | None:
+    pairs = [("Настройки FinMaster", "*.fms"), ("Все файлы", "*.*")]
+    if not _tk_ready():
+        return _as_fms(
+            _native_dialog(
+                save=True,
+                title="Экспорт настроек FinMaster",
+                pairs=pairs,
+                initial_dir=initial_dir,
+                initial_file=suggested,
+                default_ext=".fms",
+            )
+        )
+    from tkinter import filedialog
+
+    with _lock:
+        root = _root()
+        try:
+            kwargs: dict[str, Any] = {
+                "parent": root,
+                "title": "Экспорт настроек FinMaster",
+                "defaultextension": ".fms",
+                "filetypes": pairs,
+                "initialfile": suggested,
+            }
+            if initial_dir:
+                kwargs["initialdir"] = initial_dir
+            path = filedialog.asksaveasfilename(**kwargs)
+            return _as_fms(path or None)
+        finally:
+            root.destroy()
