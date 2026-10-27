@@ -53,7 +53,7 @@ body {
   position: fixed;
   top: 0;
   left: 0;
-  z-index: 10200;
+  z-index: 10220;
   max-width: min(320px, calc(100vw - 24px));
   padding: var(--tip-pad);
   border: 1px solid var(--tip-line);
@@ -317,11 +317,15 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   cursor: pointer;
 }
 .file-menu-login:hover { background: color-mix(in srgb, var(--accent) 16%, var(--card)); }
-#settings-pack-modal { z-index: 80; }
+#settings-pack-modal.open,
+#token-pack-modal.open,
+#voice-info-modal.open,
+#remote-guide-modal.open,
+#device-info-modal.open { z-index: 10090 !important; }
 .modal-card.settings-pack-modal { width: min(420px, 100%); }
 .settings-pack-list { display: grid; gap: 8px; margin: 0 0 14px; }
-.settings-pack-check { justify-content: flex-start; }
-.settings-pack-check small { margin-left: auto; color: var(--muted); font-weight: 500; }
+.settings-pack-check { justify-content: flex-start; align-items: flex-start; }
+.settings-pack-check > small { margin-left: auto; color: var(--muted); font-weight: 500; }
 .modal-card p.settings-pack-warn { margin: 0 0 12px; color: var(--danger); font-size: 13px; font-weight: 650; line-height: 1.4; }
 .settings-pack-bar { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
 .settings-pack-bar > span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
@@ -2022,9 +2026,64 @@ html[data-theme="dark"] .line-menu { background: #1b2538; border-color: var(--li
   .update-versions { grid-template-columns: 1fr; }
 }
 
-.report-settings-modal {
-  width: min(440px, 100%);
+.report-settings-modal,
+.app-settings-modal {
+  width: min(640px, calc(100vw - 32px));
+  max-height: min(86vh, 760px);
+  display: flex;
+  flex-direction: column;
 }
+.app-settings-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.app-settings-tab {
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.app-settings-tab.is-on { color: var(--ink); border-color: var(--accent-2); background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
+.app-settings-body { overflow: auto; min-height: 0; }
+.app-settings-pane[hidden] { display: none !important; }
+.app-settings-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.app-settings-login { margin-bottom: 8px; }
+.voice-models { display: grid; gap: 8px; }
+.voice-model {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.voice-model.is-on { border-color: color-mix(in srgb, var(--accent) 48%, var(--line)); }
+.voice-model b { display: block; }
+.voice-model small { color: var(--muted); }
+.voice-model-actions { display: flex; gap: 6px; align-items: center; }
+.voice-job { display: grid; gap: 8px; margin: 0 0 12px; }
+.voice-job[hidden] { display: none !important; }
+.voice-job-head { display: flex; align-items: center; gap: 10px; }
+.voice-job-head b { flex: 1; min-width: 0; font-size: 13px; font-weight: 650; }
+.remote-tg-users, .remote-tg-pending { display: grid; gap: 8px; margin-bottom: 10px; }
+.remote-tg-person {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-2);
+}
+.remote-tg-person span { min-width: 0; }
+.remote-tg-person b, .remote-tg-person small { display: block; }
+.remote-tg-person small { color: var(--muted); }
+.remote-tg-person .btn:first-of-type { margin-left: auto; }
+.settings-pack-check > span { display: grid; min-width: 0; }
+.settings-pack-check > span small { color: var(--muted); font-size: 12px; font-weight: 500; }
 .runtime-modal { width: min(520px, 100%); }
 .runtime-lead { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.45; }
 .runtime-choice {

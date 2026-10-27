@@ -427,3 +427,63 @@ def save_settings_dialog(suggested: str = "Настройки.fms", initial_dir:
             return _as_fms(path or None)
         finally:
             root.destroy()
+
+
+def _as_fmt(path: str | None) -> str | None:
+    if not path:
+        return None
+    root, ext = os.path.splitext(path)
+    if ext.lower() != ".fmt":
+        path = root + ".fmt"
+    return path
+
+
+def open_tokens_dialog(initial_dir: str = "") -> str | None:
+    pairs = [("Токены FinMaster", "*.fmt"), ("Все файлы", "*.*")]
+    if not _tk_ready():
+        return _native_dialog(save=False, title="Импорт токенов FinMaster", pairs=pairs, initial_dir=initial_dir)
+    from tkinter import filedialog
+
+    with _lock:
+        root = _root()
+        try:
+            kwargs: dict[str, Any] = {"parent": root, "title": "Импорт токенов FinMaster", "filetypes": pairs}
+            if initial_dir:
+                kwargs["initialdir"] = initial_dir
+            path = filedialog.askopenfilename(**kwargs)
+            return path or None
+        finally:
+            root.destroy()
+
+
+def save_tokens_dialog(suggested: str = "Токены.fmt", initial_dir: str = "") -> str | None:
+    pairs = [("Токены FinMaster", "*.fmt"), ("Все файлы", "*.*")]
+    if not _tk_ready():
+        return _as_fmt(
+            _native_dialog(
+                save=True,
+                title="Экспорт токенов FinMaster",
+                pairs=pairs,
+                initial_dir=initial_dir,
+                initial_file=suggested,
+                default_ext=".fmt",
+            )
+        )
+    from tkinter import filedialog
+
+    with _lock:
+        root = _root()
+        try:
+            kwargs: dict[str, Any] = {
+                "parent": root,
+                "title": "Экспорт токенов FinMaster",
+                "defaultextension": ".fmt",
+                "filetypes": pairs,
+                "initialfile": suggested,
+            }
+            if initial_dir:
+                kwargs["initialdir"] = initial_dir
+            path = filedialog.asksaveasfilename(**kwargs)
+            return _as_fmt(path or None)
+        finally:
+            root.destroy()

@@ -64,16 +64,25 @@
             <span>Токен Telegram-бота</span>
             <input type="password" value="123456:AAF-example" readonly tabindex="-1" aria-label="Токен">
           </label>
-          <label class="field">
-            <span>Chat id <small>(необязательно — заполнится, когда напишете боту)</small></span>
-            <input type="text" value="123456789" readonly tabindex="-1" aria-label="Chat id">
-          </label>
+          <div class="remote-tg-pending">
+            <div class="remote-tg-person">
+              <span><b>@ivan</b><small>id 123456789</small></span>
+              <button type="button" class="btn small" tabindex="-1">Отклонить</button>
+              <button type="button" class="btn small primary" tabindex="-1">Добавить</button>
+            </div>
+          </div>
+          <div class="remote-tg-users">
+            <div class="remote-tg-person">
+              <span><b>@master</b><small>id 987654321</small></span>
+              <button type="button" class="btn small danger" tabindex="-1">Удалить</button>
+            </div>
+          </div>
           <div class="remote-tg-actions">
             <button type="button" class="btn small" tabindex="-1">Запомнить токен</button>
             <button type="button" class="btn small" tabindex="-1">Проверить связь</button>
             <button type="button" class="btn small primary" tabindex="-1">Отправить ссылку сейчас</button>
           </div>
-          <div class="remote-ngrok-status">Бот на связи. Отвечает одному чату.</div>
+          <div class="remote-ngrok-status">Бот на связи. Отвечает подтверждённым чатам.</div>
         </div>
       </div>
     </div>
@@ -104,6 +113,7 @@
         </div>
         <div class="row">
           <button type="button" class="btn small" tabindex="-1">Новая ссылка</button>
+          <button type="button" class="btn small" tabindex="-1">Голос</button>
         </div>
       </div>
     </div>

@@ -102,3 +102,12 @@ body {
   z-index: auto !important;
 }
 .stage .dictionary-body { min-height: 480px; }
+
+/* В окне программы карточка ограничена высотой экрана. В справке она должна вырасти целиком, иначе низ вкладки ложится на подпись. */
+.modal-card.app-settings-modal {
+  position: relative !important;
+  width: min(640px, 100%) !important;
+  max-height: none !important;
+  height: auto !important;
+  overflow: visible !important;
+}

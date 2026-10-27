@@ -6,14 +6,17 @@
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="stage.css">
   <link rel="stylesheet" href="stand.css">
-  <style>
-    .modal-card { position: relative; }
-  </style>
 </head>
 <body>
-  <p class="hint">Окно «Настройки отчёта» из верхней панели. Валюта и знаки после запятой живут в файле отчёта.</p>
-  <div class="modal-card report-settings-modal">
-    <h3>Настройки отчёта</h3>
+  <p class="hint">Вкладка «Отчёт» в окне настроек. Валюта и знаки после запятой живут в файле отчёта.</p>
+  <div class="modal-card app-settings-modal">
+    <h3>Настройки</h3>
+    <div class="app-settings-tabs">
+      <button type="button" class="app-settings-tab" tabindex="-1">Программа</button>
+      <button type="button" class="app-settings-tab is-on" tabindex="-1">Отчёт</button>
+      <button type="button" class="app-settings-tab" tabindex="-1">Голос</button>
+      <button type="button" class="app-settings-tab" tabindex="-1">Среда</button>
+    </div>
     <p class="report-settings-lead">Файл, автосохранение, валюта и округление сумм во всём отчёте — таблицы, графики, мобильный и Telegram.</p>
     <div class="report-settings-block">
       <div class="report-settings-label">Файл</div>
@@ -40,9 +43,6 @@
         <button type="button" class="report-decimals-chip" tabindex="-1">0.000</button>
       </div>
       <div class="report-settings-preview">Пример: 1 234,56 ₽</div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn ghost" type="button" tabindex="-1">Закрыть</button>
     </div>
   </div>
   <script src="chrome.js"></script>

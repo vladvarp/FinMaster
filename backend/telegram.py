@@ -241,7 +241,7 @@ def _menu_keyboard(app_url: str = "") -> dict[str, Any]:
         tools.append({"text": "Интерфейс ПК"})
     if tools:
         rows.append(tools)
-    rows.append([{"text": "Новая ссылка"}])
+    rows.append([{"text": "Новая ссылка"}, {"text": "Голос"}])
     return {
         "keyboard": rows,
         "resize_keyboard": True,
@@ -1034,7 +1034,7 @@ def welcome_text(info: Any = None) -> str:
         "<b>FinMaster</b>\n"
         "отчёты, заказы и снимки прямо здесь\n\n"
         f"{channel_block(info)}\n\n"
-        "Кнопки внизу: <b>Отчёты</b>, <b>Заказы</b>, <b>Снимок</b>, <b>Ссылка</b>, <b>Хранилище</b>, <b>Интерфейс ПК</b>, <b>Новая ссылка</b>.\n"
+        "Кнопки внизу: <b>Отчёты</b>, <b>Заказы</b>, <b>Снимок</b>, <b>Ссылка</b>, <b>Хранилище</b>, <b>Интерфейс ПК</b>, <b>Новая ссылка</b>, <b>Голос</b>.\n"
         "«Открыть» — телефон. «Хранилище» — копилки на телефоне. «Интерфейс ПК» — тот же экран, что на компьютере.\n"
         "Голосом или текстом можно спросить долги, заказы, кассу, календарь, заказчика — отвечу по открытому отчёту.\n"
         "В списке заказов можно написать имя или номер — найду."
@@ -1153,7 +1153,7 @@ def send_link(token: str, chat_id: str, url: str, info: Any = None) -> str:
         raise RuntimeError("Вставьте токен бота от @BotFather.")
     cid = str(chat_id or "").strip()
     if not cid:
-        raise RuntimeError("Напишите боту /start — chat id подставится сам. Или вставьте его вручную.")
+        raise RuntimeError("Нет подтверждённых пользователей. Пусть человек напишет боту — запрос придёт в окно «Телефон».")
     send_access(token, cid, url, info)
     return cid
 
@@ -1173,6 +1173,7 @@ def setup_bot(token: str) -> None:
                     {"command": "bank", "description": "Хранилище на телефоне"},
                     {"command": "newlink", "description": "Новая ссылка на телефон"},
                     {"command": "ask", "description": "Спросить по открытому отчёту"},
+                    {"command": "voice", "description": "Модель распознавания речи"},
                 ]
             },
         )
@@ -1284,6 +1285,9 @@ class TelegramBot:
         self._on_access: Callable[[bool], Any] | None = None
         self._skip = True
         self._chats: dict[str, ChatSession] = {}
+        self._group_told: set[str] = set()
+        self._declined_told: set[str] = set()
+        self._voice_watch: threading.Thread | None = None
 
     def _busy(
         self,
@@ -1343,9 +1347,14 @@ class TelegramBot:
         token, _, running = self._state()
         if not token or not running:
             raise RuntimeError("Бот Telegram выключен. Включите его в окне «Телефон».")
-        chat_id = str(storage.remote_settings().get("telegram_chat_id") or "").strip()
+        people = storage.remote_settings().get("telegram_users") or []
+        chat_id = ""
+        if user_id:
+            chat_id = next((str(item.get("id") or "") for item in people if str(item.get("id") or "") == str(user_id)), "")
+        if not chat_id and people:
+            chat_id = str(people[0].get("id") or "")
         if not chat_id:
-            raise RuntimeError("Напишите боту /start — без привязанного чата снимок некуда отправить.")
+            raise RuntimeError("Нет подтверждённого чата. Пусть человек напишет боту и подтвердите запрос в окне «Телефон».")
         name = str(filename or "finmaster-snapshot.png").replace("\\", "_").replace("/", "_")
         if not name.lower().endswith(".png"):
             name = f"{name}.png"
@@ -1438,12 +1447,34 @@ class TelegramBot:
                 self._chats[chat_id] = session
             return session
 
-    def _authorized(self, chat_id: str) -> bool:
-        saved = str(storage.remote_settings().get("telegram_chat_id") or "")
-        if not saved:
-            storage.save_remote_settings(telegram_chat_id=str(chat_id))
+    def _admit(self, token: str, chat_id: str, sender: dict[str, Any] | None = None, text: str = "") -> bool:
+        from backend import secrets as token_store
+
+        person = sender if isinstance(sender, dict) else {}
+        username = str(person.get("username") or "")
+        name = " ".join(part for part in (str(person.get("first_name") or ""), str(person.get("last_name") or "")) if part).strip()
+        low = text.lower().strip()
+        restart = low in {"/start", "start"} or low.startswith("/start@")
+        state = token_store.ask(str(chat_id), username, name, restart=restart)
+        if state == "allowed":
+            self._declined_told.discard(str(chat_id))
             return True
-        return saved == str(chat_id)
+        if state == "group":
+            if str(chat_id) not in self._group_told:
+                self._group_told.add(str(chat_id))
+                send_html(token, chat_id, "Напишите боту в личные сообщения. В группе он не отвечает.")
+            return False
+        if state == "new":
+            nick = f"@{username.lstrip('@')}" if username else (name or str(chat_id))
+            send_html(token, chat_id, "Запрос отправлен на компьютер. Дождитесь подтверждения в окне «Телефон».")
+            netlog.add("telegram", f"Запрос доступа: {nick}, id {chat_id}", level="warn", key=f"tg-ask-{chat_id}")
+            return False
+        if state == "declined":
+            if str(chat_id) not in self._declined_told:
+                self._declined_told.add(str(chat_id))
+                send_html(token, chat_id, "Доступ закрыт. Чтобы попросить снова, напишите /start.")
+            return False
+        return False
 
     def _loop(self) -> None:
         while True:
@@ -1503,7 +1534,7 @@ class TelegramBot:
             audio_msg = msg.get("audio") if isinstance(msg.get("audio"), dict) else None
             clip = voice_msg or audio_msg
             if clip and clip.get("file_id"):
-                self._on_voice(token, str(cid), str(clip.get("file_id")))
+                self._on_voice(token, str(cid), str(clip.get("file_id")), sender if isinstance(sender, dict) else {})
                 return
             text = str(msg.get("text") or "").strip()
             netlog.add(
@@ -1512,20 +1543,15 @@ class TelegramBot:
                 source=f"chat {cid}",
                 key=f"tg-msg-{cid}",
             )
-            self._on_text(token, str(cid), text)
+            self._on_text(token, str(cid), text, sender=sender if isinstance(sender, dict) else {})
             with self._lock:
                 self._error = ""
         except RuntimeError as exc:
             with self._lock:
                 self._error = str(exc)
 
-    def _on_voice(self, token: str, chat_id: str, file_id: str) -> None:
-        if not self._authorized(chat_id):
-            send_html(
-                token,
-                chat_id,
-                "Этот бот уже привязан к другому чату. В FinMaster → Телефон очистите Chat id, если хотите сменить аккаунт.",
-            )
+    def _on_voice(self, token: str, chat_id: str, file_id: str, sender: dict[str, Any] | None = None) -> None:
+        if not self._admit(token, chat_id, sender):
             return
         with self._busy(token, chat_id, "Слушаю запись…", bar=True, action="record_voice") as busy:
             try:
@@ -1555,20 +1581,15 @@ class TelegramBot:
         send_html(token, chat_id, f"Услышал: <i>{html_esc(heard)}</i>")
         self._on_text(token, chat_id, heard, voice=True)
 
-    def _on_text(self, token: str, chat_id: str, text: str, voice: bool = False) -> None:
+    def _on_text(self, token: str, chat_id: str, text: str, voice: bool = False, sender: dict[str, Any] | None = None) -> None:
+        if not self._admit(token, chat_id, sender, text):
+            return
         low = text.lower()
         info = self._status_for(chat_id)
         if low in ASK_MENU or not text:
             self._chat(chat_id).pending_ask = ""
             send_welcome(token, chat_id, info)
             self._show(token, chat_id, "home")
-            return
-        if not self._authorized(chat_id):
-            send_html(
-                token,
-                chat_id,
-                "Этот бот уже привязан к другому чату. В FinMaster → Телефон очистите Chat id, если хотите сменить аккаунт.",
-            )
             return
         busy_label = "Разбираю голос…" if voice else "Читаю запрос…"
         with self._busy(token, chat_id, busy_label, action="typing"):
@@ -1594,6 +1615,9 @@ class TelegramBot:
             return
         if low in ASK_NEW_LINK:
             self._ask_new_link(token, chat_id)
+            return
+        if low in {"/voice", "voice", "голос", "модель голоса", "модели голоса"} or low.startswith("/voice@"):
+            self._show_voice(token, chat_id)
             return
         if low in ASK_REPORTS:
             self._show(token, chat_id, "reports")
@@ -1755,6 +1779,9 @@ class TelegramBot:
         if cid is None:
             return
         chat_id = str(cid)
+        sender = query.get("from") if isinstance(query.get("from"), dict) else {}
+        if not self._admit(token, chat_id, sender):
+            return
         labels = {
             "H": "меню",
             "R": "отчёты",
@@ -1804,8 +1831,8 @@ class TelegramBot:
         if data == "Ny":
             self._rotate_link(token, chat_id)
             return
-        if not self._authorized(chat_id):
-            send_html(token, chat_id, "Этот бот уже привязан к другому чату.")
+        if data == "Vx" or data.startswith(("Vu:", "Vg:", "Vi:")):
+            self._voice_action(token, chat_id, data)
             return
         session = self._chat(chat_id)
         if mid is not None:
@@ -1832,6 +1859,137 @@ class TelegramBot:
             return
         session = self._chat(chat_id)
         send_access(token, chat_id, str(flags.get("url") or ""), flags, session.message_id)
+
+    def _show_voice(self, token: str, chat_id: str) -> None:
+        data = voice.catalog()
+        lines = ["<b>Модели речи</b>", "Распознавание идёт на этом компьютере. Запись никуда не отправляется."]
+        rows: list[list[dict[str, Any]]] = []
+        for model in data.get("models") or []:
+            if not isinstance(model, dict) or not model.get("code"):
+                continue
+            job = data.get("job") if isinstance(data.get("job"), dict) else {}
+            busy = bool(job.get("running") and job.get("model") == model.get("id"))
+            mark = " · рабочая" if model.get("active") else ""
+            if busy:
+                state = f"скачивается, {int(job.get('progress') or 0)}%"
+            elif model.get("ready"):
+                state = "скачана"
+            else:
+                state = f"можно скачать, {model.get('size') or 'размер неизвестен'}"
+            lines.append(f"\n<b>{html_esc(str(model.get('label') or ''))}</b>{mark}\n{html_esc(state)}")
+            code = str(model.get("code") or "")
+            row: list[dict[str, Any]] = []
+            if busy:
+                row.append(_btn("Отменить", "Vx"))
+            elif model.get("ready") and not model.get("active"):
+                row.append(_btn("Включить", f"Vu:{code}"))
+            elif not model.get("ready"):
+                row.append(_btn("Скачать", f"Vg:{code}"))
+            row.append(_btn("i", f"Vi:{code}"))
+            rows.append(row)
+        rows.append([_btn("Меню", "H")])
+        send_html(token, chat_id, "\n".join(lines), _inline(rows))
+
+    def _voice_action(self, token: str, chat_id: str, data: str) -> None:
+        if data == "Vx":
+            job = voice.cancel_download()
+            with self._lock:
+                live = self._voice_watch is not None and self._voice_watch.is_alive()
+            if not live:
+                if job.get("running") or job.get("text") == "Отмена…":
+                    send_html(token, chat_id, "Отменяю скачивание…")
+                else:
+                    send_html(token, chat_id, "Сейчас ничего не скачивается.")
+            return
+        code = data.split(":", 1)[1] if ":" in data else ""
+        model_id = voice.id_of(code)
+        if not model_id:
+            send_html(token, chat_id, "Такой модели нет.")
+            return
+        spec = next((item for item in voice.CATALOG if item["id"] == model_id), None)
+        label = str((spec or {}).get("label") or model_id)
+        if data.startswith("Vi:"):
+            send_html(token, chat_id, f"<b>{html_esc(label)}</b>\n{html_esc(voice.describe(model_id))}")
+            return
+        if data.startswith("Vu:"):
+            try:
+                voice.set_active(model_id)
+            except voice.VoiceError as exc:
+                send_html(token, chat_id, html_esc(str(exc)))
+                return
+            send_html(token, chat_id, f"Рабочая модель: <b>{html_esc(label)}</b>.")
+            self._show_voice(token, chat_id)
+            return
+        try:
+            snap = voice.start_download(model_id)
+        except voice.VoiceError as exc:
+            send_html(token, chat_id, html_esc(str(exc)))
+            return
+        except RuntimeError:
+            snap = voice.job_snapshot()
+        if not snap.get("running"):
+            if snap.get("ok") and voice.model_ready(model_id):
+                send_html(token, chat_id, f"<b>{html_esc(label)}</b> уже скачана.")
+                self._show_voice(token, chat_id)
+            return
+        self._arm_voice_watch(token, chat_id, label)
+
+    def _arm_voice_watch(self, token: str, chat_id: str, label: str) -> None:
+        with self._lock:
+            live = self._voice_watch is not None and self._voice_watch.is_alive()
+            if live:
+                send_html(token, chat_id, "Скачивание уже идёт. Отменить можно кнопкой в том сообщении.")
+                return
+            thread = threading.Thread(
+                target=self._voice_job_loop,
+                args=(token, chat_id, label),
+                name="fm-voice-job",
+                daemon=True,
+            )
+            self._voice_watch = thread
+            thread.start()
+
+    def _voice_job_html(self, job: dict[str, Any]) -> str:
+        ratio = max(0, min(100, int(job.get("progress") or 0))) / 100
+        bar = _progress_bar_determinate(ratio)
+        text = html_esc(str(job.get("text") or "Скачиваю модель…"))
+        pct = f"{int(round(ratio * 100)):>3}%"
+        return f"<b>{text}</b>\n<pre>▏{bar}▕\n{pct}</pre>"
+
+    def _voice_job_loop(self, token: str, chat_id: str, label: str) -> None:
+        keyboard = _inline([[_btn("Отменить", "Vx")]])
+        html = self._voice_job_html(voice.job_snapshot())
+        mid = send_html(token, chat_id, html, keyboard)
+        last = html
+        while voice.job_snapshot().get("running"):
+            time.sleep(1)
+            job = voice.job_snapshot()
+            if not job.get("running"):
+                break
+            html = self._voice_job_html(job)
+            if html == last or mid is None:
+                continue
+            last = html
+            try:
+                send_html(token, chat_id, html, keyboard, message_id=mid)
+            except RuntimeError:
+                pass
+        job = voice.job_snapshot()
+        empty = _inline([])
+        if job.get("cancelled"):
+            send_html(token, chat_id, "Скачивание отменено.", empty, message_id=mid)
+            return
+        if job.get("error"):
+            send_html(token, chat_id, html_esc(str(job.get("error"))), empty, message_id=mid)
+            return
+        send_html(
+            token,
+            chat_id,
+            f"<b>{html_esc(label)}</b> скачана. Можно включить её кнопкой ниже.",
+            empty,
+            message_id=mid,
+        )
+        self._show_voice(token, chat_id)
 
     def _dispatch(self, token: str, chat_id: str, data: str) -> None:
         session = self._chat(chat_id)

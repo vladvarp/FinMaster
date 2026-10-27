@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+</head>
+<body>
+  <p class="hint">Вкладка «Среда». Её нет, если Python лежит в папке программы.</p>
+  <div class="modal-card app-settings-modal">
+    <h3>Настройки</h3>
+    <div class="app-settings-tabs">
+      <button type="button" class="app-settings-tab" tabindex="-1">Программа</button>
+      <button type="button" class="app-settings-tab" tabindex="-1">Отчёт</button>
+      <button type="button" class="app-settings-tab" tabindex="-1">Голос</button>
+      <button type="button" class="app-settings-tab is-on" tabindex="-1">Среда</button>
+    </div>
+    <p class="runtime-lead">По умолчанию программа запускается из папки FinMaster. Библиотеки ставятся туда же.</p>
+    <label class="runtime-choice is-on"><input type="radio" checked tabindex="-1"><span><b>Папка FinMaster</b><small>Документы\FinMaster\python</small></span></label>
+    <label class="runtime-choice"><input type="radio" tabindex="-1"><span><b>Системный Python</b><small>Уже установлен в Windows</small></span></label>
+    <div class="runtime-block">
+      <div class="runtime-label">Папка FinMaster</div>
+      <div class="runtime-path">Документы\FinMaster\python</div>
+      <div class="runtime-lib">flask <b>есть</b></div>
+      <div class="runtime-lib">pywebview <b>есть</b></div>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

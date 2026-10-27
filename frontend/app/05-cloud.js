@@ -2170,13 +2170,33 @@
       return existing;
     }
 
+    function topLayer() {
+      const nodes = [...document.querySelectorAll(".modal.open, .dictionary-layer.open, .net-console:not([hidden]), .palette.open")];
+      let best = null;
+      let bestZ = -1;
+      nodes.forEach((el) => {
+        if (el.hidden) return;
+        const z = parseInt(getComputedStyle(el).zIndex, 10) || 0;
+        const later = best && !!(best.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+        if (!best || z > bestZ || (z === bestZ && later)) {
+          best = el;
+          bestZ = z;
+        }
+      });
+      return best;
+    }
+
     function findTipTarget(start) {
       let el = start;
+      const layer = topLayer();
       for (let i = 0; i < 8 && el && el !== document.body; i += 1) {
         if (isTipChrome(el)) return null;
         if (el.getAttribute?.("data-no-tip") === "1") return null;
         const text = migrateTitle(el) || String(el.getAttribute?.("data-tip") || "").trim();
-        if (text) return el;
+        if (text) {
+          if (layer && !layer.contains(el)) return null;
+          return el;
+        }
         el = el.parentElement;
       }
       return null;
@@ -2426,35 +2446,201 @@
   }
 
   async function openRuntime() {
-    $("runtime-modal")?.classList.add("open");
-    try {
-      await refreshRuntime();
-    } catch (err) {
-      toast(err.message || "Не удалось прочитать среду запуска");
-    }
+    openAppSettings("runtime");
   }
 
   function closeRuntime() {
     stopRuntimePoll();
-    $("runtime-modal")?.classList.remove("open");
+    if ($("app-settings-modal")?.classList.contains("open") && document.querySelector(".app-settings-tab.is-on")?.dataset.settingsTab === "runtime") {
+      showSettingsTab("program");
+    }
   }
 
   function applyRuntimeMenu(show) {
-    const button = $("btn-runtime");
-    const sep = $("runtime-menu-sep");
-    if (button) button.hidden = !show;
-    if (sep) sep.hidden = !show;
+    const tab = $("settings-tab-runtime");
+    if (tab) tab.hidden = !show;
+    if (!show && document.querySelector(".app-settings-tab.is-on")?.dataset.settingsTab === "runtime") {
+      showSettingsTab("program");
+    }
+  }
+
+  function showSettingsTab(name) {
+    const tab = name === "runtime" && $("settings-tab-runtime")?.hidden ? "program" : name;
+    document.querySelectorAll("[data-settings-tab]").forEach((btn) => {
+      btn.classList.toggle("is-on", btn.dataset.settingsTab === tab);
+    });
+    document.querySelectorAll("[data-settings-pane]").forEach((pane) => {
+      pane.hidden = pane.dataset.settingsPane !== tab;
+    });
+    if (tab !== "runtime") stopRuntimePoll();
+    if (tab === "runtime") {
+      refreshRuntime().catch((err) => toast(err.message || "Не удалось прочитать среду запуска"));
+    }
+    if (tab === "voice") loadVoiceModels().catch((err) => toast(err.message || "Не удалось прочитать модели"));
+    if (tab === "report") updateChrome();
+    if (tab === "program") paintWindowsLogin();
+  }
+
+  function openAppSettings(tab) {
+    $("app-settings-modal")?.classList.add("open");
+    showSettingsTab(tab || "program");
+    refreshVoiceJob().catch(() => {});
+  }
+
+  function closeAppSettings() {
+    stopRuntimePoll();
+    $("voice-info-modal")?.classList.remove("open");
+    $("app-settings-modal")?.classList.remove("open");
+  }
+
+  let voicePoll = 0;
+  let voiceJobLive = false;
+
+  function stopVoicePoll() {
+    if (!voicePoll) return;
+    clearInterval(voicePoll);
+    voicePoll = 0;
+  }
+
+  function paintSettingsJobMark(job) {
+    const btn = $("btn-settings");
+    if (!btn) return;
+    const running = !!job?.running;
+    const pct = Math.max(0, Math.min(100, Number(job?.progress) || 0));
+    const text = running ? `${job.text || "Скачиваю модель"} · ${pct}%` : "Настройки";
+    btn.dataset.tip = text;
+    btn.setAttribute("aria-label", text);
+  }
+
+  function paintVoiceProgress(job) {
+    const box = $("voice-job");
+    if (!box) return;
+    const running = !!job?.running;
+    box.hidden = !running;
+    paintSettingsJobMark(running ? job : null);
+    if (!running) return;
+    const pct = Math.max(0, Math.min(100, Number(job.progress) || 0));
+    const text = $("voice-job-text");
+    if (text) text.textContent = `${job.text || "Скачиваю модель…"} · ${pct}%`;
+    const bar = $("voice-job-bar");
+    if (bar) bar.style.width = `${pct}%`;
+  }
+
+  function paintVoiceModels(data) {
+    const box = $("voice-models");
+    if (!box) return;
+    const rows = data?.models || [];
+    const job = data?.job;
+    box.innerHTML = rows.map((model) => {
+      const busy = !!(job?.running && job.model === model.id);
+      return `
+      <article class="voice-model${model.active ? " is-on" : ""}">
+        <div>
+          <b>${esc(model.label || model.id)}</b>
+          <small>${esc(model.size || "размер неизвестен")}${busy ? " · скачивается" : model.ready ? " · скачана" : " · можно скачать"}${model.active ? " · рабочая" : ""}</small>
+        </div>
+        <div class="voice-model-actions">
+          <button type="button" class="info-btn" data-voice-info="${esc(model.id)}" aria-label="Описание модели">i</button>
+          ${model.ready && !model.active ? `<button type="button" class="btn small" data-voice-use="${esc(model.id)}">Сделать рабочей</button>` : ""}
+          ${model.ready || busy ? "" : `<button type="button" class="btn small" data-voice-get="${esc(model.id)}">Скачать</button>`}
+        </div>
+      </article>`;
+    }).join("") || '<p class="report-settings-hint">Моделей пока нет.</p>';
+    box.dataset.about = JSON.stringify(Object.fromEntries(rows.map((model) => [model.id, { label: model.label, about: model.about }])));
+    paintVoiceProgress(job);
+  }
+
+  async function loadVoiceModels() {
+    const data = await apiGet("/api/voice/models");
+    paintVoiceModels(data);
+    if (data?.job?.running) watchVoiceJob();
+  }
+
+  async function refreshVoiceJob() {
+    const job = await apiGet("/api/voice/job");
+    paintVoiceProgress(job);
+    if (job.running) watchVoiceJob();
+  }
+
+  function watchVoiceJob() {
+    if (voicePoll) return;
+    voicePoll = setInterval(async () => {
+      try {
+        const job = await apiGet("/api/voice/job");
+        const running = !!job.running;
+        const started = running && !voiceJobLive;
+        const finished = voiceJobLive && !running;
+        if (running || voiceJobLive) paintVoiceProgress(job);
+        voiceJobLive = running;
+        const settingsOpen = $("app-settings-modal")?.classList.contains("open");
+        if (started && settingsOpen) await loadVoiceModels();
+        if (!finished) return;
+        if (job.cancelled) toast("Скачивание отменено");
+        else if (job.error) toast(job.error);
+        else if (job.ok) toast("Модель скачана");
+        if (settingsOpen) await loadVoiceModels();
+      } catch { /* локальный опрос скачивания */ }
+    }, 800);
+  }
+
+  function bindAppSettings() {
+    watchVoiceJob();
+    $("btn-settings")?.addEventListener("click", () => openAppSettings("program"));
+    $("app-settings-close")?.addEventListener("click", closeAppSettings);
+    $("app-settings-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("app-settings-modal")) closeAppSettings();
+    });
+    document.querySelector(".app-settings-tabs")?.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-settings-tab]");
+      if (!btn || btn.hidden) return;
+      showSettingsTab(btn.dataset.settingsTab);
+    });
+    $("voice-models")?.addEventListener("click", async (e) => {
+      const info = e.target.closest("[data-voice-info]");
+      const use = e.target.closest("[data-voice-use]");
+      const get = e.target.closest("[data-voice-get]");
+      if (info) {
+        let about = {};
+        try { about = JSON.parse($("voice-models")?.dataset.about || "{}"); } catch { about = {}; }
+        const row = about[info.dataset.voiceInfo] || {};
+        const title = $("voice-info-title");
+        const text = $("voice-info-text");
+        if (title) title.textContent = row.label || "Модель";
+        if (text) text.textContent = row.about || "";
+        $("voice-info-modal")?.classList.add("open");
+        return;
+      }
+      try {
+        if (use) {
+          paintVoiceModels(await apiPost("/api/voice/use", { id: use.dataset.voiceUse }));
+          toast("Рабочая модель переключена");
+        } else if (get) {
+          await apiPost("/api/voice/download", { id: get.dataset.voiceGet });
+          await loadVoiceModels();
+        }
+      } catch (err) {
+        toast(err.message || "Не удалось изменить модель");
+      }
+    });
+    $("voice-job-cancel")?.addEventListener("click", async () => {
+      const btn = $("voice-job-cancel");
+      if (btn) btn.disabled = true;
+      try {
+        paintVoiceProgress(await apiPost("/api/voice/cancel", {}));
+      } catch (err) {
+        toast(err.message || "Не удалось отменить скачивание");
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    });
+    $("voice-info-close")?.addEventListener("click", () => $("voice-info-modal")?.classList.remove("open"));
+    $("voice-info-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("voice-info-modal")) $("voice-info-modal").classList.remove("open");
+    });
   }
 
   function bindRuntime() {
-    $("btn-runtime")?.addEventListener("click", () => openRuntime());
-    $("runtime-close")?.addEventListener("click", () => closeRuntime());
-    $("runtime-modal")?.addEventListener("click", (e) => {
-      if (e.target === $("runtime-modal")) closeRuntime();
-    });
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && $("runtime-modal")?.classList.contains("open")) closeRuntime();
-    });
+    bindAppSettings();
   }
 
   function bind() {
@@ -2482,11 +2668,6 @@
       if (!state.doc) return;
       state.doc.title = e.target.value;
       markDirty();
-    });
-    $("btn-report-settings")?.addEventListener("click", () => openReportSettings());
-    $("report-settings-close")?.addEventListener("click", () => closeReportSettings());
-    $("report-settings-modal")?.addEventListener("click", (e) => {
-      if (e.target === $("report-settings-modal")) closeReportSettings();
     });
     $("report-currency")?.addEventListener("input", (e) => {
       setCurrency(e.target.value, { refresh: false });
@@ -3899,9 +4080,24 @@
           return;
         }
         if ($("help-modal").classList.contains("open")) $("help-modal").classList.remove("open");
-        if ($("report-settings-modal")?.classList.contains("open")) {
+        if ($("voice-info-modal")?.classList.contains("open")) {
           e.preventDefault();
-          closeReportSettings();
+          $("voice-info-modal").classList.remove("open");
+          return;
+        }
+        if ($("token-pack-modal")?.classList.contains("open")) {
+          e.preventDefault();
+          $("token-pack-modal").classList.remove("open");
+          return;
+        }
+        if ($("settings-pack-modal")?.classList.contains("open")) {
+          e.preventDefault();
+          closeSettingsPack();
+          return;
+        }
+        if ($("app-settings-modal")?.classList.contains("open")) {
+          e.preventDefault();
+          closeAppSettings();
           return;
         }
         if ($("device-info-modal")?.classList.contains("open")) {

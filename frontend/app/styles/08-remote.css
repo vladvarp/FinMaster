@@ -27,6 +27,24 @@
   pointer-events: none;
 }
 .phone-live.idle { background: var(--muted); }
+.phone-ask {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--warn);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}
+.phone-ask:not([hidden])::after { content: "!"; }
+.phone-ask:not(:empty)::after { content: none; }
 .phone-live.idle::after { content: "•"; }
 @keyframes phone-pop {
   from { transform: scale(0.4); opacity: 0; }

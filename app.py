@@ -15,19 +15,21 @@ from flask import Flask, g, jsonify, redirect, request, send_from_directory
 
 from backend import ask
 from backend import dictionary
-from backend import netlog, qr, runtime, settings_pack, storage
+from backend import netlog, qr, runtime, secrets, settings_pack, storage, voice
 from backend.backup import is_backup_path
 from backend import backup as report_backup
 from backend.dialogs import (
     open_dictionary_dialog,
     open_report_dialog,
     open_settings_dialog,
+    open_tokens_dialog,
     save_csv_dialog,
     save_dictionary_dialog,
     save_pdf_dialog,
     save_png_dialog,
     save_report_dialog,
     save_settings_dialog,
+    save_tokens_dialog,
 )
 from backend.document import empty_document, normalize_document, now_iso
 from backend.remote import SESSION as REMOTE
@@ -50,6 +52,7 @@ from backend.telegram import BOT as TELEGRAM
 from backend.telegram import send_link as telegram_send_link
 from backend.telegram import set_menu_button as telegram_set_menu
 from backend.telegram import push_open_controls as telegram_push_open
+from backend.telegram import send_html as telegram_send_html
 from backend.tunnel import TUNNEL
 from backend.watch import WATCHER
 from backend.pdf_bridge import PDF_BRIDGE
@@ -701,8 +704,6 @@ def _telegram_sync_menu() -> None:
 def _telegram_live_url(chat_id: str = "") -> dict[str, Any]:
     """Возвращает ссылку и состояние тумблеров. Выключенный доступ сам не поднимает."""
     settings = storage.remote_settings()
-    if chat_id and not settings.get("telegram_chat_id"):
-        settings = storage.save_remote_settings(telegram_chat_id=str(chat_id))
     access_on = bool(REMOTE.enabled)
     ngrok_on = bool(settings.get("ngrok"))
     url = ""
@@ -800,6 +801,8 @@ def _remote_public(ip: str | None = None, via: str | None = None) -> dict[str, A
         "ngrok_ready": bool(settings.get("ngrok_token")),
         "telegram_ready": bool(settings.get("telegram_bot_token")),
         "telegram_chat_id": str(settings.get("telegram_chat_id") or ""),
+        "telegram_users": settings.get("telegram_users") or [],
+        "telegram_pending": settings.get("telegram_pending") or [],
         "telegram_listening": bool(TELEGRAM.snapshot().get("listening")),
         "telegram_error": TELEGRAM.snapshot().get("error") or "",
         "ngrok_installed": bool(tunnel.get("available")),
@@ -1758,6 +1761,170 @@ def api_settings_import():
     return jsonify(snap)
 
 
+def _tell_telegram(chat_id: str, text: str) -> None:
+    settings = storage.remote_settings()
+    token = str(settings.get("telegram_bot_token") or TELEGRAM.token() or "").strip()
+    if not token or not chat_id:
+        return
+    try:
+        telegram_send_html(token, chat_id, text)
+    except Exception:
+        pass
+
+
+@app.get("/api/tokens/bundle")
+def api_tokens_bundle():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    return jsonify({"ok": True, "parts": secrets.export_parts()})
+
+
+@app.post("/api/tokens/export")
+def api_tokens_export():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    path = save_tokens_dialog("Токены.fmt", _settings_folder())
+    if not path:
+        return jsonify({"ok": True, "cancelled": True})
+    try:
+        secrets.write_export(path, list(data.get("ids") or []))
+    except (ValueError, OSError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, "path": path})
+
+
+@app.post("/api/tokens/import/pick")
+def api_tokens_import_pick():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    path = open_tokens_dialog(_settings_folder())
+    if not path:
+        return jsonify({"ok": True, "cancelled": True})
+    try:
+        parts = secrets.inspect_export(path)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, "path": path, "parts": parts})
+
+
+@app.post("/api/tokens/import")
+def api_tokens_import():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        secrets.apply_export(str(data.get("path") or ""), list(data.get("ids") or []))
+    except (ValueError, OSError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    settings = storage.remote_settings()
+    if settings.get("telegram_bot_token"):
+        _start_telegram(settings)
+    if settings.get("ngrok") and REMOTE.enabled:
+        _ensure_tunnel(settings)
+    payload = _remote_public()
+    payload["ok"] = True
+    return jsonify(payload)
+
+
+@app.get("/api/telegram/access")
+def api_telegram_access():
+    if not _is_local() and not _desk_editor():
+        return jsonify({"error": "Только в окне программы."}), 403
+    settings = storage.remote_settings()
+    return jsonify(
+        {
+            "ok": True,
+            "telegram_users": settings.get("telegram_users") or [],
+            "telegram_pending": settings.get("telegram_pending") or [],
+        }
+    )
+
+
+@app.post("/api/telegram/users")
+def api_telegram_users():
+    if not _is_local() and not _desk_editor():
+        return jsonify({"error": "Только в окне программы."}), 403
+    data = request.get_json(silent=True) or {}
+    action = str(data.get("action") or "")
+    chat_id = str(data.get("id") or "").strip()
+    if action == "approve":
+        person = secrets.approve(chat_id)
+        if person:
+            nick = _telegram_nick(person)
+            _tell_telegram(chat_id, f"Доступ открыт{nick}. Можно писать боту.")
+    elif action == "decline":
+        person = secrets.decline(chat_id)
+        if person:
+            _tell_telegram(chat_id, "Доступ не открыли. Чтобы попросить снова, напишите /start.")
+    elif action == "remove":
+        person = secrets.remove_user(chat_id)
+        if person:
+            _tell_telegram(chat_id, "Доступ к боту закрыт. Чтобы попросить снова, напишите /start.")
+    else:
+        return jsonify({"error": "Неизвестное действие."}), 400
+    payload = _remote_public()
+    payload["ok"] = True
+    return jsonify(payload)
+
+
+def _telegram_nick(person: dict[str, Any]) -> str:
+    username = str(person.get("username") or "").strip()
+    name = str(person.get("name") or "").strip()
+    if username:
+        return f", @{username}"
+    if name:
+        return f", {name}"
+    return ""
+
+
+@app.get("/api/voice/models")
+def api_voice_models():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    return jsonify(voice.catalog())
+
+
+@app.get("/api/voice/job")
+def api_voice_job():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    return jsonify(voice.job_snapshot())
+
+
+@app.post("/api/voice/use")
+def api_voice_use():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        voice.set_active(str(data.get("id") or ""))
+    except voice.VoiceError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(voice.catalog())
+
+
+@app.post("/api/voice/download")
+def api_voice_download():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        snap = voice.start_download(str(data.get("id") or ""))
+    except voice.VoiceError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 409
+    return jsonify(snap)
+
+
+@app.post("/api/voice/cancel")
+def api_voice_cancel():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    return jsonify(voice.cancel_download())
+
+
 @app.post("/api/remote/start")
 def api_remote_start():
     data = request.get_json(silent=True) or {}
@@ -1840,10 +2007,6 @@ def api_remote_telegram():
             return jsonify({"error": "Это не токен бота. Скопируйте его целиком у @BotFather."}), 400
         if storage.valid_telegram_token(token):
             updates["telegram_bot_token"] = token
-    if "chat_id" in data:
-        chat = str(data.get("chat_id") or "").strip()
-        if chat:
-            updates["telegram_chat_id"] = chat
     settings = storage.save_remote_settings(**updates) if updates else storage.remote_settings()
     _start_telegram(settings)
     if data.get("send"):
@@ -1852,16 +2015,17 @@ def api_remote_telegram():
         if settings.get("ngrok"):
             _ensure_tunnel(settings)
         payload = _remote_public()
+        people = [item for item in (settings.get("telegram_users") or []) if isinstance(item, dict) and item.get("id")]
+        if not people:
+            return jsonify({**payload, "error": "Нет подтверждённых пользователей. Пусть человек напишет боту."}), 400
         try:
-            chat_id = telegram_send_link(
-                str(settings.get("telegram_bot_token") or ""),
-                str(data.get("chat_id") or settings.get("telegram_chat_id") or ""),
-                str(payload.get("url") or ""),
-                {"access": True, "ngrok": bool(settings.get("ngrok")), "url": payload.get("url") or ""},
-            )
-            if chat_id and chat_id != settings.get("telegram_chat_id"):
-                storage.save_remote_settings(telegram_chat_id=chat_id)
-                payload = _remote_public()
+            for person in people:
+                telegram_send_link(
+                    str(settings.get("telegram_bot_token") or ""),
+                    str(person.get("id") or ""),
+                    str(payload.get("url") or ""),
+                    {"access": True, "ngrok": bool(settings.get("ngrok")), "url": payload.get("url") or ""},
+                )
         except RuntimeError as exc:
             return jsonify({**payload, "error": str(exc)}), 400
         g.netlog_text = "Ссылка отправлена в Telegram"
@@ -1889,7 +2053,7 @@ def _rotate_remote_link() -> dict[str, Any]:
         REMOTE.start(settings["token"])
     payload = _remote_public()
     link = str(payload.get("public_url") or payload.get("url") or "")
-    chats = [str(settings.get("telegram_chat_id") or "")]
+    chats = [str(item.get("id") or "") for item in (settings.get("telegram_users") or []) if isinstance(item, dict)]
     chats.extend(TELEGRAM.chat_ids())
     telegram_push_open(
         str(settings.get("telegram_bot_token") or TELEGRAM.token() or ""),
@@ -2515,6 +2679,10 @@ def main(splash=None) -> None:
             splash.step(text, progress)
 
     report("Чтение настроек…", 40)
+    try:
+        settings_pack.apply_pending_python()
+    except Exception:
+        pass
     cfg = storage.load_config()
     recent = cfg.get("recent") or []
     report(f"Недавних отчётов: {len(recent)}", 46)

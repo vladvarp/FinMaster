@@ -678,12 +678,11 @@
 
   function openReportSettings() {
     updateChrome();
-    $("report-settings-modal")?.classList.add("open");
-    $("report-currency")?.focus();
+    openAppSettings("report");
   }
 
   function closeReportSettings() {
-    $("report-settings-modal")?.classList.remove("open");
+    $("app-settings-modal")?.classList.remove("open");
   }
 
   function showApp() {

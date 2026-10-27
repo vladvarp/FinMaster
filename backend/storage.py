@@ -21,8 +21,8 @@ HISTORY_LIMIT_DEFAULT = 40
 _TELEGRAM_TOKEN_RE = re.compile(r"^\d{5,}:[A-Za-z0-9_-]{20,}$")
 _LOCK = threading.RLock()
 _CACHE: dict[str, Any] | None = None
-_SECRETS = {"ngrok_token": "", "telegram_bot_token": "", "telegram_chat_id": ""}
 _VOLUME_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_REMOTE_SECRET_KEYS = ("ngrok_token", "telegram_bot_token", "telegram_chat_id", "telegram_users", "telegram_pending", "telegram_declined")
 
 
 def config_dir() -> str:
@@ -67,24 +67,12 @@ def valid_ngrok_token(value: str) -> bool:
     return 16 <= len(text) <= 200 and all(ch.isalnum() or ch in "-_." for ch in text)
 
 
-def _remember_secrets(remote: dict[str, Any]) -> None:
-    for key in _SECRETS:
-        value = str(remote.get(key) or "").strip()
-        if not value:
-            continue
-        if key == "telegram_bot_token" and ":" not in value:
-            continue
-        if key == "ngrok_token" and len(value) < 16:
-            continue
-        _SECRETS[key] = value
-
-
-def _fill_secrets(remote: dict[str, Any]) -> dict[str, Any]:
-    _remember_secrets(remote)
-    for key, value in _SECRETS.items():
-        if value and not str(remote.get(key) or "").strip():
-            remote[key] = value
-    return remote
+def _strip_remote_secrets(data: dict[str, Any]) -> None:
+    remote = data.get("remote")
+    if not isinstance(remote, dict):
+        return
+    for key in _REMOTE_SECRET_KEYS:
+        remote.pop(key, None)
 
 
 def load_config() -> dict[str, Any]:
@@ -110,9 +98,15 @@ def load_config() -> dict[str, Any]:
             data["history_limit"] = clamp_history_limit(data.get("history_limit"))
             if data.get("python_runtime") not in {"system", "folder"}:
                 data["python_runtime"] = "folder"
-            if isinstance(data.get("remote"), dict):
-                _fill_secrets(data["remote"])
+            remote = data.get("remote")
+            migrated = False
+            if isinstance(remote, dict):
+                from backend import secrets
+
+                migrated = secrets.absorb_remote(remote)
             _CACHE = _clone(data)
+            if migrated:
+                save_config(data)
             return _clone(data)
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             if _CACHE is not None:
@@ -121,12 +115,13 @@ def load_config() -> dict[str, Any]:
 
 
 def reload_config() -> dict[str, Any]:
-    """Забыть кэш и прочитать config.json с диска. Секреты берутся из этого файла."""
+    """Забыть кэш и прочитать config.json с диска. Токены лежат в отдельном файле."""
     global _CACHE
+    from backend import secrets
+
     with _LOCK:
         _CACHE = None
-        for key in _SECRETS:
-            _SECRETS[key] = ""
+    secrets.forget_cache()
     return load_config()
 
 
@@ -136,12 +131,11 @@ def save_config(data: dict[str, Any]) -> None:
         return
     with _LOCK:
         payload = _clone(data)
+        _strip_remote_secrets(payload)
         remote = payload.get("remote")
-        if isinstance(remote, dict):
-            _fill_secrets(remote)
-            payload["remote"] = remote
-        elif _CACHE and isinstance(_CACHE.get("remote"), dict):
+        if not isinstance(remote, dict) and _CACHE and isinstance(_CACHE.get("remote"), dict):
             payload["remote"] = _clone(_CACHE["remote"])
+            _strip_remote_secrets(payload)
         path = config_path()
         tmp = f"{path}.{os.getpid()}.tmp"
         try:
@@ -748,6 +742,20 @@ def now_local_iso() -> str:
     return datetime.now(timezone.utc).astimezone().replace(microsecond=0).isoformat()
 
 
+def _with_secret_tokens(out: dict[str, Any]) -> dict[str, Any]:
+    from backend import secrets
+
+    data = secrets.load()
+    merged = dict(out)
+    users = list(data.get("users") or [])
+    merged["ngrok_token"] = str(data.get("ngrok_token") or "")
+    merged["telegram_bot_token"] = str(data.get("telegram_bot_token") or "")
+    merged["telegram_users"] = users
+    merged["telegram_pending"] = list(data.get("pending") or [])
+    merged["telegram_chat_id"] = str(users[0]["id"]) if users else ""
+    return merged
+
+
 def remote_settings() -> dict[str, Any]:
     cfg = load_config()
     raw = cfg.get("remote")
@@ -769,10 +777,7 @@ def remote_settings() -> dict[str, Any]:
         "autostart": bool(raw.get("autostart")),
         "devices": devices[:MAX_DEVICES],
         "ngrok": bool(raw.get("ngrok")),
-        "ngrok_token": str(raw.get("ngrok_token") or "").strip(),
         "via": str(raw.get("via") or "lan"),
-        "telegram_bot_token": str(raw.get("telegram_bot_token") or "").strip(),
-        "telegram_chat_id": str(raw.get("telegram_chat_id") or "").strip(),
         "telegram_offset": 0,
     }
     try:
@@ -780,9 +785,9 @@ def remote_settings() -> dict[str, Any]:
     except (TypeError, ValueError):
         out["telegram_offset"] = 0
     if raw.get("token") != token or raw.get("port") != port or not isinstance(cfg.get("remote"), dict):
-        cfg["remote"] = out
+        cfg["remote"] = _clone(out)
         save_config(cfg)
-    return out
+    return _with_secret_tokens(out)
 
 
 def save_remote_settings(**updates: Any) -> dict[str, Any]:
@@ -801,10 +806,11 @@ def save_remote_settings(**updates: Any) -> dict[str, Any]:
         data["devices"] = [d for d in updates["devices"] if isinstance(d, dict) and d.get("id")][:MAX_DEVICES]
     if "ngrok" in updates:
         data["ngrok"] = bool(updates["ngrok"])
+    secret_updates: dict[str, str] = {}
     if "ngrok_token" in updates:
         token_value = str(updates["ngrok_token"] or "").strip()
         if valid_ngrok_token(token_value):
-            data["ngrok_token"] = token_value
+            secret_updates["ngrok_token"] = token_value
     if "via" in updates:
         data["via"] = "ngrok" if updates["via"] == "ngrok" else "lan"
     if "telegram_bot_token" in updates:
@@ -812,19 +818,23 @@ def save_remote_settings(**updates: Any) -> dict[str, Any]:
         if valid_telegram_token(bot):
             if bot != data.get("telegram_bot_token"):
                 data["telegram_offset"] = 0
-            data["telegram_bot_token"] = bot
-    if "telegram_chat_id" in updates:
-        chat = str(updates["telegram_chat_id"] or "").strip()
-        if chat:
-            data["telegram_chat_id"] = chat
+            secret_updates["telegram_bot_token"] = bot
     if "telegram_offset" in updates:
         try:
             data["telegram_offset"] = max(0, int(updates["telegram_offset"] or 0))
         except (TypeError, ValueError):
             pass
-    cfg["remote"] = data
+    if secret_updates:
+        from backend import secrets
+
+        secrets.update_tokens(**secret_updates)
+    cfg["remote"] = {
+        key: value
+        for key, value in data.items()
+        if key not in ("ngrok_token", "telegram_bot_token", "telegram_chat_id", "telegram_users", "telegram_pending")
+    }
     save_config(cfg)
-    return data
+    return _with_secret_tokens(cfg["remote"])
 
 
 _DEVICE_INFO_KEYS = (

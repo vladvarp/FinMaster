@@ -1,4 +1,4 @@
-"""Привязка .fmaster и .fbak к FinMaster.exe. У .fmwb и .fms только иконка: щелчок их не открывает."""
+"""Привязка .fmaster и .fbak к FinMaster.exe. У .fmwb, .fms и .fmt только иконка: щелчок их не открывает."""
 
 from __future__ import annotations
 
@@ -143,5 +143,7 @@ def register_reports(root: str) -> None:
     changed |= _register_icon(root, ".fmwb", "FinMaster.Dictionary", "Словарь FinMaster", "dictionary.ico", "application/x-finmaster-dictionary")
     changed |= _drop_launch("FinMaster.Settings", ".fms")
     changed |= _register_icon(root, ".fms", "FinMaster.Settings", "Настройки FinMaster", "settings.ico", "application/x-finmaster-settings")
+    changed |= _drop_launch("FinMaster.Tokens", ".fmt")
+    changed |= _register_icon(root, ".fmt", "FinMaster.Tokens", "Токены FinMaster", "tokens.ico", "application/x-finmaster-tokens")
     if changed:
         _notify()

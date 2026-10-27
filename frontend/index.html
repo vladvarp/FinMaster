@@ -46,6 +46,7 @@
           <button class="btn icon phone-btn js-open-remote" type="button" id="btn-start-remote" title="Управление с телефона" aria-label="Управление с телефона">
             <span class="phone-ico" aria-hidden="true"></span>
             <span class="phone-live" hidden></span>
+            <span class="phone-ask" hidden></span>
           </button>
           <button class="btn icon js-theme-toggle" type="button" title="Тема" aria-label="Тема"></button>
         </div>
@@ -96,15 +97,6 @@
             <button type="button" class="btn ghost" id="btn-open" role="menuitem">Открыть</button>
             <button type="button" class="btn ghost" id="btn-save" role="menuitem">Сохранить</button>
             <button type="button" class="btn ghost" id="btn-save-as" role="menuitem">Сохранить как</button>
-            <div class="file-menu-sep" role="separator"></div>
-            <label class="file-menu-login" title="При входе в Windows FinMaster откроется сам, без чёрного окна">
-              <span>Автозагрузка</span>
-              <input type="checkbox" id="remote-windows-login" />
-            </label>
-            <button type="button" class="btn ghost" id="btn-settings-export" role="menuitem" title="Упаковать настройки в архив .fms">Экспорт настроек</button>
-            <button type="button" class="btn ghost" id="btn-settings-import" role="menuitem" title="Заменить отмеченные настройки архивом .fms">Импорт настроек</button>
-            <div class="file-menu-sep" id="runtime-menu-sep" role="separator"></div>
-            <button type="button" class="btn ghost" id="btn-runtime" role="menuitem">Среда запуска</button>
           </div>
         </div>
       </div>
@@ -115,12 +107,6 @@
             <span class="dirty-dot hidden" id="dirty-dot" title="Есть несохранённые изменения" aria-label="Есть несохранённые изменения"></span>
           </div>
           <div class="file-name">
-            <button type="button" class="file-settings-btn" id="btn-report-settings" title="Настройки отчёта: файл, автосохранение, валюта и округление" aria-label="Настройки отчёта">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.8"/>
-                <path d="M19.4 13.5a7.6 7.6 0 0 0 .1-1.5 7.6 7.6 0 0 0-.1-1.5l1.7-1.3-1.6-2.8-2 .8a7.8 7.8 0 0 0-2.6-1.5l-.3-2.1h-3.2l-.3 2.1a7.8 7.8 0 0 0-2.6 1.5l-2-.8-1.6 2.8 1.7 1.3a7.6 7.6 0 0 0-.1 1.5 7.6 7.6 0 0 0 .1 1.5L4.3 14.8l1.6 2.8 2-.8a7.8 7.8 0 0 0 2.6 1.5l.3 2.1h3.2l.3-2.1a7.8 7.8 0 0 0 2.6-1.5l2 .8 1.6-2.8-1.7-1.3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-              </svg>
-            </button>
             <input id="report-title" value="Новый отчёт" maxlength="120" spellcheck="false" />
           </div>
         </div>
@@ -208,6 +194,7 @@
           <button class="btn icon phone-btn js-open-remote" type="button" id="btn-remote" title="Управление с телефона" aria-label="Управление с телефона">
             <span class="phone-ico" aria-hidden="true"></span>
             <span class="phone-live" id="phone-live" hidden></span>
+            <span class="phone-ask" hidden></span>
           </button>
           <button class="btn icon js-theme-toggle" type="button" title="Тема" aria-label="Тема"></button>
           <button class="btn icon" type="button" id="btn-help" title="Горячие клавиши (F1)" aria-label="Горячие клавиши">
@@ -217,6 +204,12 @@
             </svg>
           </button>
           <button class="btn icon" type="button" id="btn-guide" title="Справка" aria-label="Справка">?</button>
+          <button class="btn icon" type="button" id="btn-settings" title="Настройки" aria-label="Настройки">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M19.4 13.5a7.6 7.6 0 0 0 .1-1.5 7.6 7.6 0 0 0-.1-1.5l1.7-1.3-1.6-2.8-2 .8a7.8 7.8 0 0 0-2.6-1.5l-.3-2.1h-3.2l-.3 2.1a7.8 7.8 0 0 0-2.6 1.5l-2-.8-1.6 2.8 1.7 1.3a7.6 7.6 0 0 0-.1 1.5 7.6 7.6 0 0 0 .1 1.5L4.3 14.8l1.6 2.8 2-.8a7.8 7.8 0 0 0 2.6 1.5l.3 2.1h3.2l.3-2.1a7.8 7.8 0 0 0 2.6-1.5l2 .8 1.6-2.8-1.7-1.3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            </svg>
+          </button>
           <button class="btn icon" type="button" id="btn-update" title="Обновить программу" aria-label="Обновить программу">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M20 12a8 8 0 0 1-13.7 5.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
@@ -1223,10 +1216,8 @@
                   <span>Токен Telegram-бота</span>
                   <input type="password" id="remote-tg-token" placeholder="123456:AAF… из @BotFather" autocomplete="off" />
                 </label>
-                <label class="field">
-                  <span>Chat id <small>(необязательно — заполнится, когда напишете боту)</small></span>
-                  <input type="text" id="remote-tg-chat" placeholder="например 123456789" autocomplete="off" />
-                </label>
+                <div id="remote-tg-pending" class="remote-tg-pending"></div>
+                <div id="remote-tg-users" class="remote-tg-users"></div>
                 <div class="remote-tg-actions">
                   <button type="button" class="btn small" id="remote-tg-save">Запомнить токен</button>
                   <button type="button" class="btn small" id="remote-tg-check">Проверить связь</button>
@@ -1322,9 +1313,44 @@
     </div>
   </div>
 
-  <div class="modal" id="report-settings-modal">
-    <div class="modal-card report-settings-modal">
-      <h3>Настройки отчёта</h3>
+  <div class="modal" id="app-settings-modal">
+    <div class="modal-card app-settings-modal" role="dialog" aria-modal="true" aria-labelledby="app-settings-title">
+      <div class="modal-title-row">
+        <h3 id="app-settings-title">Настройки</h3>
+        <button class="btn ghost" type="button" id="app-settings-close">Закрыть</button>
+      </div>
+      <div class="app-settings-tabs" role="tablist">
+        <button type="button" class="app-settings-tab is-on" data-settings-tab="program" role="tab">Программа</button>
+        <button type="button" class="app-settings-tab" data-settings-tab="report" role="tab">Отчёт</button>
+        <button type="button" class="app-settings-tab" data-settings-tab="voice" role="tab">Голос</button>
+        <button type="button" class="app-settings-tab" id="settings-tab-runtime" data-settings-tab="runtime" role="tab">Среда</button>
+      </div>
+      <div id="voice-job" class="voice-job" hidden>
+        <div class="voice-job-head">
+          <b id="voice-job-text">Скачиваю модель…</b>
+          <button type="button" class="btn small" id="voice-job-cancel">Отменить</button>
+        </div>
+        <div class="settings-pack-bar" aria-hidden="true"><span id="voice-job-bar"></span></div>
+      </div>
+      <div class="app-settings-body">
+        <div class="app-settings-pane" data-settings-pane="program">
+          <label class="file-menu-login app-settings-login" title="При входе в Windows FinMaster откроется сам, без чёрного окна">
+            <span>Автозагрузка</span>
+            <input type="checkbox" id="remote-windows-login" />
+          </label>
+          <p class="report-settings-hint">При входе в Windows откроется эта копия программы.</p>
+          <div class="app-settings-actions">
+            <button type="button" class="btn" id="btn-settings-export">Экспорт настроек</button>
+            <button type="button" class="btn" id="btn-settings-import">Импорт настроек</button>
+          </div>
+          <p class="report-settings-hint">Архив .fms. Python из папки отчётов и модели Vosk выключены, пока галочка не стоит. В подписи видны версия Python, библиотеки и описание модели.</p>
+          <div class="app-settings-actions">
+            <button type="button" class="btn" id="btn-tokens-export">Экспорт токенов</button>
+            <button type="button" class="btn" id="btn-tokens-import">Импорт токенов</button>
+          </div>
+          <p class="report-settings-hint">Отдельный файл .fmt: токен ngrok и Telegram вместе с пользователями. В файле токены не читаются как текст, импорт открывается на другом компьютере.</p>
+        </div>
+        <div class="app-settings-pane" data-settings-pane="report" hidden>
       <p class="report-settings-lead">Файл, автосохранение, валюта и округление сумм во всём отчёте — таблицы, графики, мобильный и Telegram.</p>
 
       <div class="report-settings-block">
@@ -1362,15 +1388,12 @@
         <div class="report-settings-preview" id="report-settings-preview">Пример: 1 234,56 ₽</div>
       </div>
 
-      <div class="modal-actions">
-        <button class="btn ghost" type="button" id="report-settings-close">Закрыть</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal" id="runtime-modal">
-    <div class="modal-card runtime-modal" role="dialog" aria-modal="true" aria-labelledby="runtime-title">
-      <h3 id="runtime-title">Среда запуска</h3>
+        </div>
+        <div class="app-settings-pane" data-settings-pane="voice" hidden>
+          <p class="report-settings-hint">Рабочая модель разбирает голосовые вопросы бота на этом компьютере. У каждой есть размер загрузки и кнопка i с описанием.</p>
+          <div id="voice-models" class="voice-models"></div>
+        </div>
+        <div class="app-settings-pane" data-settings-pane="runtime" hidden>
       <p class="runtime-lead" id="runtime-note"></p>
       <div id="runtime-choices"></div>
       <div class="runtime-block">
@@ -1384,8 +1407,17 @@
         <div id="runtime-system-libs"></div>
       </div>
       <pre class="runtime-log" id="runtime-log" hidden></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="voice-info-modal">
+    <div class="modal-card voice-info-modal" role="dialog" aria-modal="true" aria-labelledby="voice-info-title">
+      <h3 id="voice-info-title">Модель</h3>
+      <p id="voice-info-text"></p>
       <div class="modal-actions">
-        <button class="btn primary" type="button" id="runtime-close">Закрыть</button>
+        <button class="btn primary" type="button" id="voice-info-close">Закрыть</button>
       </div>
     </div>
   </div>
@@ -1581,7 +1613,7 @@
   <div class="modal" id="settings-pack-modal">
     <div class="modal-card settings-pack-modal" role="dialog" aria-modal="true" aria-labelledby="settings-pack-title">
       <h3 id="settings-pack-title">Экспорт настроек</h3>
-      <p id="settings-pack-lead">Отмеченное из папки настроек попадёт в архив .fms.</p>
+      <p id="settings-pack-lead">Отмеченное попадёт в архив .fms. Python и модели речи выключены, пока галочка не стоит.</p>
       <p class="settings-pack-warn" id="settings-pack-warn" hidden>Старые настройки потеряются: отмеченные файлы заменят текущие. Остальные файлы останутся как есть.</p>
       <div id="settings-pack-list" class="settings-pack-list"></div>
       <div class="settings-pack-progress" id="settings-pack-progress" hidden>
@@ -1591,6 +1623,18 @@
       <div class="modal-actions">
         <button class="btn" type="button" id="settings-pack-cancel">Отмена</button>
         <button class="btn primary" type="button" id="settings-pack-go">Упаковать</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal" id="token-pack-modal">
+    <div class="modal-card settings-pack-modal" role="dialog" aria-modal="true" aria-labelledby="token-pack-title">
+      <h3 id="token-pack-title">Экспорт токенов</h3>
+      <p id="token-pack-lead">Один файл .fmt. Отметьте, что в него положить.</p>
+      <p class="settings-pack-warn" id="token-pack-warn" hidden>Отмеченное заменит токены на этом компьютере.</p>
+      <div id="token-pack-list" class="settings-pack-list"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" id="token-pack-cancel">Отмена</button>
+        <button class="btn primary" type="button" id="token-pack-go">Сохранить</button>
       </div>
     </div>
   </div>

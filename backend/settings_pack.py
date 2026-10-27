@@ -10,7 +10,7 @@ import threading
 import zipfile
 from typing import Any, Callable
 
-from backend import storage
+from backend import runtime, storage, voice
 
 
 EXT = ".fms"
@@ -24,6 +24,8 @@ _SKIP = {
     "stdlib.scan.txt",
     "history",
     "config.yml",
+    "secrets.bin",
+    "python-pending",
 }
 _HEAD = (
     ("config.json", "config", "Настройки"),
@@ -49,12 +51,40 @@ def job_snapshot() -> dict[str, Any]:
 
 
 def list_parts(root: str | None = None) -> list[dict[str, Any]]:
-    return _parts_from_tree(root or storage.config_dir())
+    parts = [row for row in _parts_from_tree(root or storage.config_dir()) if row["id"] != "voice"]
+    parts.extend(_voice_parts())
+    python = _python_part()
+    if python:
+        parts.append(python)
+    return parts
 
 
 def inspect_archive(path: str) -> list[dict[str, Any]]:
     names = _archive_names(path)
-    return _parts_from_names(names, _archive_sizes(path, names))
+    return _parts_from_archive(names, _archive_sizes(path, names), _manifest(path))
+
+
+def apply_pending_python() -> None:
+    """Дописывает файлы Python, которые были заняты во время импорта."""
+    pending = os.path.join(storage.config_dir(), "python-pending")
+    if not os.path.isdir(pending):
+        return
+    dest_root = runtime.runtime_dir()
+    left = False
+    for dirpath, _dirnames, filenames in os.walk(pending):
+        for filename in filenames:
+            src = os.path.join(dirpath, filename)
+            rel = os.path.relpath(src, pending)
+            dest = os.path.join(dest_root, rel)
+            if not _inside(dest_root, dest):
+                continue
+            try:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                os.replace(src, dest)
+            except OSError:
+                left = True
+    if not left:
+        shutil.rmtree(pending, ignore_errors=True)
 
 
 def start_export(dest: str, ids: list[str]) -> dict[str, Any]:
@@ -86,6 +116,8 @@ def start_import(src: str, ids: list[str]) -> dict[str, Any]:
         with _LOCK:
             _JOB["config"] = bool(flags.get("config"))
             _JOB["dictionary"] = bool(flags.get("dictionary"))
+            if flags.get("python_pending"):
+                _JOB["text"] = "Часть Python заменится после перезапуска"
 
     _start(work)
     return job_snapshot()
@@ -94,6 +126,8 @@ def start_import(src: str, ids: list[str]) -> dict[str, Any]:
 def export_archive(root: str, dest: str, ids: list[str], progress: Callable[[int, int], None] | None = None) -> None:
     chosen = set(_clean_ids(ids))
     files = [item for item in _files(root) if item[0] in chosen]
+    if "python" in chosen:
+        files.extend(_python_files())
     if not files:
         raise ValueError("В папке настроек нет отмеченных файлов.")
     dest = os.path.abspath(dest)
@@ -111,7 +145,7 @@ def export_archive(root: str, dest: str, ids: list[str], progress: Callable[[int
             info = zipfile.ZipInfo(_MANIFEST)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.flag_bits |= 0x800
-            archive.writestr(info, json.dumps({"kind": KIND, "version": 1}, ensure_ascii=False))
+            archive.writestr(info, json.dumps(_manifest_body(chosen), ensure_ascii=False))
             for _part, rel, path, size in files:
                 wrote = _write_member(archive, rel, path, size)
                 done += wrote
@@ -130,7 +164,7 @@ def export_archive(root: str, dest: str, ids: list[str], progress: Callable[[int
 
 def import_archive(root: str, src: str, ids: list[str], progress: Callable[[int, int], None] | None = None) -> dict[str, bool]:
     chosen = set(_clean_ids(ids))
-    names = [name for name in _archive_names(src) if _part_id(name.split("/", 1)[0]) in chosen]
+    names = [name for name in _archive_names(src) if _pid_of_member(name) in chosen]
     if not names:
         raise ValueError("В архиве нет отмеченных файлов.")
     sizes = _archive_sizes(src, names)
@@ -140,8 +174,15 @@ def import_archive(root: str, src: str, ids: list[str], progress: Callable[[int,
         progress(0, total)
     os.makedirs(root, exist_ok=True)
     stage = tempfile.mkdtemp(prefix=".fms-in-", dir=root)
-    flags = {"config": False, "dictionary": False}
+    flags = {"config": False, "dictionary": False, "python_pending": False}
+    python_names = [name for name in names if name.startswith("python/")]
+    names = [name for name in names if not name.startswith("python/")]
     try:
+        if python_names:
+            flags["python_pending"], wrote = _import_python(src, python_names)
+            done += wrote
+            if progress:
+                progress(min(done, total), total)
         with zipfile.ZipFile(src, "r") as archive:
             for name in names:
                 rel = name.replace("\\", "/")
@@ -211,7 +252,8 @@ def _start(work: Callable[[], None]) -> None:
             _JOB["running"] = False
             _JOB["ok"] = True
             _JOB["progress"] = 100
-            _JOB["text"] = "Готово"
+            if not str(_JOB.get("text") or "").startswith("Часть"):
+                _JOB["text"] = "Готово"
 
     threading.Thread(target=runner, daemon=True).start()
 
@@ -251,6 +293,15 @@ def _part_id(name: str) -> str:
     return "extra:" + name
 
 
+def _pid_label(pid: str) -> str:
+    for _name, known, label in (*_HEAD, _VOICE):
+        if known == pid:
+            return label
+    if pid.startswith("extra:"):
+        return pid.split(":", 1)[1]
+    return pid
+
+
 def _label(name: str) -> str:
     for known, _pid, label in (*_HEAD, _VOICE):
         if name == known:
@@ -259,7 +310,7 @@ def _label(name: str) -> str:
 
 
 def _default_on(pid: str) -> bool:
-    return pid not in ("voice", "extra:cloudflared.exe")
+    return pid not in ("voice", "extra:cloudflared.exe") and not pid.startswith("voice:") and pid != "python"
 
 
 def _parts_from_tree(root: str) -> list[dict[str, Any]]:
@@ -292,11 +343,224 @@ def _parts_from_names(names: list[str], sizes: dict[str, int]) -> list[dict[str,
     return [_part_row(_part_id(name), _label(name), tops[name]) for name in ordered]
 
 
-def _part_row(pid: str, label: str, size: int) -> dict[str, Any]:
+def _part_row(pid: str, label: str, size: int, title: str = "", detail: str = "") -> dict[str, Any]:
     row = {"id": pid, "label": label, "on": _default_on(pid), "bytes": size, "size": _fmt_size(size)}
     if pid == "voice":
         row["title"] = "Папка voice. В архив не входит, пока галочка выключена."
+    if title:
+        row["title"] = title
+    if detail:
+        row["detail"] = detail
     return row
+
+
+def _pid_of_member(name: str) -> str:
+    parts = name.replace("\\", "/").split("/")
+    top = parts[0]
+    if top == "python":
+        return "python"
+    if top == "voice" and len(parts) > 1 and _safe_top(parts[1]):
+        return "voice:" + parts[1]
+    return _part_id(top)
+
+
+def _manifest(path: str) -> dict[str, Any]:
+    try:
+        with zipfile.ZipFile(path, "r") as archive:
+            raw = archive.read(_MANIFEST)
+        meta = json.loads(raw.decode("utf-8"))
+    except (OSError, KeyError, UnicodeDecodeError, json.JSONDecodeError, zipfile.BadZipFile):
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _manifest_body(chosen: set[str]) -> dict[str, Any]:
+    body: dict[str, Any] = {"kind": KIND, "version": 2}
+    if "python" in chosen:
+        summary = runtime.folder_summary()
+        body["python"] = {
+            "version": summary.get("version") or "",
+            "packages": [
+                {"name": item.get("name") or "", "version": item.get("version") or "", "installed": bool(item.get("installed"))}
+                for item in summary.get("packages") or []
+                if isinstance(item, dict)
+            ],
+        }
+    models = []
+    for pid in sorted(chosen):
+        if not pid.startswith("voice:"):
+            continue
+        model_id = pid.split(":", 1)[1]
+        models.append({"id": model_id, "label": _voice_label(model_id), "about": voice.describe(model_id)})
+    if models:
+        body["models"] = models
+    return body
+
+
+def _voice_label(model_id: str) -> str:
+    for spec in voice.CATALOG:
+        if spec["id"] == model_id:
+            return f"Vosk · {spec['label']}"
+    return f"Vosk · {model_id}"
+
+
+def _voice_detail(model_id: str, meta: dict[str, Any] | None = None) -> str:
+    about = ""
+    if meta:
+        for item in meta.get("models") or []:
+            if isinstance(item, dict) and item.get("id") == model_id:
+                about = str(item.get("about") or "")
+                break
+    if not about:
+        about = voice.describe(model_id)
+    return about
+
+
+def _python_detail(meta: dict[str, Any] | None = None, live: dict[str, Any] | None = None) -> str:
+    source = live or {}
+    if meta and isinstance(meta.get("python"), dict):
+        source = meta["python"]
+    version = str(source.get("version") or "").strip()
+    packages = []
+    for item in source.get("packages") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "")
+        if not name:
+            continue
+        if item.get("installed") is False:
+            packages.append(f"нет {name}")
+        else:
+            ver = str(item.get("version") or "")
+            packages.append(f"{name} {ver}".strip())
+    bits = []
+    if version:
+        bits.append(f"Python {version}")
+    if packages:
+        bits.append(", ".join(packages))
+    return " · ".join(bits)
+
+
+def _voice_parts() -> list[dict[str, Any]]:
+    root = os.path.join(storage.config_dir(), "voice")
+    if not os.path.isdir(root):
+        return []
+    parts = []
+    for name in sorted(os.listdir(root)):
+        path = os.path.join(root, name)
+        if not _safe_top(name) or not os.path.isdir(path):
+            continue
+        if not os.path.isdir(os.path.join(path, "am")) and name not in {spec["id"] for spec in voice.CATALOG}:
+            continue
+        size = _tree_size(path)
+        detail = _voice_detail(name)
+        parts.append(_part_row(f"voice:{name}", _voice_label(name), size, detail, detail))
+    return parts
+
+
+def _python_part() -> dict[str, Any] | None:
+    summary = runtime.folder_summary()
+    if not summary.get("available"):
+        return None
+    size = _tree_size(runtime.runtime_dir())
+    detail = _python_detail(live=summary)
+    return _part_row("python", "Python из папки отчётов", size, detail or "Папка Документы\\FinMaster\\python", detail)
+
+
+def _voice_files(path: str) -> list[tuple[str, str, str, int]]:
+    found: list[tuple[str, str, str, int]] = []
+    root = storage.config_dir()
+    for name in os.listdir(path):
+        if not _safe_top(name):
+            continue
+        model_path = os.path.join(path, name)
+        if not os.path.isdir(model_path):
+            continue
+        pid = "voice:" + name
+        for dirpath, dirnames, filenames in os.walk(model_path):
+            dirnames[:] = [item for item in dirnames if not item.startswith(".")]
+            for filename in filenames:
+                full = os.path.join(dirpath, filename)
+                if not os.path.isfile(full) or not _inside(root, full):
+                    continue
+                rel = os.path.relpath(full, root).replace("\\", "/")
+                found.append((pid, rel, full, os.path.getsize(full)))
+    return found
+
+
+def _python_files() -> list[tuple[str, str, str, int]]:
+    root = runtime.runtime_dir()
+    if not os.path.isfile(os.path.join(root, "pythonw.exe")) and not os.path.isfile(os.path.join(root, "python.exe")):
+        return []
+    found: list[tuple[str, str, str, int]] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [item for item in dirnames if not item.startswith(".")]
+        for filename in filenames:
+            full = os.path.join(dirpath, filename)
+            if not os.path.isfile(full) or not _inside(root, full):
+                continue
+            rel = "python/" + os.path.relpath(full, root).replace("\\", "/")
+            found.append(("python", rel, full, os.path.getsize(full)))
+    return found
+
+
+def _parts_from_archive(names: list[str], sizes: dict[str, int], meta: dict[str, Any]) -> list[dict[str, Any]]:
+    buckets: dict[str, int] = {}
+    for name in names:
+        pid = _pid_of_member(name)
+        buckets[pid] = buckets.get(pid, 0) + sizes.get(name, 0)
+    ordered = [row[1] for row in _HEAD if row[1] in buckets]
+    ordered += sorted((pid for pid in buckets if pid not in ordered and not pid.startswith("voice:") and pid != "python"), key=str.lower)
+    ordered += sorted(pid for pid in buckets if pid.startswith("voice:"))
+    if "python" in buckets:
+        ordered.append("python")
+    parts = []
+    for pid in ordered:
+        if pid.startswith("voice:"):
+            model_id = pid.split(":", 1)[1]
+            detail = _voice_detail(model_id, meta)
+            parts.append(_part_row(pid, _voice_label(model_id), buckets[pid], detail, detail))
+        elif pid == "python":
+            detail = _python_detail(meta)
+            parts.append(_part_row(pid, "Python из папки отчётов", buckets[pid], detail or "Папка Документы\\FinMaster\\python", detail))
+        else:
+            parts.append(_part_row(pid, _pid_label(pid), buckets[pid]))
+    return parts
+
+
+def _import_python(src: str, names: list[str]) -> tuple[bool, int]:
+    dest_root = runtime.runtime_dir()
+    pending_root = os.path.join(storage.config_dir(), "python-pending")
+    pending = False
+    wrote = 0
+    with zipfile.ZipFile(src, "r") as archive:
+        for name in names:
+            rel = name.replace("\\", "/")
+            tail = rel.split("/", 1)[1] if "/" in rel else ""
+            if not tail or not _member_ok(rel):
+                continue
+            target = os.path.join(dest_root, *tail.split("/"))
+            if not _inside(dest_root, target):
+                raise ValueError("Архив содержит недопустимый путь.")
+            fd, tmp = tempfile.mkstemp(prefix=".pyimp-", dir=storage.config_dir())
+            os.close(fd)
+            try:
+                wrote += _read_member(archive, name, tmp)
+                try:
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    shutil.copy2(tmp, target)
+                except OSError:
+                    pending = True
+                    hold = os.path.join(pending_root, *tail.split("/"))
+                    os.makedirs(os.path.dirname(hold), exist_ok=True)
+                    shutil.copy2(tmp, hold)
+            finally:
+                if os.path.exists(tmp):
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+    return pending, wrote
 
 
 def _files(root: str) -> list[tuple[str, str, str, int]]:
@@ -311,6 +575,9 @@ def _files(root: str) -> list[tuple[str, str, str, int]]:
         if os.path.isfile(path):
             if _inside(root, path):
                 found.append((pid, name.replace("\\", "/"), path, os.path.getsize(path)))
+            continue
+        if name == "voice" and os.path.isdir(path):
+            found.extend(_voice_files(path))
             continue
         if not os.path.isdir(path):
             continue
@@ -361,7 +628,7 @@ def _archive_sizes(path: str, names: list[str]) -> dict[str, int]:
                 continue
             total += max(0, info.file_size)
             sizes[name] = max(0, info.file_size)
-            if total > 2_000_000_000:
+            if total > 8_000_000_000:
                 raise ValueError("Архив слишком большой.")
     return sizes
 
@@ -405,7 +672,9 @@ def _fmt_size(size: int) -> str:
         return f"{size} Б"
     if size < 1024 * 1024:
         return f"{max(1, round(size / 1024))} КБ"
-    return f"{size / (1024 * 1024):.1f} МБ".replace(".0 МБ", " МБ").replace(".", ",")
+    if size < 1024 * 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} МБ".replace(".0 МБ", " МБ").replace(".", ",")
+    return f"{size / (1024 * 1024 * 1024):.1f} ГБ".replace(".0 ГБ", " ГБ").replace(".", ",")
 
 
 def _write_member(archive: zipfile.ZipFile, rel: str, path: str, size: int) -> int:

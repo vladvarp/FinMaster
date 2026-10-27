@@ -237,6 +237,21 @@ def using_program_python(project_root: str | None = None) -> bool:
     return bool(program_pythonw(project_root)) and _under(sys.executable, program_python_dir(project_root))
 
 
+def folder_summary() -> dict[str, Any]:
+    """Версия и библиотеки Python в папке отчётов. Для подписи в экспорте настроек."""
+    exe = folder_pythonw()
+    folder = runtime_dir()
+    if not exe:
+        return {"available": False, "version": "", "packages": [], "path": folder}
+    pip_names = required_packages(_ROOT)
+    return {
+        "available": True,
+        "version": _version_of(exe),
+        "packages": _probe_libraries(exe, pip_names, ["tkinter"]),
+        "path": os.path.dirname(exe),
+    }
+
+
 def folder_pythonw() -> str:
     path = os.path.join(runtime_dir(), "pythonw.exe")
     return path if os.path.isfile(path) else ""

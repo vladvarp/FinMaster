@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+</head>
+<body>
+  <p class="hint">Вкладка «Голос». Кнопка i открывает описание модели поверх окна настроек.</p>
+  <div class="modal-card app-settings-modal">
+    <h3>Настройки</h3>
+    <div class="app-settings-tabs">
+      <button type="button" class="app-settings-tab" tabindex="-1">Программа</button>
+      <button type="button" class="app-settings-tab" tabindex="-1">Отчёт</button>
+      <button type="button" class="app-settings-tab is-on" tabindex="-1">Голос</button>
+      <button type="button" class="app-settings-tab" tabindex="-1">Среда</button>
+    </div>
+    <div class="voice-job">
+      <div class="voice-job-head">
+        <b>Скачиваю Русская 0.22: 240 МБ из 1,5 ГБ · 16%</b>
+        <button type="button" class="btn small" tabindex="-1">Отменить</button>
+      </div>
+      <div class="settings-pack-bar" aria-hidden="true"><span style="width:16%"></span></div>
+    </div>
+    <div class="voice-models">
+      <article class="voice-model is-on">
+        <div><b>Малая русская</b><small>45 МБ · скачана · рабочая</small></div>
+        <div class="voice-model-actions"><button type="button" class="info-btn" tabindex="-1">i</button></div>
+      </article>
+      <article class="voice-model">
+        <div><b>Русская 0.22</b><small>1,5 ГБ · скачивается</small></div>
+        <div class="voice-model-actions"><button type="button" class="info-btn" tabindex="-1">i</button></div>
+      </article>
+      <article class="voice-model">
+        <div><b>Русская 0.42</b><small>1,8 ГБ · можно скачать</small></div>
+        <div class="voice-model-actions"><button type="button" class="info-btn" tabindex="-1">i</button><button type="button" class="btn small" tabindex="-1">Скачать</button></div>
+      </article>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+</head>
+<body>
+  <p class="hint">Вкладка «Программа»: автозагрузка, архив настроек и отдельный файл токенов.</p>
+  <div class="modal-card app-settings-modal">
+    <h3>Настройки</h3>
+    <div class="app-settings-tabs">
+      <button type="button" class="app-settings-tab is-on" tabindex="-1">Программа</button>
+      <button type="button" class="app-settings-tab" tabindex="-1">Отчёт</button>
+      <button type="button" class="app-settings-tab" tabindex="-1">Голос</button>
+      <button type="button" class="app-settings-tab" tabindex="-1">Среда</button>
+    </div>
+    <label class="file-menu-login app-settings-login"><span>Автозагрузка</span><input type="checkbox" checked tabindex="-1"></label>
+    <div class="app-settings-actions">
+      <button type="button" class="btn" tabindex="-1">Экспорт настроек</button>
+      <button type="button" class="btn" tabindex="-1">Импорт настроек</button>
+    </div>
+    <div class="settings-pack-list">
+      <label class="report-settings-check settings-pack-check"><input type="checkbox" checked tabindex="-1"><span>Настройки</span><small>12 КБ</small></label>
+      <label class="report-settings-check settings-pack-check"><input type="checkbox" checked tabindex="-1"><span>Словарь</span><small>40 КБ</small></label>
+      <label class="report-settings-check settings-pack-check" title="Python 3.12 · flask, pillow, pywebview"><input type="checkbox" tabindex="-1"><span>Python из папки отчётов<small>Python 3.12 · flask, pillow</small></span><small>86 МБ</small></label>
+      <label class="report-settings-check settings-pack-check"><input type="checkbox" tabindex="-1"><span>Vosk · Малая русская<small>Короткие команды и номера</small></span><small>45 МБ</small></label>
+    </div>
+    <div class="app-settings-actions">
+      <button type="button" class="btn" tabindex="-1">Экспорт токенов</button>
+      <button type="button" class="btn" tabindex="-1">Импорт токенов</button>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

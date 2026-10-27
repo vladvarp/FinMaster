@@ -252,6 +252,45 @@
       live.classList.toggle("idle", remote.enabled && !phones);
     });
     document.querySelectorAll(".phone-btn").forEach((btn) => btn.classList.toggle("on", remote.enabled));
+    paintTelegramAsk();
+  }
+
+  function paintTelegramAsk() {
+    const count = remote.telegramPending?.length || 0;
+    document.querySelectorAll(".phone-ask").forEach((mark) => {
+      mark.hidden = !count;
+      mark.textContent = count > 1 ? String(count) : "";
+    });
+  }
+
+  function telegramNick(person) {
+    if (person?.username) return `@${String(person.username).replace(/^@/, "")}`;
+    if (person?.name) return person.name;
+    return person?.id || "";
+  }
+
+  function renderTelegramPeople() {
+    const pending = $("remote-tg-pending");
+    const users = $("remote-tg-users");
+    if (pending) {
+      const rows = remote.telegramPending || [];
+      pending.innerHTML = rows.length ? rows.map((person) => `
+        <div class="remote-tg-person">
+          <span><b>${esc(telegramNick(person))}</b><small>id ${esc(person.id || "")}</small></span>
+          <button type="button" class="btn small" data-tg-decline="${esc(person.id || "")}">Отклонить</button>
+          <button type="button" class="btn small primary" data-tg-approve="${esc(person.id || "")}">Добавить</button>
+        </div>
+      `).join("") : "";
+    }
+    if (users) {
+      const rows = remote.telegramUsers || [];
+      users.innerHTML = rows.length ? rows.map((person) => `
+        <div class="remote-tg-person">
+          <span><b>${esc(telegramNick(person))}</b><small>id ${esc(person.id || "")}</small></span>
+          <button type="button" class="btn small danger" data-tg-remove="${esc(person.id || "")}">Удалить</button>
+        </div>
+      `).join("") : '<p class="report-settings-hint">Подтверждённых пользователей пока нет. Пусть человек напишет боту.</p>';
+    }
   }
 
   function applyRemotePayload(data) {
@@ -276,7 +315,15 @@
     if (typeof data.ngrok_installed === "boolean") remote.ngrokInstalled = data.ngrok_installed;
     if (data.tunnel) remote.tunnel = data.tunnel;
     if (typeof data.telegram_ready === "boolean") remote.telegramReady = data.telegram_ready;
-    if ("telegram_chat_id" in data) remote.telegramChatId = data.telegram_chat_id || "";
+    if (Array.isArray(data.telegram_users)) remote.telegramUsers = data.telegram_users;
+    if (Array.isArray(data.telegram_pending)) {
+      const next = data.telegram_pending.length;
+      if (remote.pendingReady && next > (remote.telegramPending || []).length) toast("Запрос доступа к боту");
+      remote.telegramPending = data.telegram_pending;
+      remote.pendingReady = true;
+      paintTelegramAsk();
+      if ($("remote-modal")?.classList.contains("open")) renderTelegramPeople();
+    }
     if (typeof data.telegram_listening === "boolean") remote.telegramListening = data.telegram_listening;
     if ("telegram_error" in data) remote.telegramError = data.telegram_error || "";
     if (data.desk) applyPcDeskLock(data.desk);
@@ -564,8 +611,7 @@
     if (tokenInput && remote.ngrokReady && !tokenInput.value) tokenInput.placeholder = "токен сохранён — можно не вводить заново";
     const tgToken = $("remote-tg-token");
     if (tgToken && remote.telegramReady && !tgToken.value) tgToken.placeholder = "токен сохранён — можно не вводить заново";
-    const tgChat = $("remote-tg-chat");
-    if (tgChat && remote.telegramChatId && !tgChat.value) tgChat.value = remote.telegramChatId;
+    renderTelegramPeople();
     renderRemoteSignals();
     renderRemoteLive();
   }
@@ -588,15 +634,9 @@
   async function persistRemoteSecrets() {
     const ngrokToken = $("remote-ngrok-token")?.value?.trim() || "";
     const tgToken = $("remote-tg-token")?.value?.trim() || "";
-    const tgChat = $("remote-tg-chat")?.value?.trim() || "";
     try {
       if (ngrokToken) await apiPost("/api/remote/ngrok", { authtoken: ngrokToken });
-      if (tgToken || tgChat) {
-        const payload = {};
-        if (tgToken) payload.token = tgToken;
-        if (tgChat) payload.chat_id = tgChat;
-        await apiPost("/api/remote/telegram", payload);
-      }
+      if (tgToken) await apiPost("/api/remote/telegram", { token: tgToken });
     } catch {
       /* токены уже на диске или поля пустые */
     }
@@ -1177,7 +1217,7 @@
     list.innerHTML = rows.map((part) => `
       <label class="report-settings-check settings-pack-check"${part.title ? ` title="${esc(part.title)}"` : ""}>
         <input type="checkbox" data-pack-id="${esc(part.id)}"${part.on ? " checked" : ""}>
-        <span>${esc(part.label)}</span>
+        <span>${esc(part.label)}${part.detail ? `<small>${esc(part.detail)}</small>` : ""}</span>
         <small>${esc(part.size || "")}</small>
       </label>
     `).join("");
@@ -1218,7 +1258,7 @@
     const lead = $("settings-pack-lead");
     if (lead) {
       lead.hidden = importing;
-      lead.textContent = "Отмеченное из папки настроек попадёт в архив .fms.";
+      lead.textContent = "Отмеченное попадёт в архив .fms. Python и модели речи выключены, пока галочка не стоит.";
     }
     const warn = $("settings-pack-warn");
     if (warn) warn.hidden = !importing;
@@ -1391,8 +1431,153 @@
     });
   }
 
+  let tokenPackMode = "";
+  let tokenPackPath = "";
+
+  function tokenPackIds() {
+    return [...document.querySelectorAll("#token-pack-list input[data-pack-id]:checked")].map((input) => input.dataset.packId);
+  }
+
+  function paintTokenPack(parts) {
+    const list = $("token-pack-list");
+    if (!list) return;
+    const rows = parts || [];
+    list.innerHTML = rows.map((part) => `
+      <label class="report-settings-check settings-pack-check">
+        <input type="checkbox" data-pack-id="${esc(part.id)}"${part.on ? " checked" : ""}>
+        <span>${esc(part.label)}${part.detail ? `<small>${esc(part.detail)}</small>` : ""}</span>
+      </label>
+    `).join("") || '<p class="report-settings-hint">В файле нечего брать.</p>';
+    const go = $("token-pack-go");
+    if (go) go.disabled = !tokenPackIds().length;
+  }
+
+  function closeTokenPack() {
+    tokenPackMode = "";
+    tokenPackPath = "";
+    $("token-pack-modal")?.classList.remove("open");
+  }
+
+  function openTokenPack(mode, parts, path) {
+    tokenPackMode = mode;
+    tokenPackPath = path || "";
+    const importing = mode === "import";
+    const title = $("token-pack-title");
+    if (title) title.textContent = importing ? "Импорт токенов" : "Экспорт токенов";
+    const lead = $("token-pack-lead");
+    if (lead) lead.textContent = importing ? "Отмеченное из файла заменит токены на этом компьютере." : "Один файл .fmt. Отметьте, что в него положить.";
+    const warn = $("token-pack-warn");
+    if (warn) warn.hidden = !importing;
+    const go = $("token-pack-go");
+    if (go) go.textContent = importing ? "Импортировать" : "Сохранить";
+    paintTokenPack(parts);
+    $("token-pack-modal")?.classList.add("open");
+  }
+
+  async function runTokenPack() {
+    const ids = tokenPackIds();
+    if (!ids.length) return;
+    try {
+      if (tokenPackMode === "export") {
+        const data = await apiPost("/api/tokens/export", { ids });
+        if (data.cancelled) return;
+        toast("Токены экспортированы");
+        closeTokenPack();
+        return;
+      }
+      const data = await apiPost("/api/tokens/import", { path: tokenPackPath, ids });
+      renderRemoteModal(data);
+      toast("Токены импортированы");
+      closeTokenPack();
+    } catch (err) {
+      toast(err.message || "Не удалось обработать токены");
+    }
+  }
+
+  function bindTokenPack() {
+    $("btn-tokens-export")?.addEventListener("click", async () => {
+      try {
+        const data = await apiGet("/api/tokens/bundle");
+        if (!data.parts?.length) {
+          toast("Сохранённых токенов пока нет");
+          return;
+        }
+        openTokenPack("export", data.parts);
+      } catch (err) {
+        toast(err.message || "Не удалось прочитать токены");
+      }
+    });
+    $("btn-tokens-import")?.addEventListener("click", async () => {
+      try {
+        const data = await apiPost("/api/tokens/import/pick", {});
+        if (data.cancelled) return;
+        if (!data.parts?.length) {
+          toast("В файле нет токенов");
+          return;
+        }
+        openTokenPack("import", data.parts, data.path);
+      } catch (err) {
+        toast(err.message || "Не удалось открыть файл");
+      }
+    });
+    $("token-pack-list")?.addEventListener("change", () => {
+      const go = $("token-pack-go");
+      if (go) go.disabled = !tokenPackIds().length;
+    });
+    $("token-pack-cancel")?.addEventListener("click", closeTokenPack);
+    $("token-pack-go")?.addEventListener("click", () => { runTokenPack(); });
+    $("token-pack-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("token-pack-modal")) closeTokenPack();
+    });
+  }
+
+  async function telegramUserAction(action, id, nick) {
+    if (action === "remove") {
+      const ok = await askConfirm({
+        title: "Удалить пользователя?",
+        text: `${nick} больше не сможет писать боту. Снова попасть можно только новым запросом через /start.`,
+        ok: "Удалить",
+        cancel: "Отмена",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    try {
+      renderRemoteModal(await apiPost("/api/telegram/users", { action, id }));
+      toast(action === "approve" ? "Пользователь добавлен" : action === "decline" ? "Запрос отклонён" : "Пользователь удалён");
+    } catch (err) {
+      toast(err.message || "Не удалось изменить доступ");
+    }
+  }
+
+  function bindTelegramPeople() {
+    const onClick = async (e) => {
+      const approve = e.target.closest("[data-tg-approve]");
+      const decline = e.target.closest("[data-tg-decline]");
+      const remove = e.target.closest("[data-tg-remove]");
+      const node = approve || decline || remove;
+      if (!node) return;
+      const id = node.dataset.tgApprove || node.dataset.tgDecline || node.dataset.tgRemove;
+      const nick = node.closest(".remote-tg-person")?.querySelector("b")?.textContent || id;
+      const action = approve ? "approve" : decline ? "decline" : "remove";
+      await telegramUserAction(action, id, nick);
+    };
+    $("remote-tg-pending")?.addEventListener("click", onClick);
+    $("remote-tg-users")?.addEventListener("click", onClick);
+    if (!state.desktop) return;
+    setInterval(async () => {
+      try {
+        applyRemotePayload(await apiGet("/api/telegram/access"));
+      } catch {
+        /* запрос повторится */
+      }
+    }, 3000);
+  }
+
   function bindRemote() {
     bindSettingsPack();
+    bindTokenPack();
+    bindTelegramPeople();
     bindNetConsole();
     document.querySelectorAll(".js-open-remote").forEach((btn) => {
       btn.addEventListener("click", async () => {
@@ -1459,7 +1644,6 @@
     const postTelegram = async (send) => {
       const status = $("remote-tg-status");
       const token = $("remote-tg-token")?.value?.trim() || "";
-      const chat = $("remote-tg-chat")?.value?.trim() || "";
       if (status) {
         status.dataset.hold = "1";
         status.className = "remote-ngrok-status";
@@ -1469,7 +1653,6 @@
         if (send && !remote.enabled) await remoteStart();
         const payload = { send };
         if (token) payload.token = token;
-        if (chat) payload.chat_id = chat;
         const data = await apiPost("/api/remote/telegram", payload);
         renderRemoteModal(data);
         toast(send ? "Ссылка отправлена в Telegram" : "Токен запомнен — бот будет отвечать сам");
