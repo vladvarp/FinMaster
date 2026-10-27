@@ -793,10 +793,35 @@ def _send_chat_action(token: str, chat_id: str, action: str) -> None:
         pass
 
 
-def _progress_bar(ratio: float, width: int = 14) -> str:
+def _progress_bar_determinate(ratio: float, width: int = 20) -> str:
+    """Полоса с восьмушками на границе — плавнее, чем целые блоки."""
     clamped = max(0.0, min(1.0, ratio))
-    filled = int(round(clamped * width))
-    return "▰" * filled + "▱" * (width - filled)
+    units = clamped * width * 8
+    full = int(units // 8)
+    partial = int(round(units - full * 8))
+    if partial >= 8:
+        full += 1
+        partial = 0
+    shades = "▏▎▍▌▋▊▉"
+    tail = shades[partial - 1] if 0 < partial < 8 and full < width else ""
+    empty = width - full - (1 if tail else 0)
+    return "█" * full + tail + "░" * max(0, empty)
+
+
+def _progress_bar_scan(tick: int, width: int = 20) -> str:
+    """Бегущий блик, пока доля готовности неизвестна."""
+    span = 5
+    head = tick % (width + span)
+    shades = "▏▎▍▌▋▊▉█"
+    cells: list[str] = []
+    for index in range(width):
+        dist = head - index
+        if 0 <= dist < span:
+            level = min(7, int((span - dist) / span * 8))
+            cells.append(shades[level])
+        else:
+            cells.append("░")
+    return "".join(cells)
 
 
 def _callback_notice(data: str) -> str:
@@ -854,8 +879,6 @@ def _callback_action(data: str) -> str:
 class _ChatBusy:
     """«Печатает…» в шапке чата и, для долгих задач, сообщение с полосой прогресса."""
 
-    _PULSE = (0.1, 0.22, 0.38, 0.55, 0.72, 0.55, 0.38, 0.22)
-
     def __init__(self, token: str, chat_id: str, label: str, *, bar: bool = False, action: str = "typing") -> None:
         self._token = token
         self._chat_id = chat_id
@@ -864,6 +887,7 @@ class _ChatBusy:
         self._action = action
         self._ratio = 0.08 if bar else 0.0
         self._pulse = 0
+        self._determinate = bar
         self._msg_id: int | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -899,8 +923,9 @@ class _ChatBusy:
             self._label = label
         if ratio is not None:
             self._ratio = max(0.0, min(1.0, ratio))
+            self._determinate = True
         elif self._bar:
-            self._ratio = self._PULSE[self._pulse % len(self._PULSE)]
+            self._determinate = False
             self._pulse += 1
         self._paint()
 
@@ -911,8 +936,16 @@ class _ChatBusy:
                 self.step(ratio=None)
 
     def _progress_html(self) -> str:
-        pct = f"{int(round(self._ratio * 100))}%" if self._ratio > 0.01 else "…"
-        return f"<b>{html_esc(self._label)}</b>\n<code>{_progress_bar(self._ratio)}</code> {pct}"
+        width = 20
+        show_pct = self._determinate and self._ratio > 0.008
+        if show_pct:
+            bar = _progress_bar_determinate(self._ratio, width)
+            pct = f"{int(round(self._ratio * 100)):>3}%"
+        else:
+            bar = _progress_bar_scan(self._pulse, width)
+            pct = "  · "
+        track = f"▏{bar}▕"
+        return f"<b>{html_esc(self._label)}</b>\n<pre>{track}\n{pct}</pre>"
 
     def _paint(self) -> None:
         if not self._bar or self._msg_id is None:
