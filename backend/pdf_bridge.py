@@ -5,7 +5,7 @@ from __future__ import annotations
 import secrets
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 
 class PdfBridge:
@@ -14,7 +14,12 @@ class PdfBridge:
         self._pending: dict[str, dict[str, Any]] = {}
         self._queue: list[str] = []
 
-    def request(self, payload: dict[str, Any], timeout: float = 90.0) -> bytes:
+    def request(
+        self,
+        payload: dict[str, Any],
+        timeout: float = 90.0,
+        on_tick: Callable[[float], None] | None = None,
+    ) -> bytes:
         job_id = secrets.token_hex(8)
         done = threading.Event()
         with self._lock:
@@ -26,7 +31,14 @@ class PdfBridge:
                 "created": time.time(),
             }
             self._queue.append(job_id)
-        if not done.wait(timeout):
+        deadline = time.time() + timeout
+        while not done.wait(0.75 if on_tick else timeout):
+            if on_tick:
+                left = max(0.0, deadline - time.time())
+                on_tick(min(0.92, 0.12 + (timeout - left) / max(timeout, 1.0) * 0.75))
+            if time.time() >= deadline:
+                break
+        if not done.is_set():
             with self._lock:
                 self._pending.pop(job_id, None)
                 if job_id in self._queue:

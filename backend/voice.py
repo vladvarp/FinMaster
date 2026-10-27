@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 import wave
 import zipfile
+from typing import Callable
 
 from backend import storage
 
@@ -43,16 +44,20 @@ def require() -> None:
             ) from exc
 
 
-def transcribe(data: bytes) -> str:
+def transcribe(data: bytes, on_progress: Callable[[float, str], None] | None = None) -> str:
     if not data:
         raise VoiceError("Пустая запись. Напишите вопрос текстом.")
     require()
-    path = ensure_model()
+    path = ensure_model(on_progress)
+    if on_progress:
+        on_progress(0.94, "Разбираю запись…")
     wav = _to_wav(data)
+    if on_progress:
+        on_progress(0.98, "Распознаю речь…")
     return spoken_digits(_recognize(path, wav))
 
 
-def ensure_model() -> str:
+def ensure_model(on_progress: Callable[[float, str], None] | None = None) -> str:
     path = _model_dir()
     if os.path.isdir(os.path.join(path, "am")):
         return path
@@ -60,10 +65,24 @@ def ensure_model() -> str:
     tmp = path + ".zip"
     try:
         request = urllib.request.Request(MODEL_URL, headers={"User-Agent": "FinMaster"})
-        with urllib.request.urlopen(request, timeout=120) as response, open(tmp, "wb") as handle:
-            shutil.copyfileobj(response, handle)
+        with urllib.request.urlopen(request, timeout=120) as response:
+            total = int(response.headers.get("Content-Length") or 0)
+            with open(tmp, "wb") as handle:
+                done = 0
+                while True:
+                    chunk = response.read(256 * 1024)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    done += len(chunk)
+                    if on_progress and total > 0:
+                        on_progress(min(0.72, done / total * 0.72), "Скачиваю распознавание речи…")
+        if on_progress:
+            on_progress(0.74, "Распаковываю модель…")
         with zipfile.ZipFile(tmp) as archive:
-            for info in archive.infolist():
+            entries = [info for info in archive.infolist() if info.filename.replace("\\", "/")]
+            total_files = max(len(entries), 1)
+            for index, info in enumerate(entries):
                 name = info.filename.replace("\\", "/")
                 if not name or name.startswith("/") or ".." in name.split("/"):
                     continue
@@ -74,6 +93,8 @@ def ensure_model() -> str:
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 with archive.open(info) as source, open(dest, "wb") as target:
                     shutil.copyfileobj(source, target)
+                if on_progress:
+                    on_progress(0.74 + (index + 1) / total_files * 0.18, "Распаковываю модель…")
     except (OSError, urllib.error.URLError, zipfile.BadZipFile, TimeoutError) as exc:
         raise VoiceError(
             "Не удалось скачать распознавание речи. Проверьте интернет и пришлите голос ещё раз. Текст можно написать сразу."

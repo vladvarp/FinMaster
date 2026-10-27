@@ -730,7 +730,9 @@ def send_long_html(token: str, chat_id: str, text: str, markup: dict[str, Any] |
     if len(plain) > 30000 or len(chunks) > 6:
         head = chunks[0] if chunks else html_esc(plain[:500])
         send_html(token, chat_id, f"{head}\n<i>Дальше — в файле.</i>", markup)
-        send_document(token, chat_id, plain.encode("utf-8"), "finmaster-otvet.txt", "Полный ответ")
+        with _ChatBusy(token, chat_id, "Отправляю файл с ответом…", bar=True, action="upload_document") as busy:
+            busy.step("Готовлю файл…", 0.4)
+            send_document(token, chat_id, plain.encode("utf-8"), "finmaster-otvet.txt", "Полный ответ")
         return
     for index, chunk in enumerate(chunks):
         send_html(token, chat_id, chunk, markup if index == len(chunks) - 1 else None)
@@ -782,6 +784,148 @@ def send_document(
     if result.get("message_id") is not None:
         _bump_tail(chat_id, int(result["message_id"]))
     return data
+
+
+def _send_chat_action(token: str, chat_id: str, action: str) -> None:
+    try:
+        _call(token, "sendChatAction", {"chat_id": chat_id, "action": action}, timeout=8)
+    except RuntimeError:
+        pass
+
+
+def _progress_bar(ratio: float, width: int = 14) -> str:
+    clamped = max(0.0, min(1.0, ratio))
+    filled = int(round(clamped * width))
+    return "▰" * filled + "▱" * (width - filled)
+
+
+def _callback_notice(data: str) -> str:
+    fixed = {
+        "H": "Меню…",
+        "R": "Список отчётов…",
+        "O": "Список заказов…",
+        "L": "Обновляю ссылку…",
+        "Bk": "Ссылка на хранилище…",
+        "N": "Новая ссылка…",
+        "Ny": "Выпускаю новую ссылку…",
+        "Nn": "Отмена…",
+        "S": "Снимок…",
+        "SB": "Снимок…",
+        "So": "Оформление снимка…",
+        "Sv": "Профили снимка…",
+        "SP": "Готовлю PNG…",
+        "Sd": "Настройки PDF…",
+        "Sdp": "Собираю PDF…",
+        "ST": "Готовлю текст…",
+        "Wh": "Переключаю доступ…",
+        "Wa": "Переключаю доступ…",
+        "PC": "Открываю на компьютере…",
+        "D": "Карточка заказа…",
+    }
+    if data in fixed:
+        return fixed[data]
+    if data.startswith("Ri:"):
+        return "Открываю отчёт…"
+    if data.startswith("Oi:"):
+        return "Открываю заказ…"
+    if data.startswith("Aq:"):
+        return "Отвечаю…"
+    if data.startswith(("Rp:", "Op:", "Of:", "Os")):
+        return "Обновляю список…"
+    if data.startswith(("Sx:", "Sy:", "Sp:", "St:", "Sf:", "Sn:", "Sa:", "Pf:")):
+        return "Обновляю снимок…"
+    if data in {"SF", "SN", "SA", "SC", "SX", "Shl", "Shs", "La", "Ln", "Li", "LG", "Aa", "An", "Ai", "AG", "B"}:
+        return "Обновляю снимок…"
+    if data.startswith(("Ls:", "As:")):
+        return "Отмечаю позиции…"
+    return "Обрабатываю…"
+
+
+def _callback_action(data: str) -> str:
+    if data in {"SP"}:
+        return "upload_photo"
+    if data in {"Sdp", "ST"}:
+        return "upload_document"
+    if data.startswith("Aq:"):
+        return "typing"
+    return "typing"
+
+
+class _ChatBusy:
+    """«Печатает…» в шапке чата и, для долгих задач, сообщение с полосой прогресса."""
+
+    _PULSE = (0.1, 0.22, 0.38, 0.55, 0.72, 0.55, 0.38, 0.22)
+
+    def __init__(self, token: str, chat_id: str, label: str, *, bar: bool = False, action: str = "typing") -> None:
+        self._token = token
+        self._chat_id = chat_id
+        self._label = label
+        self._bar = bar
+        self._action = action
+        self._ratio = 0.08 if bar else 0.0
+        self._pulse = 0
+        self._msg_id: int | None = None
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._last_edit = 0.0
+        self._last_ratio = -1.0
+
+    def __enter__(self) -> _ChatBusy:
+        _send_chat_action(self._token, self._chat_id, self._action)
+        self._thread = threading.Thread(target=self._loop, name="fm-tg-busy", daemon=True)
+        self._thread.start()
+        if self._bar:
+            self._msg_id = send_html(self._token, self._chat_id, self._progress_html())
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=1.5)
+        if self._msg_id is not None:
+            try:
+                _call(
+                    self._token,
+                    "deleteMessage",
+                    {"chat_id": self._chat_id, "message_id": self._msg_id},
+                    timeout=8,
+                )
+            except RuntimeError:
+                pass
+            self._msg_id = None
+
+    def step(self, label: str | None = None, ratio: float | None = None) -> None:
+        if label:
+            self._label = label
+        if ratio is not None:
+            self._ratio = max(0.0, min(1.0, ratio))
+        elif self._bar:
+            self._ratio = self._PULSE[self._pulse % len(self._PULSE)]
+            self._pulse += 1
+        self._paint()
+
+    def _loop(self) -> None:
+        while not self._stop.wait(4.2):
+            _send_chat_action(self._token, self._chat_id, self._action)
+            if self._bar:
+                self.step(ratio=None)
+
+    def _progress_html(self) -> str:
+        pct = f"{int(round(self._ratio * 100))}%" if self._ratio > 0.01 else "…"
+        return f"<b>{html_esc(self._label)}</b>\n<code>{_progress_bar(self._ratio)}</code> {pct}"
+
+    def _paint(self) -> None:
+        if not self._bar or self._msg_id is None:
+            return
+        now = time.time()
+        if now - self._last_edit < 0.5 and abs(self._ratio - self._last_ratio) < 0.035:
+            return
+        self._last_edit = now
+        self._last_ratio = self._ratio
+        try:
+            send_html(self._token, self._chat_id, self._progress_html(), message_id=self._msg_id)
+        except RuntimeError:
+            pass
 
 
 def _photo_file_id(data: dict[str, Any]) -> str:
@@ -1108,6 +1252,17 @@ class TelegramBot:
         self._skip = True
         self._chats: dict[str, ChatSession] = {}
 
+    def _busy(
+        self,
+        token: str,
+        chat_id: str,
+        label: str,
+        *,
+        bar: bool = False,
+        action: str = "typing",
+    ) -> _ChatBusy:
+        return _ChatBusy(token, chat_id, label, bar=bar, action=action)
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             return {"listening": self._running and bool(self._token), "error": self._error}
@@ -1339,22 +1494,26 @@ class TelegramBot:
                 "Этот бот уже привязан к другому чату. В FinMaster → Телефон очистите Chat id, если хотите сменить аккаунт.",
             )
             return
-        send_html(token, chat_id, "Слушаю запись…")
-        try:
-            voice.require()
-            if not voice.model_ready():
-                send_html(
-                    token,
-                    chat_id,
-                    "Первый раз скачиваю распознавание речи на этот компьютер. Нужен интернет, дальше голос разбирается здесь и никуда не отправляется.",
-                )
-            heard = voice.transcribe(_tg_file(token, file_id))
-        except voice.VoiceError as exc:
-            send_html(token, chat_id, html_esc(str(exc)))
-            return
-        except Exception as exc:
-            send_html(token, chat_id, f"Не удалось разобрать голос: {html_esc(str(exc) or 'ошибка')}")
-            return
+        with self._busy(token, chat_id, "Слушаю запись…", bar=True, action="record_voice") as busy:
+            try:
+                voice.require()
+                need_model = not voice.model_ready()
+                if need_model:
+                    busy.step(
+                        "Первый раз скачиваю распознавание речи. Нужен интернет, дальше голос разбирается здесь.",
+                        0.05,
+                    )
+
+                def _voice_progress(ratio: float, text: str) -> None:
+                    busy.step(text, ratio if need_model else None)
+
+                heard = voice.transcribe(_tg_file(token, file_id), on_progress=_voice_progress)
+            except voice.VoiceError as exc:
+                send_html(token, chat_id, html_esc(str(exc)))
+                return
+            except Exception as exc:
+                send_html(token, chat_id, f"Не удалось разобрать голос: {html_esc(str(exc) or 'ошибка')}")
+                return
         heard = " ".join(str(heard or "").split())
         if not heard:
             send_html(token, chat_id, "Не разобрал речь. Скажите ближе к телефону или напишите вопрос текстом.")
@@ -1378,6 +1537,13 @@ class TelegramBot:
                 "Этот бот уже привязан к другому чату. В FinMaster → Телефон очистите Chat id, если хотите сменить аккаунт.",
             )
             return
+        busy_label = "Разбираю голос…" if voice else "Читаю запрос…"
+        with self._busy(token, chat_id, busy_label, action="typing"):
+            self._on_text_body(token, chat_id, text, voice=voice)
+
+    def _on_text_body(self, token: str, chat_id: str, text: str, voice: bool = False) -> None:
+        low = text.lower()
+        info = self._status_for(chat_id)
         session = self._chat(chat_id)
         if session.awaiting == "title" and not voice:
             session.snap["title"] = text[:80]
@@ -1547,25 +1713,10 @@ class TelegramBot:
         if isinstance(query.get("from"), dict) and not chat:
             chat = {"id": query["from"].get("id")}
         cid = chat.get("id")
-        notice = ""
-        if data == "L":
-            notice = "Обновляю ссылку…"
-        elif data == "Bk":
-            notice = "Ссылка на хранилище…"
-        elif data == "N":
-            notice = "Новая ссылка…"
-        elif data == "Ny":
-            notice = "Выпускаю новую ссылку…"
-        elif data in {"SP", "ST", "Sdp"}:
-            notice = "Готовлю снимок…"
-        elif data in {"Wh", "Wa"}:
-            notice = "Переключаю доступ…"
+        notice = _callback_notice(data)
         if qid:
             try:
-                payload = {"callback_query_id": qid}
-                if notice:
-                    payload["text"] = notice
-                _call(token, "answerCallbackQuery", payload)
+                _call(token, "answerCallbackQuery", {"callback_query_id": qid, "text": notice})
             except RuntimeError:
                 pass
         if cid is None:
@@ -1626,7 +1777,8 @@ class TelegramBot:
         session = self._chat(chat_id)
         if mid is not None:
             session.message_id = int(mid)
-        self._dispatch(token, chat_id, data)
+        with self._busy(token, chat_id, notice, bar=data == "Ny", action=_callback_action(data)):
+            self._dispatch(token, chat_id, data)
 
     def _toggle_web_access(self, token: str, chat_id: str, home: bool) -> None:
         info = self._status_for(chat_id)
@@ -2247,45 +2399,58 @@ class TelegramBot:
         if hide_totals:
             fields = snapmod.without_prices(fields)
         caption = snapmod.default_title(blocks, title)
-        try:
-            if kind == "png":
-                png = snapmod.render_png(
-                    doc,
-                    blocks,
-                    fields,
-                    str(session.snap.get("theme") or "teal"),
-                    hide_labels,
-                    hide_stamp,
-                    title,
-                    hide_totals,
-                )
-                send_photo(token, chat_id, png, caption, "finmaster-snapshot.png")
-            elif kind == "pdf":
-                opts = _pdf_opts(session.snap.get("pdf_opts") or _default_pdf_opts())
-                if len(blocks) > 1:
-                    opts["orderTitles"] = True
-                payload = {
-                    "blocks": [{"order": block["order"], "lines": block["lines"]} for block in blocks],
-                    "fields": fields,
-                    "theme": str(session.snap.get("theme") or "teal"),
-                    "hide_labels": hide_labels,
-                    "hide_stamp": hide_stamp,
-                    "hide_totals": hide_totals,
-                    "title": title or caption,
-                    "opts": opts,
-                    "path": session.path or "",
-                }
-                pdf = PDF_BRIDGE.request(payload, timeout=90.0)
-                name = f"{(caption or 'Заказы')[:80]}.pdf".replace("/", "_").replace("\\", "_")
-                send_document(token, chat_id, pdf, name, caption, "application/pdf")
-            else:
-                text = snapmod.render_text(doc, blocks, fields, hide_labels, hide_stamp, title, hide_totals)
-                if len(text) < 3800:
-                    send_html(token, chat_id, f"<pre>{html_esc(text)}</pre>")
+        labels = {"png": "Готовлю PNG…", "pdf": "Собираю PDF…", "text": "Готовлю текст…"}
+        action = "upload_photo" if kind == "png" else "upload_document"
+        with self._busy(token, chat_id, labels.get(kind, "Готовлю снимок…"), bar=True, action=action) as busy:
+            try:
+                if kind == "png":
+                    busy.step("Рисую картинку…", 0.18)
+                    png = snapmod.render_png(
+                        doc,
+                        blocks,
+                        fields,
+                        str(session.snap.get("theme") or "teal"),
+                        hide_labels,
+                        hide_stamp,
+                        title,
+                        hide_totals,
+                    )
+                    busy.step("Отправляю PNG…", 0.9)
+                    send_photo(token, chat_id, png, caption, "finmaster-snapshot.png")
+                elif kind == "pdf":
+                    busy.step("Прошу FinMaster собрать PDF…", 0.08)
+                    opts = _pdf_opts(session.snap.get("pdf_opts") or _default_pdf_opts())
+                    if len(blocks) > 1:
+                        opts["orderTitles"] = True
+                    payload = {
+                        "blocks": [{"order": block["order"], "lines": block["lines"]} for block in blocks],
+                        "fields": fields,
+                        "theme": str(session.snap.get("theme") or "teal"),
+                        "hide_labels": hide_labels,
+                        "hide_stamp": hide_stamp,
+                        "hide_totals": hide_totals,
+                        "title": title or caption,
+                        "opts": opts,
+                        "path": session.path or "",
+                    }
+
+                    def _pdf_tick(ratio: float) -> None:
+                        busy.step("Собираю PDF на компьютере…", ratio)
+
+                    pdf = PDF_BRIDGE.request(payload, timeout=90.0, on_tick=_pdf_tick)
+                    busy.step("Отправляю PDF…", 0.96)
+                    name = f"{(caption or 'Заказы')[:80]}.pdf".replace("/", "_").replace("\\", "_")
+                    send_document(token, chat_id, pdf, name, caption, "application/pdf")
                 else:
-                    send_document(token, chat_id, text.encode("utf-8"), "finmaster-snapshot.txt", caption)
-        except Exception as exc:
-            send_html(token, chat_id, html_esc(str(exc) or "Не удалось собрать снимок."))
+                    busy.step("Собираю текст…", 0.25)
+                    text = snapmod.render_text(doc, blocks, fields, hide_labels, hide_stamp, title, hide_totals)
+                    busy.step("Отправляю…", 0.88)
+                    if len(text) < 3800:
+                        send_html(token, chat_id, f"<pre>{html_esc(text)}</pre>")
+                    else:
+                        send_document(token, chat_id, text.encode("utf-8"), "finmaster-snapshot.txt", caption)
+            except Exception as exc:
+                send_html(token, chat_id, html_esc(str(exc) or "Не удалось собрать снимок."))
 
     def _show(self, token: str, chat_id: str, screen: str) -> None:
         session = self._chat(chat_id)
