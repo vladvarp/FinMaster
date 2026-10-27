@@ -2067,9 +2067,39 @@ html[data-theme="dark"] .line-menu { background: #1b2538; border-color: var(--li
 .voice-model small { color: var(--muted); }
 .voice-model-actions { display: flex; gap: 6px; align-items: center; }
 .voice-more-open { margin-top: 12px; }
-.modal-card.voice-more-modal { width: min(680px, 100%); }
-.voice-more-modal input { width: 100%; margin: 0 0 8px; }
-.voice-more-list { max-height: min(52vh, 460px); overflow: auto; display: grid; gap: 8px; align-content: start; }
+.modal-card.voice-more-modal {
+  width: min(680px, 100%);
+  max-height: min(86vh, 760px);
+  display: flex;
+  flex-direction: column;
+}
+.voice-more-modal input {
+  width: 100%;
+  margin: 0 0 10px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 12px;
+  outline: none;
+}
+.voice-more-modal input::placeholder { color: var(--muted); }
+.voice-more-modal input:focus {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.15);
+}
+.voice-more-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.voice-more-modal .modal-actions { margin-top: 16px; flex: 0 0 auto; }
 .voice-more-lang { margin: 4px 0 0; font-size: 12px; font-weight: 650; color: var(--muted); }
 .voice-job { display: grid; gap: 8px; margin: 0 0 12px; }
 .voice-job[hidden] { display: none !important; }
