@@ -1772,7 +1772,7 @@
     host.className = `update-versions${match ? " is-single" : ""}`;
     host.innerHTML = `
       <div class="update-ver${installedClass}">
-        <span class="update-ver-label">Сейчас установлена</span>
+        <span class="update-ver-label">Текущая версия</span>
         <b>${esc(current)}</b>
         <div class="update-ver-tools">
           <span class="update-code">${esc(shortCode(state.updateCurrentCode || state.updateCurrentSha))}</span>
@@ -1822,7 +1822,7 @@
       return;
     }
     if (!all && rows.length === 1 && rows[0].current) {
-      log.innerHTML = '<p class="update-wait">Это последняя версия. Весь путь открывает кнопка «Вся история».</p>';
+      log.innerHTML = '<p class="update-wait">Это последняя версия.</p>';
       return;
     }
     log.innerHTML = `<ol class="update-path">${rows.map(updateCommitItem).join("")}</ol>`;
