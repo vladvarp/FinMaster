@@ -55,6 +55,7 @@ CATALOG = (
 _model = None
 _model_path = ""
 _MODEL_LOCK = threading.Lock()
+_RECOGNIZE_LOCK = threading.Lock()
 _SIZE_CACHE: dict[str, int] = {}
 _JOB_LOCK = threading.Lock()
 _JOB: dict[str, Any] = {
@@ -119,7 +120,10 @@ def transcribe(
     wav = _to_wav(data, should_stop)
     if on_progress:
         on_progress(0.98, "Распознаю речь…")
-    return spoken_digits(_recognize(path, wav, should_stop))
+    text = _recognize_cancellable(path, wav, should_stop) if should_stop else _recognize(path, wav)
+    if should_stop and should_stop():
+        raise RecognizeCancelled()
+    return spoken_digits(text)
 
 
 def ensure_model(
@@ -764,6 +768,31 @@ def _to_wav(data: bytes, should_stop: Callable[[], bool] | None = None) -> bytes
                     pass
 
 
+def _recognize_cancellable(path: str, wav: bytes, should_stop: Callable[[], bool]) -> str:
+    """Ждёт разбор кусками. «Отменить» возвращает управление сразу, даже если Vosk ещё считает."""
+    if not _RECOGNIZE_LOCK.acquire(blocking=False):
+        raise VoiceError("Предыдущее распознавание ещё останавливается. Пришлите запись через несколько секунд.")
+    box: dict[str, Any] = {}
+    done = threading.Event()
+
+    def run() -> None:
+        try:
+            box["text"] = _recognize(path, wav, should_stop)
+        except Exception as exc:
+            box["err"] = exc
+        finally:
+            _RECOGNIZE_LOCK.release()
+            done.set()
+
+    threading.Thread(target=run, name="fm-vosk", daemon=True).start()
+    while not done.wait(0.15):
+        if should_stop():
+            raise RecognizeCancelled()
+    if box.get("err"):
+        raise box["err"]
+    return str(box.get("text") or "")
+
+
 def _recognize(path: str, wav: bytes, should_stop: Callable[[], bool] | None = None) -> str:
     global _model, _model_path
     try:
@@ -791,6 +820,8 @@ def _recognize(path: str, wav: bytes, should_stop: Callable[[], bool] | None = N
             if not chunk:
                 break
             recognizer.AcceptWaveform(chunk)
+        if should_stop and should_stop():
+            raise RecognizeCancelled()
         payload = json.loads(recognizer.FinalResult() or "{}")
     return " ".join(str(payload.get("text") or "").split())
 
