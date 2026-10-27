@@ -846,6 +846,7 @@ def _callback_notice(data: str) -> str:
         "Wa": "Переключаю доступ…",
         "PC": "Открываю на компьютере…",
         "D": "Карточка заказа…",
+        "Vr": "Отменяю распознавание…",
     }
     if data in fixed:
         return fixed[data]
@@ -889,8 +890,10 @@ class _ChatBusy:
         self._pulse = 0
         self._determinate = bar
         self._msg_id: int | None = None
+        self._markup: dict[str, Any] | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._cancel_timer: threading.Timer | None = None
         self._last_edit = 0.0
         self._last_ratio = -1.0
 
@@ -902,8 +905,24 @@ class _ChatBusy:
             self._msg_id = send_html(self._token, self._chat_id, self._progress_html())
         return self
 
+    def arm_cancel(self, data: str, delay: float = 2.0) -> None:
+        """Кнопка «Отменить» на карточке, если работа ещё идёт через delay секунд."""
+        timer = threading.Timer(delay, self._show_cancel, args=(data,))
+        timer.daemon = True
+        self._cancel_timer = timer
+        timer.start()
+
+    def _show_cancel(self, data: str) -> None:
+        if self._stop.is_set() or self._msg_id is None:
+            return
+        self._markup = _inline([[_btn("Отменить", data)]])
+        self._last_edit = 0.0
+        self._paint()
+
     def __exit__(self, *exc: object) -> None:
         self._stop.set()
+        if self._cancel_timer:
+            self._cancel_timer.cancel()
         if self._thread:
             self._thread.join(timeout=1.5)
         if self._msg_id is not None:
@@ -956,7 +975,7 @@ class _ChatBusy:
         self._last_edit = now
         self._last_ratio = self._ratio
         try:
-            send_html(self._token, self._chat_id, self._progress_html(), message_id=self._msg_id)
+            send_html(self._token, self._chat_id, self._progress_html(), self._markup, message_id=self._msg_id)
         except RuntimeError:
             pass
 
@@ -1288,6 +1307,9 @@ class TelegramBot:
         self._group_told: set[str] = set()
         self._declined_told: set[str] = set()
         self._voice_watch: threading.Thread | None = None
+        self._hear_thread: threading.Thread | None = None
+        self._hear_stop: threading.Event | None = None
+        self._work_lock = threading.Lock()
 
     def _busy(
         self,
@@ -1518,6 +1540,14 @@ class TelegramBot:
             if isinstance(upd.get("callback_query"), dict):
                 self._on_callback(token, upd["callback_query"])
                 return
+            with self._work_lock:
+                self._handle_message(token, upd)
+        except RuntimeError as exc:
+            with self._lock:
+                self._error = str(exc)
+
+    def _handle_message(self, token: str, upd: dict[str, Any]) -> None:
+        try:
             msg = upd.get("message")
             if not isinstance(msg, dict):
                 return
@@ -1553,7 +1583,36 @@ class TelegramBot:
     def _on_voice(self, token: str, chat_id: str, file_id: str, sender: dict[str, Any] | None = None) -> None:
         if not self._admit(token, chat_id, sender):
             return
+        with self._lock:
+            if self._hear_thread is not None and self._hear_thread.is_alive():
+                busy = True
+            else:
+                busy = False
+                self._hear_stop = threading.Event()
+                thread = threading.Thread(
+                    target=self._hear_voice,
+                    args=(token, chat_id, file_id),
+                    name="fm-hear",
+                    daemon=True,
+                )
+                self._hear_thread = thread
+                thread.start()
+        if busy:
+            send_html(token, chat_id, "Уже разбираю предыдущую запись.")
+
+    def _cancel_hear(self, token: str, chat_id: str) -> None:
+        with self._lock:
+            stop = self._hear_stop
+            alive = self._hear_thread is not None and self._hear_thread.is_alive()
+        if stop is not None and alive:
+            stop.set()
+            return
+        send_html(token, chat_id, "Сейчас ничего не разбирается.")
+
+    def _hear_voice(self, token: str, chat_id: str, file_id: str) -> None:
+        stop = self._hear_stop
         with self._busy(token, chat_id, "Слушаю запись…", bar=True, action="record_voice") as busy:
+            busy.arm_cancel("Vr")
             try:
                 voice.require()
                 need_model = not voice.model_ready()
@@ -1566,7 +1625,14 @@ class TelegramBot:
                 def _voice_progress(ratio: float, text: str) -> None:
                     busy.step(text, ratio if need_model else None)
 
-                heard = voice.transcribe(_tg_file(token, file_id), on_progress=_voice_progress)
+                heard = voice.transcribe(
+                    _tg_file(token, file_id),
+                    on_progress=_voice_progress,
+                    should_stop=stop.is_set if stop is not None else None,
+                )
+            except (voice.RecognizeCancelled, voice.DownloadCancelled):
+                send_html(token, chat_id, "Распознавание отменено.")
+                return
             except voice.VoiceError as exc:
                 send_html(token, chat_id, html_esc(str(exc)))
                 return
@@ -1579,7 +1645,8 @@ class TelegramBot:
             return
         netlog.add("telegram", f"Голос: {heard[:80]}", source=f"chat {chat_id}", key=f"tg-voice-{chat_id}")
         send_html(token, chat_id, f"Услышал: <i>{html_esc(heard)}</i>")
-        self._on_text(token, chat_id, heard, voice=True)
+        with self._work_lock:
+            self._on_text(token, chat_id, heard, voice=True)
 
     def _on_text(self, token: str, chat_id: str, text: str, voice: bool = False, sender: dict[str, Any] | None = None) -> None:
         if not self._admit(token, chat_id, sender, text):
@@ -1831,9 +1898,16 @@ class TelegramBot:
         if data == "Ny":
             self._rotate_link(token, chat_id)
             return
+        if data == "Vr":
+            self._cancel_hear(token, chat_id)
+            return
         if data in {"Vx", "Vn"} or data.startswith(("Vu:", "Vg:", "Vi:", "Vd:", "Vy:")):
             self._voice_action(token, chat_id, data)
             return
+        with self._work_lock:
+            self._dispatch_callback(token, chat_id, data, mid, notice)
+
+    def _dispatch_callback(self, token: str, chat_id: str, data: str, mid: Any, notice: str) -> None:
         session = self._chat(chat_id)
         if mid is not None:
             session.message_id = int(mid)

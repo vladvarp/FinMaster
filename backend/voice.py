@@ -82,6 +82,10 @@ class DownloadCancelled(Exception):
     pass
 
 
+class RecognizeCancelled(Exception):
+    """Разбор записи остановлен кнопкой."""
+
+
 def model_ready(model_id: str = "") -> bool:
     return os.path.isdir(os.path.join(_model_dir(model_id or active_id()), "am"))
 
@@ -97,21 +101,32 @@ def require() -> None:
             ) from exc
 
 
-def transcribe(data: bytes, on_progress: Callable[[float, str], None] | None = None) -> str:
+def transcribe(
+    data: bytes,
+    on_progress: Callable[[float, str], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
+) -> str:
     if not data:
         raise VoiceError("Пустая запись. Напишите вопрос текстом.")
     require()
-    path = ensure_model(on_progress)
+    if should_stop and should_stop():
+        raise RecognizeCancelled()
+    path = ensure_model(on_progress, should_stop)
+    if should_stop and should_stop():
+        raise RecognizeCancelled()
     if on_progress:
         on_progress(0.94, "Разбираю запись…")
-    wav = _to_wav(data)
+    wav = _to_wav(data, should_stop)
     if on_progress:
         on_progress(0.98, "Распознаю речь…")
-    return spoken_digits(_recognize(path, wav))
+    return spoken_digits(_recognize(path, wav, should_stop))
 
 
-def ensure_model(on_progress: Callable[[float, str], None] | None = None) -> str:
-    return ensure_model_id(active_id(), on_progress)
+def ensure_model(
+    on_progress: Callable[[float, str], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
+) -> str:
+    return ensure_model_id(active_id(), on_progress, should_stop)
 
 
 def ensure_model_id(
@@ -699,7 +714,7 @@ def _model_dir(model_id: str = "") -> str:
     return os.path.join(storage.config_dir(), "voice", model_id or active_id())
 
 
-def _to_wav(data: bytes) -> bytes:
+def _to_wav(data: bytes, should_stop: Callable[[], bool] | None = None) -> bytes:
     try:
         import imageio_ffmpeg
     except ImportError as exc:
@@ -714,14 +729,25 @@ def _to_wav(data: bytes) -> bytes:
             src.write(data)
             src_path = src.name
         dst_path = src_path + ".wav"
-        kwargs: dict = {"capture_output": True, "timeout": 90}
+        kwargs: dict = {}
         if os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-        run = subprocess.run(
+        proc = subprocess.Popen(
             [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", src_path, "-ac", "1", "-ar", "16000", "-f", "wav", dst_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             **kwargs,
         )
-        if run.returncode != 0 or not os.path.isfile(dst_path):
+        while proc.poll() is None:
+            if should_stop and should_stop():
+                proc.kill()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+                raise RecognizeCancelled()
+            time.sleep(0.2)
+        if proc.returncode != 0 or not os.path.isfile(dst_path):
             raise VoiceError("Не удалось прочитать запись. Напишите вопрос текстом.")
         with open(dst_path, "rb") as handle:
             return handle.read()
@@ -738,7 +764,7 @@ def _to_wav(data: bytes) -> bytes:
                     pass
 
 
-def _recognize(path: str, wav: bytes) -> str:
+def _recognize(path: str, wav: bytes, should_stop: Callable[[], bool] | None = None) -> str:
     global _model, _model_path
     try:
         from vosk import KaldiRecognizer, Model, SetLogLevel
@@ -747,14 +773,20 @@ def _recognize(path: str, wav: bytes) -> str:
             "Распознавание ещё не установлено. Перезапустите FinMaster — библиотека поставится сама. Пока напишите вопрос текстом."
         ) from exc
     SetLogLevel(-1)
+    if should_stop and should_stop():
+        raise RecognizeCancelled()
     with _MODEL_LOCK:
         if _model is None or _model_path != path:
             _model = Model(path)
             _model_path = path
         model = _model
+    if should_stop and should_stop():
+        raise RecognizeCancelled()
     with wave.open(io.BytesIO(wav), "rb") as handle:
         recognizer = KaldiRecognizer(model, handle.getframerate())
         while True:
+            if should_stop and should_stop():
+                raise RecognizeCancelled()
             chunk = handle.readframes(4000)
             if not chunk:
                 break
