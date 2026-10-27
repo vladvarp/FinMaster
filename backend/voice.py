@@ -9,15 +9,19 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import threading
 import wave
 import zipfile
+from html.parser import HTMLParser
 from typing import Any, Callable
+from urllib.parse import unquote
 
 from backend import storage
 
@@ -64,6 +68,10 @@ _JOB: dict[str, Any] = {
 }
 _CANCEL = threading.Event()
 _RESPONSE: Any = None
+_SITE_URL = "https://alphacephei.com/vosk/models"
+_SITE_LOCK = threading.Lock()
+_SITE: dict[str, Any] = {"at": 0.0, "models": []}
+_SITE_TTL = 6 * 60 * 60
 
 
 class VoiceError(RuntimeError):
@@ -210,6 +218,46 @@ def set_active(model_id: str) -> str:
     return chosen
 
 
+def remove_model(model_id: str) -> None:
+    spec = _spec(model_id)
+    chosen = str(spec["id"]) if spec else str(model_id or "").strip()
+    if not chosen or chosen in {".", ".."} or any(char in chosen for char in "/\\:"):
+        raise VoiceError("Такой модели нет.")
+    root = os.path.abspath(os.path.join(storage.config_dir(), "voice"))
+    path = os.path.abspath(os.path.join(root, chosen))
+    try:
+        inside = os.path.commonpath([root, path]) == root
+    except ValueError:
+        inside = False
+    if not inside:
+        raise VoiceError("Такой модели нет.")
+    if not model_ready(chosen):
+        raise VoiceError("Эта модель не скачана.")
+    job = job_snapshot()
+    if job.get("running") and str(job.get("model") or "") == chosen:
+        raise VoiceError("Сначала отмените скачивание.")
+    global _model, _model_path
+    with _MODEL_LOCK:
+        if os.path.normcase(_model_path) == os.path.normcase(path):
+            _model = None
+            _model_path = ""
+    cfg = storage.load_config()
+    if str(cfg.get("voice_model") or "") == chosen:
+        cfg["voice_model"] = ""
+        storage.save_config(cfg)
+    zip_path = path + ".zip"
+    if os.path.isfile(zip_path):
+        try:
+            os.remove(zip_path)
+        except OSError:
+            pass
+    try:
+        shutil.rmtree(path)
+    except OSError as exc:
+        raise VoiceError("Модель занята. Повторите удаление через минуту.") from exc
+    _forget(chosen)
+
+
 def describe(model_id: str) -> str:
     spec = _spec(model_id)
     if spec:
@@ -223,10 +271,38 @@ def code_of(model_id: str) -> str:
 
 
 def id_of(code: str) -> str:
+    key = str(code or "").strip()
     for spec in CATALOG:
-        if spec["code"] == str(code or "").strip():
+        if spec["code"] == key:
             return str(spec["id"])
+    if _safe_id(key):
+        return key
     return ""
+
+
+def more_models() -> dict[str, Any]:
+    """Модели с сайта Vosk, кроме трёх русских из основного списка. Только для окна на компьютере."""
+    error = ""
+    try:
+        rows = _load_site()
+    except VoiceError as exc:
+        rows = _site_file()
+        error = str(exc) if not rows else ""
+    builtin = {str(item["id"]) for item in CATALOG}
+    current = active_id()
+    models: list[dict[str, Any]] = []
+    for spec in rows:
+        if str(spec.get("id") or "") in builtin:
+            continue
+        row = _row(spec, current)
+        row["lang"] = str(spec.get("lang") or "")
+        models.append(row)
+    payload: dict[str, Any] = {"models": models, "job": job_snapshot()}
+    if error:
+        payload["error"] = error
+    elif not models and not rows:
+        payload["error"] = "Список с сайта пуст."
+    return payload
 
 
 def job_snapshot() -> dict[str, Any]:
@@ -254,7 +330,15 @@ def cancel_download() -> dict[str, Any]:
 def start_download(model_id: str) -> dict[str, Any]:
     spec = _spec(model_id)
     if spec is None:
+        try:
+            _load_site()
+        except VoiceError:
+            pass
+        spec = _spec(model_id)
+    if spec is None:
         raise VoiceError("Такой модели речи нет.")
+    if not any(str(item["id"]) == str(spec["id"]) for item in CATALOG):
+        _remember(spec)
     if model_ready(str(spec["id"])):
         with _JOB_LOCK:
             _JOB.update(running=False, progress=100, text="Уже скачана", error="", ok=True, cancelled=False, model=str(spec["id"]))
@@ -316,28 +400,34 @@ def catalog() -> dict[str, Any]:
         for name in sorted(os.listdir(root)):
             if name in seen or not model_ready(name):
                 continue
-            rows.append(
-                _row(
-                    {"id": name, "code": "", "label": name, "bytes": 0, "about": describe(name), "url": ""},
-                    current,
-                )
-            )
+            saved = _added().get(name)
+            rows.append(_row(saved, current) if saved else _row(
+                {"id": name, "code": "", "label": name, "bytes": 0, "about": describe(name), "url": ""},
+                current,
+            ))
     return {"active": current, "models": rows, "job": job_snapshot()}
 
 
 def _row(spec: dict[str, Any], current: str) -> dict[str, Any]:
     model_id = str(spec["id"])
     ready = model_ready(model_id)
-    size = _download_size(spec) if spec.get("url") else _dir_size(_model_dir(model_id))
+    size = int(spec.get("bytes") or 0)
+    if size <= 0 and spec.get("url"):
+        size = _download_size(spec)
+    elif size <= 0:
+        size = _dir_size(_model_dir(model_id))
+    code = str(spec.get("code") or "")
+    if not code and _safe_id(model_id):
+        code = model_id
     return {
         "id": model_id,
-        "code": str(spec.get("code") or ""),
+        "code": code,
         "label": str(spec.get("label") or model_id),
         "about": str(spec.get("about") or ""),
         "bytes": size,
         "size": _fmt_size(size),
         "ready": ready,
-        "active": model_id == current,
+        "active": ready and model_id == current,
     }
 
 
@@ -346,7 +436,214 @@ def _spec(model_id: str) -> dict[str, Any] | None:
     for spec in CATALOG:
         if spec["id"] == key or spec["code"] == key:
             return spec
+    saved = _added().get(key)
+    if saved:
+        return saved
+    for spec in _site_memory():
+        if spec.get("id") == key:
+            return spec
     return None
+
+
+def _safe_id(model_id: str) -> bool:
+    return bool(re.fullmatch(r"vosk-model-[A-Za-z0-9._-]{1,80}", str(model_id or "")))
+
+
+def _added_path() -> str:
+    return os.path.join(storage.config_dir(), "voice", "added.json")
+
+
+def _added() -> dict[str, dict[str, Any]]:
+    path = _added_path()
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for key, item in raw.items():
+        if _safe_id(str(key)) and isinstance(item, dict):
+            out[str(key)] = item
+    return out
+
+
+def _remember(spec: dict[str, Any]) -> None:
+    model_id = str(spec.get("id") or "")
+    if not _safe_id(model_id):
+        return
+    data = _added()
+    data[model_id] = {
+        "id": model_id,
+        "code": "",
+        "label": str(spec.get("label") or model_id),
+        "bytes": int(spec.get("bytes") or 0),
+        "about": str(spec.get("about") or ""),
+        "url": str(spec.get("url") or ""),
+        "lang": str(spec.get("lang") or ""),
+    }
+    path = _added_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def _forget(model_id: str) -> None:
+    data = _added()
+    if model_id not in data:
+        return
+    data.pop(model_id, None)
+    path = _added_path()
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def _site_path() -> str:
+    return os.path.join(storage.config_dir(), "voice", "site.json")
+
+
+def _site_memory() -> list[dict[str, Any]]:
+    with _SITE_LOCK:
+        return list(_SITE.get("models") or [])
+
+
+def _site_file() -> list[dict[str, Any]]:
+    path = _site_path()
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return []
+    rows = raw.get("models") if isinstance(raw, dict) else None
+    if not isinstance(rows, list):
+        return []
+    return [item for item in rows if isinstance(item, dict) and _safe_id(str(item.get("id") or ""))]
+
+
+def _load_site() -> list[dict[str, Any]]:
+    now = time.time()
+    with _SITE_LOCK:
+        cached = list(_SITE.get("models") or [])
+        fresh = cached and now - float(_SITE.get("at") or 0) < _SITE_TTL
+    if fresh:
+        return cached
+    try:
+        request = urllib.request.Request(_SITE_URL, headers={"User-Agent": "FinMaster"})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            page = response.read().decode("utf-8", "replace")
+        models = _parse_site(page)
+        if not models:
+            raise VoiceError("Список с сайта пуст.")
+    except VoiceError:
+        raise
+    except (OSError, urllib.error.URLError, TimeoutError, ValueError) as exc:
+        stored = _site_file()
+        if stored:
+            with _SITE_LOCK:
+                _SITE["models"] = stored
+                _SITE["at"] = now
+            return stored
+        raise VoiceError("Список с сайта не открылся. Проверьте интернет.") from exc
+    with _SITE_LOCK:
+        _SITE["models"] = models
+        _SITE["at"] = now
+    try:
+        path = _site_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump({"at": now, "models": models}, handle, ensure_ascii=False)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+    return models
+
+
+class _SiteTable(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.rows: list[list[tuple[str, str]]] = []
+        self._in_tr = False
+        self._in_td = False
+        self._cells: list[tuple[str, str]] = []
+        self._buf: list[str] = []
+        self._href = ""
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "tr":
+            self._in_tr = True
+            self._cells = []
+        elif tag == "td" and self._in_tr:
+            self._in_td = True
+            self._buf = []
+            self._href = ""
+        elif tag == "a" and self._in_td and not self._href:
+            href = dict(attrs).get("href") or ""
+            if href.endswith(".zip"):
+                self._href = href
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "td" and self._in_td:
+            self._cells.append((" ".join("".join(self._buf).split()), self._href))
+            self._in_td = False
+        elif tag == "tr" and self._in_tr:
+            self._in_tr = False
+            if self._cells:
+                self.rows.append(self._cells)
+
+    def handle_data(self, data: str) -> None:
+        if self._in_td:
+            self._buf.append(data)
+
+
+def _parse_human(text: str) -> int:
+    match = re.match(r"([\d.]+)\s*([kmgt])b?", str(text or "").strip().lower().replace(",", "."))
+    if not match:
+        return 0
+    mult = {"k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}[match.group(2)]
+    try:
+        return int(float(match.group(1)) * mult)
+    except ValueError:
+        return 0
+
+
+def _parse_site(page: str) -> list[dict[str, Any]]:
+    table = _SiteTable()
+    table.feed(page)
+    lang = ""
+    models: list[dict[str, Any]] = []
+    for cells in table.rows:
+        text, href = cells[0]
+        if not href:
+            if text:
+                lang = text
+            continue
+        name = unquote(href.rsplit("/", 1)[-1])
+        if name.lower().endswith(".zip"):
+            name = name[:-4]
+        if not _safe_id(name):
+            continue
+        notes = cells[3][0] if len(cells) > 3 else ""
+        url = href if href.startswith("http") else f"https://alphacephei.com{href}"
+        models.append({
+            "id": name,
+            "code": "",
+            "label": f"{lang} · {name}" if lang else name,
+            "bytes": _parse_human(cells[1][0] if len(cells) > 1 else ""),
+            "about": notes[:400],
+            "url": url,
+            "lang": lang,
+        })
+    return models
 
 
 def _download_size(spec: dict[str, Any]) -> int:

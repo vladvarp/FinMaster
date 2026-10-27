@@ -1390,8 +1390,11 @@
 
         </div>
         <div class="app-settings-pane" data-settings-pane="voice" hidden>
-          <p class="report-settings-hint">Рабочая модель разбирает голосовые вопросы бота на этом компьютере. У каждой есть размер загрузки и кнопка i с описанием.</p>
+          <p class="report-settings-hint">Рабочая модель разбирает голосовые вопросы бота на этом компьютере. У каждой есть размер загрузки и кнопка i с описанием. «Другие модели» открывает остальные модели с сайта Vosk. Скачанная появляется в этом списке и в боте.</p>
           <div id="voice-models" class="voice-models"></div>
+          <div class="voice-more-open">
+            <button type="button" class="btn" id="btn-voice-more">Другие модели</button>
+          </div>
         </div>
         <div class="app-settings-pane" data-settings-pane="runtime" hidden>
       <p class="runtime-lead" id="runtime-note"></p>
@@ -1408,6 +1411,19 @@
       </div>
       <pre class="runtime-log" id="runtime-log" hidden></pre>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="voice-more-modal">
+    <div class="modal-card voice-more-modal" role="dialog" aria-modal="true" aria-labelledby="voice-more-title">
+      <h3 id="voice-more-title">Другие модели</h3>
+      <p class="report-settings-hint">Список с сайта Vosk, кроме трёх русских моделей вкладки «Голос». После скачивания модель видна там и в боте.</p>
+      <input id="voice-more-find" type="search" placeholder="Язык или название" autocomplete="off">
+      <p id="voice-more-note" class="report-settings-hint" hidden></p>
+      <div id="voice-more-list" class="voice-more-list"></div>
+      <div class="modal-actions">
+        <button class="btn primary" type="button" id="voice-more-close">Закрыть</button>
       </div>
     </div>
   </div>

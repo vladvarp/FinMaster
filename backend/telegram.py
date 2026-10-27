@@ -1831,7 +1831,7 @@ class TelegramBot:
         if data == "Ny":
             self._rotate_link(token, chat_id)
             return
-        if data == "Vx" or data.startswith(("Vu:", "Vg:", "Vi:")):
+        if data in {"Vx", "Vn"} or data.startswith(("Vu:", "Vg:", "Vi:", "Vd:", "Vy:")):
             self._voice_action(token, chat_id, data)
             return
         session = self._chat(chat_id)
@@ -1885,12 +1885,17 @@ class TelegramBot:
                 row.append(_btn("Включить", f"Vu:{code}"))
             elif not model.get("ready"):
                 row.append(_btn("Скачать", f"Vg:{code}"))
+            if model.get("ready") and not busy:
+                row.append(_btn("Удалить", f"Vd:{code}"))
             row.append(_btn("i", f"Vi:{code}"))
             rows.append(row)
         rows.append([_btn("Меню", "H")])
         send_html(token, chat_id, "\n".join(lines), _inline(rows))
 
     def _voice_action(self, token: str, chat_id: str, data: str) -> None:
+        if data == "Vn":
+            self._show_voice(token, chat_id)
+            return
         if data == "Vx":
             job = voice.cancel_download()
             with self._lock:
@@ -1918,6 +1923,23 @@ class TelegramBot:
                 send_html(token, chat_id, html_esc(str(exc)))
                 return
             send_html(token, chat_id, f"Рабочая модель: <b>{html_esc(label)}</b>.")
+            self._show_voice(token, chat_id)
+            return
+        if data.startswith("Vd:"):
+            send_html(
+                token,
+                chat_id,
+                f"Удалить <b>{html_esc(label)}</b> с этого компьютера? Если она рабочая, подпись снимется.",
+                _inline([[_btn("Удалить", f"Vy:{code}"), _btn("Отмена", "Vn")]]),
+            )
+            return
+        if data.startswith("Vy:"):
+            try:
+                voice.remove_model(model_id)
+            except voice.VoiceError as exc:
+                send_html(token, chat_id, html_esc(str(exc)))
+                return
+            send_html(token, chat_id, f"<b>{html_esc(label)}</b> удалена.")
             self._show_voice(token, chat_id)
             return
         try:

@@ -1878,6 +1878,13 @@ def _telegram_nick(person: dict[str, Any]) -> str:
     return ""
 
 
+@app.get("/api/voice/more")
+def api_voice_more():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    return jsonify(voice.more_models())
+
+
 @app.get("/api/voice/models")
 def api_voice_models():
     if not _is_local():
@@ -1899,6 +1906,18 @@ def api_voice_use():
     data = request.get_json(silent=True) or {}
     try:
         voice.set_active(str(data.get("id") or ""))
+    except voice.VoiceError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(voice.catalog())
+
+
+@app.post("/api/voice/delete")
+def api_voice_delete():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        voice.remove_model(str(data.get("id") or ""))
     except voice.VoiceError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify(voice.catalog())

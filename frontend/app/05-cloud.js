@@ -2489,6 +2489,7 @@
 
   function closeAppSettings() {
     stopRuntimePoll();
+    $("voice-more-modal")?.classList.remove("open");
     $("voice-info-modal")?.classList.remove("open");
     $("app-settings-modal")?.classList.remove("open");
   }
@@ -2542,6 +2543,7 @@
         <div class="voice-model-actions">
           <button type="button" class="info-btn" data-voice-info="${esc(model.id)}" aria-label="Описание модели">i</button>
           ${model.ready && !model.active ? `<button type="button" class="btn small" data-voice-use="${esc(model.id)}">Сделать рабочей</button>` : ""}
+          ${model.ready && !busy ? `<button type="button" class="btn small danger" data-voice-drop="${esc(model.id)}">Удалить</button>` : ""}
           ${model.ready || busy ? "" : `<button type="button" class="btn small" data-voice-get="${esc(model.id)}">Скачать</button>`}
         </div>
       </article>`;
@@ -2554,6 +2556,52 @@
     const data = await apiGet("/api/voice/models");
     paintVoiceModels(data);
     if (data?.job?.running) watchVoiceJob();
+  }
+
+  let voiceMoreRows = [];
+
+  function paintVoiceMore() {
+    const list = $("voice-more-list");
+    if (!list) return;
+    const query = String($("voice-more-find")?.value || "").trim().toLowerCase();
+    const rows = voiceMoreRows.filter((model) => {
+      if (!query) return true;
+      return `${model.lang || ""} ${model.label || ""} ${model.id || ""} ${model.about || ""}`.toLowerCase().includes(query);
+    });
+    let lang = "";
+    list.innerHTML = rows.map((model) => {
+      const head = model.lang && model.lang !== lang ? `<p class="voice-more-lang">${esc(model.lang)}</p>` : "";
+      lang = model.lang || lang;
+      const note = String(model.about || "");
+      const short = note.length > 140 ? `${note.slice(0, 140)}…` : note;
+      const action = model.ready
+        ? `<button type="button" class="btn small" disabled>В списке</button>`
+        : `<button type="button" class="btn small" data-voice-more-get="${esc(model.id)}">Скачать</button>`;
+      return `${head}<article class="voice-model">
+        <div><b>${esc(model.id)}</b><small>${esc(model.size || "размер неизвестен")}${short ? ` · ${esc(short)}` : ""}</small></div>
+        <div class="voice-model-actions">${action}</div>
+      </article>`;
+    }).join("") || '<p class="report-settings-hint">Ничего не нашлось.</p>';
+  }
+
+  async function openVoiceMore() {
+    const modal = $("voice-more-modal");
+    const list = $("voice-more-list");
+    const note = $("voice-more-note");
+    modal?.classList.add("open");
+    if (list) list.innerHTML = '<p class="report-settings-hint">Открываю список…</p>';
+    try {
+      const data = await apiGet("/api/voice/more");
+      voiceMoreRows = Array.isArray(data?.models) ? data.models : [];
+      if (note) {
+        note.hidden = !data?.error;
+        note.textContent = data?.error || "";
+      }
+      paintVoiceMore();
+    } catch (err) {
+      voiceMoreRows = [];
+      if (list) list.innerHTML = `<p class="report-settings-hint">${esc(err.message || "Список не открылся")}</p>`;
+    }
   }
 
   async function refreshVoiceJob() {
@@ -2579,6 +2627,11 @@
         else if (job.error) toast(job.error);
         else if (job.ok) toast("Модель скачана");
         if (settingsOpen) await loadVoiceModels();
+        if (job.ok && job.model) {
+          const done = voiceMoreRows.find((model) => model.id === job.model);
+          if (done) done.ready = true;
+        }
+        if ($("voice-more-modal")?.classList.contains("open")) paintVoiceMore();
       } catch { /* локальный опрос скачивания */ }
     }, 800);
   }
@@ -2598,6 +2651,7 @@
     $("voice-models")?.addEventListener("click", async (e) => {
       const info = e.target.closest("[data-voice-info]");
       const use = e.target.closest("[data-voice-use]");
+      const drop = e.target.closest("[data-voice-drop]");
       const get = e.target.closest("[data-voice-get]");
       if (info) {
         let about = {};
@@ -2611,7 +2665,23 @@
         return;
       }
       try {
-        if (use) {
+        if (drop) {
+          const id = drop.dataset.voiceDrop;
+          let about = {};
+          try { about = JSON.parse($("voice-models")?.dataset.about || "{}"); } catch { about = {}; }
+          const row = about[id] || {};
+          const name = row.label || id;
+          const ok = await askConfirm({
+            title: "Удалить модель",
+            text: `«${name}» будет стёрта с этого компьютера. Если она была рабочей, подпись снимется. Снова использовать её можно после нового скачивания.`,
+            ok: "Удалить",
+            cancel: "Отмена",
+            danger: true,
+          });
+          if (!ok) return;
+          paintVoiceModels(await apiPost("/api/voice/delete", { id }));
+          toast("Модель удалена");
+        } else if (use) {
           paintVoiceModels(await apiPost("/api/voice/use", { id: use.dataset.voiceUse }));
           toast("Рабочая модель переключена");
         } else if (get) {
@@ -2631,6 +2701,23 @@
         toast(err.message || "Не удалось отменить скачивание");
       } finally {
         if (btn) btn.disabled = false;
+      }
+    });
+    $("btn-voice-more")?.addEventListener("click", () => openVoiceMore());
+    $("voice-more-close")?.addEventListener("click", () => $("voice-more-modal")?.classList.remove("open"));
+    $("voice-more-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("voice-more-modal")) $("voice-more-modal").classList.remove("open");
+    });
+    $("voice-more-find")?.addEventListener("input", () => paintVoiceMore());
+    $("voice-more-list")?.addEventListener("click", async (e) => {
+      const get = e.target.closest("[data-voice-more-get]");
+      if (!get || get.disabled) return;
+      try {
+        await apiPost("/api/voice/download", { id: get.dataset.voiceMoreGet });
+        $("voice-more-modal")?.classList.remove("open");
+        await loadVoiceModels();
+      } catch (err) {
+        toast(err.message || "Не удалось скачать модель");
       }
     });
     $("voice-info-close")?.addEventListener("click", () => $("voice-info-modal")?.classList.remove("open"));
@@ -4083,6 +4170,11 @@
         if ($("voice-info-modal")?.classList.contains("open")) {
           e.preventDefault();
           $("voice-info-modal").classList.remove("open");
+          return;
+        }
+        if ($("voice-more-modal")?.classList.contains("open")) {
+          e.preventDefault();
+          $("voice-more-modal").classList.remove("open");
           return;
         }
         if ($("token-pack-modal")?.classList.contains("open")) {

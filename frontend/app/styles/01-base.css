@@ -319,9 +319,11 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .file-menu-login:hover { background: color-mix(in srgb, var(--accent) 16%, var(--card)); }
 #settings-pack-modal.open,
 #token-pack-modal.open,
+#voice-more-modal.open,
 #voice-info-modal.open,
 #remote-guide-modal.open,
 #device-info-modal.open { z-index: 10090 !important; }
+#voice-info-modal.open { z-index: 10110 !important; }
 .modal-card.settings-pack-modal { width: min(420px, 100%); }
 .settings-pack-list { display: grid; gap: 8px; margin: 0 0 14px; }
 .settings-pack-check { justify-content: flex-start; align-items: flex-start; }
@@ -2064,6 +2066,11 @@ html[data-theme="dark"] .line-menu { background: #1b2538; border-color: var(--li
 .voice-model b { display: block; }
 .voice-model small { color: var(--muted); }
 .voice-model-actions { display: flex; gap: 6px; align-items: center; }
+.voice-more-open { margin-top: 12px; }
+.modal-card.voice-more-modal { width: min(680px, 100%); }
+.voice-more-modal input { width: 100%; margin: 0 0 8px; }
+.voice-more-list { max-height: min(52vh, 460px); overflow: auto; display: grid; gap: 8px; align-content: start; }
+.voice-more-lang { margin: 4px 0 0; font-size: 12px; font-weight: 650; color: var(--muted); }
 .voice-job { display: grid; gap: 8px; margin: 0 0 12px; }
 .voice-job[hidden] { display: none !important; }
 .voice-job-head { display: flex; align-items: center; gap: 10px; }
