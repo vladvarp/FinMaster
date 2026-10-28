@@ -1368,17 +1368,7 @@
   async function libraryWatchLoop() {
     if (!state.desktop || state.libraryWatching) return;
     state.libraryWatching = true;
-    if (window.FM_DESK) {
-      while (state.desktop) {
-        await new Promise((r) => setTimeout(r, 4000));
-        try {
-          applyRemoteLists({ library: await apiGet("/api/library"), recent: state.recentItems });
-        } catch {
-          /* список обновится следующим запросом */
-        }
-      }
-      return;
-    }
+    if (window.FM_DESK) return;
     let version = 0;
     while (state.desktop) {
       try {
@@ -1755,7 +1745,7 @@
     };
     $("remote-tg-pending")?.addEventListener("click", onClick);
     $("remote-tg-users")?.addEventListener("click", onClick);
-    if (!state.desktop) return;
+    if (!state.desktop || window.FM_DESK) return;
     setInterval(async () => {
       try {
         applyRemotePayload(await apiGet("/api/telegram/access"));
@@ -2053,7 +2043,7 @@
       }
       watchRemoteAccess();
       watchDesktopPdfJobs();
-      setInterval(acceptExternalOpens, 800);
+      if (!window.FM_DESK) setInterval(acceptExternalOpens, 800);
     } catch {
       state.desktop = false;
       state.autosave = window.FM_DESK ? false : localStorage.getItem(LS_AUTOSAVE) === "true";

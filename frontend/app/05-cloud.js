@@ -2605,13 +2605,14 @@
   }
 
   async function refreshVoiceJob() {
+    if (window.FM_DESK) return;
     const job = await apiGet("/api/voice/job");
     paintVoiceProgress(job);
     if (job.running) watchVoiceJob();
   }
 
   function watchVoiceJob() {
-    if (voicePoll) return;
+    if (window.FM_DESK || voicePoll) return;
     voicePoll = setInterval(async () => {
       try {
         const job = await apiGet("/api/voice/job");

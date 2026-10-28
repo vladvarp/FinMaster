@@ -542,7 +542,9 @@
     }
     reveal();
     helloDesk();
-    setInterval(helloDesk, 12000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") helloDesk();
+    });
     enrichDevice();
   }
 

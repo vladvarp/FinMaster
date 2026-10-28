@@ -407,6 +407,7 @@ _NGROK_SKIP = {
     "/api/remote/log",
     "/api/remote/publish",
     "/api/remote/desk/beat",
+    "/api/voice/job",
     "/api/console",
     "/api/dirty",
 }
