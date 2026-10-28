@@ -14,6 +14,7 @@ import urllib.request
 from typing import Any, Callable
 
 from backend import ask
+from backend import bridge
 from backend import netlog
 from backend import storage
 from backend import voice
@@ -130,11 +131,63 @@ def _chunk_btns(items: list[dict[str, str]], cols: int = 2) -> list[list[dict[st
     return rows
 
 
+_BRIDGE_OUT = {
+    "sendMessage",
+    "sendPhoto",
+    "sendDocument",
+    "editMessageText",
+    "editMessageReplyMarkup",
+    "deleteMessage",
+    "answerCallbackQuery",
+    "sendChatAction",
+}
+
+
+def _person_label(sender: Any, chat_id: Any) -> str:
+    person = sender if isinstance(sender, dict) else {}
+    username = str(person.get("username") or "").strip()
+    if username:
+        return "@" + username.lstrip("@")
+    name = " ".join(
+        part for part in (str(person.get("first_name") or ""), str(person.get("last_name") or "")) if part
+    ).strip()
+    return name or str(chat_id or "")
+
+
+def _tg_public_result(data: Any) -> Any:
+    if not isinstance(data, dict):
+        return data
+    result = data.get("result") if isinstance(data.get("result"), dict) else {}
+    out: dict[str, Any] = {"ok": bool(data.get("ok"))}
+    if data.get("description"):
+        out["description"] = data.get("description")
+    if result.get("message_id") is not None:
+        out["message_id"] = result.get("message_id")
+    return out
+
+
+def _bridge_note(method: str, request_view: Any, response_view: Any = None, error: str = "") -> None:
+    if method not in _BRIDGE_OUT:
+        return
+    body: dict[str, Any] = {"запрос": request_view}
+    if error:
+        body["ошибка"] = error[:500]
+    elif response_view is not None:
+        body["ответ"] = response_view
+    bridge.note(method, body)
+
+
 def _call(token: str, method: str, payload: dict[str, Any] | None = None, timeout: float = 15) -> dict[str, Any]:
     url = f"https://api.telegram.org/bot{urllib.parse.quote(token, safe=':-_')}/{method}"
     body = json.dumps(payload or {}).encode("utf-8")
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
-    return _read(req, timeout)
+    try:
+        data = _read(req, timeout)
+    except Exception as exc:
+        _bridge_note(method, payload or {}, error=str(exc))
+        raise
+    _bridge_note(method, payload or {}, _tg_public_result(data))
+    return data
 
 
 def _read(req: urllib.request.Request, timeout: float) -> dict[str, Any]:
@@ -196,7 +249,14 @@ def _call_file(
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         method="POST",
     )
-    return _read(req, 45)
+    view = {**fields, file_field: f"{filename}, {len(data)} байт, {mime}"}
+    try:
+        result = _read(req, 45)
+    except Exception as exc:
+        _bridge_note(method, view, error=str(exc))
+        raise
+    _bridge_note(method, view, _tg_public_result(result))
+    return result
 
 
 def _web_app_url(url: str) -> str:
@@ -1538,7 +1598,19 @@ class TelegramBot:
     def _handle(self, token: str, upd: dict[str, Any]) -> None:
         try:
             if isinstance(upd.get("callback_query"), dict):
-                self._on_callback(token, upd["callback_query"])
+                query = upd["callback_query"]
+                sender = query.get("from") if isinstance(query.get("from"), dict) else {}
+                chat = {}
+                message = query.get("message") if isinstance(query.get("message"), dict) else {}
+                if isinstance(message.get("chat"), dict):
+                    chat = message["chat"]
+                cid = chat.get("id")
+                if cid is None:
+                    cid = sender.get("id")
+                who = _person_label(sender, cid)
+                data = str(query.get("data") or "")
+                with bridge.slot("telegram", data or "кнопка", {"data": data, "chat_id": cid, "from": who}, who):
+                    self._on_callback(token, query)
                 return
             with self._work_lock:
                 self._handle_message(token, upd)
@@ -1567,13 +1639,20 @@ class TelegramBot:
                 self._on_voice(token, str(cid), str(clip.get("file_id")), sender if isinstance(sender, dict) else {})
                 return
             text = str(msg.get("text") or "").strip()
+            who = _person_label(sender, cid)
             netlog.add(
                 "telegram",
                 f"Сообщение: {text[:80] or 'без текста'}",
                 source=f"chat {cid}",
                 key=f"tg-msg-{cid}",
             )
-            self._on_text(token, str(cid), text, sender=sender if isinstance(sender, dict) else {})
+            with bridge.slot(
+                "telegram",
+                text or "Сообщение без текста",
+                {"chat_id": cid, "from": who, "text": text, "message_id": msg.get("message_id")},
+                who,
+            ):
+                self._on_text(token, str(cid), text, sender=sender if isinstance(sender, dict) else {})
             with self._lock:
                 self._error = ""
         except RuntimeError as exc:
@@ -1581,24 +1660,34 @@ class TelegramBot:
                 self._error = str(exc)
 
     def _on_voice(self, token: str, chat_id: str, file_id: str, sender: dict[str, Any] | None = None) -> None:
-        if not self._admit(token, chat_id, sender):
-            return
-        with self._lock:
-            if self._hear_thread is not None and self._hear_thread.is_alive():
-                busy = True
-            else:
-                busy = False
-                self._hear_stop = threading.Event()
-                thread = threading.Thread(
-                    target=self._hear_voice,
-                    args=(token, chat_id, file_id),
-                    name="fm-hear",
-                    daemon=True,
-                )
-                self._hear_thread = thread
-                thread.start()
-        if busy:
-            send_html(token, chat_id, "Уже разбираю предыдущую запись.")
+        who = _person_label(sender, chat_id)
+        box = bridge.open_box("telegram", "Голосовое", {"chat_id": chat_id, "file_id": file_id, "from": who}, who)
+        token_ctx = bridge.activate(box)
+        handed = False
+        try:
+            if not self._admit(token, chat_id, sender):
+                return
+            with self._lock:
+                if self._hear_thread is not None and self._hear_thread.is_alive():
+                    busy = True
+                else:
+                    busy = False
+                    self._hear_stop = threading.Event()
+                    thread = threading.Thread(
+                        target=self._hear_voice,
+                        args=(token, chat_id, file_id, box),
+                        name="fm-hear",
+                        daemon=True,
+                    )
+                    self._hear_thread = thread
+                    thread.start()
+                    handed = True
+            if busy:
+                send_html(token, chat_id, "Уже разбираю предыдущую запись.")
+        finally:
+            bridge.deactivate(token_ctx)
+            if not handed:
+                bridge.commit(box)
 
     def _cancel_hear(self, token: str, chat_id: str) -> None:
         with self._lock:
@@ -1609,8 +1698,18 @@ class TelegramBot:
             return
         send_html(token, chat_id, "Сейчас ничего не разбирается.")
 
-    def _hear_voice(self, token: str, chat_id: str, file_id: str) -> None:
+    def _hear_voice(self, token: str, chat_id: str, file_id: str, box: bridge.Box | None = None) -> None:
         stop = self._hear_stop
+        token_ctx = bridge.activate(box) if box is not None else None
+        try:
+            self._hear_voice_body(token, chat_id, file_id, box, stop)
+        finally:
+            if token_ctx is not None:
+                bridge.deactivate(token_ctx)
+            if box is not None:
+                bridge.commit(box)
+
+    def _hear_voice_body(self, token: str, chat_id: str, file_id: str, box: bridge.Box | None, stop: Any) -> None:
         with self._busy(token, chat_id, "Слушаю запись…", bar=True, action="record_voice") as busy:
             busy.arm_cancel("Vr")
             try:
@@ -1644,6 +1743,9 @@ class TelegramBot:
             send_html(token, chat_id, "Не разобрал речь. Скажите ближе к телефону или напишите вопрос текстом.")
             return
         netlog.add("telegram", f"Голос: {heard[:80]}", source=f"chat {chat_id}", key=f"tg-voice-{chat_id}")
+        if box is not None:
+            box.ask = f"Голос: {heard[:400]}"
+            box.ask_body = {"chat_id": chat_id, "file_id": file_id, "from": box.who, "text": heard}
         send_html(token, chat_id, f"Услышал: <i>{html_esc(heard)}</i>")
         with self._work_lock:
             self._on_text(token, chat_id, heard, voice=True)
@@ -1884,6 +1986,10 @@ class TelegramBot:
             else:
                 hint = data or "кнопка"
         netlog.add("telegram", f"Кнопка: {hint}", source=f"chat {chat_id}", key=f"tg-cb-{chat_id}")
+        slot = bridge.current()
+        if slot is not None:
+            slot.ask = f"Кнопка: {hint}"
+            slot.ask_body = {"data": data, "button": hint, "chat_id": chat_id, "from": slot.who}
         if data == "L":
             info = self._status_for(chat_id)
             send_access(token, chat_id, str(info.get("url") or ""), info)

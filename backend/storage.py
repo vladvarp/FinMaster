@@ -586,6 +586,7 @@ def _append_doc_history(report_path: str, payload: dict[str, Any]) -> dict[str, 
             "items": keep,
         },
     )
+    _journal_fresh(report_path, old_ids, keep)
     return load_doc_history(report_path)
 
 
@@ -676,7 +677,21 @@ def save_doc_history(report_path: str, payload: dict[str, Any]) -> dict[str, Any
             "items": keep,
         },
     )
+    _journal_fresh(report_path, old_ids, keep)
     return load_doc_history(report_path)
+
+
+def _journal_fresh(report_path: str, old_ids: set[str], keep: list[dict[str, Any]]) -> None:
+    fresh = [item for item in keep if str(item.get("id") or "") and str(item.get("id") or "") not in old_ids]
+    if not fresh:
+        return
+    try:
+        from backend import applog
+    except Exception:
+        return
+    where = os.path.basename(report_path) or "отчёт"
+    for item in fresh:
+        applog.add(str(item.get("label") or "Правка"), where=where, actor=str(item.get("device") or ""))
 
 
 def delete_doc_history(report_path: str) -> None:
@@ -842,16 +857,46 @@ _DEVICE_INFO_KEYS = (
     "platform",
     "platform_version",
     "brands",
+    "full_version",
+    "architecture",
+    "bitness",
     "user_agent",
     "language",
+    "languages",
     "screen",
     "viewport",
     "pixel_ratio",
+    "color_depth",
     "timezone",
+    "utc",
+    "touch",
+    "cores",
+    "memory",
+    "connection",
+    "prefers",
+    "vendor",
+    "cookies",
+    "online",
+    "host",
+    "accept_language",
+    "sec_ch_ua",
+    "sec_ch_mobile",
+    "sec_ch_platform",
+    "sec_model",
+    "entry",
 )
 
+_DEVICE_SURFACES = {"mobile", "bank", "desk"}
 
-def remember_device(cid: str, name: str = "", ip: str = "", info: Any = None) -> list[dict[str, Any]]:
+
+def remember_device(
+    cid: str,
+    name: str = "",
+    ip: str = "",
+    info: Any = None,
+    surface: str = "",
+    via: str = "",
+) -> list[dict[str, Any]]:
     cid = str(cid or "").strip()
     if not cid:
         return remote_settings()["devices"]
@@ -865,15 +910,31 @@ def remember_device(cid: str, name: str = "", ip: str = "", info: Any = None) ->
         value = incoming.get(key)
         if value in (None, ""):
             continue
-        limit = 400 if key == "user_agent" else 120
+        if key == "user_agent":
+            limit = 500
+        elif key in {"sec_ch_ua", "languages", "connection", "prefers"}:
+            limit = 220
+        else:
+            limit = 160
         merged[key] = str(value).strip()[:limit]
+    kind = surface if surface in _DEVICE_SURFACES else str(prev.get("surface") or "")
+    if kind not in _DEVICE_SURFACES:
+        kind = "mobile"
+    route = via if via in {"lan", "ngrok"} else str(prev.get("via") or "")
+    if route not in {"lan", "ngrok"}:
+        route = "lan"
+    fallback = {"desk": "Интерфейс ПК", "bank": "Хранилище"}.get(kind, "Телефон")
+    seen = now_local_iso()
     devices.insert(
         0,
         {
             "id": cid,
-            "name": str(name or prev.get("name") or "Телефон").strip() or "Телефон",
+            "name": str(name or prev.get("name") or fallback).strip() or fallback,
             "ip": str(ip or prev.get("ip") or ""),
-            "seen_at": now_local_iso(),
+            "seen_at": seen,
+            "first_seen": str(prev.get("first_seen") or seen),
+            "surface": kind,
+            "via": route,
             "info": merged,
         },
     )

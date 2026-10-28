@@ -2252,6 +2252,7 @@
       });
     });
     $("dictionary-open")?.addEventListener("click", () => openDictionary());
+    $("dictionary-open-voice")?.addEventListener("click", () => openDictionary());
     $("dictionary-close")?.addEventListener("click", () => closeDictionary());
     $("dictionary-fold")?.addEventListener("click", () => {
       const layer = $("dictionary-layer");

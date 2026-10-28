@@ -30,9 +30,22 @@
     ngrok: "ngrok",
   };
 
-  const netConsole = { lastId: 0, timer: 0, stick: true, drag: null };
-  const NET_CONSOLE_MIN_W = 280;
-  const NET_CONSOLE_MIN_H = 160;
+  const CONSOLE_VIEWS = { net: "Сеть", log: "Лог", tg: "Мост TG", ngrok: "Мост Ngrok" };
+  const CONSOLE_EMPTY = {
+    net: "Пока нет событий. Включите доступ — здесь появятся подключения, синхронизация, Telegram и ngrok.",
+    log: "Пока нет записей. Здесь появятся правки отчёта, открытие файла и изменения настроек: что, где и когда.",
+    tg: "Пока нет обмена с Telegram. Справа вопрос бота, слева ответ компьютера. Строку можно раскрыть.",
+    ngrok: "Пока нет запросов через ngrok. Справа запрос, слева ответ компьютера. Служебные опросы сюда не пишутся.",
+  };
+  const netConsole = {
+    view: "net",
+    last: { net: 0, log: 0, tg: 0, ngrok: 0 },
+    timer: 0,
+    stick: true,
+    drag: null,
+  };
+  const NET_CONSOLE_MIN_W = 360;
+  const NET_CONSOLE_MIN_H = 220;
 
   function netConsoleOpen() {
     return !!$("net-console") && !$("net-console").hidden;
@@ -112,11 +125,63 @@
     return d.toLocaleTimeString("ru-RU", { hour12: false });
   }
 
+  function consolePane() {
+    return document.querySelector(`[data-console-pane="${netConsole.view}"]`);
+  }
+
+  function consoleMenuOpen() {
+    const menu = $("nc-switch-menu");
+    return !!menu && !menu.hidden;
+  }
+
+  function closeConsoleMenu() {
+    const menu = $("nc-switch-menu");
+    const btn = $("nc-switch-btn");
+    if (menu) menu.hidden = true;
+    if (btn) btn.setAttribute("aria-expanded", "false");
+  }
+
+  function paintConsoleChrome() {
+    const view = netConsole.view;
+    document.querySelectorAll("[data-console-pane]").forEach((el) => {
+      el.hidden = el.dataset.consolePane !== view;
+    });
+    document.querySelectorAll("[data-console-only]").forEach((el) => {
+      let show = el.dataset.consoleOnly === view;
+      if (show && el.classList.contains("bridge-legend")) {
+        const pane = document.querySelector(`[data-console-pane="${el.dataset.consoleOnly}"]`);
+        show = !!(pane && pane.children.length);
+      }
+      el.hidden = !show;
+    });
+    const label = $("nc-switch-label");
+    if (label) label.textContent = CONSOLE_VIEWS[view] || "Сеть";
+    document.querySelectorAll("#nc-switch-menu [data-console-view]").forEach((btn) => {
+      btn.setAttribute("aria-selected", btn.dataset.consoleView === view ? "true" : "false");
+    });
+    const empty = $("net-console-empty");
+    const pane = consolePane();
+    if (empty) {
+      empty.hidden = !!(pane && pane.children.length);
+      empty.textContent = CONSOLE_EMPTY[view] || CONSOLE_EMPTY.net;
+    }
+  }
+
+  function stickConsole() {
+    const body = $("net-console-body");
+    if (netConsole.stick && body) body.scrollTop = body.scrollHeight;
+  }
+
+  function scrollConsoleEnd() {
+    const body = $("net-console-body");
+    if (!body) return;
+    netConsole.stick = true;
+    body.scrollTop = body.scrollHeight;
+  }
+
   function appendNetConsoleEvents(events) {
     const log = $("net-console-log");
-    const empty = $("net-console-empty");
-    if (!log) return;
-    if (events.length && empty) empty.hidden = true;
+    if (!log || !events.length) return;
     const body = $("net-console-body");
     const stick = netConsole.stick || (body && body.scrollHeight - body.scrollTop - body.clientHeight < 28);
     events.forEach((ev) => {
@@ -129,39 +194,158 @@
       log.appendChild(row);
     });
     while (log.children.length > 500) log.removeChild(log.firstChild);
-    if (stick && body) body.scrollTop = body.scrollHeight;
+    netConsole.stick = stick;
+    paintConsoleChrome();
+    if (stick) stickConsole();
+  }
+
+  function appendAppLog(events) {
+    const log = $("app-console-log");
+    if (!log || !events.length) return;
+    events.forEach((ev) => {
+      const row = document.createElement("div");
+      row.className = "log-row";
+      row.innerHTML = `<span class="log-time">${esc(formatNetTime(ev.ts))}</span><span class="log-where">${esc(
+        ev.where || "программа"
+      )}</span><span class="log-what">${esc(ev.what || "")}</span><span class="log-actor">${esc(ev.actor || "")}</span>`;
+      log.appendChild(row);
+    });
+    while (log.children.length > 400) log.removeChild(log.firstChild);
+    paintConsoleChrome();
+    stickConsole();
+  }
+
+  function bridgeText(value) {
+    if (value == null || value === "") return "—";
+    if (typeof value === "string") return value;
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+
+  function appendBridge(view, events) {
+    const board = $(view === "tg" ? "bridge-tg" : "bridge-ngrok");
+    if (!board || !events.length) return;
+    events.forEach((ev) => {
+      const card = document.createElement("article");
+      card.className = "bridge-card";
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "bridge-toggle";
+      toggle.innerHTML = `<span>${esc(formatNetTime(ev.ts))}</span><span class="bridge-who">${esc(
+        ev.who || ""
+      )}</span><span class="bridge-chevron" aria-hidden="true"></span>`;
+      const cols = document.createElement("div");
+      cols.className = "bridge-cols";
+      const reply = document.createElement("p");
+      reply.className = "bridge-col bridge-col-pc";
+      reply.textContent = ev.reply || "Без ответа";
+      const ask = document.createElement("p");
+      ask.className = "bridge-col bridge-col-ask";
+      ask.textContent = ev.ask || "—";
+      cols.append(reply, ask);
+      const raw = document.createElement("div");
+      raw.className = "bridge-raw";
+      raw.hidden = true;
+      const rawCols = document.createElement("div");
+      rawCols.className = "bridge-cols";
+      const replyPre = document.createElement("pre");
+      replyPre.textContent = bridgeText(ev.reply_body);
+      const askPre = document.createElement("pre");
+      askPre.textContent = bridgeText(ev.ask_body);
+      rawCols.append(replyPre, askPre);
+      raw.append(rawCols);
+      toggle.addEventListener("click", () => {
+        const open = card.classList.toggle("is-open");
+        raw.hidden = !open;
+        toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+      toggle.setAttribute("aria-expanded", "false");
+      card.append(toggle, cols, raw);
+      board.appendChild(card);
+    });
+    while (board.children.length > 250) board.removeChild(board.firstChild);
+    paintConsoleChrome();
+    stickConsole();
+  }
+
+  function clearConsolePane(view) {
+    const pane = document.querySelector(`[data-console-pane="${view}"]`);
+    if (pane) pane.replaceChildren();
+  }
+
+  async function setConsoleView(view) {
+    if (!CONSOLE_VIEWS[view]) view = "net";
+    netConsole.view = view;
+    try {
+      localStorage.setItem("finmaster.console.view", view);
+    } catch {
+      /* ignore */
+    }
+    closeConsoleMenu();
+    paintConsoleChrome();
+    if (!consolePane()?.children.length) await pollNetConsole(true);
+    scrollConsoleEnd();
+    requestAnimationFrame(scrollConsoleEnd);
   }
 
   async function pollNetConsole(reset) {
     if (!netConsoleOpen()) return;
+    const view = netConsole.view;
     try {
       if (reset) {
-        netConsole.lastId = 0;
-        const log = $("net-console-log");
-        if (log) log.innerHTML = "";
-        const empty = $("net-console-empty");
-        if (empty) empty.hidden = false;
+        netConsole.last[view] = 0;
+        clearConsolePane(view);
+        paintConsoleChrome();
       }
-      const data = await apiGet(`/api/remote/log?since=${netConsole.lastId}`);
+      const data = await apiGet(`/api/console?view=${encodeURIComponent(view)}&since=${netConsole.last[view] || 0}`);
       const events = data.events || [];
-      if (events.length) appendNetConsoleEvents(events);
-      if (typeof data.last_id === "number") netConsole.lastId = data.last_id;
-      const empty = $("net-console-empty");
-      if (empty && $("net-console-log")?.children.length) empty.hidden = true;
+      if (events.length) {
+        if (view === "log") appendAppLog(events);
+        else if (view === "tg" || view === "ngrok") appendBridge(view, events);
+        else appendNetConsoleEvents(events);
+      }
+      if (typeof data.last_id === "number") netConsole.last[view] = data.last_id;
+      paintConsoleChrome();
     } catch {
       /* консоль только с компьютера */
     }
   }
 
   function bindNetConsole() {
+    try {
+      const saved = localStorage.getItem("finmaster.console.view");
+      if (CONSOLE_VIEWS[saved]) netConsole.view = saved;
+    } catch {
+      /* ignore */
+    }
+    paintConsoleChrome();
+    $("nc-switch")?.addEventListener("click", (e) => e.stopPropagation());
+    $("nc-switch-btn")?.addEventListener("click", () => {
+      const menu = $("nc-switch-menu");
+      const btn = $("nc-switch-btn");
+      if (!menu || !btn) return;
+      const open = menu.hidden;
+      menu.hidden = !open;
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    $("nc-switch-menu")?.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-console-view]");
+      if (!btn) return;
+      setConsoleView(btn.dataset.consoleView);
+    });
+    document.addEventListener("click", () => closeConsoleMenu());
     $("remote-console-open")?.addEventListener("click", () => toggleNetConsole(true));
     $("net-console-close")?.addEventListener("click", () => closeNetConsole());
     $("net-console-cal-next")?.addEventListener("click", () => applyClockOffset(clockOffsetDays + 1));
     $("net-console-cal-reset")?.addEventListener("click", () => applyClockOffset(0));
     paintClockOffset();
     $("net-console-clear")?.addEventListener("click", async () => {
+      const view = netConsole.view;
       try {
-        await apiPost("/api/remote/log/clear", {});
+        await apiPost("/api/console/clear", { view });
       } catch {
         /* ignore */
       }
@@ -245,7 +429,7 @@
   }
 
   function remoteBadge() {
-    const phones = remote.clients?.filter((c) => c.kind === "mobile" || c.kind === "bank").length || 0;
+    const phones = remote.clients?.filter((c) => c.kind === "mobile" || c.kind === "bank" || c.kind === "desk").length || 0;
     document.querySelectorAll(".phone-live").forEach((live) => {
       live.hidden = !remote.enabled;
       live.textContent = phones ? String(phones) : "";
@@ -345,7 +529,7 @@
   }
 
   function mobileClients() {
-    return (remote.clients || []).filter((c) => c.kind === "mobile" || c.kind === "bank");
+    return (remote.clients || []).filter((c) => c.kind === "mobile" || c.kind === "bank" || c.kind === "desk");
   }
 
   function renderRemoteLive() {
@@ -453,29 +637,6 @@
     const live = new Map(mobileClients().map((c) => [c.id, c]));
     const devices = remote.devices || [];
     const online = devices.filter((d) => live.has(d.id)).length;
-    // #region agent log
-    const devSig = devices.map((d) => `${String(d.id).slice(-6)}:${live.has(d.id) ? 1 : 0}:${d.name || ""}`).join("|");
-    if (devSig !== window.__fmDevSig) {
-      window.__fmDevSig = devSig;
-      fetch("http://127.0.0.1:7439/ingest/2217c639-1122-4f34-8d73-9f66df23a223", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "871c54" },
-        body: JSON.stringify({
-          sessionId: "871c54",
-          runId: "pre",
-          hypothesisId: "E",
-          location: "08-remote.js:renderRemoteDevices",
-          message: "device list",
-          data: {
-            online,
-            live: [...live.values()].map((c) => ({ tail: String(c.id).slice(-6), kind: c.kind, name: c.name })),
-            devices: devices.map((d) => ({ tail: String(d.id).slice(-6), name: d.name, on: live.has(d.id) })),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
     const title = $("remote-devices-title");
     if (title) {
       if (!devices.length) title.textContent = "Устройства";
@@ -483,7 +644,7 @@
       else title.textContent = `Устройства · ${devices.length}`;
     }
     if (!devices.length) {
-      box.innerHTML = `<div class="remote-empty">Запомненных устройств нет — отсканируйте QR или откройте ссылку с телефона.</div>`;
+      box.innerHTML = `<div class="remote-empty">Запомненных устройств нет. Отсканируйте QR, откройте ссылку с телефона или интерфейс ПК в браузере.</div>`;
       return;
     }
     box.innerHTML = devices
@@ -491,13 +652,15 @@
         const on = live.has(d.id);
         const when = d.seen_at ? new Date(d.seen_at).toLocaleString("ru-RU") : "";
         const model = d.info?.model && d.info.model !== d.name ? d.info.model : "";
+        const kind = deviceSurfaceLabel(d.surface);
+        const via = d.via === "ngrok" ? "интернет" : d.via === "lan" ? "локально" : "";
         return `<div class="remote-device ${on ? "is-on" : "is-off"}">
           <span class="rd-dot" title="${on ? "в сети" : "не в сети"}"></span>
           <div class="rd-body">
-            <strong>${esc(d.name || "Телефон")}</strong>
+            <strong>${esc(d.name || "Устройство")}<span class="rd-kind">${esc(kind)}</span></strong>
             <small>${on ? '<span class="online">в сети</span>' : '<span class="offline">не в сети</span>'}${
-              d.ip ? ` · ${esc(d.ip)}` : ""
-            }${model ? ` · ${esc(model)}` : ""}${when ? ` · ${esc(when)}` : ""}</small>
+              via ? ` · ${esc(via)}` : ""
+            }${d.ip ? ` · ${esc(d.ip)}` : ""}${model ? ` · ${esc(model)}` : ""}${when ? ` · ${esc(when)}` : ""}</small>
           </div>
           <button type="button" class="btn small rd-info" data-device-info="${esc(d.id)}" title="О устройстве" aria-label="О устройстве">i</button>
           <button type="button" class="btn small" data-forget="${esc(d.id)}">Забыть</button>
@@ -506,22 +669,50 @@
       .join("");
   }
 
+  function deviceSurfaceLabel(surface) {
+    if (surface === "desk") return "Интерфейс ПК";
+    if (surface === "bank") return "Хранилище";
+    return "Телефон";
+  }
+
   function deviceInfoRows(device, online) {
     const info = device.info || {};
     const when = device.seen_at ? new Date(device.seen_at).toLocaleString("ru-RU") : "—";
+    const first = device.first_seen ? new Date(device.first_seen).toLocaleString("ru-RU") : "";
+    const via = device.via === "ngrok" ? "Интернет" : device.via === "lan" ? "Локальная сеть" : "";
     return [
-      ["Имя", device.name || "Телефон"],
+      ["Имя", device.name || "Устройство"],
+      ["Раздел", deviceSurfaceLabel(device.surface)],
       ["Статус", online ? "в сети" : "не в сети"],
-      ["Адрес", device.ip || "—"],
+      ["Канал", via],
+      ["Адрес", device.ip],
       ["Был в сети", when],
-      ["Модель", info.model],
+      ["Первый визит", first],
+      ["Модель", info.model || info.sec_model],
       ["Система", [info.platform, info.platform_version].filter(Boolean).join(" ")],
       ["Браузер", info.brands],
+      ["Версия браузера", info.full_version],
+      ["Архитектура", [info.architecture, info.bitness].filter(Boolean).join(" ")],
       ["Язык", info.language],
+      ["Языки", info.languages],
       ["Экран", info.screen],
       ["Окно", info.viewport],
       ["Плотность", info.pixel_ratio],
+      ["Глубина цвета", info.color_depth],
+      ["Касания", info.touch],
+      ["Ядра", info.cores],
+      ["Память", info.memory],
+      ["Сеть устройства", info.connection],
+      ["Оформление", info.prefers],
       ["Часовой пояс", info.timezone],
+      ["Пояс UTC", info.utc],
+      ["Хост", info.host],
+      ["Вход", info.entry === "ngrok" ? "ngrok" : ""],
+      ["Accept-Language", info.accept_language],
+      ["Client Hints", [info.sec_ch_ua, info.sec_ch_platform, info.sec_ch_mobile].filter(Boolean).join(" · ")],
+      ["Производитель", info.vendor],
+      ["Куки", info.cookies],
+      ["На связи в браузере", info.online],
       ["User-Agent", info.user_agent],
     ].filter(([, value]) => value);
   }

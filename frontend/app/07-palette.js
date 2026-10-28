@@ -52,8 +52,8 @@
       {
         group: "Действия",
         ico: ">_",
-        title: netConsoleOpen() ? "Скрыть консоль сети" : "Консоль сети",
-        sub: "подключения, синхронизация, Telegram и ngrok",
+        title: netConsoleOpen() ? "Скрыть консоль" : "Консоль",
+        sub: "сеть, журнал правок, мосты Telegram и ngrok",
         right: "Ctrl+Ё",
         run: () => toggleNetConsole(),
       },

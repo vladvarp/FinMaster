@@ -5,11 +5,9 @@
   const cidKey = "finmaster.desk.id";
   let cid = "";
   try {
-    cid = sessionStorage.getItem(cidKey) || "";
-    if (!cid) {
-      cid = Math.random().toString(36).slice(2) + Date.now().toString(36);
-      sessionStorage.setItem(cidKey, cid);
-    }
+    cid = localStorage.getItem(cidKey) || sessionStorage.getItem(cidKey) || "";
+    if (!cid) cid = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem(cidKey, cid);
   } catch {
     cid = Math.random().toString(36).slice(2);
   }
@@ -26,7 +24,127 @@
           : /Safari\//.test(ua)
             ? "Safari"
             : "Браузер";
-  const name = browser;
+  let name = browser;
+  const profile = {
+    model: "",
+    platform: navigator.platform || "",
+    platform_version: "",
+    brands: "",
+    full_version: "",
+    architecture: "",
+    bitness: "",
+  };
+  let deviceHeaderValue = "";
+
+  function utcLabel() {
+    const minutes = -new Date().getTimezoneOffset();
+    const sign = minutes >= 0 ? "+" : "−";
+    const abs = Math.abs(minutes);
+    const hours = Math.floor(abs / 60);
+    const rest = abs % 60;
+    return rest ? `UTC${sign}${hours}:${String(rest).padStart(2, "0")}` : `UTC${sign}${hours}`;
+  }
+
+  function connectionText() {
+    const link = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if (!link) return "";
+    return [link.effectiveType, link.downlink ? `${link.downlink} Мбит/с` : "", link.rtt ? `${link.rtt} мс` : "", link.saveData ? "экономия" : ""]
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  function prefersText() {
+    const bits = [];
+    try {
+      bits.push(window.matchMedia("(prefers-color-scheme: dark)").matches ? "тёмная тема" : "светлая тема");
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) bits.push("без анимации");
+      if (window.matchMedia("(pointer: coarse)").matches) bits.push("сенсор");
+    } catch {
+      /* браузер без matchMedia */
+    }
+    return bits.join(", ");
+  }
+
+  function paintDeskName() {
+    if (profile.model && /Telegram/i.test(ua)) name = `Telegram · ${profile.model}`;
+    else if (profile.model) name = profile.model;
+    else name = browser;
+  }
+
+  function deviceFacts() {
+    const languages = navigator.languages && navigator.languages.length ? navigator.languages.join(", ") : "";
+    return {
+      name,
+      model: profile.model || "",
+      platform: profile.platform || "",
+      platform_version: profile.platform_version || "",
+      brands: profile.brands || browser,
+      full_version: profile.full_version || "",
+      architecture: profile.architecture || "",
+      bitness: profile.bitness || "",
+      user_agent: ua,
+      language: navigator.language || "",
+      languages,
+      screen: `${window.screen?.width || 0}×${window.screen?.height || 0}`,
+      viewport: `${window.innerWidth}×${window.innerHeight}`,
+      pixel_ratio: String(window.devicePixelRatio || 1),
+      color_depth: String(window.screen?.colorDepth || ""),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+      utc: utcLabel(),
+      touch: String(navigator.maxTouchPoints || 0),
+      cores: String(navigator.hardwareConcurrency || ""),
+      memory: navigator.deviceMemory ? `${navigator.deviceMemory} ГБ` : "",
+      connection: connectionText(),
+      prefers: prefersText(),
+      vendor: navigator.vendor || "",
+      cookies: navigator.cookieEnabled ? "да" : "нет",
+      online: navigator.onLine ? "да" : "нет",
+    };
+  }
+
+  function refreshDeviceHeader() {
+    paintDeskName();
+    try {
+      deviceHeaderValue = btoa(unescape(encodeURIComponent(JSON.stringify(deviceFacts()))));
+    } catch {
+      deviceHeaderValue = "";
+    }
+  }
+
+  async function enrichDevice() {
+    refreshDeviceHeader();
+    const uaData = navigator.userAgentData;
+    try {
+      if (uaData) {
+        profile.platform = uaData.platform || profile.platform;
+        profile.brands = (uaData.brands || [])
+          .map((item) => `${item.brand}${item.version ? " " + item.version : ""}`)
+          .filter((item) => item && !/not.?a.?brand/i.test(item))
+          .join(", ");
+        if (uaData.getHighEntropyValues) {
+          const high = await Promise.race([
+            uaData.getHighEntropyValues(["model", "platform", "platformVersion", "architecture", "bitness", "fullVersionList"]),
+            new Promise((resolve) => setTimeout(() => resolve({}), 800)),
+          ]);
+          profile.model = String(high.model || "").trim();
+          profile.platform = high.platform || profile.platform;
+          profile.platform_version = String(high.platformVersion || "").trim();
+          profile.architecture = String(high.architecture || "").trim();
+          profile.bitness = String(high.bitness || "").trim();
+          if (Array.isArray(high.fullVersionList)) {
+            profile.full_version = high.fullVersionList
+              .filter((item) => item && item.brand && !/not.?a.?brand/i.test(item.brand))
+              .map((item) => `${item.brand} ${item.version}`)
+              .join(", ");
+          }
+        }
+      }
+    } catch {
+      /* браузер не отдал модель */
+    }
+    refreshDeviceHeader();
+    helloDesk();
+  }
 
   window.FM_DESK = true;
   document.documentElement.classList.add("fm-desk");
@@ -63,6 +181,7 @@
     const headers = new Headers((init && init.headers) || {});
     if (token) headers.set("X-FM-Token", token);
     if (cid) headers.set("X-FM-Desk", cid);
+    if (deviceHeaderValue) headers.set("X-FM-Device", deviceHeaderValue);
     return { ...(init || {}), headers };
   }
 
@@ -387,6 +506,31 @@
     }
   };
 
+  async function helloDesk() {
+    if (!token || !cid) return;
+    refreshDeviceHeader();
+    try {
+      await native("/api/remote/desk/beat", withDesk({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      }));
+    } catch {
+      /* следующий удар */
+    }
+  }
+
+  window.addEventListener("pagehide", () => {
+    if (!token || !cid) return;
+    refreshDeviceHeader();
+    native("/api/remote/desk/leave", withDesk({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      keepalive: true,
+    })).catch(() => {});
+  });
+
   function bootChrome() {
     ensureChrome();
     statusReady = true;
@@ -397,6 +541,9 @@
       return;
     }
     reveal();
+    helloDesk();
+    setInterval(helloDesk, 12000);
+    enrichDevice();
   }
 
   if (document.body) bootChrome();

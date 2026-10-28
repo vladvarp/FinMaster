@@ -15,7 +15,7 @@ from flask import Flask, g, jsonify, redirect, request, send_from_directory
 
 from backend import ask
 from backend import dictionary
-from backend import netlog, qr, runtime, secrets, settings_pack, storage, voice
+from backend import applog, bridge, netlog, qr, runtime, secrets, settings_pack, storage, voice
 from backend.backup import is_backup_path
 from backend import backup as report_backup
 from backend.dialogs import (
@@ -271,6 +271,80 @@ def _device_info() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+_device_disk: dict[str, tuple[float, tuple]] = {}
+
+
+def _client_ip() -> str:
+    if _is_tunneled():
+        forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        return forwarded or "интернет"
+    return request.remote_addr or ""
+
+
+def _client_profile() -> dict[str, Any]:
+    info = dict(_device_info())
+    ua = request.headers.get("User-Agent") or ""
+    if ua and not info.get("user_agent"):
+        info["user_agent"] = ua
+    host = (request.host or "").strip()
+    if host:
+        info["host"] = host[:120]
+    lang = (request.headers.get("Accept-Language") or "").strip()
+    if lang and not info.get("accept_language"):
+        info["accept_language"] = lang[:160]
+    for header, key in (
+        ("Sec-CH-UA", "sec_ch_ua"),
+        ("Sec-CH-UA-Mobile", "sec_ch_mobile"),
+        ("Sec-CH-UA-Platform", "sec_ch_platform"),
+        ("Sec-CH-UA-Model", "sec_model"),
+    ):
+        value = (request.headers.get(header) or "").strip()
+        if value and not info.get(key):
+            info[key] = value[:220]
+    if _is_tunneled():
+        info["entry"] = "ngrok"
+    return info
+
+
+def _remember_client(cid: str, name: str, surface: str) -> None:
+    if not cid or cid == "pc" or surface == "desktop":
+        return
+    info = _client_profile()
+    via = "ngrok" if _is_tunneled() else "lan"
+    label = str(name or info.get("name") or "")[:80]
+    sig = (
+        label,
+        via,
+        surface,
+        str(info.get("model") or ""),
+        str(info.get("viewport") or ""),
+        str(info.get("user_agent") or "")[:80],
+        str(info.get("brands") or ""),
+    )
+    now = time.monotonic()
+    prev = _device_disk.get(cid)
+    if prev and prev[1] == sig and now - prev[0] < 30:
+        return
+    _device_disk[cid] = (now, sig)
+    storage.remember_device(cid, label, _client_ip(), info, surface=surface, via=via)
+
+
+def _note_desk_client() -> None:
+    cid = _desk_cid()
+    if not cid or cid == "pc":
+        return
+    info = _client_profile()
+    name = str(info.get("name") or "Интерфейс ПК")[:80]
+    REMOTE.touch(cid, "desk", name)
+    _remember_client(cid, name, "desk")
+
+
+def _log_actor() -> str:
+    if _is_desk_call():
+        return "Интерфейс ПК"
+    return "ПК"
+
+
 def _net_peer() -> str:
     forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
     ip = forwarded or (request.remote_addr or "")
@@ -290,7 +364,10 @@ def guard_remote_clients():
     if path == "/api/remote/desk/leave":
         return _desk_auth_fail()
     if _is_desk_call():
-        return _guard_desk_api()
+        fail = _guard_desk_api()
+        if fail is None:
+            _note_desk_client()
+        return fail
     if _desk_page(path):
         fail = _desk_auth_fail()
         if not fail:
@@ -322,6 +399,75 @@ def guard_remote_clients():
             return jsonify({"error": "Сессия недействительна — отсканируйте QR-код заново."}), 401
         return None
     return jsonify({"error": "Доступ запрещён."}), 403
+
+
+_NGROK_SKIP = {
+    "/api/remote/pull",
+    "/api/remote/info",
+    "/api/remote/log",
+    "/api/remote/publish",
+    "/api/remote/desk/beat",
+    "/api/console",
+    "/api/dirty",
+}
+
+
+def _ngrok_exchange(response):
+    if not _is_tunneled():
+        return
+    path = request.path
+    if path in _NGROK_SKIP or path.startswith("/api/console") or path.startswith("/api/remote/log"):
+        return
+    if path == "/api/remote/desk" and request.method == "GET":
+        return
+    if not (path.startswith("/api/") or path in {"/m", "/desk", "/bank", "/mobile.html", "/bank.html"}):
+        return
+    query = {}
+    for key, value in request.args.items():
+        query[key] = "•" if key in {"t", "token"} else value
+    raw = ""
+    try:
+        raw = request.get_data(cache=True, as_text=True) or ""
+    except Exception:
+        raw = ""
+    body: Any = None
+    if raw:
+        try:
+            body = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeError):
+            body = raw[:1500]
+    ask_body = {
+        "method": request.method,
+        "path": path,
+        "query": query,
+        "ip": _client_ip(),
+        "body": body,
+    }
+    reply_body: Any
+    status = response.status_code
+    reply = str(status)
+    if response.mimetype == "application/json":
+        try:
+            reply_body = json.loads(response.get_data(as_text=True) or "null")
+        except (json.JSONDecodeError, UnicodeError):
+            reply_body = {"status": status, "type": response.mimetype}
+        if isinstance(reply_body, dict) and reply_body.get("error"):
+            reply = f"{status} {reply_body.get('error')}"[:180]
+    else:
+        length = response.calculate_content_length()
+        reply_body = {"status": status, "type": response.mimetype or "", "bytes": length}
+    info = _device_info()
+    who = str(info.get("name") or _net_peer() or "")
+    bridge.pair("ngrok", f"{request.method} {path}", reply, ask_body, reply_body, who)
+
+
+@app.after_request
+def log_ngrok_bridge(response):
+    try:
+        _ngrok_exchange(response)
+    except Exception:
+        pass
+    return response
 
 
 @app.after_request
@@ -882,6 +1028,7 @@ def api_autosave():
     data = request.get_json(silent=True) or {}
     enabled = bool(data.get("enabled"))
     storage.set_autosave(enabled)
+    applog.add("Автосохранение включено" if enabled else "Автосохранение выключено", where="Настройки", actor=_log_actor())
     version = REMOTE.notify() if REMOTE.enabled else 0
     return jsonify({"ok": True, "autosave": enabled, "version": version})
 
@@ -1061,6 +1208,7 @@ def api_dictionary_save():
     dictionary.save(book)
     global DICT_DIRTY
     DICT_DIRTY = False
+    applog.add("Словарь записан", where="dictionary.fmwb", actor=_log_actor())
     return jsonify(_dictionary_payload(book, "ok"))
 
 
@@ -1073,6 +1221,7 @@ def api_dictionary_reset():
     if data.get("all"):
         book = dictionary.restore_all()
         DICT_DIRTY = False
+        applog.add("Заводской словарь", where="dictionary.fmwb", actor=_log_actor())
         return jsonify(_dictionary_payload(book, "ok"))
     raw = data.get("book")
     current = None
@@ -1353,6 +1502,11 @@ def _open_path(path: str) -> dict[str, Any]:
     if not preview:
         report_backup.ensure_id(doc, abs_path)
     recent = storage.add_recent(abs_path, doc.get("title") or "")
+    applog.add(
+        "Открыт просмотр копии" if preview else "Открыт отчёт",
+        where=os.path.basename(abs_path),
+        actor=_log_actor(),
+    )
     return {
         "path": abs_path,
         "document": doc,
@@ -1908,6 +2062,7 @@ def api_voice_use():
         voice.set_active(str(data.get("id") or ""))
     except voice.VoiceError as exc:
         return jsonify({"error": str(exc)}), 400
+    applog.add(f"Рабочая модель: {data.get('id') or '—'}", where="Голос", actor=_log_actor())
     return jsonify(voice.catalog())
 
 
@@ -1920,6 +2075,7 @@ def api_voice_delete():
         voice.remove_model(str(data.get("id") or ""))
     except voice.VoiceError as exc:
         return jsonify({"error": str(exc)}), 400
+    applog.add(f"Удалена модель: {data.get('id') or '—'}", where="Голос", actor=_log_actor())
     return jsonify(voice.catalog())
 
 
@@ -1934,6 +2090,7 @@ def api_voice_download():
         return jsonify({"error": str(exc)}), 400
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 409
+    applog.add(f"Скачивание модели: {data.get('id') or '—'}", where="Голос", actor=_log_actor())
     return jsonify(snap)
 
 
@@ -2003,6 +2160,14 @@ def api_remote_ngrok():
         else:
             updates["via"] = "lan"
     settings = storage.save_remote_settings(**updates) if updates else storage.remote_settings()
+    if "enabled" in data:
+        applog.add(
+            "Интернет через ngrok включён" if data.get("enabled") else "Интернет через ngrok выключен",
+            where="Телефон",
+            actor=_log_actor(),
+        )
+    elif updates.get("ngrok_token"):
+        applog.add("Токен ngrok сохранён", where="Телефон", actor=_log_actor())
     if settings.get("ngrok") and REMOTE.enabled:
         _ensure_tunnel(settings)
     elif not settings.get("ngrok"):
@@ -2027,6 +2192,8 @@ def api_remote_telegram():
         if storage.valid_telegram_token(token):
             updates["telegram_bot_token"] = token
     settings = storage.save_remote_settings(**updates) if updates else storage.remote_settings()
+    if updates.get("telegram_bot_token"):
+        applog.add("Токен Telegram сохранён", where="Телефон", actor=_log_actor())
     _start_telegram(settings)
     if data.get("send"):
         if not REMOTE.enabled:
@@ -2081,6 +2248,7 @@ def _rotate_remote_link() -> dict[str, Any]:
         "Новая ссылка готова. Старая закладка больше не работает — нажмите <b>Открыть</b>.",
     )
     netlog.add("session", "Выпущена новая ссылка", level="warn", key="rotate")
+    applog.add("Новая ссылка для телефона", where="Телефон", actor=_log_actor())
     return payload
 
 
@@ -2099,6 +2267,7 @@ def api_remote_forget():
     data = request.get_json(silent=True) or {}
     cid = str(data.get("id") or "")
     devices = storage.forget_device(cid)
+    applog.add(f"Устройство забыто: {cid[:12]}" if cid else "Устройство забыто", where="Телефон", actor=_log_actor())
     g.netlog_text = f"Устройство забыто: {cid[:12]}" if cid else "Устройство забыто"
     g.netlog_level = "warn"
     g.netlog_key = f"forget-{cid}"
@@ -2186,6 +2355,35 @@ def api_desk_import():
         return jsonify(_open_path(path))
     except (OSError, ValueError, FileNotFoundError) as exc:
         return jsonify({"error": str(exc)}), 400
+
+
+@app.get("/api/console")
+def api_console():
+    if not _is_local() and not _desk_reader():
+        return jsonify({"error": "Только в окне программы."}), 403
+    view = str(request.args.get("view") or "net")
+    since = request.args.get("since", type=int) or 0
+    if view == "log":
+        return jsonify(applog.since(since))
+    if view in {"tg", "telegram"}:
+        return jsonify(bridge.since("telegram", since))
+    if view == "ngrok":
+        return jsonify(bridge.since("ngrok", since))
+    return jsonify(netlog.since(since))
+
+
+@app.post("/api/console/clear")
+def api_console_clear():
+    if not _is_local() and not _desk_editor():
+        return jsonify({"error": "Только в окне программы."}), 403
+    view = str((request.get_json(silent=True) or {}).get("view") or "net")
+    if view == "log":
+        return jsonify(applog.clear())
+    if view in {"tg", "telegram"}:
+        return jsonify(bridge.clear("telegram"))
+    if view == "ngrok":
+        return jsonify(bridge.clear("ngrok"))
+    return jsonify(netlog.clear())
 
 
 @app.get("/api/remote/log")
@@ -2309,7 +2507,7 @@ def api_remote_pull():
     name = name or str(info.get("name") or "")
     REMOTE.touch(cid, kind, name)
     if kind in {"mobile", "bank"} and cid:
-        storage.remember_device(cid, name, request.remote_addr or "", info)
+        _remember_client(cid, name, kind)
     elif kind == "desktop" and cid and any(
         item.get("id") == cid for item in (storage.remote_settings().get("devices") or [])
     ):
@@ -2345,7 +2543,7 @@ def api_remote_session():
         info = _device_info()
         name = name or str(info.get("name") or "")
         REMOTE.touch(cid, kind, name)
-        storage.remember_device(cid, name, request.remote_addr or "", info)
+        _remember_client(cid, name, kind)
         g.netlog_text = (
             f"Хранилище открыло сессию: {name or cid[:8]}"
             if kind == "bank"

@@ -2066,7 +2066,9 @@ html[data-theme="dark"] .line-menu { background: #1b2538; border-color: var(--li
 .voice-model b { display: block; }
 .voice-model small { color: var(--muted); }
 .voice-model-actions { display: flex; gap: 6px; align-items: center; }
-.voice-more-open { margin-top: 12px; }
+.voice-more-open { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.voice-tools { margin-bottom: 12px; }
+.voice-tools .report-settings-hint { margin: 8px 0 0; }
 .modal-card.voice-more-modal {
   width: min(680px, 100%);
   max-height: min(86vh, 760px);

@@ -4137,6 +4137,11 @@
           closeProductSuggest();
           return;
         }
+        if (consoleMenuOpen()) {
+          e.preventDefault();
+          closeConsoleMenu();
+          return;
+        }
         if (netConsoleOpen()) {
           e.preventDefault();
           closeNetConsole();

@@ -28,20 +28,64 @@
     return customDeviceName() || guessDeviceName();
   }
 
+  function utcLabel() {
+    const minutes = -new Date().getTimezoneOffset();
+    const sign = minutes >= 0 ? "+" : "−";
+    const abs = Math.abs(minutes);
+    const hours = Math.floor(abs / 60);
+    const rest = abs % 60;
+    return rest ? `UTC${sign}${hours}:${String(rest).padStart(2, "0")}` : `UTC${sign}${hours}`;
+  }
+
+  function connectionText() {
+    const link = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if (!link) return "";
+    return [link.effectiveType, link.downlink ? `${link.downlink} Мбит/с` : "", link.rtt ? `${link.rtt} мс` : "", link.saveData ? "экономия" : ""]
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  function prefersText() {
+    const bits = [];
+    try {
+      bits.push(window.matchMedia("(prefers-color-scheme: dark)").matches ? "тёмная тема" : "светлая тема");
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) bits.push("без анимации");
+      if (window.matchMedia("(pointer: coarse)").matches) bits.push("сенсор");
+    } catch {
+      /* браузер без matchMedia */
+    }
+    return bits.join(", ");
+  }
+
   function devicePayload() {
     const info = state.device || {};
+    const languages = navigator.languages && navigator.languages.length ? navigator.languages.join(", ") : "";
     return {
       name: deviceName(),
       model: info.model || "",
       platform: info.platform || "",
       platform_version: info.platformVersion || "",
       brands: info.brands || "",
+      full_version: info.fullVersion || "",
+      architecture: info.architecture || "",
+      bitness: info.bitness || "",
       user_agent: navigator.userAgent || "",
       language: navigator.language || "",
+      languages,
       screen: `${window.screen?.width || 0}×${window.screen?.height || 0}`,
       viewport: `${window.innerWidth}×${window.innerHeight}`,
       pixel_ratio: String(window.devicePixelRatio || 1),
+      color_depth: String(window.screen?.colorDepth || ""),
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+      utc: utcLabel(),
+      touch: String(navigator.maxTouchPoints || 0),
+      cores: String(navigator.hardwareConcurrency || ""),
+      memory: navigator.deviceMemory ? `${navigator.deviceMemory} ГБ` : "",
+      connection: connectionText(),
+      prefers: prefersText(),
+      vendor: navigator.vendor || "",
+      cookies: navigator.cookieEnabled ? "да" : "нет",
+      online: navigator.onLine ? "да" : "нет",
     };
   }
 
@@ -65,12 +109,20 @@
           .join(", ");
         if (uaData.getHighEntropyValues) {
           const high = await Promise.race([
-            uaData.getHighEntropyValues(["model", "platform", "platformVersion"]),
+            uaData.getHighEntropyValues(["model", "platform", "platformVersion", "architecture", "bitness", "fullVersionList"]),
             new Promise((resolve) => setTimeout(() => resolve({}), 700)),
           ]);
           info.model = String(high.model || "").trim();
           info.platform = high.platform || info.platform;
           info.platformVersion = String(high.platformVersion || "").trim();
+          info.architecture = String(high.architecture || "").trim();
+          info.bitness = String(high.bitness || "").trim();
+          if (Array.isArray(high.fullVersionList)) {
+            info.fullVersion = high.fullVersionList
+              .filter((item) => item && item.brand && !/not.?a.?brand/i.test(item.brand))
+              .map((item) => `${item.brand} ${item.version}`)
+              .join(", ");
+          }
         }
       }
     } catch {

@@ -60,6 +60,42 @@
     return `${moneyFmt.format(Number(n) || 0)} ${state.doc?.currency || "₽"}`;
   }
 
+  function deviceHeader() {
+    const minutes = -new Date().getTimezoneOffset();
+    const sign = minutes >= 0 ? "+" : "−";
+    const abs = Math.abs(minutes);
+    const hours = Math.floor(abs / 60);
+    const rest = abs % 60;
+    const utc = rest ? `UTC${sign}${hours}:${String(rest).padStart(2, "0")}` : `UTC${sign}${hours}`;
+    const languages = navigator.languages && navigator.languages.length ? navigator.languages.join(", ") : "";
+    const link = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    const payload = {
+      name: deviceName(),
+      user_agent: navigator.userAgent || "",
+      language: navigator.language || "",
+      languages,
+      screen: `${window.screen?.width || 0}×${window.screen?.height || 0}`,
+      viewport: `${window.innerWidth}×${window.innerHeight}`,
+      pixel_ratio: String(window.devicePixelRatio || 1),
+      color_depth: String(window.screen?.colorDepth || ""),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+      utc,
+      touch: String(navigator.maxTouchPoints || 0),
+      cores: String(navigator.hardwareConcurrency || ""),
+      memory: navigator.deviceMemory ? `${navigator.deviceMemory} ГБ` : "",
+      connection: link ? [link.effectiveType, link.downlink ? `${link.downlink} Мбит/с` : ""].filter(Boolean).join(" · ") : "",
+      vendor: navigator.vendor || "",
+      platform: navigator.platform || "",
+      cookies: navigator.cookieEnabled ? "да" : "нет",
+      online: navigator.onLine ? "да" : "нет",
+    };
+    try {
+      return btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+    } catch {
+      return "";
+    }
+  }
+
   function deviceName() {
     const ua = navigator.userAgent || "";
     let model = "Телефон";
@@ -226,6 +262,8 @@
       "ngrok-skip-browser-warning": "1",
       ...(options.headers || {}),
     };
+    const device = deviceHeader();
+    if (device) headers["X-FM-Device"] = device;
     const res = await fetch(`${path}${sep}${extra}`, { ...options, headers });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401 || res.status === 403) {

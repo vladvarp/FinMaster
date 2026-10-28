@@ -1149,7 +1149,7 @@
         <h3>Управление с телефона</h3>
         <div class="modal-title-actions">
           <button type="button" class="btn small" id="dictionary-open">Словари</button>
-          <button type="button" class="btn small" id="remote-console-open" title="Консоль сети (Ctrl+Ё)">Консоль</button>
+          <button type="button" class="btn small" id="remote-console-open" title="Консоль (Ctrl+Ё)">Консоль</button>
           <button type="button" class="info-btn" id="remote-guide-open" title="Как подключить телефон" aria-label="Как подключить телефон">i</button>
         </div>
       </div>
@@ -1249,9 +1249,21 @@
 
   <div id="net-console" class="net-console" hidden>
     <div class="net-console-head" id="net-console-head">
-      <span class="net-console-title">Сеть</span>
+      <div class="nc-switch" id="nc-switch">
+        <button type="button" class="nc-switch-btn" id="nc-switch-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="nc-switch-menu">
+          <span id="nc-switch-label">Сеть</span>
+          <span class="nc-switch-caret" aria-hidden="true"></span>
+        </button>
+        <div class="nc-switch-menu" id="nc-switch-menu" role="listbox" hidden>
+          <button type="button" role="option" data-console-view="net" aria-selected="true">Сеть</button>
+          <button type="button" role="option" data-console-view="log">Лог</button>
+          <button type="button" role="option" data-console-view="tg">Мост TG</button>
+          <button type="button" role="option" data-console-view="ngrok">Мост Ngrok</button>
+        </div>
+      </div>
       <span class="net-console-hint"><kbd>Ctrl</kbd><kbd>Ё</kbd></span>
-      <span class="net-console-cal">
+      <span class="net-console-spacer"></span>
+      <span class="net-console-cal" data-console-only="net">
         <button type="button" class="net-console-tool" id="net-console-cal-next" title="Сдвинуть «сегодня» календаря на один день">+1 день</button>
         <button type="button" class="net-console-tool" id="net-console-cal-reset" title="Вернуть настоящий сегодняшний день">Сброс</button>
         <span class="net-console-cal-day" id="net-console-cal-day"></span>
@@ -1259,15 +1271,26 @@
       <button type="button" class="net-console-tool" id="net-console-clear">Очистить</button>
       <button type="button" class="net-console-tool" id="net-console-close" title="Закрыть" aria-label="Закрыть">✕</button>
     </div>
+    <div class="bridge-legend" data-console-only="tg" data-legend="tg" hidden>
+      <span>Ответ ПК</span>
+      <span>Вопрос бота</span>
+    </div>
+    <div class="bridge-legend" data-console-only="ngrok" data-legend="ngrok" hidden>
+      <span>Ответ ПК</span>
+      <span>Запрос</span>
+    </div>
     <div class="net-console-body" id="net-console-body">
       <div class="net-console-empty" id="net-console-empty">Пока нет событий. Включите доступ — здесь появятся подключения, синхронизация, Telegram и ngrok.</div>
-      <div class="net-console-log" id="net-console-log"></div>
+      <div class="net-console-log" id="net-console-log" data-console-pane="net"></div>
+      <div class="app-console-log" id="app-console-log" data-console-pane="log" hidden></div>
+      <div class="bridge-board" id="bridge-tg" data-console-pane="tg" hidden></div>
+      <div class="bridge-board" id="bridge-ngrok" data-console-pane="ngrok" hidden></div>
     </div>
     <div class="net-console-resize" id="net-console-resize"></div>
   </div>
 
   <div class="modal" id="device-info-modal">
-    <div class="modal-card" style="max-width:520px">
+    <div class="modal-card device-info-card">
       <h3 id="device-info-title">Устройство</h3>
       <div class="device-info-body" id="device-info-body"></div>
       <div class="modal-actions">
@@ -1394,6 +1417,7 @@
           <div id="voice-models" class="voice-models"></div>
           <div class="voice-more-open">
             <button type="button" class="btn" id="btn-voice-more">Другие модели</button>
+            <button type="button" class="btn" id="dictionary-open-voice">Словари</button>
           </div>
         </div>
         <div class="app-settings-pane" data-settings-pane="runtime" hidden>
