@@ -1295,7 +1295,13 @@ def _load_doc(path: str) -> tuple[dict[str, Any], bool]:
 
 
 def _live_path() -> str:
-    return str(REMOTE.path or "") if REMOTE.enabled else ""
+    """Отчёт, открытый в окне программы. С телефона приходят правки того же файла."""
+    desktop = str(REMOTE.desktop_path or "")
+    if desktop and os.path.isfile(desktop):
+        return desktop
+    if REMOTE.enabled and REMOTE.path and os.path.isfile(str(REMOTE.path)):
+        return str(REMOTE.path)
+    return ""
 
 
 def _order_label(order: dict[str, Any], currency: str, types: dict[str, str] | None = None, decimals: int = 2) -> str:
@@ -1317,6 +1323,7 @@ class ChatSession:
     def __init__(self) -> None:
         self.screen = "home"
         self.path = ""
+        self.chosen = False
         self.live = False
         self.filter = "all"
         self.search = ""
@@ -1823,10 +1830,18 @@ class TelegramBot:
             return
         send_html(token, chat_id, "Нажмите <b>Отчёты</b>, <b>Заказы</b>, <b>Снимок</b>, <b>Хранилище</b> или <b>Меню</b>.", self._reply_kb(chat_id))
 
+    def _adopt_open(self, session: ChatSession) -> str:
+        """Пока в чате цель не выбирали, вопрос идёт в отчёт, открытый в программе."""
+        if session.chosen and session.path:
+            return session.path
+        live = _live_path()
+        session.path = live
+        return live
+
     def _has_report(self, session: ChatSession) -> bool:
-        if session.path or _live_path():
+        if self._adopt_open(session):
             return True
-        return bool(REMOTE.enabled and isinstance(REMOTE.doc, dict))
+        return bool(not session.chosen and REMOTE.enabled and isinstance(REMOTE.doc, dict))
 
     def _try_ask(self, token: str, chat_id: str, text: str, voice: bool = False) -> bool:
         session = self._chat(chat_id)
@@ -1920,6 +1935,7 @@ class TelegramBot:
             return
         session = self._chat(chat_id)
         session.path = path
+        session.chosen = True
         session.order_id = ""
         session.search = ""
         session.filter = "all"
@@ -2378,6 +2394,7 @@ class TelegramBot:
             send_html(token, chat_id, "Этот файл открыть нельзя.")
             return
         session.path = path
+        session.chosen = True
         session.order_id = ""
         session.search = ""
         session.filter = "all"
@@ -2399,7 +2416,7 @@ class TelegramBot:
 
     def _open_on_pc(self, token: str, chat_id: str) -> None:
         session = self._chat(chat_id)
-        if not session.path or not _path_allowed(session.path):
+        if not self._adopt_open(session) or not _path_allowed(session.path):
             send_html(token, chat_id, "Сначала откройте отчёт в боте.")
             return
         if not REMOTE.enabled:
@@ -2703,16 +2720,15 @@ class TelegramBot:
         self._show(token, chat_id, "snap")
 
     def _doc_of(self, session: ChatSession) -> tuple[dict[str, Any], bool]:
-        path = session.path or _live_path()
+        path = self._adopt_open(session)
         if path and _path_allowed(path):
             try:
                 doc, live = _load_doc(path)
-                session.path = path
                 session.live = live
                 return doc, live
             except (OSError, ValueError, json.JSONDecodeError):
                 pass
-        if REMOTE.enabled and isinstance(REMOTE.doc, dict):
+        if not session.chosen and REMOTE.enabled and isinstance(REMOTE.doc, dict):
             session.path = str(REMOTE.path or session.path)
             session.live = True
             return REMOTE.doc, True
@@ -2924,6 +2940,7 @@ class TelegramBot:
         return text, rows
 
     def _screen_reports(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
+        self._adopt_open(session)
         lib = _library_items()
         recent = [item for item in _recent_items() if item.get("exists") is not False]
         seen: list[str] = []

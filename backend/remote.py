@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 import socket
 import threading
@@ -118,6 +119,7 @@ class RemoteSession:
         self.version = 0
         self.doc: dict[str, Any] | None = None
         self.path = ""
+        self.desktop_path = ""
         self.dirty = False
         self.origin = ""
         self.command: dict[str, Any] | None = None
@@ -185,6 +187,8 @@ class RemoteSession:
             if isinstance(history, dict):
                 self.history = _history_payload(history)
             self.path = str(path or "")
+            if str(origin or "") == "desktop":
+                self.desktop_path = self.path
             self.dirty = bool(dirty)
             self.origin = str(origin or "")
             self.doc_version += 1
@@ -195,10 +199,18 @@ class RemoteSession:
             netlog.add("sync", f"Отчёт обновлён ({who})", source=who, key=f"pub-{origin or 'x'}")
             return self.version
 
+    def note_desktop(self, path: str) -> None:
+        """Файл, который сейчас открыт в окне программы. Бот берёт его, если в чате цель не выбирали."""
+        with self._cond:
+            self.desktop_path = str(path or "")
+
     def clear_document(self) -> int:
         with self._cond:
+            gone = self.path
             self.doc = None
             self.path = ""
+            if gone and self.desktop_path and os.path.normcase(os.path.abspath(gone)) == os.path.normcase(os.path.abspath(self.desktop_path)):
+                self.desktop_path = ""
             self.dirty = False
             self.origin = ""
             self.doc_version += 1

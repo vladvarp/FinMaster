@@ -1503,6 +1503,10 @@ def _open_path(path: str) -> dict[str, Any]:
     if not preview:
         report_backup.ensure_id(doc, abs_path)
     recent = storage.add_recent(abs_path, doc.get("title") or "")
+    if not preview and not _is_desk_call():
+        REMOTE.note_desktop(abs_path)
+        if REMOTE.enabled:
+            REMOTE.publish(doc, abs_path, "desktop", False)
     applog.add(
         "Открыт просмотр копии" if preview else "Открыт отчёт",
         where=os.path.basename(abs_path),
@@ -1669,7 +1673,9 @@ def api_write():
         storage.save_doc_history(abs_path, history)
     desk_patch = _is_desk_call() and isinstance(data.get("patch"), dict)
     saved_history = storage.load_history_meta(abs_path) if _is_desk_call() else storage.load_doc_history(abs_path)
-    if _is_desk_call() and REMOTE.enabled and storage.same_path(abs_path, REMOTE.path):
+    if not _is_desk_call():
+        REMOTE.note_desktop(abs_path)
+    elif REMOTE.enabled and storage.same_path(abs_path, REMOTE.path):
         REMOTE.publish(doc, abs_path, f"web:{_desk_cid() or 'desk'}", False)
     payload = {
         "path": abs_path,
