@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <style>
+    .net-console,
+    .net-console[hidden] {
+      position: relative !important;
+      right: auto !important;
+      bottom: auto !important;
+      display: flex !important;
+      width: 100% !important;
+      height: auto !important;
+      min-height: 0 !important;
+      margin: 0 0 8px;
+    }
+    h2 { margin: 18px 0 8px; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <p class="hint">Стенд консоли. Строки — пример, не запись с этого компьютера.</p>
+
+  <h2>Сеть</h2>
+  <div class="net-console">
+    <div class="net-console-head">
+      <div class="nc-switch">
+        <button type="button" class="nc-switch-btn" tabindex="-1" aria-haspopup="listbox" aria-expanded="false">
+          <span>Сеть</span>
+          <span class="nc-switch-caret" aria-hidden="true"></span>
+        </button>
+      </div>
+      <span class="net-console-hint"><kbd>Ctrl</kbd><kbd>Ё</kbd></span>
+      <span class="net-console-spacer"></span>
+      <span class="net-console-cal">
+        <button type="button" class="net-console-tool" tabindex="-1">+1 день</button>
+        <button type="button" class="net-console-tool" tabindex="-1">Сброс</button>
+      </span>
+      <button type="button" class="net-console-tool" tabindex="-1">Очистить</button>
+      <button type="button" class="net-console-tool" tabindex="-1" aria-label="Закрыть">✕</button>
+    </div>
+    <div class="net-console-body">
+      <div class="net-console-log">
+        <div class="nc-row ok"><span class="nc-time">22:41:02</span><span class="nc-kind">сессия</span><span class="nc-text">Доступ с телефона включён</span></div>
+        <div class="nc-row info"><span class="nc-time">22:41:18</span><span class="nc-kind">клиент</span><span class="nc-text">Телефон открыл сессию <span class="nc-src">телефон</span></span></div>
+        <div class="nc-row ok"><span class="nc-time">22:42:05</span><span class="nc-kind">синхр.</span><span class="nc-text">Отчёт обновлён (компьютер) <span class="nc-src">компьютер</span></span></div>
+        <div class="nc-row info"><span class="nc-time">22:42:40</span><span class="nc-kind">telegram</span><span class="nc-text">Связь есть: бот слушает сообщения</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Лог</h2>
+  <div class="net-console">
+    <div class="net-console-head">
+      <div class="nc-switch">
+        <button type="button" class="nc-switch-btn" tabindex="-1">
+          <span>Лог</span>
+          <span class="nc-switch-caret" aria-hidden="true"></span>
+        </button>
+      </div>
+      <span class="net-console-hint"><kbd>Ctrl</kbd><kbd>Ё</kbd></span>
+      <span class="net-console-spacer"></span>
+      <button type="button" class="net-console-tool" tabindex="-1">Очистить</button>
+      <button type="button" class="net-console-tool" tabindex="-1" aria-label="Закрыть">✕</button>
+    </div>
+    <div class="net-console-body">
+      <div class="app-console-log">
+        <div class="log-row"><span class="log-time">22:40:11</span><span class="log-where">Мастерская.fmaster</span><span class="log-what">Открыт отчёт</span><span class="log-actor">ПК</span></div>
+        <div class="log-row"><span class="log-time">22:44:02</span><span class="log-where">Заказы</span><span class="log-what">1042 Кухня · цена</span><span class="log-actor">ПК</span></div>
+        <div class="log-row"><span class="log-time">22:46:30</span><span class="log-where">Настройки</span><span class="log-what">Автосохранение включено</span><span class="log-actor">ПК</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Мост TG</h2>
+  <div class="net-console">
+    <div class="net-console-head">
+      <div class="nc-switch">
+        <button type="button" class="nc-switch-btn" tabindex="-1">
+          <span>Мост TG</span>
+          <span class="nc-switch-caret" aria-hidden="true"></span>
+        </button>
+      </div>
+      <span class="net-console-hint"><kbd>Ctrl</kbd><kbd>Ё</kbd></span>
+      <span class="net-console-spacer"></span>
+      <button type="button" class="net-console-tool" tabindex="-1">Очистить</button>
+      <button type="button" class="net-console-tool" tabindex="-1" aria-label="Закрыть">✕</button>
+    </div>
+    <div class="bridge-legend">
+      <span>Вопрос бота</span>
+      <span>Ответ ПК</span>
+    </div>
+    <div class="net-console-body">
+      <div class="bridge-board">
+        <article class="bridge-card is-open">
+          <button type="button" class="bridge-toggle" tabindex="-1" aria-expanded="true">
+            <span>22:47:12</span>
+            <span class="bridge-who">долги</span>
+            <span class="bridge-chevron" aria-hidden="true"></span>
+          </button>
+          <div class="bridge-cols">
+            <p class="bridge-col bridge-col-ask">долги</p>
+            <p class="bridge-col bridge-col-pc">Иванов · долг 12 000 ₽</p>
+          </div>
+          <div class="bridge-raw">
+            <div class="bridge-cols">
+              <pre>долги</pre>
+              <pre>{
+  "html": "Иванов · долг 12 000 ₽"
+}</pre>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

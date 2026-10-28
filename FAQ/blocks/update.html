@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <style>
+    .modal {
+      position: relative !important;
+      display: block !important;
+      inset: auto !important;
+      background: transparent !important;
+      padding: 0 !important;
+    }
+    .modal-card.update-modal {
+      position: relative !important;
+      width: min(560px, 100%) !important;
+      max-height: none !important;
+      height: auto !important;
+    }
+  </style>
+</head>
+<body>
+  <p class="hint">Стенд окна, когда на GitHub уже есть версия новее. Карточки, путь коммитов и список файлов — пример.</p>
+  <div class="modal open" id="update-modal">
+    <div class="modal-card update-modal" role="dialog" aria-labelledby="update-title">
+      <div class="modal-title-row">
+        <h3 id="update-title">Есть обновление</h3>
+        <button class="btn" type="button" tabindex="-1">О программе</button>
+      </div>
+      <div class="update-versions">
+        <div class="update-ver is-old">
+          <span class="update-ver-label">Текущая версия</span>
+          <b>28.10.2026, 14:20</b>
+          <div class="update-ver-tools">
+            <span class="update-code">a1b2c3d</span>
+          </div>
+        </div>
+        <div class="update-ver is-new">
+          <span class="update-ver-label">На GitHub</span>
+          <b>28.10.2026, 21:05</b>
+          <div class="update-ver-tools">
+            <span class="update-code">e4f5a6b</span>
+            <button type="button" class="info-btn confirm-info open" tabindex="-1" aria-label="Чем отличается">i</button>
+          </div>
+        </div>
+      </div>
+      <div class="confirm-diff open">
+        <div class="confirm-diff-head">2 файла отличаются</div>
+        <ul>
+          <li class="is-changed" style="--i:0"><span>frontend/app/05-cloud.js</span><em>изменён</em></li>
+          <li class="is-missing" style="--i:1"><span>backend/ask.py</span><em>нет файла</em></li>
+        </ul>
+      </div>
+      <div class="update-log-head">
+        <h4>От этой версии до последней</h4>
+        <button type="button" class="btn small" tabindex="-1">Вся история</button>
+      </div>
+      <div class="update-log">
+        <ol class="update-path">
+          <li class="is-current">
+            <i></i>
+            <div>
+              <header><code>a1b2c3d</code><time>28.10.2026, 14:20</time><em>установлена</em></header>
+              <strong>Касса: срок в подсказке</strong>
+            </div>
+          </li>
+          <li class="is-latest">
+            <i></i>
+            <div>
+              <header><code>e4f5a6b</code><time>28.10.2026, 21:05</time><em>последняя</em></header>
+              <strong>Бот берёт открытый отчёт</strong>
+              <p>Если программа уже открыла файл, вопрос в чате идёт в него.</p>
+            </div>
+          </li>
+        </ol>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" type="button" tabindex="-1">Не сейчас</button>
+        <button class="btn primary" type="button" tabindex="-1">Обновить</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

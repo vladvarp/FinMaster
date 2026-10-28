@@ -6,6 +6,7 @@ window.FAQ_TOC = [
       { id: "start", title: "С чего начать", keys: "запуск установка exe python первый поиск справка" },
       { id: "reports", title: "Файлы отчётов", keys: "fmaster fbak сохранить открыть новый автосохранение корзина вернуться к отчёту" },
       { id: "interface", title: "Окно программы", keys: "панель тема поиск дата тост стартовый галактики" },
+      { id: "update", title: "Обновление", keys: "github коммит целостность янтарное красное свечение вся история скачать update.vbs" },
     ],
   },
   {
@@ -65,6 +66,7 @@ window.FAQ_TOC = [
     title: "Телефон и интернет",
     items: [
       { id: "phone", title: "Подключение телефона", keys: "qr wi-fi доступ устройства экран вкладки стенд" },
+      { id: "console", title: "Консоль", keys: "сеть лог мост telegram ngrok ctrl ё очистить" },
       { id: "ngrok", title: "Интернет через ngrok", keys: "токен path store туннель" },
       { id: "telegram", title: "Telegram-бот", keys: "botfather mini app снимок голос вопрос долги чат стенд токен хранилище bank" },
       { id: "mobile", title: "Экран телефона", keys: "вкладки свайп заказы календарь стенд проиграть" },
