@@ -34,8 +34,8 @@
   const CONSOLE_EMPTY = {
     net: "Пока нет событий. Включите доступ — здесь появятся подключения, синхронизация, Telegram и ngrok.",
     log: "Пока нет записей. Здесь появятся правки отчёта, открытие файла и изменения настроек: что, где и когда.",
-    tg: "Пока нет обмена с Telegram. Справа вопрос бота, слева ответ компьютера. Строку можно раскрыть.",
-    ngrok: "Пока нет запросов через ngrok. Справа запрос, слева ответ компьютера. Служебные опросы сюда не пишутся.",
+    tg: "Пока нет обмена с Telegram. Слева вопрос бота, справа ответ компьютера. Строку можно раскрыть.",
+    ngrok: "Пока нет запросов через ngrok. Слева запрос, справа ответ компьютера. Служебные опросы сюда не пишутся.",
   };
   const netConsole = {
     view: "net",
@@ -245,7 +245,7 @@
       const ask = document.createElement("p");
       ask.className = "bridge-col bridge-col-ask";
       ask.textContent = ev.ask || "—";
-      cols.append(reply, ask);
+      cols.append(ask, reply);
       const raw = document.createElement("div");
       raw.className = "bridge-raw";
       raw.hidden = true;
@@ -255,7 +255,7 @@
       replyPre.textContent = bridgeText(ev.reply_body);
       const askPre = document.createElement("pre");
       askPre.textContent = bridgeText(ev.ask_body);
-      rawCols.append(replyPre, askPre);
+      rawCols.append(askPre, replyPre);
       raw.append(rawCols);
       toggle.addEventListener("click", () => {
         const open = card.classList.toggle("is-open");
