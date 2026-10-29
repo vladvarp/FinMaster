@@ -673,21 +673,24 @@
     }
     box.innerHTML = devices
       .map((d) => {
-        const on = live.has(d.id);
+        const revoked = !!d.revoked_at;
+        const on = !revoked && live.has(d.id);
         const when = d.seen_at ? new Date(d.seen_at).toLocaleString("ru-RU") : "";
         const model = d.info?.model && d.info.model !== d.name ? d.info.model : "";
         const kind = deviceSurfaceLabel(d.surface);
         const via = d.via === "ngrok" ? "интернет" : d.via === "lan" ? "локально" : "";
         return `<div class="remote-device ${on ? "is-on" : "is-off"}">
-          <span class="rd-dot" title="${on ? "в сети" : "не в сети"}"></span>
+          <span class="rd-dot" title="${revoked ? "доступ закрыт" : on ? "в сети" : "не в сети"}"></span>
           <div class="rd-body">
             <strong>${esc(d.name || "Устройство")}<span class="rd-kind">${esc(kind)}</span></strong>
-            <small>${on ? '<span class="online">в сети</span>' : '<span class="offline">не в сети</span>'}${
+            <small>${revoked ? '<span class="offline">доступ закрыт</span>' : on ? '<span class="online">в сети</span>' : '<span class="offline">не в сети</span>'}${
               via ? ` · ${esc(via)}` : ""
             }${d.ip ? ` · ${esc(d.ip)}` : ""}${model ? ` · ${esc(model)}` : ""}${when ? ` · ${esc(when)}` : ""}</small>
           </div>
           <button type="button" class="btn small rd-info" data-device-info="${esc(d.id)}" title="О устройстве" aria-label="О устройстве">i</button>
-          <button type="button" class="btn small" data-forget="${esc(d.id)}">Забыть</button>
+          ${revoked
+            ? `<button type="button" class="btn small" data-restore="${esc(d.id)}">Восстановить доступ</button>`
+            : `<button type="button" class="btn small" data-forget="${esc(d.id)}">Удалить доступ</button>`}
         </div>`;
       })
       .join("");
@@ -707,7 +710,7 @@
     return [
       ["Имя", device.name || "Устройство"],
       ["Раздел", deviceSurfaceLabel(device.surface)],
-      ["Статус", online ? "в сети" : "не в сети"],
+      ["Статус", device.revoked_at ? "доступ закрыт" : online ? "в сети" : "не в сети"],
       ["Канал", via],
       ["Адрес", device.ip],
       ["Был в сети", when],
@@ -1737,6 +1740,8 @@
   }
 
   async function telegramUserAction(action, id, nick) {
+    let rotate = false;
+  
     if (action === "remove") {
       const ok = await askConfirm({
         title: "Удалить пользователя?",
@@ -1746,10 +1751,30 @@
         danger: true,
       });
       if (!ok) return;
+  
+      rotate = await askConfirm({
+        title: "Сбросить ссылку?",
+        text: "Сбросить ссылку — новая ссылка будет отправлена на все устройства с действующим доступом. Это полезно, если вы хотите обновить ссылку для безопасности. Если оставить старую, повторно настраивать устройства не потребуется.",
+        ok: "Сбросить ссылку",
+        cancel: "Оставить ссылку",
+        danger: true,
+      });
     }
+  
     try {
-      renderRemoteModal(await apiPost("/api/telegram/users", { action, id }));
-      toast(action === "approve" ? "Пользователь добавлен" : action === "decline" ? "Запрос отклонён" : "Пользователь удалён");
+      renderRemoteModal(
+        await apiPost("/api/telegram/users", { action, id, rotate })
+      );
+  
+      toast(
+        action === "approve"
+          ? "Пользователь добавлен"
+          : action === "decline"
+            ? "Запрос отклонён"
+            : rotate
+              ? "Пользователь удалён, ссылка обновлена"
+              : "Пользователь удалён"
+      );
     } catch (err) {
       toast(err.message || "Не удалось изменить доступ");
     }
@@ -1989,12 +2014,28 @@
       const btn = e.target.closest("[data-forget]");
       if (!btn) return;
       try {
-        const res = await apiPost("/api/remote/forget", { id: btn.dataset.forget });
-        remote.devices = res.devices || [];
-        renderRemoteDevices();
-        toast("Устройство забыто");
+        const device = (remote.devices || []).find((item) => item.id === btn.dataset.forget);
+        const name = device?.name || "устройства";
+        const ok = await askConfirm({
+          title: "Закрыть доступ?",
+          text: `У «${name}» закроется доступ. Запись останется в истории устройств.`,
+          ok: "Продолжить",
+          cancel: "Отмена",
+          danger: true,
+        });
+        if (!ok) return;
+        const rotate = await askConfirm({
+          title: "Сбросить ссылку?",
+          text: "Сброс удалит доступ у всех, кто открывал старую ссылку. Если оставить ссылку, остальные устройства продолжат работу.",
+          ok: "Сбросить ссылку",
+          cancel: "Оставить ссылку",
+          danger: true,
+        });
+        const res = await apiPost("/api/remote/forget", { id: btn.dataset.forget, rotate });
+        renderRemoteModal(res);
+        toast(rotate ? "Доступ закрыт, ссылка обновлена" : "Доступ устройства закрыт");
       } catch (err) {
-        toast(`Не удалось забыть устройство: ${err.message || err}`);
+        toast(`Не удалось закрыть доступ: ${err.message || err}`);
       }
     });
     $("remote-copy")?.addEventListener("click", () => copyRemoteLink(remote.url, "Ссылка на телефон скопирована"));

@@ -947,8 +947,30 @@ def forget_device(cid: str) -> list[dict[str, Any]]:
     return save_remote_settings(devices=devices)["devices"]
 
 
+def revoke_device(cid: str) -> list[dict[str, Any]]:
+    cid = str(cid or "").strip()
+    data = remote_settings()
+    devices = []
+    for item in data["devices"]:
+        device = dict(item)
+        if str(device.get("id") or "") == cid:
+            device["revoked_at"] = now_local_iso()
+        devices.append(device)
+    return save_remote_settings(devices=devices)["devices"]
+
+
+def device_access_revoked(cid: str) -> bool:
+    cid = str(cid or "").strip()
+    if not cid:
+        return False
+    return any(
+        str(item.get("id") or "") == cid and bool(item.get("revoked_at"))
+        for item in remote_settings()["devices"]
+    )
+
+
 def rotate_remote_token() -> dict[str, Any]:
-    return save_remote_settings(token=secrets.token_urlsafe(12), devices=[])
+    return save_remote_settings(token=secrets.token_urlsafe(12))
 
 
 def user_documents_dir() -> str:

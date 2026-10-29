@@ -250,6 +250,8 @@ def _guard_desk_api():
     fail = _desk_auth_fail()
     if fail:
         return fail
+    if storage.device_access_revoked(_desk_cid()):
+        return jsonify({"error": "Доступ к этому устройству закрыт."}), 403
     path = request.path
     if path in _DESK_DENY or path.startswith("/api/runtime/"):
         return jsonify({"error": "Это действие доступно только в окне главного компьютера."}), 403
@@ -397,6 +399,10 @@ def guard_remote_clients():
         if not REMOTE.check(_remote_token()):
             netlog.add("http", "Запрос отклонён: неверный токен", level="err", source=_net_peer(), detail=path, key="deny-token")
             return jsonify({"error": "Сессия недействительна — отсканируйте QR-код заново."}), 401
+        cid = str(request.args.get("cid") or "").strip()
+        if storage.device_access_revoked(cid):
+            netlog.add("http", "Запрос отклонён: доступ устройства закрыт", level="warn", source=_net_peer(), detail=path, key=f"deny-device-{cid}")
+            return jsonify({"error": "Доступ к этому устройству закрыт."}), 403
         return None
     return jsonify({"error": "Доступ запрещён."}), 403
 
@@ -2090,8 +2096,8 @@ def api_telegram_users():
         if token:
             telegram_set_menu(token, "", force=True, chat_id=chat_id)
 
-        # Новая ссылка отправляется только оставшимся подтверждённым пользователям.
-        _rotate_remote_link()
+        if bool(data.get("rotate")):
+            _rotate_remote_link()
 
     payload = _remote_public()
     payload["ok"] = True
@@ -2366,13 +2372,18 @@ def api_remote_rotate():
 @app.post("/api/remote/forget")
 def api_remote_forget():
     data = request.get_json(silent=True) or {}
-    cid = str(data.get("id") or "")
-    devices = storage.forget_device(cid)
-    applog.add(f"Устройство забыто: {cid[:12]}" if cid else "Устройство забыто", where="Телефон", actor=_log_actor())
-    g.netlog_text = f"Устройство забыто: {cid[:12]}" if cid else "Устройство забыто"
+    cid = str(data.get("id") or "").strip()
+    if not cid:
+        return jsonify({"error": "Не указано устройство."}), 400
+    devices = storage.revoke_device(cid)
+    REMOTE.drop(cid)
+    rotated = bool(data.get("rotate"))
+    payload = _rotate_remote_link() if rotated else _remote_public()
+    applog.add(f"Доступ устройства закрыт: {cid[:12]}", where="Телефон", actor=_log_actor())
+    g.netlog_text = "Доступ устройства закрыт и ссылка обновлена" if rotated else "Доступ устройства закрыт"
     g.netlog_level = "warn"
-    g.netlog_key = f"forget-{cid}"
-    return jsonify({"ok": True, "devices": devices})
+    g.netlog_key = f"revoke-{cid}"
+    return jsonify({"ok": True, **payload, "devices": devices})
 
 
 def _desk_name_from(data: dict[str, Any]) -> str:
@@ -2609,10 +2620,6 @@ def api_remote_pull():
     REMOTE.touch(cid, kind, name)
     if kind in {"mobile", "bank"} and cid:
         _remember_client(cid, name, kind)
-    elif kind == "desktop" and cid and any(
-        item.get("id") == cid for item in (storage.remote_settings().get("devices") or [])
-    ):
-        storage.forget_device(cid)
     snap = REMOTE.wait(since)
     if "clients" not in snap:
         snap["clients"] = REMOTE.clients()
