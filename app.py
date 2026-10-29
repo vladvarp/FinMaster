@@ -2037,50 +2037,61 @@ def api_telegram_users():
     if not chat_id:
         return jsonify({"error": "Не указан пользователь."}), 400
 
+    if action not in {"approve", "decline", "remove"}:
+        return jsonify({"error": "Неизвестное действие."}), 400
+
+    token = str(
+        storage.remote_settings().get("telegram_bot_token")
+        or TELEGRAM.token()
+        or ""
+    )
+
     if action == "approve":
         person = secrets.approve(chat_id)
         if person:
             nick = _telegram_nick(person)
             _tell_telegram(chat_id, f"Доступ открыт{nick}. Можно писать боту.")
 
+        # Применяем актуальное меню сразу после подтверждения.
+        _telegram_sync_menu()
+
     elif action == "decline":
         person = secrets.decline(chat_id)
-        if person:
-            _tell_telegram(
-                chat_id,
-                "Доступ не открыли. Чтобы попросить снова, напишите /start.",
-            )
+        if person and token:
+            try:
+                telegram_send_html(
+                    token,
+                    chat_id,
+                    "Доступ не открыли. Чтобы попросить снова, напишите /start.",
+                    {"remove_keyboard": True},
+                )
+            except Exception:
+                pass
 
-        token = str(
-            storage.remote_settings().get("telegram_bot_token")
-            or TELEGRAM.token()
-            or ""
-        )
         if token:
             telegram_set_menu(token, "", force=True, chat_id=chat_id)
 
+        # Смена токена делает прежнюю ссылку недействительной.
         _rotate_remote_link()
 
     elif action == "remove":
         person = secrets.remove_user(chat_id)
-        if person:
-            _tell_telegram(
-                chat_id,
-                "Доступ к боту закрыт. Чтобы попросить снова, напишите /start.",
-            )
+        if person and token:
+            try:
+                telegram_send_html(
+                    token,
+                    chat_id,
+                    "Доступ к боту закрыт. Чтобы попросить снова, напишите /start.",
+                    {"remove_keyboard": True},
+                )
+            except Exception:
+                pass
 
-        token = str(
-            storage.remote_settings().get("telegram_bot_token")
-            or TELEGRAM.token()
-            or ""
-        )
         if token:
             telegram_set_menu(token, "", force=True, chat_id=chat_id)
 
+        # Новая ссылка отправляется только оставшимся подтверждённым пользователям.
         _rotate_remote_link()
-
-    else:
-        return jsonify({"error": "Неизвестное действие."}), 400
 
     payload = _remote_public()
     payload["ok"] = True
