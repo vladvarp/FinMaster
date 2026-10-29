@@ -374,23 +374,32 @@ def set_menu_button(token: str, url: str = "", force: bool = False, chat_id: str
         netlog.add("telegram", f"Не обновилась кнопка «Открыть»: {exc}", level="err", key="tg-menu")
 
 
-def push_open_controls(token: str, chat_id: str | list[str], url: str, notice: str = "") -> None:
-    """Сбрасывает кэш Telegram у «Открыть» и ставит клавиатуру с актуальным URL."""
+def push_open_controls(
+    token: str,
+    chat_id: str | list[str],
+    url: str,
+    notice: str = "",
+) -> None:
+    """Обновляет ссылку и кнопку Mini App только в указанных чатах."""
     token = str(token or "").strip()
     link = str(url or "").strip()
     if not token:
         return
+
     ids: list[str] = []
     for item in chat_id if isinstance(chat_id, list) else [chat_id]:
         cid = str(item or "").strip()
         if cid and cid not in ids:
             ids.append(cid)
-    set_menu_button(token, link, force=True)
+
     if not ids:
         return
+
     text = notice or "Ссылка на телефон обновлена. Нажмите <b>Открыть</b>."
-    kb = _menu_keyboard(link)
+    kb = _menu_keyboard(link) if link else {"remove_keyboard": True}
+
     for cid in ids:
+        # Устанавливаем Mini App только для конкретного чата.
         set_menu_button(token, link, force=True, chat_id=cid)
         try:
             _call(
@@ -403,10 +412,23 @@ def push_open_controls(token: str, chat_id: str | list[str], url: str, notice: s
                 },
             )
             time.sleep(0.35)
-            send_html(token, cid, text, kb)
-            netlog.add("telegram", "Клавиатура бота с новой ссылкой", source=f"chat {cid}", key=f"tg-kb-{cid}")
+
+            if link:
+                send_html(token, cid, text, kb)
+
+            netlog.add(
+                "telegram",
+                "Кнопка и клавиатура Mini App обновлены",
+                source=f"chat {cid}",
+                key=f"tg-kb-{cid}",
+            )
         except RuntimeError as exc:
-            netlog.add("telegram", f"Не обновилась клавиатура: {exc}", level="err", key=f"tg-kb-{cid}")
+            netlog.add(
+                "telegram",
+                f"Не обновились кнопки Mini App: {exc}",
+                level="err",
+                key=f"tg-kb-{cid}",
+            )
 
 
 def send_html(

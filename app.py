@@ -835,17 +835,40 @@ def _qr_svg(url: str) -> str:
 
 
 def _telegram_sync_menu() -> None:
-    """Кнопка Mini App в меню бота. Не поднимает туннель — только текущий HTTPS."""
+    """Mini App доступен в меню только подтверждённым пользователям."""
     settings = storage.remote_settings()
     token = str(settings.get("telegram_bot_token") or TELEGRAM.token() or "")
     if not token:
         return
+
+    # Глобальная кнопка не должна содержать ссылку на интерфейс.
+    telegram_set_menu(token, "", force=True)
+
     url = ""
     if REMOTE.enabled:
         public_base = str(TUNNEL.snapshot().get("url") or "")
         if public_base.startswith("https://"):
-            url = _mobile_url(public_base, REMOTE.token or settings.get("token") or "")
-    telegram_set_menu(token, url)
+            url = _mobile_url(
+                public_base,
+                REMOTE.token or settings.get("token") or "",
+            )
+
+    users = settings.get("telegram_users") or []
+    for item in users:
+        if not isinstance(item, dict):
+            continue
+
+        chat_id = str(item.get("id") or "").strip()
+        if not chat_id:
+            continue
+
+        # Если публичная ссылка недоступна — убираем Mini App из меню чата.
+        telegram_set_menu(
+            token,
+            url,
+            force=True,
+            chat_id=chat_id,
+        )
 
 
 def _telegram_live_url(chat_id: str = "") -> dict[str, Any]:
@@ -2006,24 +2029,59 @@ def api_telegram_access():
 def api_telegram_users():
     if not _is_local() and not _desk_editor():
         return jsonify({"error": "Только в окне программы."}), 403
+
     data = request.get_json(silent=True) or {}
     action = str(data.get("action") or "")
     chat_id = str(data.get("id") or "").strip()
+
+    if not chat_id:
+        return jsonify({"error": "Не указан пользователь."}), 400
+
     if action == "approve":
         person = secrets.approve(chat_id)
         if person:
             nick = _telegram_nick(person)
             _tell_telegram(chat_id, f"Доступ открыт{nick}. Можно писать боту.")
+
     elif action == "decline":
         person = secrets.decline(chat_id)
         if person:
-            _tell_telegram(chat_id, "Доступ не открыли. Чтобы попросить снова, напишите /start.")
+            _tell_telegram(
+                chat_id,
+                "Доступ не открыли. Чтобы попросить снова, напишите /start.",
+            )
+
+        token = str(
+            storage.remote_settings().get("telegram_bot_token")
+            or TELEGRAM.token()
+            or ""
+        )
+        if token:
+            telegram_set_menu(token, "", force=True, chat_id=chat_id)
+
+        _rotate_remote_link()
+
     elif action == "remove":
         person = secrets.remove_user(chat_id)
         if person:
-            _tell_telegram(chat_id, "Доступ к боту закрыт. Чтобы попросить снова, напишите /start.")
+            _tell_telegram(
+                chat_id,
+                "Доступ к боту закрыт. Чтобы попросить снова, напишите /start.",
+            )
+
+        token = str(
+            storage.remote_settings().get("telegram_bot_token")
+            or TELEGRAM.token()
+            or ""
+        )
+        if token:
+            telegram_set_menu(token, "", force=True, chat_id=chat_id)
+
+        _rotate_remote_link()
+
     else:
         return jsonify({"error": "Неизвестное действие."}), 400
+
     payload = _remote_public()
     payload["ok"] = True
     return jsonify(payload)
@@ -2240,20 +2298,28 @@ def api_remote_stop():
 
 
 def _rotate_remote_link() -> dict[str, Any]:
-    """Новая ссылка для телефона: бот и токены ngrok/Telegram не сбрасываются."""
+    """Выпускает новую ссылку и отправляет её только подтверждённым пользователям."""
     settings = storage.rotate_remote_token()
+
     if REMOTE.enabled:
         REMOTE.start(settings["token"])
+
     payload = _remote_public()
     link = str(payload.get("public_url") or payload.get("url") or "")
-    chats = [str(item.get("id") or "") for item in (settings.get("telegram_users") or []) if isinstance(item, dict)]
-    chats.extend(TELEGRAM.chat_ids())
+
+    chats = [
+        str(item.get("id") or "").strip()
+        for item in (settings.get("telegram_users") or [])
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    ]
+
     telegram_push_open(
         str(settings.get("telegram_bot_token") or TELEGRAM.token() or ""),
         chats,
         link,
         "Новая ссылка готова. Старая закладка больше не работает — нажмите <b>Открыть</b>.",
     )
+
     netlog.add("session", "Выпущена новая ссылка", level="warn", key="rotate")
     applog.add("Новая ссылка для телефона", where="Телефон", actor=_log_actor())
     return payload
