@@ -255,6 +255,66 @@
     return "";
   }
 
+  function pruneOffLists(weekends, offDays, workDays) {
+    const off = offDays.filter((key) => {
+      const d = parseDay(key);
+      return d && !weekends.includes(weekdayIndex(d));
+    });
+    const work = workDays.filter((key) => {
+      const d = parseDay(key);
+      return d && weekends.includes(weekdayIndex(d));
+    });
+    return { offDays: [...new Set(off)].sort(), workDays: [...new Set(work)].sort() };
+  }
+
+  function writeCalendarOff({ weekends, offDays, workDays } = {}) {
+    if (!state.doc) return;
+    if (!state.doc.ui || typeof state.doc.ui !== "object") state.doc.ui = {};
+    if (!state.doc.ui.calendar || typeof state.doc.ui.calendar !== "object") state.doc.ui.calendar = {};
+    const cur = calendarOffSettings();
+    const nextW = weekends ?? cur.weekends;
+    const pruned = pruneOffLists(nextW, offDays ?? cur.offDays, workDays ?? cur.workDays);
+    const cal = state.doc.ui.calendar;
+    cal.weekends = nextW;
+    cal.off_days = pruned.offDays;
+    cal.work_days = pruned.workDays;
+  }
+
+  function togglePointOffDay(key) {
+    const d = parseDay(key);
+    if (!d || !state.doc) return "";
+    const iso = dayKey(d);
+    const off = calendarOffSettings();
+    const offDays = new Set(off.offDays);
+    const workDays = new Set(off.workDays);
+    const recurring = off.weekends.includes(weekdayIndex(d));
+    if (!isWeekend(d)) {
+      workDays.delete(iso);
+      if (recurring) {
+        writeCalendarOff({ offDays: [...offDays], workDays: [...workDays] });
+        return "Выходной";
+      }
+      offDays.add(iso);
+      writeCalendarOff({ offDays: [...offDays], workDays: [...workDays] });
+      return "Выходной на дату";
+    }
+    offDays.delete(iso);
+    if (!recurring) {
+      writeCalendarOff({ offDays: [...offDays], workDays: [...workDays] });
+      return "Рабочий день";
+    }
+    workDays.add(iso);
+    writeCalendarOff({ offDays: [...offDays], workDays: [...workDays] });
+    return "Рабочий на дату";
+  }
+
+  function mcalOffBtn(day) {
+    const d = day instanceof Date ? day : parseDay(day);
+    if (!d) return "";
+    const label = isWeekend(d) ? "Сделать рабочим" : "Сделать выходным";
+    return `<button type="button" class="btn small mcal-off" data-cal-off="${esc(dayKey(d))}">${label}</button>`;
+  }
+
   function calendarDayNotes() {
     const raw = state.doc?.ui?.calendar?.day_notes;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};

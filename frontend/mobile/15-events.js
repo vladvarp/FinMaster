@@ -284,11 +284,32 @@
       setTimeout(flushPending, 150);
     });
 
+    let calOffLock = false;
+    $("main").addEventListener("pointerdown", (e) => {
+      const btn = e.target.closest("[data-cal-off]");
+      if (!btn || calOffLock) return;
+      e.preventDefault();
+      const key = btn.dataset.calOff;
+      const note = btn.parentElement?.querySelector("[data-cal-note]");
+      if (note && note.dataset.calNote === key) setDayNote(key, note.value);
+      const text = togglePointOffDay(key);
+      if (!text) return;
+      calOffLock = true;
+      setTimeout(() => {
+        calOffLock = false;
+      }, 400);
+      touchDoc();
+      pushSoon();
+      renderCalendar();
+      toast(text);
+    });
+
     $("main").addEventListener("click", async (e) => {
       if (calSwiped) {
         calSwiped = false;
         return;
       }
+      if (e.target.closest("[data-cal-off]")) return;
       const workBtn = e.target.closest("[data-work-act]");
       if (workBtn) {
         const id = workBtn.dataset.calWork || state.orderId;

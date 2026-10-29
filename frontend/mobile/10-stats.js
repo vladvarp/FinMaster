@@ -227,6 +227,7 @@
           <em>${items.length} зак.</em>
         </div>
         <div class="mcal-load"><i style="width:${pct}%"></i></div>
+        ${mcalOffBtn(day)}
         <textarea class="mcal-memo-edit" rows="2" data-cal-note="${esc(key)}" placeholder="Заметка">${esc(dayNote(key))}</textarea>
         ${block("старт", starts)}
         ${block(mid, running)}
@@ -299,6 +300,7 @@
         const items = list.filter((order) => orderMarksDay(order, pick) && !(hidePause && isPaused(order, pick)));
         const pickKey = dayKey(pick);
         board += `<div class="mcal-daylist"><h3>${esc(calFmtDay(pick))}</h3>
+          ${mcalOffBtn(pick)}
           <label class="mcal-note">Заметка<textarea rows="2" data-cal-note="${esc(pickKey)}" placeholder="Что в этот день">${esc(dayNote(pickKey))}</textarea></label>
           ${items.length ? items.map((order) => mcalOrderCard(order, pick)).join("") : `<div class="empty">В этот день никто не отмечен.</div>`}
         </div>`;
@@ -323,7 +325,7 @@
           return `<div class="mcal-col ${dayToneClass(day)} ${key === dayKey(today) ? "is-today" : ""} ${cal.pick === key ? "is-pick" : ""} ${mcalDayTone(items)}" data-cal-day="${key}">
             <div class="mcal-col-h"><b>${RU_WEEKDAYS[(day.getDay() + 6) % 7]}</b><span>${day.getDate()}</span><i>${items.length}</i></div>
             ${note && cal.pick !== key ? `<div class="mcal-memo">${esc(note)}</div>` : ""}
-            ${cal.pick === key ? `<label class="mcal-note">Заметка<textarea rows="2" data-cal-note="${esc(key)}" placeholder="Что в этот день">${esc(note)}</textarea></label>` : ""}
+            ${cal.pick === key ? `${mcalOffBtn(day)}<label class="mcal-note">Заметка<textarea rows="2" data-cal-note="${esc(key)}" placeholder="Что в этот день">${esc(note)}</textarea></label>` : ""}
             ${block("Старт", starts)}${block("В работе", running)}${block("На паузе", paused)}${block("Финиш", ends)}
             ${items.length ? "" : `<div class="empty">пусто</div>`}
           </div>`;

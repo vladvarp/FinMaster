@@ -504,6 +504,7 @@
   border: 0;
   cursor: pointer;
 }
+.mcal-off { width: 100%; margin: 0 0 8px; }
 .mcal-daylist { margin-top: 12px; }
 .mcal-ico.active { background: color-mix(in srgb, var(--accent) 16%, var(--card)); border-color: var(--accent); }
 .mcal-dock-tab {
