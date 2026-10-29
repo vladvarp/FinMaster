@@ -12,6 +12,31 @@ body {
   padding: 12px !important;
 }
 
+.ui-tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 10220;
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 8px 11px;
+  border: 1px solid color-mix(in srgb, var(--accent-2) 30%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  color: var(--ink);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(10px);
+  font: 12px/1.4 var(--sans, "Segoe UI", sans-serif);
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.14s ease, visibility 0.14s;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ui-tip.is-on { opacity: 1; visibility: visible; }
+
 .stage {
   display: flex;
   flex-direction: column;

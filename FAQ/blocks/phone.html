@@ -254,6 +254,11 @@
         if (i === 0) clearInterval(timer);
       }, 1400);
     });
+    document.addEventListener("wheel", (event) => {
+      if (event.target.closest("#phone")) return;
+      event.preventDefault();
+      parent.scrollBy({ top: event.deltaY, left: event.deltaX });
+    }, { passive: false });
   </script>
 </body>
 </html>
