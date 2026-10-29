@@ -2385,6 +2385,38 @@ def api_remote_forget():
     g.netlog_key = f"revoke-{cid}"
     return jsonify({"ok": True, **payload, "devices": devices})
 
+@app.post("/api/remote/restore")
+def api_remote_restore():
+    data = request.get_json(silent=True) or {}
+    cid = str(data.get("id") or "").strip()
+
+    if not cid:
+        return jsonify({"error": "Не указано устройство."}), 400
+
+    devices_before = storage.remote_settings()["devices"]
+    device = next(
+        (item for item in devices_before if str(item.get("id") or "") == cid),
+        None,
+    )
+
+    if device is None:
+        return jsonify({"error": "Устройство не найдено в истории."}), 404
+
+    if not device.get("revoked_at"):
+        return jsonify({"error": "Устройство уже имеет доступ."}), 409
+
+    devices = storage.restore_device(cid)
+
+    applog.add(
+        f"Доступ устройства восстановлен: {cid[:12]}",
+        where="Телефон",
+        actor=_log_actor(),
+    )
+    g.netlog_text = f"Доступ устройства восстановлен: {cid[:12]}"
+    g.netlog_level = "info"
+    g.netlog_key = f"restore-{cid}"
+
+    return jsonify({"ok": True, **_remote_public(), "devices": devices})
 
 def _desk_name_from(data: dict[str, Any]) -> str:
     return str(data.get("name") or request.args.get("name") or "Браузер")[:80]

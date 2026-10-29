@@ -958,6 +958,18 @@ def revoke_device(cid: str) -> list[dict[str, Any]]:
         devices.append(device)
     return save_remote_settings(devices=devices)["devices"]
 
+def restore_device(cid: str) -> list[dict[str, Any]]:
+    cid = str(cid or "").strip()
+    data = remote_settings()
+    devices = []
+
+    for item in data["devices"]:
+        device = dict(item)
+        if str(device.get("id") or "") == cid:
+            device.pop("revoked_at", None)
+        devices.append(device)
+
+    return save_remote_settings(devices=devices)["devices"]
 
 def device_access_revoked(cid: str) -> bool:
     cid = str(cid or "").strip()

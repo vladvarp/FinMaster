@@ -689,8 +689,8 @@
           </div>
           <button type="button" class="btn small rd-info" data-device-info="${esc(d.id)}" title="О устройстве" aria-label="О устройстве">i</button>
           ${revoked
-            ? `<button type="button" class="btn small" data-restore="${esc(d.id)}">Восстановить доступ</button>`
-            : `<button type="button" class="btn small" data-forget="${esc(d.id)}">Удалить доступ</button>`}
+            ? `<button type="button" class="btn small" data-restore="${esc(d.id)}">Разблокировать</button>`
+            : `<button type="button" class="btn small" data-forget="${esc(d.id)}">Заблокировать</button>`}
         </div>`;
       })
       .join("");
@@ -2011,11 +2011,45 @@
         openDeviceInfo(info.dataset.deviceInfo);
         return;
       }
+    
+      const restoreBtn = e.target.closest("[data-restore]");
+      if (restoreBtn) {
+        try {
+          const device = (remote.devices || []).find(
+            (item) => item.id === restoreBtn.dataset.restore
+          );
+          const name = device?.name || "устройства";
+    
+          const ok = await askConfirm({
+            title: "Восстановить доступ?",
+            text: `У «${name}» снова появится доступ. История устройства сохранится.`,
+            ok: "Восстановить",
+            cancel: "Отмена",
+          });
+    
+          if (!ok) return;
+    
+          const res = await apiPost("/api/remote/restore", {
+            id: restoreBtn.dataset.restore,
+          });
+    
+          renderRemoteModal(res);
+          toast("Доступ устройства восстановлен");
+        } catch (err) {
+          toast(`Не удалось восстановить доступ: ${err.message || err}`);
+        }
+        return;
+      }
+    
       const btn = e.target.closest("[data-forget]");
       if (!btn) return;
+    
       try {
-        const device = (remote.devices || []).find((item) => item.id === btn.dataset.forget);
+        const device = (remote.devices || []).find(
+          (item) => item.id === btn.dataset.forget
+        );
         const name = device?.name || "устройства";
+    
         const ok = await askConfirm({
           title: "Закрыть доступ?",
           text: `У «${name}» закроется доступ. Запись останется в истории устройств.`,
@@ -2023,7 +2057,9 @@
           cancel: "Отмена",
           danger: true,
         });
+    
         if (!ok) return;
+    
         const rotate = await askConfirm({
           title: "Сбросить ссылку?",
           text: "Сброс удалит доступ у всех, кто открывал старую ссылку. Если оставить ссылку, остальные устройства продолжат работу.",
@@ -2031,9 +2067,18 @@
           cancel: "Оставить ссылку",
           danger: true,
         });
-        const res = await apiPost("/api/remote/forget", { id: btn.dataset.forget, rotate });
+    
+        const res = await apiPost("/api/remote/forget", {
+          id: btn.dataset.forget,
+          rotate,
+        });
+    
         renderRemoteModal(res);
-        toast(rotate ? "Доступ закрыт, ссылка обновлена" : "Доступ устройства закрыт");
+        toast(
+          rotate
+            ? "Доступ закрыт, ссылка обновлена"
+            : "Доступ устройства закрыт"
+        );
       } catch (err) {
         toast(`Не удалось закрыть доступ: ${err.message || err}`);
       }
