@@ -322,7 +322,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 #voice-more-modal.open,
 #voice-info-modal.open,
 #remote-guide-modal.open,
-#device-info-modal.open { z-index: 10090 !important; }
+#device-info-modal.open,
+#telegram-user-log-modal.open { z-index: 10090 !important; }
 #voice-info-modal.open { z-index: 10110 !important; }
 .modal-card.settings-pack-modal { width: min(420px, 100%); }
 .settings-pack-list { display: grid; gap: 8px; margin: 0 0 14px; }
@@ -2111,16 +2112,24 @@ html[data-theme="dark"] .line-menu { background: #1b2538; border-color: var(--li
 .remote-tg-person {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--bg-2);
 }
-.remote-tg-person span { min-width: 0; }
+.remote-tg-person span { min-width: 0; flex: 1 1 120px; }
 .remote-tg-person b, .remote-tg-person small { display: block; }
 .remote-tg-person small { color: var(--muted); }
 .remote-tg-person .btn:first-of-type { margin-left: auto; }
+.remote-tg-log { min-width: 34px; padding-inline: 8px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: 700; }
+.modal-card.telegram-user-log-modal { width: min(560px, 100%); max-height: min(72vh, 620px); display: flex; flex-direction: column; }
+.telegram-user-log { display: grid; gap: 8px; min-height: 0; overflow: auto; padding-right: 2px; }
+.telegram-user-log-item { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 2px 10px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); font-size: 12px; line-height: 1.4; }
+.telegram-user-log-item time { grid-row: span 2; color: var(--muted); font-variant-numeric: tabular-nums; }
+.telegram-user-log-item b, .telegram-user-log-item span { overflow-wrap: anywhere; }
+.telegram-user-log-item span { color: var(--muted); }
 .settings-pack-check > span { display: grid; min-width: 0; }
 .settings-pack-check > span small { color: var(--muted); font-size: 12px; font-weight: 500; }
 .runtime-modal { width: min(520px, 100%); }

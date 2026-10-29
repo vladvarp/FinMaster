@@ -2050,7 +2050,7 @@ def api_telegram_users():
         person = secrets.approve(chat_id)
         if person:
             nick = _telegram_nick(person)
-            _tell_telegram(chat_id, f"Доступ открыт{nick}. Можно писать боту.")
+            _tell_telegram(chat_id, f"Доступ открыт{nick}. Можно писать боту. Если менью не активировался напишите /start еще раз.")
 
         # Применяем актуальное меню сразу после подтверждения.
         _telegram_sync_menu()
@@ -2096,6 +2096,23 @@ def api_telegram_users():
     payload = _remote_public()
     payload["ok"] = True
     return jsonify(payload)
+
+
+@app.get("/api/telegram/users/log")
+def api_telegram_user_log():
+    if not _is_local() and not _desk_reader():
+        return jsonify({"error": "Только в окне программы."}), 403
+
+    chat_id = str(request.args.get("id") or "").strip()
+    if not chat_id:
+        return jsonify({"error": "Не указан пользователь."}), 400
+
+    events = []
+    for event in bridge.since("telegram").get("events") or []:
+        body = event.get("ask_body")
+        if isinstance(body, dict) and str(body.get("chat_id") or "") == chat_id:
+            events.append(event)
+    return jsonify({"ok": True, "events": list(reversed(events[-80:]))})
 
 
 def _telegram_nick(person: dict[str, Any]) -> str:

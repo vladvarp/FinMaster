@@ -471,9 +471,33 @@
       users.innerHTML = rows.length ? rows.map((person) => `
         <div class="remote-tg-person">
           <span><b>${esc(telegramNick(person))}</b><small>id ${esc(person.id || "")}</small></span>
+          <button type="button" class="btn small remote-tg-log" data-tg-log="${esc(person.id || "")}" title="Действия пользователя" aria-label="Действия пользователя">&gt;_</button>
           <button type="button" class="btn small danger" data-tg-remove="${esc(person.id || "")}">Удалить</button>
         </div>
       `).join("") : '<p class="report-settings-hint">Подтверждённых пользователей пока нет. Пусть человек напишет боту.</p>';
+    }
+  }
+
+  async function openTelegramUserLog(id, nick) {
+    const modal = $("telegram-user-log-modal");
+    const title = $("telegram-user-log-title");
+    const box = $("telegram-user-log");
+    if (!modal || !title || !box) return;
+    title.textContent = `Действия · ${nick}`;
+    box.innerHTML = '<p class="report-settings-hint">Загружаю журнал…</p>';
+    modal.classList.add("open");
+    try {
+      const data = await apiGet(`/api/telegram/users/log?id=${encodeURIComponent(id)}`);
+      const events = Array.isArray(data.events) ? data.events : [];
+      box.innerHTML = events.length ? events.map((event) => `
+        <article class="telegram-user-log-item">
+          <time>${esc(formatNetTime(event.ts))}</time>
+          <b>${esc(event.ask || "—")}</b>
+          <span>${esc(event.reply || "Без ответа")}</span>
+        </article>
+      `).join("") : '<p class="report-settings-hint">Действий в текущем журнале пока нет.</p>';
+    } catch (err) {
+      box.innerHTML = `<p class="report-settings-hint">${esc(err.message || "Не удалось загрузить журнал.")}</p>`;
     }
   }
 
@@ -1736,15 +1760,24 @@
       const approve = e.target.closest("[data-tg-approve]");
       const decline = e.target.closest("[data-tg-decline]");
       const remove = e.target.closest("[data-tg-remove]");
-      const node = approve || decline || remove;
+      const log = e.target.closest("[data-tg-log]");
+      const node = approve || decline || remove || log;
       if (!node) return;
-      const id = node.dataset.tgApprove || node.dataset.tgDecline || node.dataset.tgRemove;
+      const id = node.dataset.tgApprove || node.dataset.tgDecline || node.dataset.tgRemove || node.dataset.tgLog;
       const nick = node.closest(".remote-tg-person")?.querySelector("b")?.textContent || id;
+      if (log) {
+        await openTelegramUserLog(id, nick);
+        return;
+      }
       const action = approve ? "approve" : decline ? "decline" : "remove";
       await telegramUserAction(action, id, nick);
     };
     $("remote-tg-pending")?.addEventListener("click", onClick);
     $("remote-tg-users")?.addEventListener("click", onClick);
+    $("telegram-user-log-close")?.addEventListener("click", () => $("telegram-user-log-modal")?.classList.remove("open"));
+    $("telegram-user-log-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("telegram-user-log-modal")) $("telegram-user-log-modal")?.classList.remove("open");
+    });
     if (!state.desktop || window.FM_DESK) return;
     setInterval(async () => {
       try {
