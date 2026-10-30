@@ -546,40 +546,46 @@
   }
 
   function openTelegramApplicant(id) {
-    const person = (remote.telegramPending || []).find(
-      (item) => String(item.id) === String(id)
-    );
-  
+    const person = [
+      ...(remote.telegramPending || []),
+      ...(remote.telegramHiddenPending || []),
+    ].find((item) => String(item.id) === String(id));
+
     const modal = $("telegram-applicant-modal");
     const title = $("telegram-applicant-title");
     const box = $("telegram-applicant-info");
-  
+
     if (!person || !modal || !title || !box) return;
-  
+
     const requested = person.requested_at
       ? new Date(person.requested_at * 1000).toLocaleString("ru-RU")
       : "Время неизвестно";
-  
+
     const rows = [
       ["Имя", person.first_name],
       ["Фамилия", person.last_name],
-      ["Username", person.username ? `@${String(person.username).replace(/^@/, "")}` : ""],
+      [
+        "Username",
+        person.username
+          ? `@${String(person.username).replace(/^@/, "")}`
+          : "",
+      ],
       ["Telegram ID", person.id],
       ["Язык", person.language_code],
       ["Заявка отправлена", requested],
     ];
-  
+
     title.textContent = `Заявитель · ${telegramNick(person)}`;
-  
+
     box.innerHTML = rows.map(([label, value]) => `
       <div class="telegram-applicant-row">
         <span>${esc(label)}</span>
         <b>${esc(value || "—")}</b>
       </div>
     `).join("");
-  
+
     modal.classList.add("open");
-  }
+}
 
   async function openTelegramUserLog(id, nick) {
     const modal = $("telegram-user-log-modal");
