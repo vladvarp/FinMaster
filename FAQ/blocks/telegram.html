@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -6,88 +7,120 @@
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="stage.css">
   <style>
-    .tg-layout { display: grid; grid-template-columns: minmax(280px, 420px) minmax(280px, 1fr); gap: 16px; align-items: start; }
-    @media (max-width: 760px) { .tg-layout { grid-template-columns: 1fr; } }
-    .remote-fold { margin: 0; }
-    .chat {
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: var(--bg-2);
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      min-height: 420px;
-    }
-    .chat-head {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 12px 14px;
-      background: linear-gradient(135deg, var(--accent), #115e59 70%);
-      color: #eafaf7;
-    }
-    .chat-head b { display: block; }
-    .chat-head span { display: block; font-size: 12px; opacity: 0.85; }
-    .chat-log { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 12px; }
-    .bubble {
-      max-width: 92%;
-      padding: 8px 10px;
-      border-radius: 12px;
-      background: var(--card);
-      border: 1px solid var(--line);
-      font-size: 14px;
-      line-height: 1.4;
-    }
-    .bubble.me { margin-left: auto; background: color-mix(in srgb, var(--accent-2) 16%, var(--card)); }
-    .bubble[hidden] { display: none !important; }
-    .bubble b { display: block; margin-bottom: 4px; }
-    .keys { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-top: 1px solid var(--line); background: var(--card); }
-    .keys .row { display: flex; gap: 6px; }
-    .keys .btn { flex: 1; }
-    .demo-bar { display: flex; gap: 8px; margin-bottom: 12px; }
+    .tg-layout { display:grid; grid-template-columns:minmax(280px, 1fr) minmax(280px, 1fr); gap:16px; align-items:start; }
+    @media(max-width:760px){.tg-layout{grid-template-columns:1fr}}
+    .remote-fold{margin:0}
+    .remote-tg-person{align-items:center;flex-wrap:wrap}
+    .remote-tg-person>span{min-width:100px;flex:1}
+    .remote-tg-person small{display:block}
+    .remote-tg-hidden-fold{margin:12px 0;padding:10px;border:1px solid var(--line);border-radius:10px}
+    .remote-tg-hidden-fold summary{display:flex;justify-content:space-between;cursor:pointer;font-weight:600}
+    .remote-tg-hidden-count{border-radius:20px;padding:1px 8px;background:var(--card)}
+    .demo-note{font-size:12px;color:var(--muted);margin:8px 0}
+    .chat{border:1px solid var(--line);border-radius:16px;background:var(--bg-2);overflow:hidden;display:flex;flex-direction:column;min-height:420px}
+    .chat-head{padding:12px 14px;background:linear-gradient(135deg,var(--accent),#115e59 70%);color:#eafaf7}
+    .chat-head b,.chat-head span{display:block}
+    .chat-head span{font-size:12px;opacity:.85}
+    .chat-log{flex:1;display:flex;flex-direction:column;gap:8px;padding:12px}
+    .bubble{max-width:92%;padding:8px 10px;border-radius:12px;background:var(--card);border:1px solid var(--line);font-size:14px;line-height:1.4}
+    .bubble.me{margin-left:auto;background:color-mix(in srgb,var(--accent-2) 16%,var(--card))}
+    .bubble[hidden]{display:none!important}
+    .bubble b{display:block;margin-bottom:4px}
+    .keys{display:flex;flex-direction:column;gap:6px;padding:8px;border-top:1px solid var(--line);background:var(--card)}
+    .keys .row{display:flex;gap:6px}
+    .keys .btn{flex:1}
+    .demo-bar{display:flex;gap:8px;margin-bottom:12px}
   </style>
 </head>
 <body>
   <div class="demo-bar">
     <button type="button" class="btn small primary" id="play">Проиграть вопрос</button>
   </div>
-  <p class="hint">Слева блок из окна «Телефон». Справа стенд чата: кнопки бота и ответ по открытому отчёту. Кнопка выше показывает, как приходит вопрос «долги».</p>
+  <p class="hint">Слева — настройки Telegram и управление заявками на доступ. Справа — чат бота.</p>
+
   <div class="tg-layout">
-    <div class="remote-fold">
-      <button type="button" class="remote-fold-head" tabindex="-1">
-        <span class="remote-fold-title">Telegram<i class="token-dot on" title="Токен сохранён"></i></span>
-        <span class="remote-fold-ico">▾</span>
-      </button>
-      <div class="remote-fold-body">
-        <div class="remote-tg-box">
-          <label class="field">
-            <span>Токен Telegram-бота</span>
-            <input type="password" value="123456:AAF-example" readonly tabindex="-1" aria-label="Токен">
-          </label>
-          <div class="remote-tg-pending">
-            <div class="remote-tg-person">
-              <span><b>@ivan</b><small>id 123456789</small></span>
-              <button type="button" class="btn small" tabindex="-1">Отклонить</button>
-              <button type="button" class="btn small primary" tabindex="-1">Добавить</button>
+    <div>
+      <div class="remote-fold">
+        <button type="button" class="remote-fold-head" tabindex="-1">
+          <span class="remote-fold-title">Telegram<i class="token-dot on" title="Токен сохранён"></i></span>
+          <span class="remote-fold-ico">▾</span>
+        </button>
+        <div class="remote-fold-body">
+          <div class="remote-tg-box">
+            <label class="field">
+              <span>Токен Telegram-бота</span>
+              <input type="password" value="123456:AAF-example" readonly tabindex="-1">
+            </label>
+
+            <div class="remote-tg-pending">
+              <div class="remote-tg-person">
+                <span>
+                  <b>@ivan</b>
+                  <small>id 123456789</small>
+                  <small>30.10.2026, 18:42:15</small>
+                </span>
+                <button type="button" class="btn small" tabindex="-1">ⓘ</button>
+                <button type="button" class="btn small" tabindex="-1">Скрыть</button>
+                <button type="button" class="btn small" tabindex="-1">Отклонить</button>
+                <button type="button" class="btn small primary" tabindex="-1">Добавить</button>
+              </div>
+              <div class="remote-tg-person">
+                <span>
+                  <b>Александр</b>
+                  <small>id 234567890</small>
+                  <small>30.10.2026, 19:05:32</small>
+                </span>
+                <button type="button" class="btn small" tabindex="-1">ⓘ</button>
+                <button type="button" class="btn small" tabindex="-1">Скрыть</button>
+                <button type="button" class="btn small" tabindex="-1">Отклонить</button>
+                <button type="button" class="btn small primary" tabindex="-1">Добавить</button>
+              </div>
             </div>
-          </div>
-          <div class="remote-tg-users">
-            <div class="remote-tg-person">
-              <span><b>@master</b><small>id 987654321</small></span>
-              <button type="button" class="btn small danger" tabindex="-1">Удалить</button>
+
+            <details class="remote-tg-hidden-fold">
+              <summary>
+                <span>Скрытые заявки</span>
+                <span class="remote-tg-hidden-count">1</span>
+              </summary>
+              <div class="remote-tg-hidden">
+                <div class="remote-tg-person">
+                  <span>
+                    <b>@sergey</b>
+                    <small>id 345678901</small>
+                  </span>
+                  <button type="button" class="btn small" tabindex="-1">ⓘ</button>
+                  <button type="button" class="btn small primary" tabindex="-1">Вернуть</button>
+                </div>
+              </div>
+            </details>
+
+            <div class="remote-tg-users">
+              <div class="remote-tg-person">
+                <span>
+                  <b>@master</b>
+                  <small>id 987654321</small>
+                </span>
+                <button type="button" class="btn small danger" tabindex="-1">Удалить</button>
+              </div>
             </div>
+
+            <div class="remote-tg-actions">
+              <button type="button" class="btn small" tabindex="-1">Запомнить токен</button>
+              <button type="button" class="btn small" tabindex="-1">Проверить связь</button>
+              <button type="button" class="btn small primary" tabindex="-1">Отправить ссылку сейчас</button>
+            </div>
+            <div class="remote-ngrok-status">Бот на связи. Отвечает подтверждённым чатам.</div>
           </div>
-          <div class="remote-tg-actions">
-            <button type="button" class="btn small" tabindex="-1">Запомнить токен</button>
-            <button type="button" class="btn small" tabindex="-1">Проверить связь</button>
-            <button type="button" class="btn small primary" tabindex="-1">Отправить ссылку сейчас</button>
-          </div>
-          <div class="remote-ngrok-status">Бот на связи. Отвечает подтверждённым чатам.</div>
         </div>
       </div>
+      <p class="demo-note">ⓘ — информация о заявителе. Скрытие не отклоняет заявку: её можно вернуть.</p>
     </div>
+
     <div class="chat" aria-label="Чат бота">
-      <div class="chat-head"><div><b>FinMaster</b><span>бот · отчёт «Мастерская»</span></div></div>
+      <div class="chat-head">
+        <b>FinMaster</b>
+        <span>бот · отчёт «Мастерская»</span>
+      </div>
       <div class="chat-log" id="log">
         <div class="bubble">Отчёты, заказы и снимок — кнопками внизу. Вопрос можно написать или прислать голосом.</div>
         <div class="bubble me" id="q" hidden>долги</div>
@@ -118,6 +151,7 @@
       </div>
     </div>
   </div>
+
   <script src="chrome.js"></script>
   <script src="fit.js"></script>
   <script>
