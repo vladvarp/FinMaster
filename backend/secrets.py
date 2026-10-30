@@ -153,35 +153,33 @@ def ask(
         return "group"
 
     data = load()
+    profile = {
+        "first_name": extra.get("first_name"),
+        "last_name": extra.get("last_name"),
+        "language_code": extra.get("language_code"),
+    }
 
     if any(item["id"] == cid for item in data["users"]):
-        _touch(data, "users", cid, username, name)
+        _touch(data, "users", cid, username, name, **profile)
         save(data)
         return "allowed"
 
     if any(item["id"] == cid for item in data["pending"]):
-        _touch(data, "pending", cid, username, name)
+        _touch(data, "pending", cid, username, name, **profile)
         save(data)
         return "pending"
 
     if cid in data["declined"] and not restart:
         return "declined"
 
-    data["declined"] = [
-        item for item in data["declined"] if item != cid
-    ]
-
-    data["pending"] = [
-        item for item in data["pending"] if item["id"] != cid
-    ]
+    data["declined"] = [item for item in data["declined"] if item != cid]
+    data["pending"] = [item for item in data["pending"] if item["id"] != cid]
 
     person = _person(
         cid,
         username,
         name,
-        first_name=extra.get("first_name"),
-        last_name=extra.get("last_name"),
-        language_code=extra.get("language_code"),
+        **profile,
         requested_at=extra.get("requested_at"),
     )
 
@@ -192,18 +190,41 @@ def ask(
     return "new"
 
 
-def approve(chat_id: str) -> dict[str, str] | None:
+def approve(chat_id: str) -> dict[str, Any] | None:
     cid = str(chat_id or "").strip()
     data = load()
-    person = next((item for item in data["pending"] if item["id"] == cid), None)
+
+    person = next(
+        (item for item in data["pending"] if item["id"] == cid),
+        None,
+    )
+
     if person is None:
-        person = next((item for item in data["users"] if item["id"] == cid), None)
-        return person
-    data["pending"] = [item for item in data["pending"] if item["id"] != cid]
-    data["declined"] = [item for item in data["declined"] if item != cid]
-    _add_user(data, cid, person.get("username") or "", person.get("name") or "")
+        return next(
+            (item for item in data["users"] if item["id"] == cid),
+            None,
+        )
+
+    data["pending"] = [
+        item for item in data["pending"] if item["id"] != cid
+    ]
+    data["declined"] = [
+        item for item in data["declined"] if item != cid
+    ]
+
+    _add_user(
+        data,
+        cid,
+        person.get("username") or "",
+        person.get("name") or "",
+        extra=person,
+    )
+
     save(data)
-    return next(item for item in data["users"] if item["id"] == cid)
+
+    return next(
+        item for item in data["users"] if item["id"] == cid
+    )
 
 
 def decline(chat_id: str) -> dict[str, str] | None:
@@ -309,7 +330,13 @@ def apply_export(file_path: str, ids: list[str]) -> None:
             data["telegram_bot_token"] = token
         for person in payload.get("users") or []:
             if isinstance(person, dict) and _private_id(str(person.get("id") or "")):
-                _add_user(data, str(person["id"]), str(person.get("username") or ""), str(person.get("name") or ""))
+                _add_user(
+                    data,
+                    str(person["id"]),
+                    str(person.get("username") or ""),
+                    str(person.get("name") or ""),
+                    extra=person,
+                )
     save(data)
 
 
@@ -341,47 +368,66 @@ def _normalize(raw: Any) -> dict[str, Any]:
     data = _blank()
     if not isinstance(raw, dict):
         return data
+
     ngrok = str(raw.get("ngrok_token") or "").strip()
     bot = str(raw.get("telegram_bot_token") or "").strip()
+
     if storage.valid_ngrok_token(ngrok):
         data["ngrok_token"] = ngrok
     if storage.valid_telegram_token(bot):
         data["telegram_bot_token"] = bot
+
+    extra_keys = ("first_name", "last_name", "language_code", "requested_at")
+
     seen: set[str] = set()
+
     for person in raw.get("users") or []:
         if not isinstance(person, dict):
             continue
+
         cid = str(person.get("id") or "").strip()
         if not _private_id(cid) or cid in seen:
             continue
+
         seen.add(cid)
         data["users"].append(
             _person(
                 cid,
                 person.get("username") or "",
                 person.get("name") or "",
-                **{
-                    key: person.get(key)
-                    for key in ("first_name", "last_name", "language_code", "requested_at")
-                },
+                **{key: person.get(key) for key in extra_keys},
             )
         )
+
     data["users"] = data["users"][:30]
+
     seen_p: set[str] = set()
+
     for person in raw.get("pending") or []:
         if not isinstance(person, dict):
             continue
+
         cid = str(person.get("id") or "").strip()
         if not _private_id(cid) or cid in seen or cid in seen_p:
             continue
+
         seen_p.add(cid)
-        data["pending"].append(_person(cid, person.get("username") or "", person.get("name") or ""))
+        data["pending"].append(
+            _person(
+                cid,
+                person.get("username") or "",
+                person.get("name") or "",
+                **{key: person.get(key) for key in extra_keys},
+            )
+        )
+
     data["pending"] = data["pending"][-20:]
-    data["declined"] = []
+
     for item in raw.get("declined") or []:
         cid = str(item or "").strip()
         if _private_id(cid) and cid not in data["declined"] and cid not in seen:
             data["declined"].append(cid)
+
     data["declined"] = data["declined"][-100:]
     return data
 
@@ -413,25 +459,78 @@ def _private_id(chat_id: str) -> bool:
     return text.isdigit() and int(text) > 0
 
 
-def _add_user(data: dict[str, Any], chat_id: str, username: str, name: str) -> None:
+def _add_user(
+    data: dict[str, Any],
+    chat_id: str,
+    username: str,
+    name: str,
+    extra: dict[str, Any] | None = None,
+) -> None:
     cid = str(chat_id)
-    rest = [item for item in data["users"] if item["id"] != cid]
-    current = next((item for item in data["users"] if item["id"] == cid), None)
-    person = _person(cid, username or (current or {}).get("username") or "", name or (current or {}).get("name") or "")
+
+    current = next(
+        (item for item in data["users"] if item["id"] == cid),
+        None,
+    )
+
+    source = extra if isinstance(extra, dict) else {}
+
+    person = _person(
+        cid,
+        username or (current or {}).get("username") or "",
+        name or (current or {}).get("name") or "",
+        first_name=source.get("first_name") or (current or {}).get("first_name"),
+        last_name=source.get("last_name") or (current or {}).get("last_name"),
+        language_code=source.get("language_code") or (current or {}).get("language_code"),
+        requested_at=source.get("requested_at") or (current or {}).get("requested_at"),
+    )
+
+    rest = [
+        item for item in data["users"]
+        if item["id"] != cid
+    ]
+
     rest.append(person)
     data["users"] = rest[:30]
-    data["pending"] = [item for item in data["pending"] if item["id"] != cid]
-    data["declined"] = [item for item in data["declined"] if item != cid]
+
+    data["pending"] = [
+        item for item in data["pending"]
+        if item["id"] != cid
+    ]
+
+    data["declined"] = [
+        item for item in data["declined"]
+        if item != cid
+    ]
 
 
-def _touch(data: dict[str, Any], key: str, chat_id: str, username: str, name: str) -> None:
+def _touch(
+    data: dict[str, Any],
+    key: str,
+    chat_id: str,
+    username: str,
+    name: str,
+    **extra: Any,
+) -> None:
     for item in data[key]:
         if item["id"] != str(chat_id):
             continue
+
         if username:
             item["username"] = str(username).strip().lstrip("@")[:64]
+
         if name:
             item["name"] = " ".join(str(name).split())[:80]
+
+        for field, limit in (
+            ("first_name", 80),
+            ("last_name", 80),
+            ("language_code", 16),
+        ):
+            value = extra.get(field)
+            if value:
+                item[field] = str(value)[:limit]
+
         return
 
 
