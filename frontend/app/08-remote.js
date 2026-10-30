@@ -517,33 +517,40 @@
   }
 
   function renderTelegramHidden() {
+    const fold = $("remote-tg-hidden-fold");
+    const count = $("remote-tg-hidden-count");
     const box = $("remote-tg-hidden");
-    if (!box) return;
-  
+
+    if (!fold || !box) return;
+
     const rows = remote.telegramHiddenPending || [];
-  
-    box.innerHTML = rows.length
-      ? rows.map((person) => `
-          <div class="remote-tg-person">
-            <span>
-              <b>${esc(telegramNick(person))}</b>
-              <small>id ${esc(person.id || "")}</small>
-            </span>
-            <button
-              type="button"
-              class="btn small"
-              data-tg-info="${esc(person.id || "")}"
-              title="Информация о заявителе"
-            >ⓘ</button>
-            <button
-              type="button"
-              class="btn small primary"
-              data-tg-restore="${esc(person.id || "")}"
-            >Вернуть</button>
-          </div>
-        `).join("")
-      : '<p class="report-settings-hint">Скрытых заявок нет.</p>';
-  }
+
+    fold.hidden = !rows.length;
+
+    if (count) {
+      count.textContent = String(rows.length);
+    }
+
+    box.innerHTML = rows.map((person) => `
+      <div class="remote-tg-person">
+        <span>
+          <b>${esc(telegramNick(person))}</b>
+          <small>id ${esc(person.id || "")}</small>
+        </span>
+        <button
+          type="button"
+          class="btn small"
+          data-tg-info="${esc(person.id || "")}"
+          title="Информация о заявителе"
+        >ⓘ</button>
+        <button
+          type="button"
+          class="btn small primary"
+          data-tg-restore="${esc(person.id || "")}"
+        >Вернуть</button>
+      </div>
+    `).join("");
+}
 
   function openTelegramApplicant(id) {
     const person = [

@@ -3374,19 +3374,61 @@ html[data-theme="dark"] #view-orders > .toolbar { box-shadow: 0 10px 24px rgba(0
   font-weight: 600;
 }
 
-.remote-tg-hidden-title {
-  margin: 12px 0 7px;
-  padding-top: 10px;
+.remote-tg-hidden-fold {
+  margin: 12px 0 10px;
   border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.remote-tg-hidden-fold[hidden] {
+  display: none !important;
+}
+
+.remote-tg-hidden-fold summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 4px;
+  cursor: pointer;
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 650;
+  list-style: none;
+  user-select: none;
+}
+
+.remote-tg-hidden-fold summary::-webkit-details-marker {
+  display: none;
+}
+
+.remote-tg-hidden-fold summary::after {
+  content: "▾";
+  margin-left: auto;
+  transition: transform 0.2s ease;
+}
+
+.remote-tg-hidden-fold[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.remote-tg-hidden-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 11px;
 }
 
 .remote-tg-hidden {
   display: grid;
   gap: 8px;
-  margin-bottom: 10px;
+  padding-bottom: 10px;
 }
 
 .remote-tg-hidden:empty {
