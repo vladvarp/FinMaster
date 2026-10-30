@@ -22,8 +22,15 @@ _TELEGRAM_TOKEN_RE = re.compile(r"^\d{5,}:[A-Za-z0-9_-]{20,}$")
 _LOCK = threading.RLock()
 _CACHE: dict[str, Any] | None = None
 _VOLUME_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
-_REMOTE_SECRET_KEYS = ("ngrok_token", "telegram_bot_token", "telegram_chat_id", "telegram_users", "telegram_pending", "telegram_declined")
-
+_REMOTE_SECRET_KEYS = (
+    "ngrok_token",
+    "telegram_bot_token",
+    "telegram_chat_id",
+    "telegram_users",
+    "telegram_pending",
+    "telegram_hidden_pending",
+    "telegram_declined",
+)
 
 def config_dir() -> str:
     base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config")
@@ -809,49 +816,73 @@ def remote_settings() -> dict[str, Any]:
 def save_remote_settings(**updates: Any) -> dict[str, Any]:
     cfg = load_config()
     data = remote_settings()
+
     if "token" in updates and updates["token"]:
         data["token"] = str(updates["token"])
+
     if "port" in updates:
         try:
             data["port"] = int(updates["port"])
         except (TypeError, ValueError):
             pass
+
     if "autostart" in updates:
         data["autostart"] = bool(updates["autostart"])
+
     if "devices" in updates and isinstance(updates["devices"], list):
-        data["devices"] = [d for d in updates["devices"] if isinstance(d, dict) and d.get("id")][:MAX_DEVICES]
+        data["devices"] = [
+            d for d in updates["devices"]
+            if isinstance(d, dict) and d.get("id")
+        ][:MAX_DEVICES]
+
     if "ngrok" in updates:
         data["ngrok"] = bool(updates["ngrok"])
+
     secret_updates: dict[str, str] = {}
+
     if "ngrok_token" in updates:
         token_value = str(updates["ngrok_token"] or "").strip()
         if valid_ngrok_token(token_value):
             secret_updates["ngrok_token"] = token_value
+
     if "via" in updates:
         data["via"] = "ngrok" if updates["via"] == "ngrok" else "lan"
+
     if "telegram_bot_token" in updates:
         bot = str(updates["telegram_bot_token"] or "").strip()
         if valid_telegram_token(bot):
             if bot != data.get("telegram_bot_token"):
                 data["telegram_offset"] = 0
             secret_updates["telegram_bot_token"] = bot
+
     if "telegram_offset" in updates:
         try:
-            data["telegram_offset"] = max(0, int(updates["telegram_offset"] or 0))
+            data["telegram_offset"] = max(
+                0, int(updates["telegram_offset"] or 0)
+            )
         except (TypeError, ValueError):
             pass
+
     if secret_updates:
         from backend import secrets
 
         secrets.update_tokens(**secret_updates)
+
     cfg["remote"] = {
         key: value
         for key, value in data.items()
-        if key not in ("ngrok_token", "telegram_bot_token", "telegram_chat_id", "telegram_users", "telegram_pending")
+        if key not in (
+            "ngrok_token",
+            "telegram_bot_token",
+            "telegram_chat_id",
+            "telegram_users",
+            "telegram_pending",
+            "telegram_hidden_pending",
+        )
     }
+
     save_config(cfg)
     return _with_secret_tokens(cfg["remote"])
-
 
 _DEVICE_INFO_KEYS = (
     "model",
