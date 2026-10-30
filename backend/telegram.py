@@ -1558,33 +1558,86 @@ class TelegramBot:
                 self._chats[chat_id] = session
             return session
 
-    def _admit(self, token: str, chat_id: str, sender: dict[str, Any] | None = None, text: str = "") -> bool:
+    def _admit(
+        self,
+        token: str,
+        chat_id: str,
+        sender: dict[str, Any] | None = None,
+        text: str = "",
+    ) -> bool:
         from backend import secrets as token_store
 
         person = sender if isinstance(sender, dict) else {}
+
         username = str(person.get("username") or "")
-        name = " ".join(part for part in (str(person.get("first_name") or ""), str(person.get("last_name") or "")) if part).strip()
+        first_name = str(person.get("first_name") or "")
+        last_name = str(person.get("last_name") or "")
+
+        name = " ".join(
+            part for part in (first_name, last_name) if part
+        ).strip()
+
         low = text.lower().strip()
         restart = low in {"/start", "start"} or low.startswith("/start@")
-        state = token_store.ask(str(chat_id), username, name, restart=restart)
+
+        state = token_store.ask(
+            str(chat_id),
+            username,
+            name,
+            restart=restart,
+            first_name=first_name,
+            last_name=last_name,
+            language_code=person.get("language_code") or "",
+            requested_at=int(time.time()),
+        )
+
         if state == "allowed":
             self._declined_told.discard(str(chat_id))
             return True
+
         if state == "group":
             if str(chat_id) not in self._group_told:
                 self._group_told.add(str(chat_id))
-                send_html(token, chat_id, "Напишите боту в личные сообщения. В группе он не отвечает.")
+                send_html(
+                    token,
+                    chat_id,
+                    "Напишите боту в личные сообщения. В группе он не отвечает.",
+                )
             return False
+
         if state == "new":
             nick = f"@{username.lstrip('@')}" if username else (name or str(chat_id))
-            send_html(token, chat_id, "Запрос отправлен на компьютер. Дождитесь подтверждения в окне «Телефон».")
-            netlog.add("telegram", f"Запрос доступа: {nick}, id {chat_id}", level="warn", key=f"tg-ask-{chat_id}")
+
+            send_html(
+                token,
+                chat_id,
+                "Запрос отправлен на компьютер. Дождитесь подтверждения в окне «Телефон».",
+            )
+
+            requested = time.strftime(
+                "%d.%m.%Y %H:%M:%S",
+                time.localtime(int(time.time())),
+            )
+
+            netlog.add(
+                "telegram",
+                f"Запрос доступа: {nick}, id {chat_id}, время {requested}",
+                level="warn",
+                key=f"tg-ask-{chat_id}",
+            )
+
             return False
+
         if state == "declined":
             if str(chat_id) not in self._declined_told:
                 self._declined_told.add(str(chat_id))
-                send_html(token, chat_id, "Доступ закрыт. Чтобы попросить снова, напишите /start.")
+                send_html(
+                    token,
+                    chat_id,
+                    "Доступ закрыт. Чтобы попросить снова, напишите /start.",
+                )
             return False
+
         return False
 
     def _loop(self) -> None:

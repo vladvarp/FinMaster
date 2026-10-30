@@ -139,26 +139,55 @@ def allowed(chat_id: str) -> bool:
     return any(item["id"] == str(chat_id) for item in users())
 
 
-def ask(chat_id: str, username: str = "", name: str = "", restart: bool = False) -> str:
-    """new — запрос только что создан, pending — уже ждёт, declined — отклонён, allowed — можно отвечать, group — не личный чат."""
+def ask(
+    chat_id: str,
+    username: str = "",
+    name: str = "",
+    restart: bool = False,
+    **extra: Any,
+) -> str:
+    """Создаёт заявку на доступ и сохраняет сведения о пользователе."""
     cid = str(chat_id or "").strip()
+
     if not _private_id(cid):
         return "group"
+
     data = load()
+
     if any(item["id"] == cid for item in data["users"]):
         _touch(data, "users", cid, username, name)
         save(data)
         return "allowed"
+
     if any(item["id"] == cid for item in data["pending"]):
         _touch(data, "pending", cid, username, name)
         save(data)
         return "pending"
+
     if cid in data["declined"] and not restart:
         return "declined"
-    data["declined"] = [item for item in data["declined"] if item != cid]
-    data["pending"] = [item for item in data["pending"] if item["id"] != cid]
-    data["pending"].append(_person(cid, username, name))
+
+    data["declined"] = [
+        item for item in data["declined"] if item != cid
+    ]
+
+    data["pending"] = [
+        item for item in data["pending"] if item["id"] != cid
+    ]
+
+    person = _person(
+        cid,
+        username,
+        name,
+        first_name=extra.get("first_name"),
+        last_name=extra.get("last_name"),
+        language_code=extra.get("language_code"),
+        requested_at=extra.get("requested_at"),
+    )
+
+    data["pending"].append(person)
     data["pending"] = data["pending"][-20:]
+
     save(data)
     return "new"
 
@@ -299,7 +328,13 @@ def _read_export(file_path: str) -> dict[str, Any]:
 
 
 def _blank() -> dict[str, Any]:
-    return {"ngrok_token": "", "telegram_bot_token": "", "users": [], "pending": [], "declined": []}
+    return {
+        "ngrok_token": "",
+        "telegram_bot_token": "",
+        "users": [],
+        "pending": [],
+        "declined": [],
+    }
 
 
 def _normalize(raw: Any) -> dict[str, Any]:
@@ -320,7 +355,17 @@ def _normalize(raw: Any) -> dict[str, Any]:
         if not _private_id(cid) or cid in seen:
             continue
         seen.add(cid)
-        data["users"].append(_person(cid, person.get("username") or "", person.get("name") or ""))
+        data["users"].append(
+            _person(
+                cid,
+                person.get("username") or "",
+                person.get("name") or "",
+                **{
+                    key: person.get(key)
+                    for key in ("first_name", "last_name", "language_code", "requested_at")
+                },
+            )
+        )
     data["users"] = data["users"][:30]
     seen_p: set[str] = set()
     for person in raw.get("pending") or []:
@@ -341,10 +386,26 @@ def _normalize(raw: Any) -> dict[str, Any]:
     return data
 
 
-def _person(chat_id: str, username: str, name: str) -> dict[str, str]:
+def _person(
+    chat_id: str,
+    username: str = "",
+    name: str = "",
+    **extra: Any,
+) -> dict[str, Any]:
     nick = str(username or "").strip().lstrip("@")[:64]
     title = " ".join(str(name or "").split())[:80]
-    return {"id": str(chat_id), "username": nick, "name": title}
+
+    person: dict[str, Any] = {
+        "id": str(chat_id),
+        "username": nick,
+        "name": title,
+        "first_name": str(extra.get("first_name") or "")[:80],
+        "last_name": str(extra.get("last_name") or "")[:80],
+        "language_code": str(extra.get("language_code") or "")[:16],
+        "requested_at": int(extra.get("requested_at") or 0),
+    }
+
+    return person
 
 
 def _private_id(chat_id: str) -> bool:

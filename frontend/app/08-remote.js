@@ -456,22 +456,60 @@
   function renderTelegramPeople() {
     const pending = $("remote-tg-pending");
     const users = $("remote-tg-users");
+  
     if (pending) {
       const rows = remote.telegramPending || [];
-      pending.innerHTML = rows.length ? rows.map((person) => `
-        <div class="remote-tg-person">
-          <span><b>${esc(telegramNick(person))}</b><small>id ${esc(person.id || "")}</small></span>
-          <button type="button" class="btn small" data-tg-decline="${esc(person.id || "")}">Отклонить</button>
-          <button type="button" class="btn small primary" data-tg-approve="${esc(person.id || "")}">Добавить</button>
-        </div>
-      `).join("") : "";
+  
+      pending.innerHTML = rows.length ? rows.map((person) => {
+        const requested = person.requested_at
+          ? new Date(person.requested_at * 1000).toLocaleString("ru-RU")
+          : "Время неизвестно";
+  
+        const details = [
+          person.first_name && `Имя: ${person.first_name}`,
+          person.last_name && `Фамилия: ${person.last_name}`,
+          person.username && `Username: @${String(person.username).replace(/^@/, "")}`,
+          `Telegram ID: ${person.id || ""}`,
+          person.language_code && `Язык: ${person.language_code}`,
+          `Заявка отправлена: ${requested}`,
+        ].filter(Boolean).join("\n");
+  
+        return `
+          <div class="remote-tg-person">
+            <span>
+              <b>${esc(telegramNick(person))}</b>
+              <small>id ${esc(person.id || "")}</small>
+              <small>${esc(requested)}</small>
+            </span>
+            <button
+              type="button"
+              class="btn small"
+              data-tg-info="${esc(person.id || "")}"
+              title="${esc(details)}"
+            >ⓘ</button>
+            <button type="button" class="btn small" data-tg-decline="${esc(person.id || "")}">Отклонить</button>
+            <button type="button" class="btn small primary" data-tg-approve="${esc(person.id || "")}">Добавить</button>
+          </div>
+        `;
+      }).join("") : "";
     }
+  
     if (users) {
       const rows = remote.telegramUsers || [];
+  
       users.innerHTML = rows.length ? rows.map((person) => `
         <div class="remote-tg-person">
-          <span><b>${esc(telegramNick(person))}</b><small>id ${esc(person.id || "")}</small></span>
-          <button type="button" class="btn small remote-tg-log" data-tg-log="${esc(person.id || "")}" title="Действия пользователя" aria-label="Действия пользователя">&gt;_</button>
+          <span>
+            <b>${esc(telegramNick(person))}</b>
+            <small>id ${esc(person.id || "")}</small>
+          </span>
+          <button
+            type="button"
+            class="btn small remote-tg-log"
+            data-tg-log="${esc(person.id || "")}"
+            title="Действия пользователя"
+            aria-label="Действия пользователя"
+          >&gt;_</button>
           <button type="button" class="btn small danger" data-tg-remove="${esc(person.id || "")}">Удалить</button>
         </div>
       `).join("") : '<p class="report-settings-hint">Подтверждённых пользователей пока нет. Пусть человек напишет боту.</p>';
