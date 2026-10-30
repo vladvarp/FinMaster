@@ -184,7 +184,6 @@ def ask(
     )
 
     data["pending"].append(person)
-    data["pending"] = data["pending"][-20:]
 
     save(data)
     return "new"
@@ -285,11 +284,8 @@ def hide_pending(chat_id: str) -> dict[str, Any] | None:
     if not any(item["id"] == cid for item in data["hidden_pending"]):
         data["hidden_pending"].append(person)
 
-    data["hidden_pending"] = data["hidden_pending"][-20:]
-
     save(data)
     return person
-
 
 def restore_pending(chat_id: str) -> dict[str, Any] | None:
     cid = str(chat_id or "").strip()
@@ -309,8 +305,6 @@ def restore_pending(chat_id: str) -> dict[str, Any] | None:
 
     if not any(item["id"] == cid for item in data["pending"]):
         data["pending"].append(person)
-
-    data["pending"] = data["pending"][-20:]
 
     save(data)
     return person
@@ -496,8 +490,6 @@ def _normalize(raw: Any) -> dict[str, Any]:
             )
         )
 
-    data["pending"] = data["pending"][-20:]
-
     seen_h: set[str] = set()
 
     for person in raw.get("hidden_pending") or []:
@@ -522,8 +514,6 @@ def _normalize(raw: Any) -> dict[str, Any]:
                 **{key: person.get(key) for key in extra_keys},
             )
         )
-
-    data["hidden_pending"] = data["hidden_pending"][-20:]
 
     for item in raw.get("declined") or []:
         cid = str(item or "").strip()
