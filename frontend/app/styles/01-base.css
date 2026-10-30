@@ -3341,3 +3341,35 @@ html[data-theme="dark"] #view-orders > .toolbar { box-shadow: 0 10px 24px rgba(0
 }
 .row-actions .btn.icon.small { width: 30px; height: 28px; flex: 0 0 30px; font-size: 13px; }
 
+#telegram-applicant-modal.open {
+  z-index: 10090 !important;
+}
+
+.modal-card.telegram-applicant-modal {
+  width: min(480px, 100%);
+}
+
+.telegram-applicant-info {
+  display: grid;
+  gap: 8px;
+}
+
+.telegram-applicant-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.7fr) minmax(0, 1.3fr);
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-2);
+  font-size: 13px;
+}
+
+.telegram-applicant-row span {
+  color: var(--muted);
+}
+
+.telegram-applicant-row b {
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}

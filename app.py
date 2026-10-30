@@ -2056,9 +2056,11 @@ def api_telegram_users():
         person = secrets.approve(chat_id)
         if person:
             nick = _telegram_nick(person)
-            _tell_telegram(chat_id, f"Доступ открыт{nick}. Можно писать боту. Если менью не активировался напишите /start еще раз.")
+            _tell_telegram(
+                chat_id,
+                f"Доступ открыт{nick}. Можно писать боту. Если меню не активировалось, напишите /start ещё раз."
+            )
 
-        # Применяем актуальное меню сразу после подтверждения.
         _telegram_sync_menu()
 
     elif action == "decline":
@@ -2076,9 +2078,6 @@ def api_telegram_users():
 
         if token:
             telegram_set_menu(token, "", force=True, chat_id=chat_id)
-
-        # Смена токена делает прежнюю ссылку недействительной.
-        _rotate_remote_link()
 
     elif action == "remove":
         person = secrets.remove_user(chat_id)

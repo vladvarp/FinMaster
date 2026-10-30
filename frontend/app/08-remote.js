@@ -465,15 +465,6 @@
           ? new Date(person.requested_at * 1000).toLocaleString("ru-RU")
           : "Время неизвестно";
   
-        const details = [
-          person.first_name && `Имя: ${person.first_name}`,
-          person.last_name && `Фамилия: ${person.last_name}`,
-          person.username && `Username: @${String(person.username).replace(/^@/, "")}`,
-          `Telegram ID: ${person.id || ""}`,
-          person.language_code && `Язык: ${person.language_code}`,
-          `Заявка отправлена: ${requested}`,
-        ].filter(Boolean).join("\n");
-  
         return `
           <div class="remote-tg-person">
             <span>
@@ -485,7 +476,8 @@
               type="button"
               class="btn small"
               data-tg-info="${esc(person.id || "")}"
-              title="${esc(details)}"
+              title="Информация о заявителе"
+              aria-label="Информация о заявителе"
             >ⓘ</button>
             <button type="button" class="btn small" data-tg-decline="${esc(person.id || "")}">Отклонить</button>
             <button type="button" class="btn small primary" data-tg-approve="${esc(person.id || "")}">Добавить</button>
@@ -514,6 +506,42 @@
         </div>
       `).join("") : '<p class="report-settings-hint">Подтверждённых пользователей пока нет. Пусть человек напишет боту.</p>';
     }
+  }
+
+  function openTelegramApplicant(id) {
+    const person = (remote.telegramPending || []).find(
+      (item) => String(item.id) === String(id)
+    );
+  
+    const modal = $("telegram-applicant-modal");
+    const title = $("telegram-applicant-title");
+    const box = $("telegram-applicant-info");
+  
+    if (!person || !modal || !title || !box) return;
+  
+    const requested = person.requested_at
+      ? new Date(person.requested_at * 1000).toLocaleString("ru-RU")
+      : "Время неизвестно";
+  
+    const rows = [
+      ["Имя", person.first_name],
+      ["Фамилия", person.last_name],
+      ["Username", person.username ? `@${String(person.username).replace(/^@/, "")}` : ""],
+      ["Telegram ID", person.id],
+      ["Язык", person.language_code],
+      ["Заявка отправлена", requested],
+    ];
+  
+    title.textContent = `Заявитель · ${telegramNick(person)}`;
+  
+    box.innerHTML = rows.map(([label, value]) => `
+      <div class="telegram-applicant-row">
+        <span>${esc(label)}</span>
+        <b>${esc(value || "—")}</b>
+      </div>
+    `).join("");
+  
+    modal.classList.add("open");
   }
 
   async function openTelegramUserLog(id, nick) {
@@ -1820,28 +1848,64 @@
 
   function bindTelegramPeople() {
     const onClick = async (e) => {
+      const info = e.target.closest("[data-tg-info]");
       const approve = e.target.closest("[data-tg-approve]");
       const decline = e.target.closest("[data-tg-decline]");
       const remove = e.target.closest("[data-tg-remove]");
       const log = e.target.closest("[data-tg-log]");
-      const node = approve || decline || remove || log;
+  
+      const node = info || approve || decline || remove || log;
       if (!node) return;
-      const id = node.dataset.tgApprove || node.dataset.tgDecline || node.dataset.tgRemove || node.dataset.tgLog;
-      const nick = node.closest(".remote-tg-person")?.querySelector("b")?.textContent || id;
+  
+      const id =
+        node.dataset.tgInfo ||
+        node.dataset.tgApprove ||
+        node.dataset.tgDecline ||
+        node.dataset.tgRemove ||
+        node.dataset.tgLog;
+  
+      const nick =
+        node.closest(".remote-tg-person")?.querySelector("b")?.textContent || id;
+  
+      if (info) {
+        openTelegramApplicant(id);
+        return;
+      }
+  
       if (log) {
         await openTelegramUserLog(id, nick);
         return;
       }
+  
       const action = approve ? "approve" : decline ? "decline" : "remove";
       await telegramUserAction(action, id, nick);
     };
+  
     $("remote-tg-pending")?.addEventListener("click", onClick);
     $("remote-tg-users")?.addEventListener("click", onClick);
-    $("telegram-user-log-close")?.addEventListener("click", () => $("telegram-user-log-modal")?.classList.remove("open"));
+  
+    $("telegram-user-log-close")?.addEventListener("click", () =>
+      $("telegram-user-log-modal")?.classList.remove("open")
+    );
+  
     $("telegram-user-log-modal")?.addEventListener("click", (e) => {
-      if (e.target === $("telegram-user-log-modal")) $("telegram-user-log-modal")?.classList.remove("open");
+      if (e.target === $("telegram-user-log-modal")) {
+        $("telegram-user-log-modal")?.classList.remove("open");
+      }
     });
+  
+    $("telegram-applicant-close")?.addEventListener("click", () =>
+      $("telegram-applicant-modal")?.classList.remove("open")
+    );
+  
+    $("telegram-applicant-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("telegram-applicant-modal")) {
+        $("telegram-applicant-modal")?.classList.remove("open");
+      }
+    });
+  
     if (!state.desktop || window.FM_DESK) return;
+  
     setInterval(async () => {
       try {
         applyRemotePayload(await apiGet("/api/telegram/access"));
