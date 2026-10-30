@@ -979,6 +979,7 @@ def _remote_public(ip: str | None = None, via: str | None = None) -> dict[str, A
         "telegram_chat_id": str(settings.get("telegram_chat_id") or ""),
         "telegram_users": settings.get("telegram_users") or [],
         "telegram_pending": settings.get("telegram_pending") or [],
+        "telegram_hidden_pending": settings.get("telegram_hidden_pending") or [],
         "telegram_listening": bool(TELEGRAM.snapshot().get("listening")),
         "telegram_error": TELEGRAM.snapshot().get("error") or "",
         "ngrok_installed": bool(tunnel.get("available")),
@@ -2027,6 +2028,7 @@ def api_telegram_access():
             "ok": True,
             "telegram_users": settings.get("telegram_users") or [],
             "telegram_pending": settings.get("telegram_pending") or [],
+            "telegram_hidden_pending": settings.get("telegram_hidden_pending") or [],
         }
     )
 
@@ -2043,7 +2045,7 @@ def api_telegram_users():
     if not chat_id:
         return jsonify({"error": "Не указан пользователь."}), 400
 
-    if action not in {"approve", "decline", "remove"}:
+    if action not in {"approve", "decline", "remove", "hide", "restore"}:
         return jsonify({"error": "Неизвестное действие."}), 400
 
     token = str(
@@ -2078,6 +2080,16 @@ def api_telegram_users():
 
         if token:
             telegram_set_menu(token, "", force=True, chat_id=chat_id)
+
+    elif action == "hide":
+        person = secrets.hide_pending(chat_id)
+        if person is None:
+            return jsonify({"error": "Заявка не найдена."}), 404
+
+    elif action == "restore":
+        person = secrets.restore_pending(chat_id)
+        if person is None:
+            return jsonify({"error": "Скрытая заявка не найдена."}), 404
 
     elif action == "remove":
         person = secrets.remove_user(chat_id)

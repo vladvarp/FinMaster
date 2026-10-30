@@ -767,6 +767,7 @@ def _with_secret_tokens(out: dict[str, Any]) -> dict[str, Any]:
     merged["telegram_bot_token"] = str(data.get("telegram_bot_token") or "")
     merged["telegram_users"] = users
     merged["telegram_pending"] = list(data.get("pending") or [])
+    merged["telegram_hidden_pending"] = list(data.get("hidden_pending") or [])
     merged["telegram_chat_id"] = str(users[0]["id"]) if users else ""
     return merged
 

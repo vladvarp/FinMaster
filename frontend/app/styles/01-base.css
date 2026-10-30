@@ -3373,3 +3373,22 @@ html[data-theme="dark"] #view-orders > .toolbar { box-shadow: 0 10px 24px rgba(0
   overflow-wrap: anywhere;
   font-weight: 600;
 }
+
+.remote-tg-hidden-title {
+  margin: 12px 0 7px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.remote-tg-hidden {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.remote-tg-hidden:empty {
+  display: none;
+}

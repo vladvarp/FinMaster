@@ -164,16 +164,16 @@ def ask(
         save(data)
         return "allowed"
 
-    if any(item["id"] == cid for item in data["pending"]):
-        _touch(data, "pending", cid, username, name, **profile)
-        save(data)
-        return "pending"
+    for key in ("pending", "hidden_pending"):
+        if any(item["id"] == cid for item in data[key]):
+            _touch(data, key, cid, username, name, **profile)
+            save(data)
+            return "pending"
 
     if cid in data["declined"] and not restart:
         return "declined"
 
     data["declined"] = [item for item in data["declined"] if item != cid]
-    data["pending"] = [item for item in data["pending"] if item["id"] != cid]
 
     person = _person(
         cid,
@@ -189,13 +189,17 @@ def ask(
     save(data)
     return "new"
 
-
 def approve(chat_id: str) -> dict[str, Any] | None:
     cid = str(chat_id or "").strip()
     data = load()
 
     person = next(
-        (item for item in data["pending"] if item["id"] == cid),
+        (
+            item
+            for key in ("pending", "hidden_pending")
+            for item in data[key]
+            if item["id"] == cid
+        ),
         None,
     )
 
@@ -207,6 +211,9 @@ def approve(chat_id: str) -> dict[str, Any] | None:
 
     data["pending"] = [
         item for item in data["pending"] if item["id"] != cid
+    ]
+    data["hidden_pending"] = [
+        item for item in data["hidden_pending"] if item["id"] != cid
     ]
     data["declined"] = [
         item for item in data["declined"] if item != cid
@@ -227,19 +234,86 @@ def approve(chat_id: str) -> dict[str, Any] | None:
     )
 
 
-def decline(chat_id: str) -> dict[str, str] | None:
+def decline(chat_id: str) -> dict[str, Any] | None:
     cid = str(chat_id or "").strip()
     data = load()
-    person = next((item for item in data["pending"] if item["id"] == cid), None)
+
+    person = next(
+        (
+            item
+            for key in ("pending", "hidden_pending")
+            for item in data[key]
+            if item["id"] == cid
+        ),
+        None,
+    )
+
     if person is None:
         return None
-    data["pending"] = [item for item in data["pending"] if item["id"] != cid]
+
+    data["pending"] = [
+        item for item in data["pending"] if item["id"] != cid
+    ]
+    data["hidden_pending"] = [
+        item for item in data["hidden_pending"] if item["id"] != cid
+    ]
+
     if cid not in data["declined"]:
         data["declined"].append(cid)
+
     data["declined"] = data["declined"][-100:]
+
     save(data)
     return person
 
+def hide_pending(chat_id: str) -> dict[str, Any] | None:
+    cid = str(chat_id or "").strip()
+    data = load()
+
+    person = next(
+        (item for item in data["pending"] if item["id"] == cid),
+        None,
+    )
+
+    if person is None:
+        return None
+
+    data["pending"] = [
+        item for item in data["pending"] if item["id"] != cid
+    ]
+
+    if not any(item["id"] == cid for item in data["hidden_pending"]):
+        data["hidden_pending"].append(person)
+
+    data["hidden_pending"] = data["hidden_pending"][-20:]
+
+    save(data)
+    return person
+
+
+def restore_pending(chat_id: str) -> dict[str, Any] | None:
+    cid = str(chat_id or "").strip()
+    data = load()
+
+    person = next(
+        (item for item in data["hidden_pending"] if item["id"] == cid),
+        None,
+    )
+
+    if person is None:
+        return None
+
+    data["hidden_pending"] = [
+        item for item in data["hidden_pending"] if item["id"] != cid
+    ]
+
+    if not any(item["id"] == cid for item in data["pending"]):
+        data["pending"].append(person)
+
+    data["pending"] = data["pending"][-20:]
+
+    save(data)
+    return person
 
 def remove_user(chat_id: str) -> dict[str, str] | None:
     cid = str(chat_id or "").strip()
@@ -361,6 +435,7 @@ def _blank() -> dict[str, Any]:
         "users": [],
         "pending": [],
         "declined": [],
+        "hidden_pending": [],
     }
 
 
@@ -423,6 +498,33 @@ def _normalize(raw: Any) -> dict[str, Any]:
 
     data["pending"] = data["pending"][-20:]
 
+    seen_h: set[str] = set()
+
+    for person in raw.get("hidden_pending") or []:
+        if not isinstance(person, dict):
+            continue
+
+        cid = str(person.get("id") or "").strip()
+        if (
+            not _private_id(cid)
+            or cid in seen
+            or cid in seen_p
+            or cid in seen_h
+        ):
+            continue
+
+        seen_h.add(cid)
+        data["hidden_pending"].append(
+            _person(
+                cid,
+                person.get("username") or "",
+                person.get("name") or "",
+                **{key: person.get(key) for key in extra_keys},
+            )
+        )
+
+    data["hidden_pending"] = data["hidden_pending"][-20:]
+
     for item in raw.get("declined") or []:
         cid = str(item or "").strip()
         if _private_id(cid) and cid not in data["declined"] and cid not in seen:
@@ -430,7 +532,6 @@ def _normalize(raw: Any) -> dict[str, Any]:
 
     data["declined"] = data["declined"][-100:]
     return data
-
 
 def _person(
     chat_id: str,

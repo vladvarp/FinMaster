@@ -479,6 +479,12 @@
               title="Информация о заявителе"
               aria-label="Информация о заявителе"
             >ⓘ</button>
+            <button
+              type="button"
+              class="btn small"
+              data-tg-hide="${esc(person.id || "")}"
+              title="Скрыть заявку"
+            >Скрыть</button>
             <button type="button" class="btn small" data-tg-decline="${esc(person.id || "")}">Отклонить</button>
             <button type="button" class="btn small primary" data-tg-approve="${esc(person.id || "")}">Добавить</button>
           </div>
@@ -506,6 +512,37 @@
         </div>
       `).join("") : '<p class="report-settings-hint">Подтверждённых пользователей пока нет. Пусть человек напишет боту.</p>';
     }
+  
+    renderTelegramHidden();
+  }
+
+  function renderTelegramHidden() {
+    const box = $("remote-tg-hidden");
+    if (!box) return;
+  
+    const rows = remote.telegramHiddenPending || [];
+  
+    box.innerHTML = rows.length
+      ? rows.map((person) => `
+          <div class="remote-tg-person">
+            <span>
+              <b>${esc(telegramNick(person))}</b>
+              <small>id ${esc(person.id || "")}</small>
+            </span>
+            <button
+              type="button"
+              class="btn small"
+              data-tg-info="${esc(person.id || "")}"
+              title="Информация о заявителе"
+            >ⓘ</button>
+            <button
+              type="button"
+              class="btn small primary"
+              data-tg-restore="${esc(person.id || "")}"
+            >Вернуть</button>
+          </div>
+        `).join("")
+      : '<p class="report-settings-hint">Скрытых заявок нет.</p>';
   }
 
   function openTelegramApplicant(id) {
@@ -594,6 +631,12 @@
       const next = data.telegram_pending.length;
       if (remote.pendingReady && next > (remote.telegramPending || []).length) toast("Запрос доступа к боту");
       remote.telegramPending = data.telegram_pending;
+      if (Array.isArray(data.telegram_hidden_pending)) {
+        remote.telegramHiddenPending = data.telegram_hidden_pending;
+        if ($("remote-modal")?.classList.contains("open")) {
+          renderTelegramPeople();
+        }
+      }
       remote.pendingReady = true;
       paintTelegramAsk();
       if ($("remote-modal")?.classList.contains("open")) renderTelegramPeople();
@@ -1853,8 +1896,10 @@
       const decline = e.target.closest("[data-tg-decline]");
       const remove = e.target.closest("[data-tg-remove]");
       const log = e.target.closest("[data-tg-log]");
+      const hide = e.target.closest("[data-tg-hide]");
+      const restore = e.target.closest("[data-tg-restore]");
   
-      const node = info || approve || decline || remove || log;
+      const node = info || approve || decline || remove || log || hide || restore;
       if (!node) return;
   
       const id =
@@ -1862,7 +1907,9 @@
         node.dataset.tgApprove ||
         node.dataset.tgDecline ||
         node.dataset.tgRemove ||
-        node.dataset.tgLog;
+        node.dataset.tgLog ||
+        node.dataset.tgHide ||
+        node.dataset.tgRestore;
   
       const nick =
         node.closest(".remote-tg-person")?.querySelector("b")?.textContent || id;
@@ -1877,11 +1924,28 @@
         return;
       }
   
+      if (hide || restore) {
+        const action = hide ? "hide" : "restore";
+  
+        try {
+          renderRemoteModal(
+            await apiPost("/api/telegram/users", { action, id })
+          );
+  
+          toast(hide ? "Заявка скрыта" : "Заявка возвращена");
+        } catch (err) {
+          toast(err.message || "Не удалось изменить заявку");
+        }
+  
+        return;
+      }
+  
       const action = approve ? "approve" : decline ? "decline" : "remove";
       await telegramUserAction(action, id, nick);
     };
   
     $("remote-tg-pending")?.addEventListener("click", onClick);
+    $("remote-tg-hidden")?.addEventListener("click", onClick);
     $("remote-tg-users")?.addEventListener("click", onClick);
   
     $("telegram-user-log-close")?.addEventListener("click", () =>
@@ -1912,7 +1976,7 @@
       } catch {
         /* запрос повторится */
       }
-    }, 3000);
+    }, 5000);
   }
 
   function bindRemote() {
