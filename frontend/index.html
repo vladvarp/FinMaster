@@ -1197,12 +1197,9 @@
             </button>
             <div class="remote-fold-body">
               <div class="remote-ngrok-box show" id="remote-ngrok-box">
-                <label class="field">
-                  <span>Токен ngrok</span>
-                  <input type="password" id="remote-ngrok-token" placeholder="2abc… из dashboard.ngrok.com" autocomplete="off" />
-                </label>
+                <div class="remote-ngrok-current" id="remote-ngrok-current">Активный токен: не выбран</div>
                 <div class="remote-tg-actions">
-                  <button type="button" class="btn small" id="remote-ngrok-save">Сохранить и включить</button>
+                  <button type="button" class="btn small primary" id="ngrok-manage-open">Управление токенами</button>
                   <button type="button" class="btn small" id="remote-ngrok-check">Проверить связь</button>
                 </div>
                 <div class="remote-ngrok-status" id="remote-ngrok-status"></div>
@@ -1717,6 +1714,19 @@
         <button class="btn" type="button" id="token-pack-cancel">Отмена</button>
         <button class="btn primary" type="button" id="token-pack-go">Сохранить</button>
       </div>
+    </div>
+  </div>
+  <div class="modal" id="ngrok-manager-modal">
+    <div class="modal-card settings-pack-modal" role="dialog" aria-modal="true" aria-labelledby="ngrok-manager-title">
+      <h3 id="ngrok-manager-title">Токены ngrok</h3>
+      <p>Выберите активный токен или добавьте новый. Полностью токен не показывается — только первые шесть символов.</p>
+      <div id="ngrok-token-list" class="settings-pack-list"></div>
+      <div class="ngrok-token-add">
+        <label class="field"><span>Новый Authtoken</span><input id="ngrok-token-value" type="password" autocomplete="off" placeholder="Вставьте токен ngrok" /></label>
+        <label class="field"><span>Название (необязательно)</span><input id="ngrok-token-name" type="text" maxlength="64" placeholder="Например, Рабочий аккаунт" /></label>
+        <button type="button" class="btn primary" id="ngrok-token-add">Добавить токен</button>
+      </div>
+      <div class="modal-actions"><button class="btn" type="button" id="ngrok-manager-close">Закрыть</button></div>
     </div>
   </div>
   <div class="toast" id="toast"></div>
