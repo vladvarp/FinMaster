@@ -41,6 +41,7 @@ ASK_BANK = {"хранилище", "/bank"}
 ASK_LINK = {
     "получить ссылку",
     "ссылка",
+    "доступ",
     "link",
     "/link",
     "/url",
@@ -281,27 +282,11 @@ def _bank_link(url: str) -> str:
 
 
 def _menu_keyboard(app_url: str = "") -> dict[str, Any]:
-    second: list[dict[str, Any]] = [{"text": "Ссылка"}, {"text": "Меню"}]
-    app = _web_app_url(app_url)
-    if app:
-        second = [{"text": "Открыть", "web_app": {"url": app}}, {"text": "Ссылка"}, {"text": "Меню"}]
-    rows: list[list[dict[str, Any]]] = [[{"text": "Отчёты"}, {"text": "Заказы"}, {"text": "Снимок"}], second]
-    tools: list[dict[str, Any]] = []
-    bank = _bank_link(app_url)
-    bank_app = _web_app_url(bank)
-    if bank_app:
-        tools.append({"text": "Хранилище", "web_app": {"url": bank_app}})
-    elif bank:
-        tools.append({"text": "Хранилище"})
-    desk = _desk_link(app_url)
-    desk_app = _web_app_url(desk)
-    if desk_app:
-        tools.append({"text": "Интерфейс ПК", "web_app": {"url": desk_app}})
-    elif desk:
-        tools.append({"text": "Интерфейс ПК"})
-    if tools:
-        rows.append(tools)
-    rows.append([{"text": "Новая ссылка"}, {"text": "Голос"}])
+    rows = [
+        [{"text": "Отчёты"}, {"text": "Заказы"}, {"text": "Снимок"}],
+        [{"text": "Доступ"}, {"text": "Меню"}],
+        [{"text": "Голос"}],
+    ]
     return {
         "keyboard": rows,
         "resize_keyboard": True,
@@ -1191,7 +1176,7 @@ def access_rows(url: str, info: Any = None) -> list[list[dict[str, Any]]]:
         desk = _desk_link(link)
         if desk:
             rows.append([_open_btn("Интерфейс ПК", desk)])
-        rows.append([_btn("Обновить ссылку", "L"), _btn("Новая ссылка", "N")])
+        rows.append([_btn("Тип доступа", "L"), _btn("Новая ссылка", "N")])
     else:
         rows.append([_btn("Получить ссылку", "L")])
 
@@ -1202,7 +1187,8 @@ def access_rows(url: str, info: Any = None) -> list[list[dict[str, Any]]]:
             "Ng",
         )
     ])
-    rows.append([_btn("Отчёты", "R"), _btn("Заказы", "O")])
+    rows.append([_btn("Назад", "H")])
+
     return rows
 
 
@@ -1310,7 +1296,7 @@ def send_link_choice(token: str, chat_id: str, info: Any = None) -> None:
             "\nНе удалось получить адреса. Проверьте окно «Телефон» на компьютере."
         )
 
-    rows.append([web_access_btn(flags)])
+    rows.append([_btn("Назад", "Da")])
 
     send_html(token, chat_id, "\n".join(lines), _inline(rows))
 
@@ -2429,6 +2415,9 @@ class TelegramBot:
         elif data == "Bk":
             info = self._status_for(chat_id)
             send_bank_link(token, chat_id, str(info.get("url") or ""), info)
+        elif data == "Da":
+            info = self._status_for(chat_id)
+            send_access(token, chat_id, str(info.get("url") or ""), info)
         elif data == "H":
             self._show(token, chat_id, "home")
         elif data == "R":

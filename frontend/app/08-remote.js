@@ -404,21 +404,42 @@
 
   function remoteWatchStart() {
     if (remote.watch) return;
+  
     const tick = async () => {
       if (!$("remote-modal")?.classList.contains("open")) {
         remoteWatchStop();
         return;
       }
+  
       if (!state.desktop) return;
+  
       try {
         const probe = $("remote-ngrok")?.checked ? "?probe=1" : "";
         applyRemotePayload(await apiGet(`/api/remote/info${probe}`));
+  
+        // Синхронизация переключателей с актуальным состоянием сервера.
+        const accessChk = $("remote-autostart");
+        if (accessChk) {
+          accessChk.checked = !!remote.autostart;
+        }
+  
+        const ngrokChk = $("remote-ngrok");
+        if (ngrokChk) {
+          ngrokChk.checked = !!remote.ngrok;
+        }
+  
+        const ngrokCheck = $("remote-ngrok-check");
+        if (ngrokCheck) {
+          ngrokCheck.disabled = !remote.ngrok;
+        }
+  
         renderRemoteLive();
         renderRemoteSignals();
       } catch {
         renderRemoteLive();
       }
     };
+  
     remote.watch = setInterval(tick, 2000);
     tick();
   }
