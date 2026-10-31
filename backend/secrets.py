@@ -547,7 +547,7 @@ def _normalize(raw: Any) -> dict[str, Any]:
             if storage.valid_ngrok_token(token):
                 _store_ngrok_token(data, token, str(item.get("name") or ""))
     legacy = str(raw.get("ngrok_token") or "").strip()
-    if not data["ngrok_tokens"] and storage.valid_ngrok_token(legacy):
+    if storage.valid_ngrok_token(legacy) and not any(x.get("token") == legacy for x in data["ngrok_tokens"]):
         _store_ngrok_token(data, legacy, "")
     active = str(raw.get("active_ngrok_id") or "")
     if any(x["id"] == active for x in data["ngrok_tokens"]):
