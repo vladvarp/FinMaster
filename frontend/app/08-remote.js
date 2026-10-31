@@ -851,7 +851,7 @@
         ngrokStatus.classList.add("err");
         ngrokStatus.textContent = "ngrok не установлен. Скачайте с ngrok.com и добавьте в PATH.";
       } else {
-        ngrokStatus.textContent = "Туннель ещё не поднят — сохраните токен и включите доступ.";
+        ngrokStatus.textContent = "Туннель ещё не поднят — выберите токен и включите доступ.";
       }
     }
   }
