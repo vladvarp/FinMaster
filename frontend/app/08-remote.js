@@ -1666,7 +1666,10 @@
       lead.textContent = "Отмеченное попадёт в архив .fms. Python и модели речи выключены, пока галочка не стоит.";
     }
     const warn = $("settings-pack-warn");
-    if (warn) warn.hidden = !importing;
+    if (warn) {
+      warn.hidden = !importing;
+      warn.textContent = "Если в файле есть токен с тем же значением, его запись и название будут обновлены. Ниже показано число совпадений.";
+    }
     const go = $("settings-pack-go");
     if (go) go.textContent = importing ? "Импортировать" : "Упаковать";
     const cancel = $("settings-pack-cancel");
@@ -1870,7 +1873,7 @@
     const title = $("token-pack-title");
     if (title) title.textContent = importing ? "Импорт токенов" : "Экспорт токенов";
     const lead = $("token-pack-lead");
-    if (lead) lead.textContent = importing ? "Отмеченное из файла заменит токены на этом компьютере." : "Один файл .fmt. Отметьте, что в него положить.";
+    if (lead) lead.textContent = importing ? "Совпадающие токены будут обновлены данными из файла. Перед импортом можно сохранить уникальные токены этого компьютера." : "Один файл .fmt. В него попадут все токены ngrok с названиями и активным выбором.";
     const warn = $("token-pack-warn");
     if (warn) warn.hidden = !importing;
     const go = $("token-pack-go");
