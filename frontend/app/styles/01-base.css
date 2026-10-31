@@ -717,7 +717,7 @@ input[type="search"]::-webkit-search-decoration {
   transition: max-height 0.35s ease, opacity 0.25s ease, margin 0.25s ease, border-color 0.25s ease;
 }
 .confirm-diff.open {
-  max-height: 280px;
+  max-height: 320px;
   margin: 12px 0 4px;
   opacity: 1;
   border-color: var(--line);
@@ -730,10 +730,13 @@ input[type="search"]::-webkit-search-decoration {
 }
 .confirm-diff-head { color: var(--ink); font-weight: 700; }
 .confirm-diff ul {
+  height: 220px;
   max-height: 220px;
+  flex: 0 0 220px;
   margin: 0;
   padding: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   list-style: none;
 }
 .confirm-diff li {
