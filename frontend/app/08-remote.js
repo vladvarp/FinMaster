@@ -1892,13 +1892,23 @@
       }
       let keepUniqueNgrok = true;
       if (ids.includes("ngrok")) {
-        keepUniqueNgrok = await askConfirm({
+        const keep = await askConfirm({
           title: "Сохранить остальные токены?",
-          text: "Совпадающие токены из файла обновят существующие записи и их названия. Сохранить уникальные токены, которые уже есть на этом компьютере? Если отказаться, они будут удалены после импорта.",
+          text: "Совпадающие токены из файла обновят существующие записи и их названия. Сохранить уникальные токены, которые уже есть на этом компьютере?",
           ok: "Сохранить уникальные",
-          cancel: "Заменить весь список",
-          danger: true,
+          cancel: "Другой вариант",
         });
+        if (!keep) {
+          const replace = await askConfirm({
+            title: "Заменить список токенов?",
+            text: "Все уникальные токены, которые есть только на этом компьютере, будут удалены. Совпадающие записи обновятся данными из файла.",
+            ok: "Заменить список",
+            cancel: "Отмена",
+            danger: true,
+          });
+          if (!replace) return;
+          keepUniqueNgrok = false;
+        }
       }
       const payload = { path: tokenPackPath, ids, keep_unique_ngrok: keepUniqueNgrok };
       let data;
