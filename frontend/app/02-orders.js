@@ -972,9 +972,9 @@
 
   function masterLines(order) {
     return (order?.lines || []).filter((line) => {
-      if (isExpenseLine(line)) return false;
+      if (isExpenseLine(line) || isFrozenLine(line)) return false;
       if (!lineFilterActive()) return true;
-      return !isFrozenLine(line) && linePasses(order, line);
+      return linePasses(order, line);
     });
   }
 
@@ -2816,6 +2816,8 @@
   }
 
   function lineDoneButton(order, line) {
+    if (isFrozenLine(line) || isExpenseLine(line)) return "";
+  
     const end = lineCalendarEnd(order, line);
     const today = dayKey(clockToday());
     const closedToday = end === today;
@@ -2823,6 +2825,7 @@
     const planned = !!end && end > today;
     const ago = done ? dayDiff(parseDay(end), clockToday()) : 0;
     const left = planned ? dayDiff(clockToday(), parseDay(end)) : 0;
+  
     const title = closedToday
       ? "Завершена сегодня"
       : done
@@ -2832,6 +2835,7 @@
         : planned
           ? `До конечной даты ${left} ${dayCountWord(left)}`
           : "Завершить позицию";
+  
     const cls = closedToday ? " is-today" : done ? " is-done" : planned ? " is-plan" : "";
     return `<button type="button" class="done-btn${cls}" data-act="line-done" title="${esc(title)}" aria-label="${esc(title)}" aria-pressed="${end ? "true" : "false"}">✓</button>`;
   }

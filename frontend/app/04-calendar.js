@@ -1090,9 +1090,8 @@
 
   /** Конец позиции в календаре: свой или унаследованный от заказа. */
   function lineCalendarEnd(order, line) {
-    if (!line || isExpenseLine(line)) return "";
+    if (!line || isFrozenLine(line) || isExpenseLine(line)) return "";
     if (dateDay(line.work_end)) return dateDay(line.work_end);
-    if (isFrozenLine(line)) return "";
     if (!dateDay(line.work_start) && dateDay(order?.work_end)) return dateDay(order.work_end);
     return "";
   }
@@ -1149,8 +1148,10 @@
   }
 
   function toggleLineCalendarDone(order, line) {
-    if (!order || !line || isExpenseLine(line)) return;
+    if (!order || !line || isExpenseLine(line) || isFrozenLine(line)) return;
+  
     const today = dayKey(clockToday());
+  
     if (lineCalendarDone(order, line)) {
       keepSiblingEnds(order, line.id);
       if (!dateDay(line.work_start)) line.work_start = dateDay(order.work_start) || today;
@@ -1160,27 +1161,41 @@
       if (start > today) start = today;
       line.work_start = start;
       line.work_end = today;
-      if (!isFrozenLine(line) && (!dateDay(order.work_start) || dateDay(order.work_start) > start)) order.work_start = start;
+  
+      if (!dateDay(order.work_start) || dateDay(order.work_start) > start) {
+        order.work_start = start;
+      }
     }
+  
     syncOrderEndWithPositions(order);
     normalizeWorkDates(order);
   }
 
   function setAllLinesCalendarDone(order, on, only) {
-    const lines = (order?.lines || []).filter((line) => !isExpenseLine(line) && (!only || only.has(line.id)));
+    const lines = (order?.lines || []).filter(
+      (line) => !isExpenseLine(line) && !isFrozenLine(line) && (!only || only.has(line.id))
+    );
+  
     if (!lines.length) return;
+  
     const today = dayKey(clockToday());
+  
     if (on) {
       let startFloor = dateDay(order.work_start) || today;
+  
       lines.forEach((line) => {
         if (lineCalendarDone(order, line)) return;
+  
         let start = dateDay(line.work_start) || dateDay(order.work_start) || today;
         if (start > today) start = today;
+  
         line.work_start = start;
         line.work_end = today;
-        if (!isFrozenLine(line) && start < startFloor) startFloor = start;
+  
+        if (start < startFloor) startFloor = start;
       });
-      if (lines.some((line) => !isFrozenLine(line)) && (!dateDay(order.work_start) || dateDay(order.work_start) > startFloor)) {
+  
+      if (!dateDay(order.work_start) || dateDay(order.work_start) > startFloor) {
         order.work_start = startFloor;
       }
     } else {
@@ -1189,6 +1204,7 @@
         line.work_end = "";
       });
     }
+  
     syncOrderEndWithPositions(order);
     normalizeWorkDates(order);
   }
