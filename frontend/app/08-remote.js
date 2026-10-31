@@ -2009,13 +2009,21 @@
     if (!button) return;
     const id = button.dataset.ngrokSelect || button.dataset.ngrokRename || button.dataset.ngrokDelete;
     try {
-      let body;
       if (button.dataset.ngrokRename) {
         const item = (remote.ngrokTokens || []).find((x) => x.id === id);
-        const name = window.prompt("Название токена (пустое — без названия):", item?.name || "");
-        if (name === null) return;
-        body = { action: "rename", id, name };
-      } else if (button.dataset.ngrokDelete) {
+        const modal = $("ngrok-rename-modal");
+        const input = $("ngrok-rename-value");
+        if (!modal || !input) return;
+        modal.dataset.tokenId = id;
+        input.value = item?.name || "";
+        modal.classList.add("open");
+        input.focus();
+        input.select();
+        return;
+      }
+
+      let body;
+      if (button.dataset.ngrokDelete) {
         const ok = await askConfirm({
           title: "Удалить токен?",
           text: "Токен будет удалён из FinMaster. Если он используется, активным станет первый оставшийся токен.",
@@ -2032,9 +2040,31 @@
       remote.ngrokTokens = data.tokens || [];
       renderRemoteModal(data);
       renderNgrokManager(remote.ngrokTokens);
-      toast(body.action === "select" ? "Активный токен изменён" : body.action === "delete" ? "Токен удалён" : "Название изменено");
+      toast(body.action === "select" ? "Активный токен изменён" : "Токен удалён");
     } catch (err) {
       toast(err.message || "Не удалось изменить токен");
+    }
+  }
+
+  async function saveNgrokTokenName() {
+    const modal = $("ngrok-rename-modal");
+    const input = $("ngrok-rename-value");
+    const id = modal?.dataset.tokenId || "";
+    if (!modal || !id || !input) return;
+    const save = $("ngrok-rename-save");
+    if (save) save.disabled = true;
+    try {
+      const data = await ngrokManagerPost({ action: "rename", id, name: input.value.trim() });
+      remote.ngrokTokens = data.tokens || [];
+      renderRemoteModal(data);
+      renderNgrokManager(remote.ngrokTokens);
+      modal.classList.remove("open");
+      delete modal.dataset.tokenId;
+      toast("Название изменено");
+    } catch (err) {
+      toast(err.message || "Не удалось переименовать токен");
+    } finally {
+      if (save) save.disabled = false;
     }
   }
 
@@ -2336,6 +2366,16 @@
     $("remote-tg-send")?.addEventListener("click", () => postTelegram(true));
     $("ngrok-manage-open")?.addEventListener("click", openNgrokManager);
     $("ngrok-manager-close")?.addEventListener("click", closeNgrokManager);
+    $("ngrok-rename-close")?.addEventListener("click", () => $("ngrok-rename-modal")?.classList.remove("open"));
+    $("ngrok-rename-cancel")?.addEventListener("click", () => $("ngrok-rename-modal")?.classList.remove("open"));
+    $("ngrok-rename-save")?.addEventListener("click", saveNgrokTokenName);
+    $("ngrok-rename-value")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") saveNgrokTokenName();
+      if (e.key === "Escape") $("ngrok-rename-modal")?.classList.remove("open");
+    });
+    $("ngrok-rename-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("ngrok-rename-modal")) $("ngrok-rename-modal").classList.remove("open");
+    });
     $("ngrok-manager-modal")?.addEventListener("click", (e) => {
       if (e.target === $("ngrok-manager-modal")) closeNgrokManager();
     });
