@@ -1931,6 +1931,100 @@
     }
   }
 
+  function closeNgrokManager() {
+    $("ngrok-manager-modal")?.classList.remove("open");
+  }
+
+  async function openNgrokManager() {
+    try {
+      const data = await apiGet("/api/remote/ngrok/tokens");
+      remote.ngrokTokens = data.tokens || [];
+      renderNgrokManager(remote.ngrokTokens);
+      $("ngrok-manager-modal")?.classList.add("open");
+    } catch (err) {
+      toast(err.message || "Не удалось загрузить токены");
+    }
+  }
+
+  function renderNgrokManager(tokens) {
+    const box = $("ngrok-token-list");
+    if (!box) return;
+    box.innerHTML = (tokens || []).map((item) => {
+      const title = item.name || "Без названия";
+      return `<div class="report-settings-check ngrok-token-row">
+        <span class="ngrok-token-main">
+          <strong>${esc(title)}</strong>
+          <small>${esc(item.prefix)}… ${item.active ? "· используется" : ""}</small>
+        </span>
+        <span class="ngrok-token-actions">
+          ${item.active ? '<span class="online">Активен</span>' : `<button type="button" class="btn small" data-ngrok-select="${esc(item.id)}">Выбрать</button>`}
+          <button type="button" class="btn small" data-ngrok-rename="${esc(item.id)}">Название</button>
+          <button type="button" class="btn small danger" data-ngrok-delete="${esc(item.id)}">Удалить</button>
+        </span>
+      </div>`;
+    }).join("") || '<p class="report-settings-hint">Токены ещё не добавлены.</p>';
+  }
+
+  async function ngrokManagerPost(body) {
+    try {
+      return await apiPost("/api/remote/ngrok/tokens", body);
+    } catch (err) {
+      if (!String(err.message || err).includes("ngrok.exe")) throw err;
+      const force = await askConfirm({
+        title: "Не удалось остановить ngrok",
+        text: "Процесс ngrok.exe продолжает работать. Завершить его принудительно через ngrok_stop.bat? Батник остановит все процессы ngrok.exe, включая запущенные отдельно от FinMaster.",
+        ok: "Завершить принудительно",
+        cancel: "Не менять токен",
+        danger: true,
+      });
+      if (!force) throw err;
+      await apiPost("/api/ngrok/force-stop", {});
+      for (let i = 0; i < 12; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        try {
+          if (!(await window.pywebview.api.ngrok_process_running())) break;
+        } catch {
+          break;
+        }
+      }
+      return apiPost("/api/remote/ngrok/tokens", body);
+    }
+  }
+
+  async function handleNgrokTokenClick(event) {
+    const button = event.target.closest("[data-ngrok-select], [data-ngrok-rename], [data-ngrok-delete]");
+    if (!button) return;
+    const id = button.dataset.ngrokSelect || button.dataset.ngrokRename || button.dataset.ngrokDelete;
+    try {
+      let body;
+      if (button.dataset.ngrokRename) {
+        const item = (remote.ngrokTokens || []).find((x) => x.id === id);
+        const name = window.prompt("Название токена (пустое — без названия):", item?.name || "");
+        if (name === null) return;
+        body = { action: "rename", id, name };
+      } else if (button.dataset.ngrokDelete) {
+        const ok = await askConfirm({
+          title: "Удалить токен?",
+          text: "Токен будет удалён из FinMaster. Если он используется, активным станет первый оставшийся токен.",
+          ok: "Удалить",
+          cancel: "Отмена",
+          danger: true,
+        });
+        if (!ok) return;
+        body = { action: "delete", id };
+      } else {
+        body = { action: "select", id };
+      }
+      const data = await ngrokManagerPost(body);
+      remote.ngrokTokens = data.tokens || [];
+      renderRemoteModal(data);
+      renderNgrokManager(remote.ngrokTokens);
+      toast(body.action === "select" ? "Активный токен изменён" : body.action === "delete" ? "Токен удалён" : "Название изменено");
+    } catch (err) {
+      toast(err.message || "Не удалось изменить токен");
+    }
+  }
+
   function bindTokenPack() {
     $("btn-tokens-export")?.addEventListener("click", async () => {
       try {
