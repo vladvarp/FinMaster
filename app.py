@@ -1010,6 +1010,9 @@ def _remote_public(ip: str | None = None, via: str | None = None) -> dict[str, A
         "clients": REMOTE.clients(),
         "ngrok": bool(settings.get("ngrok")),
         "ngrok_ready": bool(settings.get("ngrok_token")),
+        "ngrok_tokens": secrets.ngrok_token_list(),
+        "ngrok_active_id": next((item["id"] for item in secrets.ngrok_token_list() if item.get("active")), ""),
+        "ngrok_active_label": next((item.get("name") or item.get("prefix") for item in secrets.ngrok_token_list() if item.get("active")), ""),
         "telegram_ready": bool(settings.get("telegram_bot_token")),
         "telegram_chat_id": str(settings.get("telegram_chat_id") or ""),
         "telegram_users": settings.get("telegram_users") or [],
@@ -2040,7 +2043,11 @@ def api_tokens_import():
         return jsonify({"error": "Только на этом компьютере."}), 403
     data = request.get_json(silent=True) or {}
     try:
-        secrets.apply_export(str(data.get("path") or ""), list(data.get("ids") or []))
+        secrets.apply_export(
+            str(data.get("path") or ""),
+            list(data.get("ids") or []),
+            keep_unique_ngrok=bool(data.get("keep_unique_ngrok", True)),
+        )
     except (ValueError, OSError) as exc:
         return jsonify({"error": str(exc)}), 400
     settings = storage.remote_settings()
@@ -2320,6 +2327,50 @@ def api_remote_ngrok():
     payload = _remote_public()
     payload["ok"] = True
     _telegram_sync_menu()
+    return jsonify(payload)
+
+
+@app.get("/api/remote/ngrok/tokens")
+def api_remote_ngrok_tokens():
+    if not _is_local() and not _desk_editor():
+        return jsonify({"error": "Только в окне программы."}), 403
+    items = secrets.ngrok_token_list()
+    active = next((x for x in items if x.get("active")), None)
+    return jsonify({"ok": True, "tokens": items, "active_id": active.get("id") if active else "",
+                    "active_label": (active.get("name") or active.get("prefix")) if active else ""})
+
+
+@app.post("/api/remote/ngrok/tokens")
+def api_remote_ngrok_tokens_update():
+    if not _is_local() and not _desk_editor():
+        return jsonify({"error": "Только в окне программы."}), 403
+    data = request.get_json(silent=True) or {}
+    action = str(data.get("action") or "")
+    token_id = str(data.get("id") or "")
+    was_running = bool(storage.remote_settings().get("ngrok") and REMOTE.enabled)
+    if action in {"select", "delete"} and token_id:
+        TUNNEL.stop()
+        if ngrok_process_running():
+            return jsonify({"error": "ngrok.exe ещё работает. Его нужно завершить принудительно через ngrok_stop.bat.", "force_required": True}), 409
+    try:
+        if action == "add":
+            secrets.add_ngrok_token(str(data.get("token") or ""), str(data.get("name") or ""))
+        elif action == "rename":
+            secrets.rename_ngrok_token(token_id, str(data.get("name") or ""))
+        elif action == "select":
+            secrets.select_ngrok_token(token_id)
+        elif action == "delete":
+            secrets.delete_ngrok_token(token_id)
+        else:
+            return jsonify({"error": "Неизвестное действие."}), 400
+    except (ValueError, OSError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    settings = storage.remote_settings()
+    if was_running and settings.get("ngrok") and settings.get("ngrok_token"):
+        _ensure_tunnel(settings)
+    payload = _remote_public()
+    payload.update({"ok": True, "tokens": secrets.ngrok_token_list(),
+                    "ngrok_active_id": next((x["id"] for x in secrets.ngrok_token_list() if x.get("active")), "")})
     return jsonify(payload)
 
 
