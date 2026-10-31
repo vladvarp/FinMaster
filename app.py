@@ -2382,6 +2382,8 @@ def api_remote_ngrok_tokens_update():
     except (ValueError, OSError) as exc:
         return jsonify({"error": str(exc)}), 400
     settings = storage.remote_settings()
+    if not settings.get("ngrok_token") and settings.get("ngrok"):
+        settings = storage.save_remote_settings(ngrok=False, via="lan")
     if was_running and settings.get("ngrok") and settings.get("ngrok_token"):
         _ensure_tunnel(settings)
     payload = _remote_public()
