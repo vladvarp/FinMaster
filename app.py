@@ -2046,7 +2046,7 @@ def api_tokens_import():
     data = request.get_json(silent=True) or {}
     ids = list(data.get("ids") or [])
     was_running = bool("ngrok" in ids and storage.remote_settings().get("ngrok") and REMOTE.enabled)
-    if was_running:
+    if "ngrok" in ids:
         TUNNEL.stop()
         for _ in range(12):
             if not ngrok_process_running():
