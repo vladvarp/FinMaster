@@ -1197,17 +1197,13 @@
             </button>
             <div class="remote-fold-body">
               <div class="remote-ngrok-box show" id="remote-ngrok-box">
-                <label class="field">
-                  <span>Токен ngrok</span>
-                  <input type="password" id="remote-ngrok-token" placeholder="2abc… из dashboard.ngrok.com" autocomplete="off" />
-                </label>
+                <div class="remote-ngrok-current" id="remote-ngrok-current">Активный токен: не выбран</div>
                 <div class="remote-tg-actions">
-                  <button type="button" class="btn small" id="remote-ngrok-save">Сохранить и включить</button>
+                  <button type="button" class="btn small primary" id="ngrok-manage-open">Управление токенами</button>
                   <button type="button" class="btn small" id="remote-ngrok-check">Проверить связь</button>
                 </div>
                 <div class="remote-ngrok-status" id="remote-ngrok-status"></div>
                 <div class="ngrok-process-actions">
-                  <span id="ngrok-process-status"></span>
                   <button
                     type="button"
                     class="btn small danger"
@@ -1360,7 +1356,7 @@
             <li>Проще поставить ngrok из Microsoft Store: после установки он уже в PATH. Либо скачайте его с <a href="https://ngrok.com/download" target="_blank" rel="noopener">ngrok.com/download</a>, распакуйте и добавьте программу в PATH.</li>
             <li>Зарегистрируйтесь на ngrok.com и скопируйте <b>Your Authtoken</b> в кабинете.</li>
             <li>Перезапустите FinMaster, откройте окно «Телефон» и включите «Через интернет (ngrok)».</li>
-            <li>Вставьте токен и нажмите «Сохранить и включить».</li>
+            <li>В «Управлении токенами» добавьте Authtoken, при желании назовите его и выберите. Затем включите «Через интернет (ngrok)».</li>
             <li>QR сменится на адрес вида <code>https://….ngrok-free.app/m?t=…</code>. Сохраните его в закладки телефона — так можно зайти из любой сети, пока компьютер включён.</li>
           </ol>
         </section>
@@ -1716,6 +1712,29 @@
       <div class="modal-actions">
         <button class="btn" type="button" id="token-pack-cancel">Отмена</button>
         <button class="btn primary" type="button" id="token-pack-go">Сохранить</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal" id="ngrok-manager-modal">
+    <div class="modal-card settings-pack-modal ngrok-manager-card" role="dialog" aria-modal="true" aria-labelledby="ngrok-manager-title">
+      <h3 id="ngrok-manager-title">Токены ngrok</h3>
+      <p>Выберите активный токен или добавьте новый. Полностью токен не показывается — только первые шесть символов.</p>
+      <div id="ngrok-token-list" class="settings-pack-list"></div>
+      <div class="ngrok-token-add">
+        <label class="field"><span>Новый Authtoken</span><input id="ngrok-token-value" type="password" autocomplete="off" placeholder="Вставьте токен ngrok" /></label>
+        <label class="field"><span>Название (необязательно)</span><input id="ngrok-token-name" type="text" maxlength="64" placeholder="Например, Рабочий аккаунт" /></label>
+        <button type="button" class="btn primary" id="ngrok-token-add">Добавить токен</button>
+      </div>
+      <div class="modal-actions"><button class="btn" type="button" id="ngrok-manager-close">Закрыть</button></div>
+    </div>
+  </div>
+  <div class="modal" id="ngrok-rename-modal">
+    <div class="modal-card ngrok-rename-card" role="dialog" aria-modal="true" aria-labelledby="ngrok-rename-title">
+      <h3 id="ngrok-rename-title">Название токена</h3>
+      <label class="field"><span>Новое название</span><input id="ngrok-rename-value" type="text" maxlength="64" autocomplete="off" placeholder="Например, Рабочий аккаунт" /></label>
+      <div class="modal-actions">
+        <button class="btn" type="button" id="ngrok-rename-cancel">Отмена</button>
+        <button class="btn primary" type="button" id="ngrok-rename-save">Сохранить</button>
       </div>
     </div>
   </div>

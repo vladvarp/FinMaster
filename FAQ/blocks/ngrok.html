@@ -26,7 +26,7 @@
   </style>
 </head>
 <body>
-  <p class="hint">Тот же блок, что в окне «Телефон». Зелёная точка показывает, что токен сохранён. Надпись рядом с заголовком отражает состояние процесса ngrok.</p>
+  <p class="hint">Тот же блок, что в окне «Телефон». Здесь выбирают активный токен, добавляют новые, переименовывают и удаляют сохранённые записи. Видны только первые шесть символов каждого токена.</p>
 
   <div class="remote-fold">
     <button type="button" class="remote-fold-head" tabindex="-1">
@@ -40,13 +40,9 @@
 
     <div class="remote-fold-body">
       <div class="remote-ngrok-box show">
-        <label class="field">
-          <span>Токен ngrok</span>
-          <input type="password" value="2abc-example" readonly tabindex="-1" aria-label="Токен ngrok">
-        </label>
-
+        <div class="remote-ngrok-current">Активный токен: Рабочий аккаунт (2abc••••••)</div>
         <div class="remote-tg-actions">
-          <button type="button" class="btn small" tabindex="-1">Сохранить и включить</button>
+          <button type="button" class="btn small primary" tabindex="-1">Управление токенами</button>
           <button type="button" class="btn small" tabindex="-1">Проверить связь</button>
         </div>
 

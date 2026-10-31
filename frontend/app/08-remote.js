@@ -17,6 +17,9 @@
     clients: [],
     deskLocked: false,
     deskBeat: 0,
+    ngrokTokens: [],
+    ngrokActiveId: "",
+    ngrokActiveLabel: "",
   };
 
   const NET_KIND = {
@@ -705,6 +708,9 @@
     if (data.via) remote.via = data.via;
     if (typeof data.ngrok === "boolean") remote.ngrok = data.ngrok;
     if (typeof data.ngrok_ready === "boolean") remote.ngrokReady = data.ngrok_ready;
+    if (Array.isArray(data.ngrok_tokens)) remote.ngrokTokens = data.ngrok_tokens;
+    if ("ngrok_active_id" in data) remote.ngrokActiveId = data.ngrok_active_id || "";
+    if ("ngrok_active_label" in data) remote.ngrokActiveLabel = data.ngrok_active_label || "";
     if (typeof data.ngrok_installed === "boolean") remote.ngrokInstalled = data.ngrok_installed;
     if (data.tunnel) remote.tunnel = data.tunnel;
     if (typeof data.telegram_ready === "boolean") remote.telegramReady = data.telegram_ready;
@@ -825,6 +831,10 @@
         tgStatus.textContent = "Вставьте токен от @BotFather и нажмите «Запомнить токен».";
       }
     }
+    const activeLabel = $("remote-ngrok-current");
+    if (activeLabel) activeLabel.textContent = remote.ngrokActiveLabel
+      ? `Активный токен: ${remote.ngrokActiveLabel}`
+      : "Активный токен: не выбран";
     const ngrokStatus = $("remote-ngrok-status");
     if (ngrokStatus && !ngrokStatus.dataset.hold) {
       const tun = remote.tunnel || {};
@@ -841,7 +851,7 @@
         ngrokStatus.classList.add("err");
         ngrokStatus.textContent = "ngrok не установлен. Скачайте с ngrok.com и добавьте в PATH.";
       } else {
-        ngrokStatus.textContent = "Туннель ещё не поднят — сохраните токен и включите доступ.";
+        ngrokStatus.textContent = "Туннель ещё не поднят — выберите токен и включите доступ.";
       }
     }
   }
@@ -1016,8 +1026,6 @@
     if (ngrokChk) ngrokChk.checked = !!remote.ngrok;
     const ngrokCheck = $("remote-ngrok-check");
     if (ngrokCheck) ngrokCheck.disabled = !remote.ngrok;
-    const tokenInput = $("remote-ngrok-token");
-    if (tokenInput && remote.ngrokReady && !tokenInput.value) tokenInput.placeholder = "токен сохранён — можно не вводить заново";
     const tgToken = $("remote-tg-token");
     if (tgToken && remote.telegramReady && !tgToken.value) tgToken.placeholder = "токен сохранён — можно не вводить заново";
     renderTelegramPeople();
@@ -1041,10 +1049,8 @@
   }
 
   async function persistRemoteSecrets() {
-    const ngrokToken = $("remote-ngrok-token")?.value?.trim() || "";
     const tgToken = $("remote-tg-token")?.value?.trim() || "";
     try {
-      if (ngrokToken) await apiPost("/api/remote/ngrok", { authtoken: ngrokToken });
       if (tgToken) await apiPost("/api/remote/telegram", { token: tgToken });
     } catch {
       /* токены уже на диске или поля пустые */
@@ -1660,7 +1666,10 @@
       lead.textContent = "Отмеченное попадёт в архив .fms. Python и модели речи выключены, пока галочка не стоит.";
     }
     const warn = $("settings-pack-warn");
-    if (warn) warn.hidden = !importing;
+    if (warn) {
+      warn.hidden = !importing;
+      warn.textContent = "Если в файле есть токен с тем же значением, его запись и название будут обновлены. Ниже показано число совпадений.";
+    }
     const go = $("settings-pack-go");
     if (go) go.textContent = importing ? "Импортировать" : "Упаковать";
     const cancel = $("settings-pack-cancel");
@@ -1864,7 +1873,7 @@
     const title = $("token-pack-title");
     if (title) title.textContent = importing ? "Импорт токенов" : "Экспорт токенов";
     const lead = $("token-pack-lead");
-    if (lead) lead.textContent = importing ? "Отмеченное из файла заменит токены на этом компьютере." : "Один файл .fmt. Отметьте, что в него положить.";
+    if (lead) lead.textContent = importing ? "Совпадающие токены будут обновлены данными из файла. Перед импортом можно сохранить уникальные токены этого компьютера." : "Один файл .fmt. В него попадут все токены ngrok с названиями и активным выбором.";
     const warn = $("token-pack-warn");
     if (warn) warn.hidden = !importing;
     const go = $("token-pack-go");
@@ -1884,12 +1893,178 @@
         closeTokenPack();
         return;
       }
-      const data = await apiPost("/api/tokens/import", { path: tokenPackPath, ids });
+      let keepUniqueNgrok = true;
+      if (ids.includes("ngrok")) {
+        const keep = await askConfirm({
+          title: "Сохранить остальные токены?",
+          text: "Совпадающие токены из файла обновят существующие записи и их названия. Сохранить уникальные токены, которые уже есть на этом компьютере?",
+          ok: "Сохранить уникальные",
+          cancel: "Другой вариант",
+        });
+        if (!keep) {
+          const replace = await askConfirm({
+            title: "Заменить список токенов?",
+            text: "Все уникальные токены, которые есть только на этом компьютере, будут удалены. Совпадающие записи обновятся данными из файла.",
+            ok: "Заменить список",
+            cancel: "Отмена",
+            danger: true,
+          });
+          if (!replace) return;
+          keepUniqueNgrok = false;
+        }
+      }
+      const payload = { path: tokenPackPath, ids, keep_unique_ngrok: keepUniqueNgrok };
+      let data;
+      try {
+        data = await apiPost("/api/tokens/import", payload);
+      } catch (err) {
+        if (!ids.includes("ngrok") || !String(err.message || err).includes("ngrok.exe")) throw err;
+        const force = await askConfirm({
+          title: "Не удалось остановить ngrok",
+          text: "Процесс ngrok.exe продолжает работать. Завершить его принудительно через ngrok_stop.bat? Батник остановит все процессы ngrok.exe, включая запущенные отдельно от FinMaster.",
+          ok: "Завершить принудительно",
+          cancel: "Отмена",
+          danger: true,
+        });
+        if (!force) return;
+        await apiPost("/api/ngrok/force-stop", {});
+        for (let i = 0; i < 12; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          try {
+            if (!(await window.pywebview.api.ngrok_process_running())) break;
+          } catch { break; }
+        }
+        data = await apiPost("/api/tokens/import", payload);
+      }
       renderRemoteModal(data);
       toast("Токены импортированы");
       closeTokenPack();
     } catch (err) {
       toast(err.message || "Не удалось обработать токены");
+    }
+  }
+
+  function closeNgrokManager() {
+    $("ngrok-manager-modal")?.classList.remove("open");
+  }
+
+  async function openNgrokManager() {
+    try {
+      const data = await apiGet("/api/remote/ngrok/tokens");
+      remote.ngrokTokens = data.tokens || [];
+      renderNgrokManager(remote.ngrokTokens);
+      $("ngrok-manager-modal")?.classList.add("open");
+    } catch (err) {
+      toast(err.message || "Не удалось загрузить токены");
+    }
+  }
+
+  function renderNgrokManager(tokens) {
+    const box = $("ngrok-token-list");
+    if (!box) return;
+    box.innerHTML = (tokens || []).map((item) => {
+      const title = item.name || "Без названия";
+      return `<div class="report-settings-check ngrok-token-row">
+        <span class="ngrok-token-main">
+          <strong>${esc(title)}</strong>
+          <small>${esc(item.prefix)}… ${item.active ? "· используется" : ""}</small>
+        </span>
+        <span class="ngrok-token-actions">
+          ${item.active ? '<span class="online">Активен</span>' : `<button type="button" class="btn small" data-ngrok-select="${esc(item.id)}">Выбрать</button>`}
+          <button type="button" class="btn small" data-ngrok-rename="${esc(item.id)}">Название</button>
+          <button type="button" class="btn small danger" data-ngrok-delete="${esc(item.id)}">Удалить</button>
+        </span>
+      </div>`;
+    }).join("") || '<p class="report-settings-hint">Токены ещё не добавлены.</p>';
+  }
+
+  async function ngrokManagerPost(body) {
+    try {
+      return await apiPost("/api/remote/ngrok/tokens", body);
+    } catch (err) {
+      if (!String(err.message || err).includes("ngrok.exe")) throw err;
+      const force = await askConfirm({
+        title: "Не удалось остановить ngrok",
+        text: "Процесс ngrok.exe продолжает работать. Завершить его принудительно через ngrok_stop.bat? Батник остановит все процессы ngrok.exe, включая запущенные отдельно от FinMaster.",
+        ok: "Завершить принудительно",
+        cancel: "Не менять токен",
+        danger: true,
+      });
+      if (!force) throw err;
+      await apiPost("/api/ngrok/force-stop", {});
+      for (let i = 0; i < 12; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        try {
+          if (!(await window.pywebview.api.ngrok_process_running())) break;
+        } catch {
+          break;
+        }
+      }
+      return apiPost("/api/remote/ngrok/tokens", body);
+    }
+  }
+
+  async function handleNgrokTokenClick(event) {
+    const button = event.target.closest("[data-ngrok-select], [data-ngrok-rename], [data-ngrok-delete]");
+    if (!button) return;
+    const id = button.dataset.ngrokSelect || button.dataset.ngrokRename || button.dataset.ngrokDelete;
+    try {
+      if (button.dataset.ngrokRename) {
+        const item = (remote.ngrokTokens || []).find((x) => x.id === id);
+        const modal = $("ngrok-rename-modal");
+        const input = $("ngrok-rename-value");
+        if (!modal || !input) return;
+        modal.dataset.tokenId = id;
+        input.value = item?.name || "";
+        modal.classList.add("open");
+        input.focus();
+        input.select();
+        return;
+      }
+
+      let body;
+      if (button.dataset.ngrokDelete) {
+        const ok = await askConfirm({
+          title: "Удалить токен?",
+          text: "Токен будет удалён из FinMaster. Если он используется, активным станет первый оставшийся токен.",
+          ok: "Удалить",
+          cancel: "Отмена",
+          danger: true,
+        });
+        if (!ok) return;
+        body = { action: "delete", id };
+      } else {
+        body = { action: "select", id };
+      }
+      const data = await ngrokManagerPost(body);
+      remote.ngrokTokens = data.tokens || [];
+      renderRemoteModal(data);
+      renderNgrokManager(remote.ngrokTokens);
+      toast(body.action === "select" ? "Активный токен изменён" : "Токен удалён");
+    } catch (err) {
+      toast(err.message || "Не удалось изменить токен");
+    }
+  }
+
+  async function saveNgrokTokenName() {
+    const modal = $("ngrok-rename-modal");
+    const input = $("ngrok-rename-value");
+    const id = modal?.dataset.tokenId || "";
+    if (!modal || !id || !input) return;
+    const save = $("ngrok-rename-save");
+    if (save) save.disabled = true;
+    try {
+      const data = await ngrokManagerPost({ action: "rename", id, name: input.value.trim() });
+      remote.ngrokTokens = data.tokens || [];
+      renderRemoteModal(data);
+      renderNgrokManager(remote.ngrokTokens);
+      modal.classList.remove("open");
+      delete modal.dataset.tokenId;
+      toast("Название изменено");
+    } catch (err) {
+      toast(err.message || "Не удалось переименовать токен");
+    } finally {
+      if (save) save.disabled = false;
     }
   }
 
@@ -2108,9 +2283,7 @@
       const ngrokCheck = $("remote-ngrok-check");
       if (ngrokCheck) ngrokCheck.disabled = !on;
       if (on) $("remote-ngrok-box")?.closest(".remote-fold")?.classList.remove("collapsed");
-      const token = $("remote-ngrok-token")?.value?.trim() || "";
       const body = { enabled: on };
-      if (token) body.authtoken = token;
       try {
         if (on && !remote.enabled) await remoteStart();
         renderRemoteModal(await apiPost("/api/remote/ngrok", body));
@@ -2191,24 +2364,35 @@
     $("remote-tg-check")?.addEventListener("click", () => checkRemoteLink("telegram"));
     $("remote-tg-save")?.addEventListener("click", () => postTelegram(false));
     $("remote-tg-send")?.addEventListener("click", () => postTelegram(true));
-    $("remote-ngrok-save")?.addEventListener("click", async () => {
-      const token = $("remote-ngrok-token")?.value?.trim() || "";
-      try {
-        if (!remote.enabled) await remoteStart();
-        const body = { enabled: true };
-        if (token) body.authtoken = token;
-        const data = await apiPost("/api/remote/ngrok", body);
-        renderRemoteModal(data);
-        toast(data.public_url ? "Интернет-ссылка готова" : "Туннель включён");
-      } catch (err) {
-        toast(`ngrok: ${err.message || err}`);
-        try {
-          renderRemoteModal(await apiGet("/api/remote/info"));
-        } catch {
-          /* ignore */
-        }
-      }
+    $("ngrok-manage-open")?.addEventListener("click", openNgrokManager);
+    $("ngrok-manager-close")?.addEventListener("click", closeNgrokManager);
+    $("ngrok-rename-close")?.addEventListener("click", () => $("ngrok-rename-modal")?.classList.remove("open"));
+    $("ngrok-rename-cancel")?.addEventListener("click", () => $("ngrok-rename-modal")?.classList.remove("open"));
+    $("ngrok-rename-save")?.addEventListener("click", saveNgrokTokenName);
+    $("ngrok-rename-value")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") saveNgrokTokenName();
+      if (e.key === "Escape") $("ngrok-rename-modal")?.classList.remove("open");
     });
+    $("ngrok-rename-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("ngrok-rename-modal")) $("ngrok-rename-modal").classList.remove("open");
+    });
+    $("ngrok-manager-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("ngrok-manager-modal")) closeNgrokManager();
+    });
+    $("ngrok-token-add")?.addEventListener("click", async () => {
+      const token = $("ngrok-token-value")?.value?.trim() || "";
+      const name = $("ngrok-token-name")?.value?.trim() || "";
+      if (!token) { toast("Вставьте Authtoken"); return; }
+      try {
+        const data = await apiPost("/api/remote/ngrok/tokens", { action: "add", token, name });
+        $("ngrok-token-value").value = "";
+        $("ngrok-token-name").value = "";
+        renderRemoteModal(data);
+        renderNgrokManager(data.tokens);
+        toast("Токен добавлен");
+      } catch (err) { toast(err.message || "Не удалось добавить токен"); }
+    });
+    $("ngrok-token-list")?.addEventListener("click", handleNgrokTokenClick);
     $("remote-guide-open")?.addEventListener("click", () => $("remote-guide-modal")?.classList.add("open"));
     $("remote-guide-close")?.addEventListener("click", () => $("remote-guide-modal")?.classList.remove("open"));
     $("remote-guide-modal")?.addEventListener("click", (e) => {
