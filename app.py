@@ -2061,6 +2061,8 @@ def api_tokens_import():
             keep_unique_ngrok=bool(data.get("keep_unique_ngrok", True)),
         )
     except (ValueError, OSError) as exc:
+        if was_running:
+            _ensure_tunnel(storage.remote_settings())
         return jsonify({"error": str(exc)}), 400
     settings = storage.remote_settings()
     if settings.get("telegram_bot_token"):
