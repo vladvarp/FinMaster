@@ -2100,7 +2100,7 @@ def api_telegram_users():
                 telegram_send_html(
                     token,
                     chat_id,
-                    "Доступ не открыли. Чтобы попросить снова, напишите /start.",
+                    "В доступе отказано.",
                     {"remove_keyboard": True},
                 )
             except Exception:
