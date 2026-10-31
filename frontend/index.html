@@ -1716,7 +1716,7 @@
     </div>
   </div>
   <div class="modal" id="ngrok-manager-modal">
-    <div class="modal-card settings-pack-modal" role="dialog" aria-modal="true" aria-labelledby="ngrok-manager-title">
+    <div class="modal-card settings-pack-modal ngrok-manager-card" role="dialog" aria-modal="true" aria-labelledby="ngrok-manager-title">
       <h3 id="ngrok-manager-title">Токены ngrok</h3>
       <p>Выберите активный токен или добавьте новый. Полностью токен не показывается — только первые шесть символов.</p>
       <div id="ngrok-token-list" class="settings-pack-list"></div>
@@ -1726,6 +1726,16 @@
         <button type="button" class="btn primary" id="ngrok-token-add">Добавить токен</button>
       </div>
       <div class="modal-actions"><button class="btn" type="button" id="ngrok-manager-close">Закрыть</button></div>
+    </div>
+  </div>
+  <div class="modal" id="ngrok-rename-modal">
+    <div class="modal-card ngrok-rename-card" role="dialog" aria-modal="true" aria-labelledby="ngrok-rename-title">
+      <h3 id="ngrok-rename-title">Название токена</h3>
+      <label class="field"><span>Новое название</span><input id="ngrok-rename-value" type="text" maxlength="64" autocomplete="off" placeholder="Например, Рабочий аккаунт" /></label>
+      <div class="modal-actions">
+        <button class="btn" type="button" id="ngrok-rename-cancel">Отмена</button>
+        <button class="btn primary" type="button" id="ngrok-rename-save">Сохранить</button>
+      </div>
     </div>
   </div>
   <div class="toast" id="toast"></div>
