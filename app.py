@@ -53,7 +53,7 @@ from backend.telegram import send_link as telegram_send_link
 from backend.telegram import set_menu_button as telegram_set_menu
 from backend.telegram import push_open_controls as telegram_push_open
 from backend.telegram import send_html as telegram_send_html
-from backend.tunnel import TUNNEL
+from backend.tunnel import TUNNEL, ngrok_process_running
 from backend.watch import WATCHER
 from backend.pdf_bridge import PDF_BRIDGE
 
@@ -62,6 +62,13 @@ FRONTEND = os.path.join(ROOT, "frontend")
 FAQ_DIR = os.path.join(ROOT, "FAQ")
 
 app = Flask(__name__, static_folder=FRONTEND, static_url_path="")
+
+class DesktopBridge:
+    """Локальные функции для интерфейса pywebview."""
+
+    def ngrok_process_running(self) -> bool:
+        return ngrok_process_running()
+
 WINDOW = None
 GUIDE_WINDOW = None
 WINDOW_FULLSCREEN = False
@@ -3007,6 +3014,25 @@ def api_update():
         return jsonify({"error": str(exc)}), 400
     return api_quit()
 
+@app.post("/api/ngrok/force-stop")
+def api_ngrok_force_stop():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+
+    if os.name != "nt":
+        return jsonify({"error": "Действие доступно только в Windows."}), 400
+
+    bat_path = os.path.join(ROOT, "ngrok_stop.bat")
+
+    if not os.path.isfile(bat_path):
+        return jsonify({"error": "Файл ngrok_stop.bat не найден."}), 404
+
+    try:
+        os.startfile(bat_path)
+    except OSError as exc:
+        return jsonify({"error": f"Не удалось запустить батник: {exc}"}), 500
+
+    return jsonify({"ok": True})
 
 @app.post("/api/quit")
 def api_quit():
@@ -3159,6 +3185,7 @@ def main(splash=None) -> None:
         min_size=(1180, 740),
         maximized=storage.window_maximized(),
         background_color="#0b1220",
+        js_api=DesktopBridge(),
     )
     WINDOW_FULLSCREEN = False
 
@@ -3204,8 +3231,10 @@ def main(splash=None) -> None:
         persist_window_state()
         # Never call evaluate_js on this stack: WebView2 deadlocks the window.
         if FORCE_CLOSE or not (DIRTY or DICT_DIRTY):
+            TUNNEL.stop()
             threading.Timer(0.05, _close_guide_window).start()
             return True
+
         window = WINDOW
 
         def ask():

@@ -8,26 +8,57 @@
   <link rel="stylesheet" href="stand.css">
   <style>
     .remote-fold { max-width: 520px; }
+
+    .ngrok-process-status {
+      margin-left: 3px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--ok);
+    }
+
+    .ngrok-process-actions {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
   </style>
 </head>
 <body>
-  <p class="hint">Тот же блок, что в окне «Телефон». Точка зелёная — токен сохранён.</p>
+  <p class="hint">Тот же блок, что в окне «Телефон». Зелёная точка показывает, что токен сохранён. Надпись рядом с заголовком отражает состояние процесса ngrok.</p>
+
   <div class="remote-fold">
     <button type="button" class="remote-fold-head" tabindex="-1">
-      <span class="remote-fold-title">Токен ngrok<i class="token-dot on" title="Токен сохранён"></i></span>
+      <span class="remote-fold-title">
+        Токен ngrok
+        <i class="token-dot on" title="Токен сохранён"></i>
+        <span class="ngrok-process-status">Процесс запущен</span>
+      </span>
       <span class="remote-fold-ico">▾</span>
     </button>
+
     <div class="remote-fold-body">
       <div class="remote-ngrok-box show">
-        <label class="field"><span>Токен ngrok</span><input type="password" value="2abc-example" readonly tabindex="-1" aria-label="Токен ngrok"></label>
+        <label class="field">
+          <span>Токен ngrok</span>
+          <input type="password" value="2abc-example" readonly tabindex="-1" aria-label="Токен ngrok">
+        </label>
+
         <div class="remote-tg-actions">
           <button type="button" class="btn small" tabindex="-1">Сохранить и включить</button>
           <button type="button" class="btn small" tabindex="-1">Проверить связь</button>
         </div>
+
         <div class="remote-ngrok-status">Туннель отвечает. QR ведёт на https-адрес.</div>
+
+        <div class="ngrok-process-actions">
+          <button type="button" class="btn small danger" tabindex="-1">Завершить принудительно</button>
+        </div>
       </div>
     </div>
   </div>
+
   <script src="chrome.js"></script>
   <script src="fit.js"></script>
 </body>

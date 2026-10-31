@@ -1188,7 +1188,11 @@
           </label>
           <div class="remote-fold collapsed" data-remote-fold>
             <button type="button" class="remote-fold-head">
-              <span class="remote-fold-title">Токен ngrok<i class="token-dot" id="ngrok-token-dot" title="Токен не сохранён"></i></span>
+              <span class="remote-fold-title">
+                Токен ngrok
+                <i class="token-dot" id="ngrok-token-dot" title="Токен не сохранён"></i>
+                <span class="ngrok-process-status" id="ngrok-process-status">Проверка…</span>
+              </span>
               <span class="remote-fold-ico">▾</span>
             </button>
             <div class="remote-fold-body">
@@ -1202,6 +1206,15 @@
                   <button type="button" class="btn small" id="remote-ngrok-check">Проверить связь</button>
                 </div>
                 <div class="remote-ngrok-status" id="remote-ngrok-status"></div>
+                <div class="ngrok-process-actions">
+                  <span id="ngrok-process-status"></span>
+                  <button
+                    type="button"
+                    class="btn small danger"
+                    id="ngrok-force-stop"
+                    hidden
+                  >Завершить принудительно</button>
+                </div>
               </div>
             </div>
           </div>

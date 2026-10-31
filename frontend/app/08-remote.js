@@ -402,6 +402,46 @@
     grip?.addEventListener("pointerup", onUp);
   }
 
+  function updateNgrokProcessStatus(running) {
+    const status = $("ngrok-process-status");
+    const button = $("ngrok-force-stop");
+  
+    const accessEnabled = !!$("remote-autostart")?.checked;
+    const ngrokEnabled = !!$("remote-ngrok")?.checked;
+  
+    if (status) {
+      status.textContent = running
+        ? "Процесс запущен"
+        : "Процесс не запущен";
+  
+      status.classList.toggle("running", running);
+      status.classList.toggle("stopped", !running);
+    }
+  
+    if (button) {
+      button.hidden = !(running && (!accessEnabled || !ngrokEnabled));
+    }
+  }
+  
+  
+  // Обработчик кнопки принудительного завершения ngrok
+  $("ngrok-force-stop")?.addEventListener("click", async () => {
+    const button = $("ngrok-force-stop");
+    if (!button || button.disabled) return;
+  
+    button.disabled = true;
+  
+    try {
+      await apiPost("/api/ngrok/force-stop", {});
+      toast("Запущено принудительное завершение ngrok");
+    } catch (err) {
+      toast(`Не удалось запустить завершение: ${err.message || err}`);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  
   function remoteWatchStart() {
     if (remote.watch) return;
   
@@ -412,6 +452,14 @@
       }
   
       if (!state.desktop) return;
+  
+      // Локальная проверка процесса ngrok.exe через pywebview.
+      try {
+        const running = await window.pywebview.api.ngrok_process_running();
+        updateNgrokProcessStatus(!!running);
+      } catch {
+        // Если локальный мост временно недоступен, сохраняем последнее состояние.
+      }
   
       try {
         const probe = $("remote-ngrok")?.checked ? "?probe=1" : "";

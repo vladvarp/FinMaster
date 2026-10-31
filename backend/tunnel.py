@@ -10,6 +10,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import csv
+import io
 from typing import Any
 
 from backend import netlog
@@ -22,6 +24,38 @@ def find_ngrok() -> str:
             return path
     return ""
 
+def ngrok_process_running() -> bool:
+    """Проверяет наличие ngrok.exe среди процессов Windows."""
+    if os.name != "nt":
+        return False
+
+    try:
+        result = subprocess.run(
+            [
+                "tasklist",
+                "/FI", "IMAGENAME eq ngrok.exe",
+                "/FO", "CSV",
+                "/NH",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=2,
+            creationflags=_no_window(),
+            check=False,
+        )
+
+        if result.returncode != 0:
+            return False
+
+        rows = csv.reader(io.StringIO(result.stdout))
+        return any(
+            row and row[0].strip().lower() == "ngrok.exe"
+            for row in rows
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 def inspect_tunnels(timeout: float = 1.2) -> list[dict[str, Any]]:
     try:
