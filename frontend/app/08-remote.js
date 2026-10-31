@@ -1026,8 +1026,6 @@
     if (ngrokChk) ngrokChk.checked = !!remote.ngrok;
     const ngrokCheck = $("remote-ngrok-check");
     if (ngrokCheck) ngrokCheck.disabled = !remote.ngrok;
-    const tokenInput = $("remote-ngrok-token");
-    if (tokenInput && remote.ngrokReady && !tokenInput.value) tokenInput.placeholder = "токен сохранён — можно не вводить заново";
     const tgToken = $("remote-tg-token");
     if (tgToken && remote.telegramReady && !tgToken.value) tgToken.placeholder = "токен сохранён — можно не вводить заново";
     renderTelegramPeople();
@@ -1051,10 +1049,8 @@
   }
 
   async function persistRemoteSecrets() {
-    const ngrokToken = $("remote-ngrok-token")?.value?.trim() || "";
     const tgToken = $("remote-tg-token")?.value?.trim() || "";
     try {
-      if (ngrokToken) await apiPost("/api/remote/ngrok", { authtoken: ngrokToken });
       if (tgToken) await apiPost("/api/remote/telegram", { token: tgToken });
     } catch {
       /* токены уже на диске или поля пустые */
@@ -2210,9 +2206,7 @@
       const ngrokCheck = $("remote-ngrok-check");
       if (ngrokCheck) ngrokCheck.disabled = !on;
       if (on) $("remote-ngrok-box")?.closest(".remote-fold")?.classList.remove("collapsed");
-      const token = $("remote-ngrok-token")?.value?.trim() || "";
       const body = { enabled: on };
-      if (token) body.authtoken = token;
       try {
         if (on && !remote.enabled) await remoteStart();
         renderRemoteModal(await apiPost("/api/remote/ngrok", body));
