@@ -120,11 +120,80 @@ def absorb_remote(remote: dict[str, Any]) -> bool:
 def update_tokens(*, ngrok_token: str | None = None, telegram_bot_token: str | None = None) -> dict[str, Any]:
     data = load()
     if ngrok_token is not None and storage.valid_ngrok_token(ngrok_token):
-        data["ngrok_token"] = str(ngrok_token).strip()
+        _store_ngrok_token(data, ngrok_token, "")
     if telegram_bot_token is not None and storage.valid_telegram_token(telegram_bot_token):
         data["telegram_bot_token"] = str(telegram_bot_token).strip()
     save(data)
     return _clone(data)
+
+
+def ngrok_token_list() -> list[dict[str, Any]]:
+    data = load()
+    active_id = str(data.get("active_ngrok_id") or "")
+    return [{"id": x["id"], "name": x.get("name") or "", "prefix": x["token"][:6], "active": x["id"] == active_id}
+            for x in data.get("ngrok_tokens") or []]
+
+
+def active_ngrok_token() -> str:
+    data = load()
+    active_id = str(data.get("active_ngrok_id") or "")
+    item = next((x for x in data.get("ngrok_tokens") or [] if x.get("id") == active_id), None)
+    return str(item.get("token") or "") if item else ""
+
+
+def _store_ngrok_token(data: dict[str, Any], token: str, name: str = "") -> dict[str, Any]:
+    value = str(token or "").strip()
+    if not storage.valid_ngrok_token(value):
+        raise ValueError("Это не токен ngrok. Проверьте Authtoken.")
+    items = data.setdefault("ngrok_tokens", [])
+    item = next((x for x in items if x.get("token") == value), None)
+    if item is None:
+        item = {"id": hashlib.sha256(value.encode("utf-8")).hexdigest()[:16], "token": value,
+                "name": " ".join(str(name or "").split())[:64]}
+        items.append(item)
+    elif name:
+        item["name"] = " ".join(str(name).split())[:64]
+    if not data.get("active_ngrok_id"):
+        data["active_ngrok_id"] = item["id"]
+    return item
+
+
+def add_ngrok_token(token: str, name: str = "") -> dict[str, Any]:
+    data = load()
+    item = _store_ngrok_token(data, token, name)
+    save(data)
+    return {"tokens": ngrok_token_list(), "active_id": data.get("active_ngrok_id"), "id": item["id"]}
+
+
+def rename_ngrok_token(token_id: str, name: str) -> list[dict[str, Any]]:
+    data = load()
+    item = next((x for x in data.get("ngrok_tokens") or [] if x.get("id") == token_id), None)
+    if not item:
+        raise ValueError("Токен не найден.")
+    item["name"] = " ".join(str(name or "").split())[:64]
+    save(data)
+    return ngrok_token_list()
+
+
+def select_ngrok_token(token_id: str) -> dict[str, Any]:
+    data = load()
+    if not any(x.get("id") == token_id for x in data.get("ngrok_tokens") or []):
+        raise ValueError("Токен не найден.")
+    data["active_ngrok_id"] = token_id
+    save(data)
+    return {"tokens": ngrok_token_list(), "active_id": token_id, "token": active_ngrok_token()}
+
+
+def delete_ngrok_token(token_id: str) -> dict[str, Any]:
+    data = load()
+    before = data.get("ngrok_tokens") or []
+    data["ngrok_tokens"] = [x for x in before if x.get("id") != token_id]
+    if len(before) == len(data["ngrok_tokens"]):
+        raise ValueError("Токен не найден.")
+    if data.get("active_ngrok_id") == token_id:
+        data["active_ngrok_id"] = data["ngrok_tokens"][0]["id"] if data["ngrok_tokens"] else ""
+    save(data)
+    return {"tokens": ngrok_token_list(), "active_id": data.get("active_ngrok_id"), "token": active_ngrok_token()}
 
 
 def users() -> list[dict[str, str]]:
@@ -326,7 +395,9 @@ def remove_user(chat_id: str) -> dict[str, str] | None:
 def export_parts() -> list[dict[str, Any]]:
     data = load()
     parts: list[dict[str, Any]] = []
-    if data.get("ngrok_token"):
+    if data.get("ngrok_tokens"):
+        parts.append({"id": "ngrok", "label": "Токены ngrok", "on": True, "detail": str(len(data["ngrok_tokens"])) + " шт."})
+    elif data.get("ngrok_token"):
         parts.append({"id": "ngrok", "label": "Токен ngrok", "on": True, "detail": ""})
     users_n = len(data.get("users") or [])
     if data.get("telegram_bot_token") or users_n:
@@ -338,8 +409,16 @@ def export_parts() -> list[dict[str, Any]]:
 def inspect_export(file_path: str) -> list[dict[str, Any]]:
     payload = _read_export(file_path)
     parts: list[dict[str, Any]] = []
-    if payload.get("ngrok_token"):
-        parts.append({"id": "ngrok", "label": "Токен ngrok", "on": True, "detail": ""})
+    imported = payload.get("ngrok_tokens") or ([{"token": payload.get("ngrok_token"), "name": ""}] if payload.get("ngrok_token") else [])
+    if imported:
+        current = load().get("ngrok_tokens") or []
+        existing = {x.get("token"): x for x in current}
+        conflicts = [x for x in imported if isinstance(x, dict) and x.get("token") in existing]
+        detail = str(len(imported)) + " шт."
+        if conflicts:
+            detail += "; совпадений: " + str(len(conflicts))
+        parts.append({"id": "ngrok", "label": "Токены ngrok", "on": True, "detail": detail,
+                      "conflicts": [{"prefix": str(x.get("token") or "")[:6]} for x in conflicts]})
     users_n = len(payload.get("users") or [])
     if payload.get("telegram_bot_token") or users_n:
         detail = f"{users_n} пол." if users_n else "без пользователей"
@@ -354,9 +433,11 @@ def write_export(file_path: str, ids: list[str]) -> None:
     data = load()
     payload: dict[str, Any] = {"kind": _KIND, "version": 1}
     if "ngrok" in chosen:
-        if not data.get("ngrok_token"):
-            raise ValueError("Токен ngrok ещё не сохранён.")
-        payload["ngrok_token"] = data["ngrok_token"]
+        if data.get("ngrok_tokens"):
+            payload["ngrok_tokens"] = data["ngrok_tokens"]
+            payload["active_ngrok_id"] = data.get("active_ngrok_id") or ""
+        elif data.get("ngrok_token"):
+            payload["ngrok_token"] = data["ngrok_token"]
     if "telegram" in chosen:
         if not data.get("telegram_bot_token") and not data.get("users"):
             raise ValueError("Токен бота и пользователи ещё не сохранены.")
@@ -382,16 +463,35 @@ def write_export(file_path: str, ids: list[str]) -> None:
                 pass
 
 
-def apply_export(file_path: str, ids: list[str]) -> None:
+def apply_export(file_path: str, ids: list[str], *, keep_unique_ngrok: bool = True) -> None:
     chosen = set(_clean_ids(ids))
     if not chosen:
         raise ValueError("Отметьте, что импортировать.")
     payload = _read_export(file_path)
     data = load()
     if "ngrok" in chosen:
-        token = str(payload.get("ngrok_token") or "").strip()
-        if token and storage.valid_ngrok_token(token):
-            data["ngrok_token"] = token
+        imported = payload.get("ngrok_tokens")
+        if not isinstance(imported, list):
+            old_token = str(payload.get("ngrok_token") or "").strip()
+            imported = [{"token": old_token, "name": ""}] if old_token else []
+        imported_values = {str(x.get("token") or "").strip() for x in imported if isinstance(x, dict)}
+        merged = [x for x in (data.get("ngrok_tokens") or []) if keep_unique_ngrok and x.get("token") not in imported_values]
+        for raw in imported:
+            if not isinstance(raw, dict):
+                continue
+            value = str(raw.get("token") or "").strip()
+            if not storage.valid_ngrok_token(value):
+                continue
+            item = {"id": hashlib.sha256(value.encode("utf-8")).hexdigest()[:16], "token": value,
+                    "name": " ".join(str(raw.get("name") or "").split())[:64]}
+            found = next((x for x in merged if x.get("token") == value), None)
+            if found:
+                found.update(item)
+            else:
+                merged.append(item)
+        data["ngrok_tokens"] = merged
+        active = str(payload.get("active_ngrok_id") or "")
+        data["active_ngrok_id"] = active if any(x.get("id") == active for x in merged) else (merged[0]["id"] if merged else "")
     if "telegram" in chosen:
         token = str(payload.get("telegram_bot_token") or "").strip()
         if token and storage.valid_telegram_token(token):
@@ -425,6 +525,8 @@ def _read_export(file_path: str) -> dict[str, Any]:
 def _blank() -> dict[str, Any]:
     return {
         "ngrok_token": "",
+        "ngrok_tokens": [],
+        "active_ngrok_id": "",
         "telegram_bot_token": "",
         "users": [],
         "pending": [],
@@ -438,11 +540,22 @@ def _normalize(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         return data
 
-    ngrok = str(raw.get("ngrok_token") or "").strip()
+    raw_tokens = raw.get("ngrok_tokens") if isinstance(raw.get("ngrok_tokens"), list) else []
+    for item in raw_tokens:
+        if isinstance(item, dict):
+            token = str(item.get("token") or "").strip()
+            if storage.valid_ngrok_token(token):
+                _store_ngrok_token(data, token, str(item.get("name") or ""))
+    legacy = str(raw.get("ngrok_token") or "").strip()
+    if not data["ngrok_tokens"] and storage.valid_ngrok_token(legacy):
+        _store_ngrok_token(data, legacy, "")
+    active = str(raw.get("active_ngrok_id") or "")
+    if any(x["id"] == active for x in data["ngrok_tokens"]):
+        data["active_ngrok_id"] = active
+    elif data["ngrok_tokens"]:
+        data["active_ngrok_id"] = data["ngrok_tokens"][0]["id"]
+    data["ngrok_token"] = next((x["token"] for x in data["ngrok_tokens"] if x["id"] == data["active_ngrok_id"]), "")
     bot = str(raw.get("telegram_bot_token") or "").strip()
-
-    if storage.valid_ngrok_token(ngrok):
-        data["ngrok_token"] = ngrok
     if storage.valid_telegram_token(bot):
         data["telegram_bot_token"] = bot
 
