@@ -961,6 +961,8 @@ def _ensure_tunnel(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     snap = TUNNEL.snapshot()
     if not cfg.get("ngrok"):
         return {**snap, "wanted": False}
+    if not cfg.get("ngrok_token"):
+        return {**snap, "wanted": True, "error": "Выберите токен ngrok в управлении токенами."}
     if snap.get("url"):
         _telegram_sync_menu()
         return {**snap, "wanted": True}
@@ -1012,7 +1014,7 @@ def _remote_public(ip: str | None = None, via: str | None = None) -> dict[str, A
         "ngrok_ready": bool(settings.get("ngrok_token")),
         "ngrok_tokens": secrets.ngrok_token_list(),
         "ngrok_active_id": next((item["id"] for item in secrets.ngrok_token_list() if item.get("active")), ""),
-        "ngrok_active_label": next((item.get("name") or item.get("prefix") for item in secrets.ngrok_token_list() if item.get("active")), ""),
+        "ngrok_active_label": next(((item.get("name") + " (" + item.get("prefix") + ")") if item.get("name") else item.get("prefix") for item in secrets.ngrok_token_list() if item.get("active")), ""),
         "telegram_ready": bool(settings.get("telegram_bot_token")),
         "telegram_chat_id": str(settings.get("telegram_chat_id") or ""),
         "telegram_users": settings.get("telegram_users") or [],
@@ -2316,6 +2318,8 @@ def api_remote_ngrok():
         if storage.valid_ngrok_token(token):
             updates["ngrok_token"] = token
     if "enabled" in data:
+        if data.get("enabled") and not settings.get("ngrok_token"):
+            return jsonify({"error": "Сначала добавьте и выберите токен ngrok."}), 400
         updates["ngrok"] = bool(data.get("enabled"))
         if updates["ngrok"]:
             updates["via"] = "ngrok"
