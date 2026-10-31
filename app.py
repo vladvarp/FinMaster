@@ -2318,7 +2318,7 @@ def api_remote_ngrok():
         if storage.valid_ngrok_token(token):
             updates["ngrok_token"] = token
     if "enabled" in data:
-        if data.get("enabled") and not settings.get("ngrok_token"):
+        if data.get("enabled") and not storage.remote_settings().get("ngrok_token"):
             return jsonify({"error": "Сначала добавьте и выберите токен ngrok."}), 400
         updates["ngrok"] = bool(data.get("enabled"))
         if updates["ngrok"]:
