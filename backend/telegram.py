@@ -929,9 +929,12 @@ def _callback_notice(data: str) -> str:
         "PC": "Открываю на компьютере…",
         "D": "Карточка заказа…",
         "Vr": "Отменяю распознавание…",
+        "Ng": "Переключаю мост ngrok…",
     }
     if data in fixed:
         return fixed[data]
+    if data.startswith("Ll:"):
+        return "Получаю локальную ссылку…"
     if data.startswith("Ri:"):
         return "Открываю отчёт…"
     if data.startswith("Oi:"):
@@ -1179,6 +1182,7 @@ def access_rows(url: str, info: Any = None) -> list[list[dict[str, Any]]]:
     link = str(url or flags.get("url") or "").strip()
     can_open = bool(flags.get("access")) and link.startswith(("http://", "https://"))
     rows: list[list[dict[str, Any]]] = []
+
     if can_open:
         rows.append([_open_btn("Телефон", link)])
         bank = _bank_link(link)
@@ -1190,7 +1194,14 @@ def access_rows(url: str, info: Any = None) -> list[list[dict[str, Any]]]:
         rows.append([_btn("Обновить ссылку", "L"), _btn("Новая ссылка", "N")])
     else:
         rows.append([_btn("Получить ссылку", "L")])
+
     rows.append([web_access_btn(flags, "Wa")])
+    rows.append([
+        _btn(
+            "Выключить мост ngrok" if flags.get("ngrok") else "Включить мост ngrok",
+            "Ng",
+        )
+    ])
     rows.append([_btn("Отчёты", "R"), _btn("Заказы", "O")])
     return rows
 
@@ -1247,6 +1258,61 @@ def send_access(token: str, chat_id: str, url: str, info: Any = None, message_id
     link = str(url or flags.get("url") or "").strip()
     send_html(token, chat_id, access_text(link, flags), _inline(access_rows(link, flags)), preview=False, message_id=message_id)
 
+def send_link_choice(token: str, chat_id: str, info: Any = None) -> None:
+    flags = _status(info)
+
+    if not flags.get("access"):
+        send_access(token, chat_id, str(flags.get("url") or ""), flags)
+        return
+
+    lan_urls = flags.get("lan_urls")
+    if not isinstance(lan_urls, list):
+        lan_urls = []
+
+    if not lan_urls and flags.get("lan_url"):
+        lan_urls = [flags["lan_url"]]
+
+    lan_urls = [
+        str(url).strip()
+        for url in lan_urls
+        if str(url).strip().startswith(("http://", "https://"))
+    ]
+
+    rows: list[list[dict[str, Any]]] = []
+    lines = ["<b>Выберите тип подключения</b>"]
+
+    for index, url in enumerate(lan_urls[:2]):
+        lines.append(
+            f"\n<b>Локальная сеть {index + 1}</b>\n"
+            f"<code>{html_esc(url)}</code>"
+        )
+        rows.append([_btn(f"LAN {index + 1}", f"Ll:{index}")])
+
+    public_url = str(flags.get("public_url") or "").strip()
+
+    if flags.get("ngrok") and public_url.startswith(("http://", "https://")):
+        lines.append(
+            "\n<b>Через интернет</b>\n"
+            f"<code>{html_esc(public_url)}</code>"
+        )
+        rows.append([_btn("Интернет (ngrok)", "Lg")])
+    elif not flags.get("ngrok"):
+        lines.append(
+            "\nИнтернет-ссылка недоступна: мост ngrok выключен."
+        )
+    else:
+        lines.append(
+            "\nМост ngrok включён, но публичная ссылка пока недоступна."
+        )
+
+    if not lan_urls and not public_url:
+        lines.append(
+            "\nНе удалось получить адреса. Проверьте окно «Телефон» на компьютере."
+        )
+
+    rows.append([web_access_btn(flags)])
+
+    send_html(token, chat_id, "\n".join(lines), _inline(rows))
 
 def send_link(token: str, chat_id: str, url: str, info: Any = None) -> str:
     token = str(token or "").strip()
@@ -1391,6 +1457,7 @@ class TelegramBot:
         self._on_offset: Callable[[int], None] | None = None
         self._on_rotate: Callable[[], Any] | None = None
         self._on_access: Callable[[bool], Any] | None = None
+        self._on_ngrok: Callable[[bool], Any] | None = None
         self._skip = True
         self._chats: dict[str, ChatSession] = {}
         self._group_told: set[str] = set()
@@ -1490,6 +1557,7 @@ class TelegramBot:
         on_offset: Callable[[int], None] | None = None,
         on_rotate: Callable[[], Any] | None = None,
         on_access: Callable[[bool], Any] | None = None,
+        on_ngrok: Callable[[bool], Any] | None = None,
     ) -> None:
         token = str(token or "").strip()
         with self._lock:
@@ -1498,6 +1566,7 @@ class TelegramBot:
             self._on_offset = on_offset
             self._on_rotate = on_rotate
             self._on_access = on_access
+            self._on_ngrok = on_ngrok
             if not same:
                 self._token = token
                 self._offset = max(0, int(offset or 0))
@@ -1936,7 +2005,7 @@ class TelegramBot:
             return True
         if reply.action == "link":
             info = self._status_for(chat_id)
-            send_access(token, chat_id, str(info.get("url") or ""), info)
+            send_link_choice(token, chat_id, info)
             return True
         if reply.action == "bank":
             info = self._status_for(chat_id)
@@ -2063,6 +2132,8 @@ class TelegramBot:
             "ST": "снимок текстом",
             "Wh": "доступ к веб",
             "Wa": "доступ к веб",
+            "Lg": "Получаю интернет-ссылку…",
+            "Ng": "мост ngrok",
         }
         hint = labels.get(data)
         if not hint:
@@ -2083,7 +2154,45 @@ class TelegramBot:
             slot.ask_body = {"data": data, "button": hint, "chat_id": chat_id, "from": slot.who}
         if data == "L":
             info = self._status_for(chat_id)
-            send_access(token, chat_id, str(info.get("url") or ""), info)
+            send_link_choice(token, chat_id, info)
+            return
+
+        if data.startswith("Ll:") or data == "Lg":
+            info = self._status_for(chat_id)
+
+            if not info.get("access"):
+                send_access(token, chat_id, str(info.get("url") or ""), info)
+                return
+
+            if data == "Lg":
+                url = str(info.get("public_url") or "").strip()
+                available = bool(info.get("ngrok"))
+            else:
+                try:
+                    index = int(data.split(":", 1)[1])
+                except (ValueError, IndexError):
+                    send_link_choice(token, chat_id, info)
+                    return
+
+                lan_urls = info.get("lan_urls")
+                if not isinstance(lan_urls, list):
+                    lan_urls = []
+
+                if not lan_urls and info.get("lan_url"):
+                    lan_urls = [info["lan_url"]]
+
+                url = (
+                    str(lan_urls[index]).strip()
+                    if 0 <= index < len(lan_urls)
+                    else ""
+                )
+                available = True
+
+            if not available or not url.startswith(("http://", "https://")):
+                send_link_choice(token, chat_id, info)
+                return
+
+            send_access(token, chat_id, url, info)
             return
         if data == "N":
             self._ask_new_link(token, chat_id)
@@ -2130,6 +2239,33 @@ class TelegramBot:
             return
         session = self._chat(chat_id)
         send_access(token, chat_id, str(flags.get("url") or ""), flags, session.message_id)
+
+    def _toggle_ngrok(self, token: str, chat_id: str) -> None:
+        info = self._status_for(chat_id)
+        want = not bool(info.get("ngrok"))
+
+        with self._lock:
+            cb = self._on_ngrok
+
+        if cb is None:
+            send_html(token, chat_id, "Управление мостом ngrok недоступно.")
+            return
+
+        try:
+            result = cb(want)
+        except Exception as exc:
+            send_html(token, chat_id, f"Не удалось переключить ngrok: {html_esc(str(exc))}")
+            return
+
+        flags = _status(result if isinstance(result, dict) else None)
+        session = self._chat(chat_id)
+        send_access(
+            token,
+            chat_id,
+            str(flags.get("url") or ""),
+            flags,
+            session.message_id,
+        )
 
     def _show_voice(self, token: str, chat_id: str) -> None:
         data = voice.catalog()
@@ -2286,7 +2422,9 @@ class TelegramBot:
 
     def _dispatch(self, token: str, chat_id: str, data: str) -> None:
         session = self._chat(chat_id)
-        if data in {"Wh", "Wa"}:
+        if data == "Ng":
+            self._toggle_ngrok(token, chat_id)
+        elif data in {"Wh", "Wa"}:
             self._toggle_web_access(token, chat_id, data == "Wh")
         elif data == "Bk":
             info = self._status_for(chat_id)

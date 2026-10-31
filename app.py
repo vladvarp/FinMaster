@@ -878,18 +878,32 @@ def _telegram_sync_menu() -> None:
 
 
 def _telegram_live_url(chat_id: str = "") -> dict[str, Any]:
-    """Возвращает ссылку и состояние тумблеров. Выключенный доступ сам не поднимает."""
+    """Возвращает ссылки и состояние удалённого доступа для Telegram."""
     settings = storage.remote_settings()
     access_on = bool(REMOTE.enabled)
     ngrok_on = bool(settings.get("ngrok"))
-    url = ""
+
+    public = {}
     if access_on:
         if ngrok_on:
             _ensure_tunnel(settings)
         public = _remote_public()
-        url = str(public.get("public_url") or public.get("url") or "")
+
     _telegram_sync_menu()
-    return {"url": url, "access": access_on, "ngrok": ngrok_on}
+
+    lan_urls = [
+        _mobile_url(f"http://{ip}:{SERVER_PORT}", REMOTE.token or settings["token"])
+        for ip in lan_candidates()
+    ]
+
+    return {
+        "url": str(public.get("public_url") or public.get("url") or ""),
+        "lan_url": str(public.get("lan_url") or (lan_urls[0] if lan_urls else "")),
+        "lan_urls": lan_urls,
+        "public_url": str(public.get("public_url") or ""),
+        "access": access_on,
+        "ngrok": ngrok_on,
+    }
 
 
 def _set_web_access(enabled: bool) -> dict[str, Any]:
@@ -904,12 +918,25 @@ def _set_web_access(enabled: bool) -> dict[str, Any]:
         storage.save_remote_settings(autostart=False)
     return _telegram_live_url()
 
+def _set_ngrok(enabled: bool) -> dict[str, Any]:
+    """Включает или выключает мост ngrok независимо от веб-доступа."""
+    settings = storage.save_remote_settings(ngrok=enabled)
+
+    if enabled:
+        if REMOTE.enabled:
+            _ensure_tunnel(settings)
+    else:
+        TUNNEL.stop()
+
+    return _telegram_live_url()
+
 
 def _start_telegram(settings: dict[str, Any] | None = None) -> None:
     cfg = settings or storage.remote_settings()
     token = str(cfg.get("telegram_bot_token") or TELEGRAM.token() or "").strip()
     if not token:
         return
+
     TELEGRAM.start(
         token,
         int(cfg.get("telegram_offset") or 0),
@@ -917,6 +944,7 @@ def _start_telegram(settings: dict[str, Any] | None = None) -> None:
         on_offset=lambda value: storage.save_remote_settings(telegram_offset=value),
         on_rotate=_rotate_remote_link,
         on_access=_set_web_access,
+        on_ngrok=_set_ngrok,
     )
     _telegram_sync_menu()
 
