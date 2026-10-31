@@ -877,3 +877,9 @@ html.fm-pc-locked .palette {
 #ngrok-rename-modal .ngrok-rename-card {
   width: min(420px, calc(100vw - 32px));
 }
+
+/* Отступ между содержимым окон ngrok и нижними кнопками */
+#ngrok-manager-modal .ngrok-manager-card > .modal-actions,
+#ngrok-rename-modal .ngrok-rename-card > .modal-actions {
+  margin-top: 14px;
+}
