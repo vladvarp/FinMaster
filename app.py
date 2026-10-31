@@ -2042,10 +2042,20 @@ def api_tokens_import():
     if not _is_local():
         return jsonify({"error": "Только на этом компьютере."}), 403
     data = request.get_json(silent=True) or {}
+    ids = list(data.get("ids") or [])
+    was_running = bool("ngrok" in ids and storage.remote_settings().get("ngrok") and REMOTE.enabled)
+    if was_running:
+        TUNNEL.stop()
+        for _ in range(12):
+            if not ngrok_process_running():
+                break
+            time.sleep(0.25)
+        if ngrok_process_running():
+            return jsonify({"error": "ngrok.exe ещё работает. Его нужно завершить принудительно через ngrok_stop.bat.", "force_required": True}), 409
     try:
         secrets.apply_export(
             str(data.get("path") or ""),
-            list(data.get("ids") or []),
+            ids,
             keep_unique_ngrok=bool(data.get("keep_unique_ngrok", True)),
         )
     except (ValueError, OSError) as exc:
