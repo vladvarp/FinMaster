@@ -213,8 +213,8 @@
 
 .doc {
   width: 100%;
-  max-width: none;
-  margin: 0;
+  max-width: 1480px;
+  margin: 0 auto;
   padding: 8px 28px 80px;
 }
 
@@ -275,3 +275,10 @@
   .theme { width: 40px; justify-content: center; padding: 6px; }
   .top-divider { margin: 0 1px; }
 }
+
+/* Тактильная отдача: лёгкое нажатие и понятный фокус */
+.nav-btn, .nav-sub, .hit-btn { transition: background .16s ease, color .16s ease, transform .16s ease; }
+.nav-btn:active, .nav-sub:active, .hit-btn:active,
+.menu:active, .theme:active, .nav-step:active:not(:disabled) { transform: scale(.975); }
+.search { transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
+.search:focus { box-shadow: var(--focus); }
