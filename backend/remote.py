@@ -314,9 +314,9 @@ class RemoteSession:
                 changed = True
         return changed
 
-    def touch(self, cid: str, kind: str = "mobile", name: str = "") -> None:
+    def touch(self, cid: str, kind: str = "mobile", name: str = "") -> bool:
         if not cid:
-            return
+            return False
         now = time.time()
         surface = kind if kind in {"mobile", "bank", "desk"} else "mobile"
         with self._cond:
@@ -334,6 +334,7 @@ class RemoteSession:
                 netlog.add("client", f"В сети: {name or cid} · {surface}", level="ok", source=surface)
             if is_new or surface_new or pruned:
                 self._bump()
+            return surface_new
 
     def _desk_clear_locked(self) -> None:
         self._desk_id = ""
