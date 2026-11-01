@@ -158,20 +158,44 @@
           shell.classList.remove("nav-open");
         });
         box.appendChild(btn);
-        (item.subs || []).forEach((child) => {
+        const subs = item.subs || [];
+        if (item.id !== active || !subs.length) return;
+        const wrap = document.createElement("div");
+        wrap.className = "nav-subs";
+        subs.forEach((child) => {
           const childBtn = document.createElement("button");
           childBtn.type = "button";
-          childBtn.className = "nav-sub" + (item.id === active && child.id === sub ? " active" : "");
+          childBtn.className = "nav-sub" + (child.id === sub ? " active" : "");
           childBtn.textContent = child.title;
           childBtn.addEventListener("click", () => {
             location.hash = item.id + "/" + child.id;
             shell.classList.remove("nav-open");
           });
-          box.appendChild(childBtn);
+          wrap.appendChild(childBtn);
         });
+        box.appendChild(wrap);
       });
       nav.appendChild(box);
     });
+    const current = nav.querySelector(".nav-sub.active") || nav.querySelector(".nav-btn.active");
+    if (!current) return;
+    const navRect = nav.getBoundingClientRect();
+    const rect = current.getBoundingClientRect();
+    if (rect.top < navRect.top || rect.bottom > navRect.bottom) current.scrollIntoView({ block: "nearest" });
+  }
+
+  let returnTimer = 0;
+  function holdReturn(on) {
+    document.documentElement.classList.toggle("is-returning", !!on);
+    clearTimeout(returnTimer);
+  }
+  function releaseReturn() {
+    clearTimeout(returnTimer);
+    returnTimer = setTimeout(() => document.documentElement.classList.remove("is-returning"), 560);
+  }
+
+  function takeScroll() {
+    return window.FAQTakeScroll ? window.FAQTakeScroll() : null;
   }
 
   function markText(node, re) {
@@ -251,7 +275,7 @@
         const target = hit.item.id + (hit.sub ? "/" + hit.sub : "");
         pending = { id: hit.item.id, sub: hit.sub || "", words: parsed.words, phrases: parsed.phrases, heading: hit.heading };
         shell.classList.remove("nav-open");
-        if ((location.hash || "").slice(1) === target) load(hit.item.id);
+        if ((location.hash || "").slice(1) === target) load(hit.item.id, null);
         else location.hash = target;
       });
       btn.addEventListener("keydown", (event) => moveHit(event, index));
@@ -306,8 +330,10 @@
     });
   }
 
-  async function load(id) {
+  async function load(id, backY) {
     const token = ++loadToken;
+    const returning = backY != null;
+    holdReturn(returning);
     if (!(search.value || "").trim()) renderNav(id);
     doc.classList.add("is-loading");
     here.hidden = true;
@@ -316,12 +342,17 @@
       if (!res.ok) throw new Error(String(res.status));
       const html = await res.text();
       if (token !== loadToken) return;
+      const jump = pending && pending.id === id ? pending : null;
+      pending = null;
 
       const updateContent = () => {
         doc.innerHTML = html;
         doc.classList.remove("is-loading");
+        showSub();
+        if (returning) window.scrollTo(0, backY);
+        else if (!jump) window.scrollTo(0, 0);
       };
-      if (document.startViewTransition) {
+      if (!returning && document.startViewTransition) {
         let updated = false;
         try {
           const transition = document.startViewTransition(() => {
@@ -344,8 +375,6 @@
       showSub();
       if (window.FAQLive) await window.FAQLive.mount(visibleRoot());
       if (token !== loadToken) return;
-      const jump = pending && pending.id === id ? pending : null;
-      pending = null;
       if (jump) highlight(doc, jump.words.concat(jump.phrases));
       fillHere();
       if (!(search.value || "").trim()) renderNav(id);
@@ -355,7 +384,8 @@
         (head || doc.querySelector("mark.hit"))?.scrollIntoView({ behavior: "smooth", block: "start" });
       } else if (jump) {
         doc.querySelector("mark.hit")?.scrollIntoView({ behavior: "smooth", block: "center" });
-      } else window.scrollTo(0, 0);
+      } else if (returning) window.scrollTo(0, backY);
+      if (returning) releaseReturn();
     } catch (err) {
       if (token !== loadToken) return;
       doc.innerHTML = "<h1>Раздел не открылся</h1><p>Проверьте, что рядом с этой страницей лежит папка <code>topics</code>. Справка рассчитана на обычные ссылки: и из окна программы, и с сайта репозитория.</p>";
@@ -403,6 +433,9 @@
 
   window.addEventListener("hashchange", () => {
     const id = currentId();
+    const backY = takeScroll();
+    const returning = backY != null;
+    holdReturn(returning);
     if (loadedId === id && doc.querySelector("[data-sub]")) {
       showSub();
       fillHere();
@@ -411,10 +444,11 @@
       if (window.FAQLive && [...root.querySelectorAll(".live")].some((host) => !host.querySelector("iframe"))) {
         window.FAQLive.mount(root);
       }
-      window.scrollTo(0, 0);
+      window.scrollTo(0, returning ? backY : 0);
+      if (returning) releaseReturn();
       return;
     }
-    load(id);
+    load(id, returning ? backY : null);
   });
   if (!location.hash) history.replaceState(null, "", "#about");
   warm();

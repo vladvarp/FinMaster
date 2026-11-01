@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <style>
+    .faq-toast-stage {
+      position: relative;
+      height: 112px;
+      border-radius: 14px;
+      background: var(--bg);
+      overflow: hidden;
+    }
+    .stage .faq-toast-stage .toast.show {
+      position: absolute !important;
+      top: auto !important;
+      left: auto !important;
+      right: 16px !important;
+      bottom: 16px !important;
+      width: auto !important;
+      max-width: 360px !important;
+      display: flex !important;
+    }
+  </style>
+</head>
+<body class="stage">
+  <div class="faq-toast-stage">
+    <div class="toast show" role="status"><span>Заказ удалён</span><button type="button" class="toast-action" tabindex="-1">Отменить</button></div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

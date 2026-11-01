@@ -10,6 +10,7 @@
 
   function apply() {
     document.documentElement.dataset.theme = theme();
+    document.body.classList.add("stage");
   }
 
   function post() {

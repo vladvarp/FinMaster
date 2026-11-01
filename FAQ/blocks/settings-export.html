@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+</head>
+<body class="stage">
+  <div class="modal-card settings-pack-modal">
+    <h3>Экспорт настроек</h3>
+    <p>Отмеченное попадёт в архив .fms. Python и модели речи выключены, пока галочка не стоит.</p>
+    <div class="settings-pack-list">
+      <label class="report-settings-check settings-pack-check">
+        <input type="checkbox" checked tabindex="-1">
+        <span>Настройки</span>
+        <small>25 КБ</small>
+      </label>
+      <label class="report-settings-check settings-pack-check">
+        <input type="checkbox" checked tabindex="-1">
+        <span>Словарь</span>
+        <small>21 КБ</small>
+      </label>
+      <label class="report-settings-check settings-pack-check">
+        <input type="checkbox" tabindex="-1">
+        <span>cloudflared.exe</span>
+        <small>52,4 МБ</small>
+      </label>
+      <label class="report-settings-check settings-pack-check" title="Короткие команды, номера и простые фразы">
+        <input type="checkbox" tabindex="-1">
+        <span>Vosk · Малая русская<small>Короткие команды, номера и простые фразы. Подходит слабому компьютеру.</small></span>
+        <small>87,1 МБ</small>
+      </label>
+      <label class="report-settings-check settings-pack-check" title="Python 3.12 · flask, pillow">
+        <input type="checkbox" tabindex="-1">
+        <span>Python из папки отчётов<small>Python 3.12 · flask, pillow, pywebview</small></span>
+        <small>216,5 МБ</small>
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" type="button" tabindex="-1">Отмена</button>
+      <button class="btn primary" type="button" tabindex="-1">Упаковать</button>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

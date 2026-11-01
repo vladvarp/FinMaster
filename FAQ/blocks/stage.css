@@ -101,9 +101,75 @@ body {
 .stage .search { width: min(420px, 100%) !important; }
 
 .stage .file-menu,
-.stage .file-menu[hidden] {
+.stage .file-menu[hidden],
+.stage .line-menu,
+.stage .line-menu[hidden] {
   position: static !important;
   display: grid !important;
+}
+
+.stage .nc-switch-menu,
+.stage .nc-switch-menu[hidden] {
+  position: static !important;
+  display: block !important;
+}
+
+.stage .dp-pop,
+.stage .dp-pop.open {
+  position: static !important;
+  display: flex !important;
+  animation: none !important;
+  width: 264px;
+  max-width: 100%;
+}
+
+.stage .toast,
+.stage .toast.show {
+  position: static !important;
+  display: flex !important;
+  animation: none !important;
+  width: auto;
+  max-width: 360px;
+}
+
+.stage .line-filter-menu,
+.stage .line-filter-menu[hidden] {
+  position: static !important;
+  display: block !important;
+  width: min(460px, 100%);
+  max-height: none;
+}
+
+.stage .cal-filter-menu,
+.stage .cal-filter-menu[hidden] {
+  position: static !important;
+  display: grid !important;
+}
+
+.stage .cal-color-menu {
+  width: min(770px, 100%);
+  max-height: none;
+}
+
+.stage .cal-side {
+  width: min(320px, 100%);
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.stage .settings-pack-check > small { white-space: nowrap; flex: none; }
+
+.stage .help-modal,
+.stage .remote-guide-modal,
+.stage .settings-pack-modal,
+.stage .voice-more-modal,
+.stage .confirm-modal,
+.stage .ngrok-rename-card {
+  position: relative !important;
+  max-height: none !important;
+  height: auto !important;
+  overflow: visible !important;
 }
 
 .stage .nav { width: 100%; }

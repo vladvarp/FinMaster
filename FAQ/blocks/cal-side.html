@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+</head>
+<body class="stage">
+  <aside class="card cal-side">
+    <div class="cal-side-body">
+      <div class="cal-sel">
+        <div class="cal-sel-head">
+          <b>Кухня 6</b>
+          <span class="work-pill work-pill-done">завершён</span>
+        </div>
+        <div class="cal-sel-sub">Анна · 8 дн.</div>
+        <label class="cal-line-note">Комментарий к заказу
+          <textarea rows="3" maxlength="2000" placeholder="Комментарий, договорённости, детали…" tabindex="-1"></textarea>
+        </label>
+        <div class="cal-dates">
+          <div class="field"><label>Начало</label><input type="date" value="2026-09-21" tabindex="-1"></div>
+          <div class="field"><label>Конец</label><input type="date" value="2026-10-30" tabindex="-1"></div>
+        </div>
+        <div class="cal-pauses">
+          <div class="cal-pause-row"><span>Пауза 21 сентября — 23 сентября</span><small class="cal-pause-auto">из позиций</small></div>
+          <div class="cal-pause-row"><span>Пауза 26 сентября — 4 октября</span><small class="cal-pause-auto">из позиций</small></div>
+          <div class="cal-pause-row"><span>Пауза 8 октября — 15 октября</span><small class="cal-pause-auto">из позиций</small></div>
+        </div>
+        <div class="cal-actions">
+          <button type="button" class="btn small primary" tabindex="-1">Начать сегодня</button>
+          <button type="button" class="btn small" tabindex="-1">Закончить сегодня</button>
+          <button type="button" class="btn small" tabindex="-1">−1 день</button>
+          <button type="button" class="btn small" tabindex="-1">+1 день</button>
+          <button type="button" class="btn small" tabindex="-1">С дат позиций</button>
+          <button type="button" class="btn small" tabindex="-1">Снять даты</button>
+          <button type="button" class="btn small" tabindex="-1">Открыть заказ</button>
+        </div>
+      </div>
+      <div class="cal-block"><h3>На паузе <span>0</span></h3><div class="cal-col-empty">Нет заказов на паузе.</div></div>
+      <div class="cal-block"><h3>В работе <span>0</span></h3><div class="cal-col-empty">Нет заказов в работе — поставьте дату начала.</div></div>
+      <div class="cal-block"><h3>Без дат <span>0</span></h3><div class="cal-col-empty">Все заказы размечены.</div></div>
+    </div>
+    <div class="cal-side-hint hint-i">
+      <button type="button" class="info-btn" tabindex="-1" aria-label="Подсказка по доске">i</button>
+    </div>
+  </aside>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

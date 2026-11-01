@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+</head>
+<body class="stage">
+  <div class="cal-filter-menu cal-color-menu">
+    <div class="cal-color-head">
+      <div class="cal-color-title">
+        <b>Цвета календаря</b>
+        <span class="cal-color-note">Эта схема сейчас на экране.</span>
+      </div>
+      <div class="cal-color-head-side">
+        <div class="cal-color-themes" role="tablist">
+          <button type="button" class="is-on" tabindex="-1">Светлая</button>
+          <button type="button" tabindex="-1">Тёмная</button>
+        </div>
+        <button type="button" class="cal-color-x" tabindex="-1" aria-label="Закрыть">×</button>
+      </div>
+    </div>
+    <section class="cal-color-block">
+      <div class="cal-color-block-h"><b>Профили</b><span>9 встроенных и свои</span></div>
+      <div class="cal-color-profiles">
+        <button type="button" class="cal-color-profile" tabindex="-1"><span class="cal-color-dots"><i style="--swatch:#059669"></i><i style="--swatch:#0369a1"></i><i style="--swatch:#dc2626"></i></span><b>Текущая</b></button>
+        <button type="button" class="cal-color-profile" tabindex="-1"><span class="cal-color-dots"><i style="--swatch:#0d9488"></i><i style="--swatch:#0369a1"></i><i style="--swatch:#be123c"></i></span><b>Море</b></button>
+        <button type="button" class="cal-color-profile" tabindex="-1"><span class="cal-color-dots"><i style="--swatch:#15803d"></i><i style="--swatch:#3f6212"></i><i style="--swatch:#9f1239"></i></span><b>Лес</b></button>
+        <button type="button" class="cal-color-profile" tabindex="-1"><span class="cal-color-dots"><i style="--swatch:#ea580c"></i><i style="--swatch:#c2410c"></i><i style="--swatch:#be123c"></i></span><b>Закат</b></button>
+        <button type="button" class="cal-color-profile" tabindex="-1"><span class="cal-color-dots"><i style="--swatch:#4f46e5"></i><i style="--swatch:#4338ca"></i><i style="--swatch:#be123c"></i></span><b>Чернила</b></button>
+        <button type="button" class="cal-color-profile" tabindex="-1"><span class="cal-color-dots"><i style="--swatch:#be123c"></i><i style="--swatch:#9d174d"></i><i style="--swatch:#881337"></i></span><b>Ягода</b></button>
+        <button type="button" class="cal-color-profile" tabindex="-1"><span class="cal-color-dots"><i style="--swatch:#a16207"></i><i style="--swatch:#92400e"></i><i style="--swatch:#9f1239"></i></span><b>Песок</b></button>
+        <button type="button" class="cal-color-profile" tabindex="-1"><span class="cal-color-dots"><i style="--swatch:#0369a1"></i><i style="--swatch:#075985"></i><i style="--swatch:#b91c1c"></i></span><b>Север</b></button>
+        <button type="button" class="cal-color-profile" tabindex="-1"><span class="cal-color-dots"><i style="--swatch:#059669"></i><i style="--swatch:#1d4ed8"></i><i style="--swatch:#be123c"></i></span><b>Контраст</b></button>
+      </div>
+      <div class="cal-color-profiles is-custom">
+        <span class="cal-color-custom is-on">
+          <button type="button" class="cal-color-profile is-on" tabindex="-1"><span class="cal-color-dots"><i style="--swatch:#46e226"></i><i style="--swatch:#22c55e"></i><i style="--swatch:#ef4444"></i></span><b>Мой</b></button>
+          <button type="button" class="cal-color-x" tabindex="-1" aria-label="Удалить профиль">×</button>
+        </span>
+        <span class="cal-color-custom">
+          <button type="button" class="cal-color-profile" tabindex="-1"><span class="cal-color-dots"><i style="--swatch:#86efac"></i><i style="--swatch:#7dd3fc"></i><i style="--swatch:#f87171"></i></span><b>Светлая</b></button>
+          <button type="button" class="cal-color-x" tabindex="-1" aria-label="Удалить профиль">×</button>
+        </span>
+      </div>
+      <div class="cal-color-save">
+        <input class="cal-color-name" maxlength="32" placeholder="Имя новой схемы" tabindex="-1">
+        <button type="button" class="btn small" tabindex="-1">Сохранить</button>
+        <button type="button" class="btn small" tabindex="-1">Обновить</button>
+        <button type="button" class="btn small" tabindex="-1">Вернуть</button>
+      </div>
+    </section>
+    <div class="cal-color-stage">
+      <section class="cal-color-block">
+        <div class="cal-color-block-h"><b>Линии</b><button type="button" class="cal-color-info" tabindex="-1" aria-label="Полосы заказов и позиций">i</button></div>
+        <div class="cal-color-rows">
+          <button type="button" class="cal-color-row is-on" tabindex="-1"><i style="--swatch:#46e226"></i><span>Оплачено</span></button>
+          <button type="button" class="cal-color-row" tabindex="-1"><i style="--swatch:#d97706"></i><span>Долг</span></button>
+          <button type="button" class="cal-color-row" tabindex="-1"><i style="--swatch:#dc2626"></i><span>Закрыт с долгом</span></button>
+          <button type="button" class="cal-color-row" tabindex="-1"><i style="--swatch:#0284c8"></i><span>Запланировано</span></button>
+          <button type="button" class="cal-color-row" tabindex="-1"><i style="--swatch:#0f766e"></i><span>В работе</span></button>
+          <button type="button" class="cal-color-row" tabindex="-1"><i style="--swatch:#0369a1"></i><span>Выполняется</span></button>
+          <button type="button" class="cal-color-row" tabindex="-1"><i style="--swatch:#166534"></i><span>Завершено</span></button>
+          <button type="button" class="cal-color-row" tabindex="-1"><i style="--swatch:#64748b"></i><span>Штрих паузы</span></button>
+        </div>
+      </section>
+      <section class="cal-color-block">
+        <div class="cal-color-block-h"><b>Статусы</b><button type="button" class="cal-color-info" tabindex="-1" aria-label="Подписи таймлайна и роли недели">i</button></div>
+        <div class="cal-color-rows">
+          <button type="button" class="cal-color-row" tabindex="-1"><i style="--swatch:#15803d"></i><span>Старт и финиш</span></button>
+          <button type="button" class="cal-color-row" tabindex="-1"><i style="--swatch:#0369a1"></i><span>Выполняется</span></button>
+          <button type="button" class="cal-color-row" tabindex="-1"><i style="--swatch:#4f46e5"></i><span>Выполнялось</span></button>
+          <button type="button" class="cal-color-row" tabindex="-1"><i style="--swatch:#b45309"></i><span>План</span></button>
+          <button type="button" class="cal-color-row" tabindex="-1"><i style="--swatch:#dc2626"></i><span>Пауза</span></button>
+        </div>
+      </section>
+      <section class="cal-color-block cal-color-editor">
+        <div class="cal-color-block-h"><b>Свой цвет</b><span>Оплачено</span></div>
+        <div class="cal-picker">
+          <div class="cal-picker-sv" style="background-color:hsl(110 100% 50%)"><i style="left:83%;top:11%"></i></div>
+          <div class="cal-picker-hue"><i style="left:30.5%"></i></div>
+          <div class="cal-picker-alpha" style="--pick:#46e226"><i style="left:100%"></i></div>
+          <label class="cal-picker-hex">
+            <i style="--swatch:#46e226"></i>
+            <input maxlength="9" value="#46e226" aria-label="Код цвета" tabindex="-1">
+            <b>100%</b>
+          </label>
+        </div>
+      </section>
+    </div>
+    <section class="cal-color-block">
+      <div class="cal-color-block-h"><b>Образцы</b><span>быстрый выбор для «Оплачено»</span></div>
+      <div class="cal-swatches">
+        <button type="button" class="cal-swatch" style="background:#166534" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#15803d" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#059669" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#0f766e" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#0d9488" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#155e75" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#1d4ed8" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#0369a1" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#0284c8" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#0891b2" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#4f46e5" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#6d28d9" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#7c3aed" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#a16207" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#b45309" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#d97706" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#c2410c" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#9a3412" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#b91c1c" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#dc2626" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#be123c" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#9d174d" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#334155" tabindex="-1"></button>
+        <button type="button" class="cal-swatch" style="background:#475569" tabindex="-1"></button>
+      </div>
+    </section>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

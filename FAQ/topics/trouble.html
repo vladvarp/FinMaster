@@ -1,18 +1,22 @@
 <h1>Частые неполадки</h1>
-<p class="lead">Коротко, что проверить, прежде чем переустанавливать программу.</p>
-
+<p class="lead">Коротко, что проверить, прежде чем переустанавливать программу. Подразделы: <a href="#trouble/telefon-ne-otkryvaet-lokalnuyu-ssylku">Телефон не открывает локальную ссылку</a>, <a href="#trouble/ssylka-byla-a-teper-ne-rabotaet">Ссылка была, а теперь не работает</a>, <a href="#trouble/ngrok-ne-vklyuchaetsya">ngrok не включается</a>, <a href="#trouble/bot-molchit">Бот молчит или пишет, что доступ выключен</a>, <a href="#trouble/okno-sohranenie-korzina">Окно, сохранение, корзина</a>.</p>
+<section data-sub="telefon-ne-otkryvaet-lokalnuyu-ssylku">
 <h2>Телефон не открывает локальную ссылку</h2>
 <p><a href="#phone">Телефон</a> и компьютер должны быть в одной Wi-Fi. Разрешите Python в брандмауэре Windows для частной сети. Если у компьютера несколько адресов, попробуйте другой чип под QR.</p>
-
+</section>
+<section data-sub="ssylka-byla-a-teper-ne-rabotaet">
 <h2>Ссылка была, а теперь не работает</h2>
 <p>Адрес <a href="#ngrok">ngrok</a> сменился после перезапуска или кто-то нажал «Новая ссылка». Откройте окно «<a href="#phone">Телефон</a>» и скопируйте актуальную ссылку либо запросите её у <a href="#telegram">бота</a>.</p>
-
+</section>
+<section data-sub="ngrok-ne-vklyuchaetsya">
 <h2>ngrok не включается</h2>
 <p>Программа <a href="#ngrok">ngrok</a> должна находиться по имени <code>ngrok</code>. Проще поставить её из Microsoft Store и перезапустить FinMaster. Токен вставляется в блок «Токен ngrok». Текст ошибки виден под кнопкой. Точка у заголовка блока краснеет, если сервис ответил ошибкой.</p>
-
+</section>
+<section data-sub="bot-molchit">
 <h2>Бот молчит или пишет, что доступ выключен</h2>
 <p>Проверьте токен из @BotFather и что программа запущена. Подробности — в разделе «<a href="#telegram">Telegram-бот</a>». После смены токена напишите <code>/start</code> заново. Если бот пишет, что доступ выключен, включите тумблеры в окне «Телефон»: бот сам их не включает.</p>
-
+</section>
+<section data-sub="okno-sohranenie-korzina">
 <h2>Окно, сохранение, корзина</h2>
 <ul>
   <li><strong>Порт занят.</strong> FinMaster сам берёт свободный и запоминает его. QR и ссылка обновятся.</li>
@@ -21,4 +25,5 @@
   <li><strong>Удалили отчёт.</strong> Файл в корзине Windows. Восстановите его и откройте снова.</li>
   <li><strong>Нужна чёрная консоль.</strong> Обычный старт её не показывает. Чтобы видеть сообщения Python, задайте <code>FINMASTER_CONSOLE=1</code> и запустите <code>python launch.py</code>. Окно <a href="#console">консоли</a> внутри программы — другое: там сеть, лог и мосты, не вывод Python.</li>
 </ul>
+</section>
 <p class="seealso">См. также: <a href="#console">Консоль</a>, <a href="#phone">Подключение телефона</a>, <a href="#ngrok">Интернет через ngrok</a>, <a href="#telegram">Telegram-бот</a>.</p>

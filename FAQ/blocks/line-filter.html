@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+</head>
+<body class="stage">
+  <div class="line-filter-menu">
+    <div class="lf-head">
+      <strong>Позиции</strong>
+      <span>40 из 40</span>
+      <button type="button" class="lf-exclude" tabindex="-1">Исключение</button>
+      <button type="button" class="btn small" tabindex="-1">Сбросить</button>
+    </div>
+    <p class="lf-hint">В одной группе — любое из отмеченных. Разные группы сужают список вместе.</p>
+    <input class="lf-search" type="search" placeholder="Найти статус, тип, продукт…" tabindex="-1">
+    <div class="lf-body">
+      <section class="lf-sec">
+        <h4>Статус</h4>
+        <div class="lf-chips">
+          <button type="button" class="lf-chip" tabindex="-1"><i style="background:#f59e0b"></i><span>Выполнен</span><b>12</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><i style="background:#22c55e"></i><span>Оплачено</span><b>9</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><i style="background:#ef4444"></i><span>Отменено</span><b>4</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><i style="background:#94a3b8"></i><span>Новый заказ</span><b>2</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><i style="background:#38bdf8"></i><span>Выполняется</span><b>1</b></button>
+        </div>
+      </section>
+      <section class="lf-sec">
+        <h4>Тип</h4>
+        <div class="lf-chips">
+          <button type="button" class="lf-chip" tabindex="-1"><span>Услуга</span><b>36</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><span>Закупка</span><b>3</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><span>3D</span><b>1</b></button>
+        </div>
+      </section>
+      <section class="lf-sec">
+        <h4>Продукт</h4>
+        <div class="lf-chips">
+          <button type="button" class="lf-chip" tabindex="-1"><span>Электрика</span><b>8</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><span>Сантехника</span><b>6</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><span>Плитка</span><b>5</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><span>Ламинат</span><b>3</b></button>
+          <button type="button" class="lf-more" tabindex="-1">Ещё 4</button>
+        </div>
+      </section>
+      <section class="lf-sec">
+        <h4>Единица</h4>
+        <div class="lf-chips">
+          <button type="button" class="lf-chip" tabindex="-1"><span>ед.</span><b>20</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><span>м²</span><b>14</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><span>м/п.</span><b>5</b></button>
+        </div>
+      </section>
+      <section class="lf-sec">
+        <h4>Заказчик</h4>
+        <div class="lf-chips">
+          <button type="button" class="lf-chip" tabindex="-1"><span>Анна</span><b>28</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><span>Мастерская</span><b>12</b></button>
+        </div>
+      </section>
+      <section class="lf-sec">
+        <h4>Оплата</h4>
+        <div class="lf-chips">
+          <button type="button" class="lf-chip" tabindex="-1"><span>Долг</span><b>16</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><span>Оплачено</span><b>18</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><span>Без цены</span><b>6</b></button>
+        </div>
+      </section>
+      <section class="lf-sec">
+        <h4>Скидка</h4>
+        <div class="lf-chips">
+          <button type="button" class="lf-chip" tabindex="-1"><span>Со скидкой</span><b>5</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><span>Без скидки</span><b>35</b></button>
+        </div>
+      </section>
+      <section class="lf-sec">
+        <h4>Строка</h4>
+        <div class="lf-chips">
+          <button type="button" class="lf-chip" tabindex="-1"><span>Доход</span><b>34</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><span>Расход</span><b>4</b></button>
+          <button type="button" class="lf-chip" tabindex="-1"><span>Замороженные</span><b>2</b></button>
+        </div>
+      </section>
+      <section class="lf-sec">
+        <h4>Дата заказа</h4>
+        <div class="lf-range">
+          <input type="date" aria-label="Дата заказа с" tabindex="-1">
+          <span>—</span>
+          <input type="date" aria-label="Дата заказа по" tabindex="-1">
+        </div>
+      </section>
+      <section class="lf-sec">
+        <h4>Сумма позиции</h4>
+        <div class="lf-range">
+          <input type="number" step="0.01" placeholder="от" aria-label="Сумма от" tabindex="-1">
+          <span>—</span>
+          <input type="number" step="0.01" placeholder="до" aria-label="Сумма до" tabindex="-1">
+        </div>
+      </section>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

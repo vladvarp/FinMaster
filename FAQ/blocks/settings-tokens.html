@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+</head>
+<body class="stage">
+  <div class="modal-card settings-pack-modal">
+    <h3>Экспорт токенов</h3>
+    <p>Один файл .fmt. В него попадут все токены ngrok с названиями и активным выбором.</p>
+    <div class="settings-pack-list">
+      <label class="report-settings-check settings-pack-check">
+        <input type="checkbox" checked tabindex="-1">
+        <span>Токены ngrok<small>2 шт.</small></span>
+      </label>
+      <label class="report-settings-check settings-pack-check">
+        <input type="checkbox" checked tabindex="-1">
+        <span>Telegram: бот, пользователи, устройства и история<small>3 пол.</small></span>
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" type="button" tabindex="-1">Отмена</button>
+      <button class="btn primary" type="button" tabindex="-1">Сохранить</button>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

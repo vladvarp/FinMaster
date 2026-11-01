@@ -14,6 +14,39 @@
   let trailIndex = 0;
   let graphPromise = null;
   let graph = [];
+  let restoreScroll = null;
+  history.scrollRestoration = "manual";
+
+  function saveScroll() {
+    const state = history.state || {};
+    const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    const y = Math.max(0, Math.min(max, Math.round(window.scrollY || 0)));
+    if (state.faqNav && state.faqScroll === y) return;
+    history.replaceState({
+      ...state,
+      faqNav: true,
+      faqScroll: y,
+      faqRoute: state.faqRoute || currentRoute(),
+      faqIndex: Number.isInteger(state.faqIndex) ? state.faqIndex : trailIndex
+    }, "", location.href);
+  }
+
+  let scrollTimer = 0;
+  window.addEventListener("scroll", () => {
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(saveScroll, 80);
+  }, { passive: true });
+
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("a[href^='#'], #nav button, #faq-back, #faq-forward")) saveScroll();
+  }, true);
+
+  window.FAQTakeScroll = function () {
+    if (restoreScroll == null) return null;
+    const y = restoreScroll;
+    restoreScroll = null;
+    return y;
+  };
 
   function currentRoute() {
     try { return decodeURIComponent((location.hash || "#about").slice(1)); }
@@ -31,8 +64,9 @@
     const route = currentRoute();
     const state = history.state;
     if (state && state.faqNav === true && state.faqRoute === route &&
-        Number.isInteger(state.faqIndex)) {
-      trailIndex = Math.max(0, Math.min(trail.length - 1, state.faqIndex));
+        Number.isInteger(state.faqIndex) && state.faqIndex >= 0 && state.faqIndex < trail.length &&
+        trail[state.faqIndex] === route) {
+      trailIndex = state.faqIndex;
     } else {
       trail.splice(trailIndex + 1);
       trail.push(route);
@@ -111,10 +145,17 @@
     return graphPromise;
   }
 
-  function makeTreeSection(title, count, entries, emptyText) {
+  const mapOpen = { out: false, in: false, path: false };
+
+  function rememberBranch(section, key) {
+    section.open = !!mapOpen[key];
+    section.addEventListener("toggle", () => { mapOpen[key] = section.open; });
+  }
+
+  function makeTreeSection(title, count, entries, emptyText, key) {
     const section = document.createElement("details");
     section.className = "map-branch";
-    section.open = true;
+    rememberBranch(section, key);
     const summary = document.createElement("summary");
     const name = document.createElement("span");
     name.textContent = title;
@@ -160,6 +201,44 @@
       });
       branch.append(groupLabel, children);
       list.appendChild(branch);
+    });
+    section.appendChild(list);
+    return section;
+  }
+
+  function makePath(entries) {
+    const section = document.createElement("details");
+    section.className = "map-branch";
+    rememberBranch(section, "path");
+    const summary = document.createElement("summary");
+    const name = document.createElement("span");
+    name.textContent = "Пройденный путь";
+    const total = document.createElement("small");
+    total.textContent = String(entries.length);
+    summary.append(name, total);
+    section.appendChild(summary);
+    const list = document.createElement("ol");
+    list.className = "map-path";
+    entries.forEach((entry) => {
+      const item = document.createElement("li");
+      if (entry.current) item.className = "is-current";
+      const link = document.createElement("a");
+      link.href = "#" + entry.route;
+      link.textContent = entry.title;
+      if (entry.current) {
+        link.setAttribute("aria-current", "page");
+      } else {
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          saveScroll();
+          const delta = entry.index - trailIndex;
+          if (delta) history.go(delta);
+        });
+      }
+      const note = document.createElement("small");
+      note.textContent = entry.note;
+      item.append(link, note);
+      list.appendChild(item);
     });
     section.appendChild(list);
     return section;
@@ -218,8 +297,21 @@
     caption.textContent = current.parent + (current.sub ? " / " + current.title : "");
     heading.append(title, caption);
     map.appendChild(heading);
-    map.appendChild(makeTreeSection("Ссылки из этого раздела", outgoingEntries.length, outgoingEntries, "В этом разделе нет ссылок на другие темы."));
-    map.appendChild(makeTreeSection("Разделы, которые ведут сюда", incomingEntries.length, incomingEntries, "На этот раздел пока нет ссылок из других тем."));
+    map.appendChild(makeTreeSection("Ссылки из этого раздела", outgoingEntries.length, outgoingEntries, "В этом разделе нет ссылок на другие темы.", "out"));
+    map.appendChild(makeTreeSection("Разделы, которые ведут сюда", incomingEntries.length, incomingEntries, "На этот раздел пока нет ссылок из других тем.", "in"));
+    const shown = trail.map((route, index) => {
+      const info = routeInfo(route);
+      if (!info) return null;
+      return {
+        index,
+        route: info.route,
+        title: info.sub ? info.parent + " · " + info.title : info.parent,
+        note: info.group,
+        current: index === trailIndex
+      };
+    }).filter(Boolean);
+    const tail = shown.length > 12 ? shown.slice(shown.length - 12) : shown;
+    map.appendChild(makePath(tail));
     map.hidden = false;
   }
 
@@ -243,7 +335,11 @@
     stampCurrentEntry();
     renderMap();
   });
-  window.addEventListener("popstate", updateHistoryButtons);
+  window.addEventListener("popstate", () => {
+    const y = history.state && Number.isFinite(history.state.faqScroll) ? history.state.faqScroll : 0;
+    restoreScroll = y;
+    updateHistoryButtons();
+  });
 
   if (!embedded) setTheme(root.dataset.theme === "light" ? "light" : "dark");
   else {

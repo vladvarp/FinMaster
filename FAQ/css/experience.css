@@ -225,6 +225,11 @@ html, body, .side, .top, .doc, .link-map, .shot, .note, .warn, .ok,
   transition-timing-function: ease;
 }
 
+@media (max-width: 860px) {
+  .nav-btn, .nav-sub { min-height: 40px; }
+  .map-path li { grid-template-columns: minmax(0, 1fr); gap: 1px; }
+}
+
 @media (max-width: 600px) {
   .map-heading { align-items: flex-start; flex-direction: column; gap: 2px; }
   .map-heading span { text-align: left; }
@@ -255,7 +260,97 @@ html, body, .side, .top, .doc, .link-map, .shot, .note, .warn, .ok,
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; scroll-padding-top: 72px; }
+
+.nav-subs {
+  margin: 2px 0 8px 12px;
+  padding: 2px 0 2px 8px;
+  border-left: 1px solid var(--line);
+  animation: subs-in .24s cubic-bezier(.2, .75, .25, 1);
+}
+
+.nav-btn.active { box-shadow: inset 3px 0 0 var(--accent); }
+
+.nav-sub.active { box-shadow: inset 2px 0 0 var(--accent); }
+
+.doc a {
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  border-radius: 4px;
+  transition: background-color .16s ease, text-decoration-color .16s ease;
+}
+
+.doc a:hover {
+  text-decoration-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.doc a:active { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+
+.shot {
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+
+.shot:hover {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+  box-shadow: var(--shadow);
+}
+
+html.is-returning #doc.content-enter,
+html.is-returning #doc [data-sub]:not([hidden]),
+html.is-returning .link-map {
+  animation: none;
+}
+
+.map-path {
+  margin: 0 0 8px;
+  padding: 0 0 0 16px;
+  list-style: none;
+}
+
+.map-path li {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 0 6px 14px;
+}
+
+.map-path li::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 13px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.map-path li.is-current::before {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.map-path a {
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.map-path a:hover { text-decoration: underline; }
+
+.map-path small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@keyframes subs-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
 
 
 #doc { view-transition-name: faq-article; }

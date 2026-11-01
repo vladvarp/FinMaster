@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+</head>
+<body class="stage">
+  <div class="cal-filter-menu cal-weekend-menu" role="menu">
+    <div class="cal-weekend-label">Дни недели</div>
+    <div class="cal-weekend-days">
+      <button type="button" class="btn" tabindex="-1">пн</button>
+      <button type="button" class="btn" tabindex="-1">вт</button>
+      <button type="button" class="btn" tabindex="-1">ср</button>
+      <button type="button" class="btn" tabindex="-1">чт</button>
+      <button type="button" class="btn" tabindex="-1">пт</button>
+      <button type="button" class="btn active" tabindex="-1">сб</button>
+      <button type="button" class="btn active" tabindex="-1">вс</button>
+    </div>
+    <div class="cal-weekend-hint">Отдельный день — клик по дате справа: «Сделать выходным» или «Сделать рабочим».</div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>

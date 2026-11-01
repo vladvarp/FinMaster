@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <style>
+    .dp-pop.open { position: relative !important; display: flex !important; animation: none !important; }
+  </style>
+</head>
+<body>
+  <div class="dp-pop open" aria-label="Выбор даты">
+    <div class="dp-spans">
+      <button type="button" class="dp-span on" tabindex="-1">Месяц</button>
+      <button type="button" class="dp-span" tabindex="-1">3 мес</button>
+      <button type="button" class="dp-span" tabindex="-1">6 мес</button>
+      <button type="button" class="dp-span" tabindex="-1">Год</button>
+    </div>
+    <div class="dp-head">
+      <button type="button" class="dp-nav" tabindex="-1" title="Предыдущий месяц">‹</button>
+      <div class="dp-titles">
+        <button type="button" class="dp-title" tabindex="-1" title="Выбрать месяц">Ноябрь</button>
+        <button type="button" class="dp-title" tabindex="-1" title="Выбрать год">2026</button>
+      </div>
+      <button type="button" class="dp-nav" tabindex="-1" title="Следующий месяц">›</button>
+    </div>
+    <div class="dp-scroll">
+      <div class="dp-week"><span class="">Пн</span><span class="">Вт</span><span class="">Ср</span><span class="">Чт</span><span class="">Пт</span><span class="wkend">Сб</span><span class="wkend">Вс</span></div>
+      <div class="dp-grid days"><button type="button" class="dp-day out" tabindex="-1">26</button><button type="button" class="dp-day out" tabindex="-1">27</button><button type="button" class="dp-day out" tabindex="-1">28</button><button type="button" class="dp-day out" tabindex="-1">29</button><button type="button" class="dp-day out" tabindex="-1">30</button><button type="button" class="dp-day out wkend" tabindex="-1">31</button><button type="button" class="dp-day wkend" tabindex="-1">1</button><button type="button" class="dp-day" tabindex="-1">2</button><button type="button" class="dp-day" tabindex="-1">3</button><button type="button" class="dp-day" tabindex="-1">4</button><button type="button" class="dp-day" tabindex="-1">5</button><button type="button" class="dp-day" tabindex="-1">6</button><button type="button" class="dp-day wkend" tabindex="-1">7</button><button type="button" class="dp-day wkend" tabindex="-1">8</button><button type="button" class="dp-day" tabindex="-1">9</button><button type="button" class="dp-day" tabindex="-1">10</button><button type="button" class="dp-day" tabindex="-1">11</button><button type="button" class="dp-day sel" tabindex="-1">12</button><button type="button" class="dp-day" tabindex="-1">13</button><button type="button" class="dp-day wkend" tabindex="-1">14</button><button type="button" class="dp-day wkend" tabindex="-1">15</button><button type="button" class="dp-day" tabindex="-1">16</button><button type="button" class="dp-day" tabindex="-1">17</button><button type="button" class="dp-day" tabindex="-1">18</button><button type="button" class="dp-day" tabindex="-1">19</button><button type="button" class="dp-day" tabindex="-1">20</button><button type="button" class="dp-day wkend" tabindex="-1">21</button><button type="button" class="dp-day wkend" tabindex="-1">22</button><button type="button" class="dp-day" tabindex="-1">23</button><button type="button" class="dp-day" tabindex="-1">24</button><button type="button" class="dp-day" tabindex="-1">25</button><button type="button" class="dp-day" tabindex="-1">26</button><button type="button" class="dp-day" tabindex="-1">27</button><button type="button" class="dp-day wkend" tabindex="-1">28</button><button type="button" class="dp-day wkend" tabindex="-1">29</button><button type="button" class="dp-day" tabindex="-1">30</button><button type="button" class="dp-day out" tabindex="-1">1</button><button type="button" class="dp-day out" tabindex="-1">2</button><button type="button" class="dp-day out" tabindex="-1">3</button><button type="button" class="dp-day out" tabindex="-1">4</button><button type="button" class="dp-day out wkend" tabindex="-1">5</button><button type="button" class="dp-day out wkend" tabindex="-1">6</button></div>
+    </div>
+    <div class="dp-foot">
+      <span class="dp-picked">12.11.2026</span>
+      <button type="button" class="dp-link" tabindex="-1">Сегодня</button>
+      <button type="button" class="dp-link muted" tabindex="-1">Очистить</button>
+    </div>
+  </div>
+</body>
+</html>

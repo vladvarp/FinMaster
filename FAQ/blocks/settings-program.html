@@ -7,30 +7,36 @@
   <link rel="stylesheet" href="stage.css">
   <link rel="stylesheet" href="stand.css">
 </head>
-<body>
-  <p class="hint">Вкладка «Программа»: автозагрузка, архив настроек и отдельный файл токенов.</p>
+<body class="stage">
   <div class="modal-card app-settings-modal">
-    <h3>Настройки</h3>
-    <div class="app-settings-tabs">
+    <div class="modal-title-row">
+      <h3>Настройки</h3>
+      <button class="btn ghost" type="button" tabindex="-1">Закрыть</button>
+    </div>
+    <div class="app-settings-tabs" role="tablist">
       <button type="button" class="app-settings-tab is-on" tabindex="-1">Программа</button>
       <button type="button" class="app-settings-tab" tabindex="-1">Отчёт</button>
       <button type="button" class="app-settings-tab" tabindex="-1">Голос</button>
       <button type="button" class="app-settings-tab" tabindex="-1">Среда</button>
     </div>
-    <label class="file-menu-login app-settings-login"><span>Автозагрузка</span><input type="checkbox" checked tabindex="-1"></label>
-    <div class="app-settings-actions">
-      <button type="button" class="btn" tabindex="-1">Экспорт настроек</button>
-      <button type="button" class="btn" tabindex="-1">Импорт настроек</button>
-    </div>
-    <div class="settings-pack-list">
-      <label class="report-settings-check settings-pack-check"><input type="checkbox" checked tabindex="-1"><span>Настройки</span><small>12 КБ</small></label>
-      <label class="report-settings-check settings-pack-check"><input type="checkbox" checked tabindex="-1"><span>Словарь</span><small>40 КБ</small></label>
-      <label class="report-settings-check settings-pack-check" title="Python 3.12 · flask, pillow, pywebview"><input type="checkbox" tabindex="-1"><span>Python из папки отчётов<small>Python 3.12 · flask, pillow</small></span><small>86 МБ</small></label>
-      <label class="report-settings-check settings-pack-check"><input type="checkbox" tabindex="-1"><span>Vosk · Малая русская<small>Короткие команды и номера</small></span><small>45 МБ</small></label>
-    </div>
-    <div class="app-settings-actions">
-      <button type="button" class="btn" tabindex="-1">Экспорт токенов</button>
-      <button type="button" class="btn" tabindex="-1">Импорт токенов</button>
+    <div class="app-settings-body">
+      <div class="app-settings-pane">
+        <label class="file-menu-login app-settings-login">
+          <span>Автозагрузка</span>
+          <input type="checkbox" tabindex="-1">
+        </label>
+        <p class="report-settings-hint">При входе в Windows откроется эта копия программы.</p>
+        <div class="app-settings-actions">
+          <button type="button" class="btn" tabindex="-1">Экспорт настроек</button>
+          <button type="button" class="btn" tabindex="-1">Импорт настроек</button>
+        </div>
+        <p class="report-settings-hint">Архив .fms. Python из папки отчётов и модели Vosk выключены, пока галочка не стоит. В подписи видны версия Python, библиотеки и описание модели.</p>
+        <div class="app-settings-actions">
+          <button type="button" class="btn" tabindex="-1">Экспорт токенов</button>
+          <button type="button" class="btn" tabindex="-1">Импорт токенов</button>
+        </div>
+        <p class="report-settings-hint">Отдельный файл .fmt: токен ngrok и Telegram вместе с пользователями. В файле токены не читаются как текст, импорт открывается на другом компьютере.</p>
+      </div>
     </div>
   </div>
   <script src="chrome.js"></script>
