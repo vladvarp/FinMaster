@@ -172,3 +172,65 @@ html[data-theme="dark"] mark.hit { background: #854d0e; color: #fff7ed; }
   font-size: 14px;
 }
 .seealso a { font-weight: 650; }
+
+
+/* Карта переходов и микровзаимодействия */
+.link-map {
+  margin: 26px 0 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  overflow: hidden;
+}
+.link-map summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 16px;
+  cursor: pointer;
+  font-weight: 700;
+  list-style: none;
+}
+.link-map summary::-webkit-details-marker { display: none; }
+.link-map summary::before {
+  content: "⌘";
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.link-map summary::after { content: "＋"; margin-left: auto; color: var(--muted); transition: transform .2s ease; }
+.link-map[open] summary::after { content: "−"; }
+.link-map-body { padding: 0 16px 16px; }
+.link-map-group { margin-top: 12px; }
+.link-map-group strong { display: block; color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 7px; }
+.link-map-links { display: flex; flex-wrap: wrap; gap: 7px; }
+.link-map-links a {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 13px;
+  background: var(--bg);
+  transition: transform .18s ease, border-color .18s ease, color .18s ease, background .18s ease;
+}
+.link-map-links a:hover { transform: translateY(-2px); border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.shot { transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease; }
+.shot:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: var(--shadow); }
+.doc a { text-decoration-thickness: .07em; text-underline-offset: .18em; }
+.doc a:hover { text-decoration-thickness: .12em; }
+@keyframes faq-enter { from { opacity: 0; transform: translateY(9px) scale(.995); } to { opacity: 1; transform: translateY(0) scale(1); } }
+#doc { view-transition-name: faq-document; }
+::view-transition-old(faq-document) { animation: 130ms ease both faq-exit; }
+::view-transition-new(faq-document) { animation: 240ms cubic-bezier(.2,.8,.2,1) both faq-enter; }
+@keyframes faq-exit { to { opacity: 0; transform: translateY(-5px) scale(.998); } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  ::view-transition-old(faq-document), ::view-transition-new(faq-document) { animation: none; }
+}
