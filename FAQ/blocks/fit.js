@@ -33,8 +33,14 @@
   if (window.ResizeObserver) new ResizeObserver(post).observe(document.body);
   window.addEventListener("load", post);
   window.addEventListener("message", (event) => {
-    if (!event.data || event.data.type !== "faq-fit") return;
-    post();
+    if (!event.data) return;
+    if (event.data.type === "faq-theme") {
+      if (event.data.theme !== "light" && event.data.theme !== "dark") return;
+      document.documentElement.dataset.theme = event.data.theme;
+      post();
+      return;
+    }
+    if (event.data.type === "faq-fit") post();
   });
   post();
 })();
