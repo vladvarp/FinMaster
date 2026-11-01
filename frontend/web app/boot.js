@@ -3,11 +3,20 @@
   const params = new URLSearchParams(location.search);
   const token = params.get("t") || "";
   const cidKey = "finmaster.desk.id";
+  const sharedCidKey = "finmaster.device.cid";
   let cid = "";
   try {
-    cid = localStorage.getItem(cidKey) || sessionStorage.getItem(cidKey) || "";
+    const legacyKeys = ["finmaster.remote.cid", "finmaster.bank.cid", "finmaster.desk.id"];
+    const legacyIds = [...new Set([
+      ...legacyKeys.map((key) => localStorage.getItem(key) || ""),
+      ...(JSON.parse(localStorage.getItem("finmaster.device.legacy_cids") || "[]")),
+    ].filter(Boolean))];
+    cid = localStorage.getItem(sharedCidKey) || localStorage.getItem(cidKey) || sessionStorage.getItem(cidKey) || "";
     if (!cid) cid = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem(sharedCidKey, cid);
     localStorage.setItem(cidKey, cid);
+    localStorage.setItem("finmaster.device.legacy_cids", JSON.stringify(legacyIds.filter((id) => id !== cid)));
+    legacyKeys.forEach((key) => localStorage.setItem(key, cid));
   } catch {
     cid = Math.random().toString(36).slice(2);
   }
@@ -76,6 +85,7 @@
     return {
       name,
       model: profile.model || "",
+      legacy_cids: (() => { try { return JSON.parse(localStorage.getItem("finmaster.device.legacy_cids") || "[]"); } catch { return []; } })(),
       platform: profile.platform || "",
       platform_version: profile.platform_version || "",
       brands: profile.brands || browser,
