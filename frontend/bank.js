@@ -239,22 +239,23 @@
   function cid() {
     let id = "";
     try {
-      id = localStorage.getItem(SHARED_CID) || localStorage.getItem(LS_CID) || "";
-    } catch {
-      id = "";
-    }
-    if (!id) {
-      id = uid();
+      const legacyKeys = ["finmaster.remote.cid", "finmaster.bank.cid", "finmaster.desk.id"];
+      let savedLegacy = [];
       try {
-        localStorage.setItem(SHARED_CID, id);
-        localStorage.setItem(LS_CID, id);
-        const legacyKeys = ["finmaster.remote.cid", "finmaster.bank.cid", "finmaster.desk.id"];
-        const legacyIds = [...new Set([...legacyKeys.map((key) => localStorage.getItem(key) || ""), ...(JSON.parse(localStorage.getItem("finmaster.device.legacy_cids") || "[]"))].filter(Boolean))].filter((value) => value !== id);
-        localStorage.setItem("finmaster.device.legacy_cids", JSON.stringify(legacyIds));
-        legacyKeys.forEach((key) => localStorage.setItem(key, id));
-      } catch {
-        /* приватный режим */
-      }
+        const parsed = JSON.parse(localStorage.getItem("finmaster.device.legacy_cids") || "[]");
+        if (Array.isArray(parsed)) savedLegacy = parsed;
+      } catch { /* повреждённый кеш не мешает запуску */ }
+      const legacyIds = [...new Set([
+        ...legacyKeys.map((key) => localStorage.getItem(key) || ""),
+        ...savedLegacy,
+      ].filter(Boolean))];
+      id = localStorage.getItem(SHARED_CID) || localStorage.getItem(LS_CID) || uid();
+      localStorage.setItem(SHARED_CID, id);
+      localStorage.setItem(LS_CID, id);
+      localStorage.setItem("finmaster.device.legacy_cids", JSON.stringify(legacyIds.filter((value) => value !== id)));
+      legacyKeys.forEach((key) => localStorage.setItem(key, id));
+    } catch {
+      if (!id) id = uid();
     }
     return id;
   }
