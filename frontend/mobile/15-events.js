@@ -642,7 +642,7 @@
       }
       if (e.target.closest("#cmd-leave")) {
         state.stopped = true;
-        api("/api/remote/leave", { method: "POST", body: JSON.stringify({ cid: state.cid }) }).catch(() => {});
+        api("/api/remote/leave", { method: "POST", body: JSON.stringify({ cid: state.cid, kind: "mobile" }) }).catch(() => {});
         localStorage.removeItem(LS_TOKEN);
         blocked("Отключено", "Чтобы подключиться снова, откройте закладку или отсканируйте QR-код.");
       }
@@ -932,10 +932,10 @@
       }
     });
     window.addEventListener("pagehide", () => {
-      if (!state.token || !state.cid || !state.stopped) return;
+      if (!state.token || !state.cid) return;
       navigator.sendBeacon?.(
         `/api/remote/leave?t=${encodeURIComponent(state.token)}`,
-        new Blob([JSON.stringify({ cid: state.cid })], { type: "application/json" })
+        new Blob([JSON.stringify({ cid: state.cid, kind: "mobile" })], { type: "application/json" })
       );
     });
 
