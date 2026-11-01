@@ -8,6 +8,9 @@ name: Deploy FAQ
       - "frontend/mobile/styles/**"
       - "frontend/index.html"
       - "frontend/mobile.html"
+      - "frontend/favicon.svg"
+      - "frontend/favicon.png"
+      - "frontend/favicon.ico"
       - ".github/workflows/main.yml"
   workflow_dispatch:
 permissions:
@@ -29,9 +32,11 @@ jobs:
           cat frontend/mobile/styles/*.css > FAQ/assets/mobile.css
           cp frontend/index.html FAQ/assets/source/app.html
           cp frontend/mobile.html FAQ/assets/source/mobile.html
+          cp frontend/favicon.svg FAQ/assets/favicon.svg
+          cp frontend/favicon.png FAQ/assets/favicon.png
+          cp frontend/favicon.ico FAQ/assets/favicon.ico
       - uses: actions/upload-pages-artifact@v3
         with:
           path: FAQ
       - id: deployment
         uses: actions/deploy-pages@v4
-        
