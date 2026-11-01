@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Справка FinMaster</title>
-  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")||localStorage.getItem("finmaster.faq.theme")||"dark"}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <link rel="stylesheet" href="css/base.css">
   <link rel="stylesheet" href="css/layout.css">
   <link rel="stylesheet" href="css/article.css">
@@ -27,9 +27,16 @@
     </aside>
     <div class="main">
       <div class="top">
-        <button class="menu" id="menu" type="button">Разделы</button>
+        <button class="menu" id="menu" type="button" aria-expanded="false">Разделы</button>
+        <div class="top-actions" aria-label="Навигация по справке">
+          <button class="nav-step" id="nav-back" type="button" aria-label="Назад по справке" title="Назад" disabled>←</button>
+          <button class="nav-step" id="nav-forward" type="button" aria-label="Вперёд по справке" title="Вперёд" disabled>→</button>
+          <span class="top-divider" aria-hidden="true"></span>
+          <button class="theme" id="theme-toggle" type="button" aria-label="Переключить тему" title="Переключить тему"><span class="theme-icon" aria-hidden="true">☀</span><span class="theme-label">Светлая тема</span></button>
+        </div>
       </div>
       <div class="doc">
+        <nav class="trail" id="trail" aria-label="Путь по справке"></nav>
         <nav class="here" id="here" hidden></nav>
         <div id="doc"></div>
       </div>
