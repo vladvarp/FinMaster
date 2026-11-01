@@ -29,6 +29,7 @@ jobs:
           cat frontend/mobile/styles/*.css > FAQ/assets/mobile.css
           cp frontend/index.html FAQ/assets/source/app.html
           cp frontend/mobile.html FAQ/assets/source/mobile.html
+          printf '%s\n' 'document.documentElement.dataset.faqMode="web";' > FAQ/assets/web-mode.js
       - uses: actions/upload-pages-artifact@v3
         with:
           path: FAQ
