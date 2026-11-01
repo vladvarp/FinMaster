@@ -428,11 +428,14 @@ def inspect_export(file_path: str) -> list[dict[str, Any]]:
                       "conflicts": [{"prefix": str(x.get("token") or "")[:6]} for x in conflicts]})
     users_n = len(payload.get("users") or [])
     devices_n = len(payload.get("devices") or [])
-    if payload.get("telegram_bot_token") or users_n or devices_n:
+    revoked_n = len(payload.get("revoked_devices") or [])
+    if payload.get("telegram_bot_token") or users_n or devices_n or revoked_n:
         details = [f"{users_n} пол."] if users_n else ["без пользователей"]
         if devices_n:
-            details.append(f"{devices_n} устр.")
-        parts.append({"id": "telegram", "label": "Telegram: бот, пользователи и устройства", "on": True, "detail": " · ".join(details)})
+            details.append(f"{devices_n} устр. с историей")
+        if revoked_n:
+            details.append(f"{revoked_n} блок.")
+        parts.append({"id": "telegram", "label": "Telegram: бот, пользователи, устройства и история", "on": True, "detail": " · ".join(details)})
     return parts
 
 
