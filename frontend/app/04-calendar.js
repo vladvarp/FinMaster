@@ -832,8 +832,9 @@
     return workPauses(order).some((pause) => {
       const from = dateDay(pause.start);
       if (!from || key < from) return false;
-      // Пауза без конца, которая начинается позже сегодня, закрывает все дни вперёд.
-      if (pauseIsOpen(order, pause) && from > todayKey) return true;
+      // Открытая пауза действует со дня начала и до явного возобновления,
+      // в том числе на будущие дни. pauseEndKey ограничивает только её отрисовку.
+      if (pauseIsOpen(order, pause)) return true;
       const till = pauseEndKey(order, pause, clockToday());
       return !!(till && key <= till);
     });
