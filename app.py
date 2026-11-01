@@ -280,7 +280,7 @@ def _device_info() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-_device_disk: dict[str, tuple[float, tuple]] = {}
+_device_disk: dict[tuple[str, str], tuple[float, tuple]] = {}
 
 
 def _client_ip() -> str:
@@ -331,10 +331,11 @@ def _remember_client(cid: str, name: str, surface: str) -> None:
         str(info.get("brands") or ""),
     )
     now = time.monotonic()
-    prev = _device_disk.get(cid)
-    if prev and prev[1] == sig and now - prev[0] < 30:
+    cache_key = (cid, surface)
+    prev = _device_disk.get(cache_key)
+    if prev and prev[1] == sig and now - prev[0] < 300:
         return
-    _device_disk[cid] = (now, sig)
+    _device_disk[cache_key] = (now, sig)
     storage.remember_device(cid, label, _client_ip(), info, surface=surface, via=via)
 
 
@@ -2500,6 +2501,19 @@ def api_remote_forget():
     g.netlog_key = f"revoke-{cid}"
     return jsonify({"ok": True, **payload, "devices": devices})
 
+@app.get("/api/remote/device/history")
+def api_remote_device_history():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    cid = str(request.args.get("id") or "").strip()
+    if not cid:
+        return jsonify({"error": "Не указано устройство."}), 400
+    devices = storage.remote_settings()["devices"]
+    if not any(str(item.get("id") or "") == cid for item in devices):
+        return jsonify({"error": "Устройство не найдено."}), 404
+    return jsonify({"ok": True, "history": storage.device_history(cid)})
+
+
 @app.post("/api/remote/device/delete")
 def api_remote_device_delete():
     if not _is_local():
@@ -2969,7 +2983,7 @@ def api_remote_autosave():
 @app.post("/api/remote/leave")
 def api_remote_leave():
     data = request.get_json(silent=True) or {}
-    REMOTE.drop(str(data.get("cid") or ""))
+    REMOTE.drop(str(data.get("cid") or ""), str(data.get("kind") or "mobile"))
     return jsonify({"ok": True})
 
 
