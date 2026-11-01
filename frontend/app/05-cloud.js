@@ -2194,7 +2194,6 @@
         if (el.getAttribute?.("data-no-tip") === "1") return null;
         const text = migrateTitle(el) || String(el.getAttribute?.("data-tip") || "").trim();
         if (text) {
-          if (layer && !layer.contains(el)) return null;
           return el;
         }
         el = el.parentElement;
