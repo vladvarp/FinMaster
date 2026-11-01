@@ -947,10 +947,40 @@ def remember_device(
     if not cid:
         return remote_settings()["devices"]
     data = remote_settings()
-    devices = [d for d in data["devices"] if d.get("id") != cid]
-    prev = next((d for d in data["devices"] if d.get("id") == cid), {})
-    prev_info = prev.get("info") if isinstance(prev.get("info"), dict) else {}
     incoming = info if isinstance(info, dict) else {}
+
+    # Старые отдельные ID телефона, хранилища и браузера объединяются
+    # в общий ID браузера, если клиент прислал их при миграции.
+    legacy_ids = incoming.get("legacy_cids") if isinstance(incoming.get("legacy_cids"), list) else []
+    legacy_ids = list(dict.fromkeys(
+        str(value).strip() for value in legacy_ids
+        if str(value).strip() and str(value).strip() != cid
+    ))[:8]
+    devices_by_id = {str(item.get("id") or ""): dict(item) for item in data["devices"] if item.get("id")}
+    prev = devices_by_id.get(cid, {})
+    revoked = set(data.get("revoked_devices") or [])
+    merged_history = list(prev.get("history") or []) if isinstance(prev.get("history"), list) else []
+    merged_surfaces = set(prev.get("surfaces") or []) if isinstance(prev.get("surfaces"), list) else set()
+    first_seen = str(prev.get("first_seen") or "")
+    for old_id in legacy_ids:
+        old = devices_by_id.pop(old_id, None)
+        if not old:
+            continue
+        merged_surfaces.update(old.get("surfaces") or [])
+        if old.get("surface"):
+            merged_surfaces.add(old["surface"])
+        if isinstance(old.get("history"), list):
+            merged_history.extend(old["history"])
+        if old.get("first_seen") and (not first_seen or str(old["first_seen"]) < first_seen):
+            first_seen = str(old["first_seen"])
+        if old.get("revoked_at") or old_id in revoked:
+            revoked.add(cid)
+        revoked.discard(old_id)
+    if revoked:
+        save_remote_settings(revoked_devices=list(revoked))
+        data = remote_settings()
+
+    prev_info = prev.get("info") if isinstance(prev.get("info"), dict) else {}
     merged = dict(prev_info)
     for key in _DEVICE_INFO_KEYS:
         value = incoming.get(key)
@@ -971,32 +1001,70 @@ def remember_device(
         route = "lan"
     fallback = {"desk": "Интерфейс ПК", "bank": "Хранилище"}.get(kind, "Телефон")
     seen = now_local_iso()
-    devices.insert(
-        0,
-        {
-            "id": cid,
-            "name": str(name or prev.get("name") or fallback).strip() or fallback,
-            "ip": str(ip or prev.get("ip") or ""),
-            "seen_at": seen,
-            "first_seen": str(prev.get("first_seen") or seen),
+    merged_surfaces.add(kind)
+    merged_surfaces = {item for item in merged_surfaces if item in _DEVICE_SURFACES}
+    history = [item for item in merged_history if isinstance(item, dict)]
+    surface_seen = dict(prev.get("surface_seen") or {}) if isinstance(prev.get("surface_seen"), dict) else {}
+    last_surface = surface_seen.get(kind) if isinstance(surface_seen.get(kind), dict) else {}
+    changed = (
+        not last_surface
+        or last_surface.get("via") != route
+        or last_surface.get("ip") != str(ip or prev.get("ip") or "")
+    )
+    if last_surface and not changed:
+        try:
+            previous_at = datetime.fromisoformat(str(last_surface.get("at") or ""))
+            changed = (datetime.now().astimezone() - previous_at).total_seconds() >= 300
+        except (TypeError, ValueError):
+            changed = True
+    if changed:
+        history.append({
+            "at": seen,
             "surface": kind,
             "via": route,
-            "info": merged,
-        },
-    )
+            "ip": str(ip or prev.get("ip") or ""),
+            "event": "Подключение",
+        })
+    surface_seen[kind] = {"at": seen, "via": route, "ip": str(ip or prev.get("ip") or "")}
+    history.sort(key=lambda item: str(item.get("at") or ""))
+    history = history[-100:]
+    devices = [item for item in data["devices"] if str(item.get("id") or "") not in set(legacy_ids + [cid])]
+    devices.insert(0, {
+        "id": cid,
+        "name": str(name or prev.get("name") or fallback).strip() or fallback,
+        "ip": str(ip or prev.get("ip") or ""),
+        "seen_at": seen,
+        "first_seen": first_seen or str(prev.get("first_seen") or seen),
+        "surface": kind,
+        "surfaces": sorted(merged_surfaces),
+        "surface_seen": surface_seen,
+        "history": history,
+        "via": route,
+        "info": merged,
+        **({"revoked_at": prev.get("revoked_at") or seen} if prev.get("revoked_at") or cid in revoked else {}),
+    })
     return save_remote_settings(devices=devices)["devices"]
 
 
 def forget_device(cid: str) -> list[dict[str, Any]]:
+    # Удаление записи означает «забыть устройство»: вместе с историей снимается и блокировка.
     cid = str(cid or "").strip()
     data = remote_settings()
-    target = next((d for d in data["devices"] if str(d.get("id") or "") == cid), None)
-    revoked = list(data.get("revoked_devices") or [])
-    if target and target.get("revoked_at") and cid and cid not in revoked:
-        revoked.append(cid)
     devices = [d for d in data["devices"] if str(d.get("id") or "") != cid]
+    revoked = [item for item in data.get("revoked_devices") or [] if str(item) != cid]
     return save_remote_settings(devices=devices, revoked_devices=revoked)["devices"]
 
+
+def device_history(cid: str) -> list[dict[str, Any]]:
+    cid = str(cid or "").strip()
+    device = next(
+        (item for item in remote_settings()["devices"] if str(item.get("id") or "") == cid),
+        None,
+    )
+    if not device:
+        return []
+    history = device.get("history") if isinstance(device.get("history"), list) else []
+    return [dict(item) for item in history if isinstance(item, dict)][-100:]
 
 def revoke_device(cid: str) -> list[dict[str, Any]]:
     cid = str(cid or "").strip()
