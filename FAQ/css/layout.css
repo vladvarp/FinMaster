@@ -282,3 +282,5 @@
 .menu:active, .theme:active, .nav-step:active:not(:disabled) { transform: scale(.975); }
 .search { transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
 .search:focus { box-shadow: var(--focus); }
+
+html[data-faq-mode="app"] .top-divider { display: none; }
