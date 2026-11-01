@@ -43,7 +43,7 @@
       localStorage.setItem(programKeyExists ? "finmaster.theme" : "finmaster.faq.theme", next);
     } catch (err) { /* тема действует до закрытия страницы */ }
     paintThemeControl();
-    if (window.FAQLive) window.FAQLive.mount(doc, true);
+    if (window.FAQLive) window.FAQLive.mount(doc);
   }
 
   document.documentElement.dataset.theme = programTheme();
@@ -53,7 +53,7 @@
     if (event.key && !["finmaster.theme", "finmaster.faq.theme"].includes(event.key)) return;
     document.documentElement.dataset.theme = programTheme();
     paintThemeControl();
-    if (window.FAQLive) window.FAQLive.mount(doc, true);
+    if (window.FAQLive) window.FAQLive.mount(doc);
   });
 
   function updateRouteButtons() {
