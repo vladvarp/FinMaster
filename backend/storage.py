@@ -975,24 +975,24 @@ def remember_device(
     first_seen = str(prev.get("first_seen") or "")
     for old_id in legacy_ids:
         old = devices_by_id.pop(old_id, None)
-        if not old:
-            continue
-        if isinstance(old.get("surfaces"), list):
-            merged_surfaces.update(str(value) for value in old["surfaces"] if str(value) in _DEVICE_SURFACES)
-        if old.get("surface") in _DEVICE_SURFACES:
-            merged_surfaces.add(old["surface"])
-        if isinstance(old.get("surface_seen"), dict):
-            for key, value in old["surface_seen"].items():
-                merged_surface_seen.setdefault(key, value)
-        if isinstance(old.get("info"), dict):
-            for key, value in old["info"].items():
-                if value not in (None, ""):
-                    legacy_info.setdefault(key, value)
-        if isinstance(old.get("history"), list):
-            merged_history.extend(old["history"])
-        if old.get("first_seen") and (not first_seen or str(old["first_seen"]) < first_seen):
-            first_seen = str(old["first_seen"])
-        if old.get("revoked_at") or old_id in revoked:
+        if old:
+            if isinstance(old.get("surfaces"), list):
+                merged_surfaces.update(str(value) for value in old["surfaces"] if str(value) in _DEVICE_SURFACES)
+            if old.get("surface") in _DEVICE_SURFACES:
+                merged_surfaces.add(old["surface"])
+            if isinstance(old.get("surface_seen"), dict):
+                for key, value in old["surface_seen"].items():
+                    merged_surface_seen.setdefault(key, value)
+            if isinstance(old.get("info"), dict):
+                for key, value in old["info"].items():
+                    if value not in (None, ""):
+                        legacy_info.setdefault(key, value)
+            if isinstance(old.get("history"), list):
+                merged_history.extend(old["history"])
+            if old.get("first_seen") and (not first_seen or str(old["first_seen"]) < first_seen):
+                first_seen = str(old["first_seen"])
+        # Даже если старую запись уже удалили, переносим её запрет на общий ID.
+        if (old and old.get("revoked_at")) or old_id in revoked:
             revoked.add(cid)
         revoked.discard(old_id)
     if revoked != revoked_before:
