@@ -3775,7 +3775,14 @@
     from = clampDay(from, min, max);
     till = clampDay(till, min, max);
     if (from > till) from = till;
-    list[index] = { start: dayKey(from), end: dayKey(till) };
+
+    // Перемещение открытой паузы не должно превращать её визуальный край в дату окончания.
+    // Закрываем её только при перетаскивании правой границы.
+    if (calDrag.pause0.open && calDrag.mode !== "pause-end") {
+      list[index] = { start: dayKey(from), end: "", open: true };
+    } else {
+      list[index] = { start: dayKey(from), end: dayKey(till) };
+    }
   }
 
   function paintCalDragBar() {
