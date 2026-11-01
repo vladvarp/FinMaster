@@ -8,8 +8,8 @@
   let job = 0;
 
   function theme() {
-    try { return localStorage.getItem("finmaster.theme") === "dark" ? "dark" : "light"; }
-    catch (err) { return "light"; }
+    try { return localStorage.getItem("finmaster.theme") || localStorage.getItem("finmaster.faq.theme") || "dark"; }
+    catch (err) { return "dark"; }
   }
 
   function extractIcons(js) {
