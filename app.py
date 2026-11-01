@@ -944,6 +944,45 @@ def _set_ngrok(enabled: bool) -> dict[str, Any]:
     return _telegram_live_url()
 
 
+def _select_ngrok_token(token_id: str) -> dict[str, Any]:
+    """Выбирает токен ngrok и перезапускает активный туннель, как в окне ПК."""
+    token_id = str(token_id or "").strip()
+    if not token_id:
+        raise ValueError("Токен не выбран.")
+
+    was_running = bool(storage.remote_settings().get("ngrok") and REMOTE.enabled)
+
+    TUNNEL.stop()
+    if ngrok_process_running():
+        raise RuntimeError(
+            "ngrok.exe ещё работает. Откройте FinMaster на компьютере и "
+            "завершите процесс через принудительную остановку ngrok, затем повторите выбор."
+        )
+
+    secrets.select_ngrok_token(token_id)
+    settings = storage.remote_settings()
+
+    if not settings.get("ngrok_token") and settings.get("ngrok"):
+        settings = storage.save_remote_settings(ngrok=False, via="lan")
+
+    if was_running and settings.get("ngrok") and settings.get("ngrok_token"):
+        _ensure_tunnel(settings)
+
+    payload = _telegram_live_url()
+    tokens = secrets.ngrok_token_list()
+    payload.update(
+        {
+            "ngrok_tokens": tokens,
+            "ngrok_active_id": next(
+                (item["id"] for item in tokens if item.get("active")),
+                "",
+            ),
+            "tunnel": TUNNEL.snapshot(),
+        }
+    )
+    return payload
+
+
 def _start_telegram(settings: dict[str, Any] | None = None) -> None:
     cfg = settings or storage.remote_settings()
     token = str(cfg.get("telegram_bot_token") or TELEGRAM.token() or "").strip()
@@ -958,6 +997,7 @@ def _start_telegram(settings: dict[str, Any] | None = None) -> None:
         on_rotate=_rotate_remote_link,
         on_access=_set_web_access,
         on_ngrok=_set_ngrok,
+        on_ngrok_token=_select_ngrok_token,
     )
     _telegram_sync_menu()
 
@@ -2370,34 +2410,68 @@ def api_remote_ngrok_tokens_update():
     data = request.get_json(silent=True) or {}
     action = str(data.get("action") or "")
     token_id = str(data.get("id") or "")
+
+    if action == "select":
+        try:
+            payload = _select_ngrok_token(token_id)
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc), "force_required": True}), 409
+        except (ValueError, OSError) as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        payload.update(
+            {
+                "ok": True,
+                "tokens": secrets.ngrok_token_list(),
+                "ngrok_active_id": next(
+                    (item["id"] for item in secrets.ngrok_token_list() if item.get("active")),
+                    "",
+                ),
+            }
+        )
+        return jsonify(payload)
+
     was_running = bool(storage.remote_settings().get("ngrok") and REMOTE.enabled)
-    if action in {"select", "delete"} and token_id:
+    if action == "delete" and token_id:
         TUNNEL.stop()
         if ngrok_process_running():
-            return jsonify({"error": "ngrok.exe ещё работает. Его нужно завершить принудительно через ngrok_stop.bat.", "force_required": True}), 409
+            return jsonify(
+                {
+                    "error": "ngrok.exe ещё работает. Его нужно завершить принудительно через ngrok_stop.bat.",
+                    "force_required": True,
+                }
+            ), 409
+
     try:
         if action == "add":
             secrets.add_ngrok_token(str(data.get("token") or ""), str(data.get("name") or ""))
         elif action == "rename":
             secrets.rename_ngrok_token(token_id, str(data.get("name") or ""))
-        elif action == "select":
-            secrets.select_ngrok_token(token_id)
         elif action == "delete":
             secrets.delete_ngrok_token(token_id)
         else:
             return jsonify({"error": "Неизвестное действие."}), 400
     except (ValueError, OSError) as exc:
         return jsonify({"error": str(exc)}), 400
+
     settings = storage.remote_settings()
     if not settings.get("ngrok_token") and settings.get("ngrok"):
         settings = storage.save_remote_settings(ngrok=False, via="lan")
     if was_running and settings.get("ngrok") and settings.get("ngrok_token"):
         _ensure_tunnel(settings)
-    payload = _remote_public()
-    payload.update({"ok": True, "tokens": secrets.ngrok_token_list(),
-                    "ngrok_active_id": next((x["id"] for x in secrets.ngrok_token_list() if x.get("active")), "")})
-    return jsonify(payload)
 
+    payload = _remote_public()
+    payload.update(
+        {
+            "ok": True,
+            "tokens": secrets.ngrok_token_list(),
+            "ngrok_active_id": next(
+                (item["id"] for item in secrets.ngrok_token_list() if item.get("active")),
+                "",
+            ),
+        }
+    )
+    return jsonify(payload)
 
 @app.post("/api/remote/telegram")
 def api_remote_telegram():
