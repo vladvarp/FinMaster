@@ -946,6 +946,7 @@ def remember_device(
     info: Any = None,
     surface: str = "",
     via: str = "",
+    record_history: bool = True,
 ) -> list[dict[str, Any]]:
     cid = str(cid or "").strip()
     if not cid:
@@ -1011,18 +1012,7 @@ def remember_device(
     history = [item for item in merged_history if isinstance(item, dict)]
     surface_seen = dict(prev.get("surface_seen") or {}) if isinstance(prev.get("surface_seen"), dict) else {}
     last_surface = surface_seen.get(kind) if isinstance(surface_seen.get(kind), dict) else {}
-    changed = (
-        not last_surface
-        or last_surface.get("via") != route
-        or last_surface.get("ip") != str(ip or prev.get("ip") or "")
-    )
-    if last_surface and not changed:
-        try:
-            previous_at = datetime.fromisoformat(str(last_surface.get("at") or ""))
-            changed = (datetime.now().astimezone() - previous_at).total_seconds() >= 300
-        except (TypeError, ValueError, OverflowError):
-            changed = True
-    if changed:
+    if record_history:
         history.append({
             "at": seen,
             "surface": kind,
