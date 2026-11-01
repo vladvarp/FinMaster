@@ -4,6 +4,8 @@ name: Deploy FAQ
     branches: [main]
     paths:
       - "FAQ/**"
+      - "frontend/app/styles/**"
+      - "frontend/mobile/styles/**"
       - ".github/workflows/main.yml"
   workflow_dispatch:
 permissions:
@@ -18,6 +20,11 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Собрать стили интерфейса для онлайн-справки
+        run: |
+          mkdir -p FAQ/assets
+          cat frontend/app/styles/*.css > FAQ/assets/app.css
+          cat frontend/mobile/styles/*.css > FAQ/assets/mobile.css
       - uses: actions/upload-pages-artifact@v3
         with:
           path: FAQ
