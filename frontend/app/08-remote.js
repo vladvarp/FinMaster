@@ -2520,10 +2520,13 @@
             (item) => item.id === restoreBtn.dataset.restore
           );
           const name = device?.name || "устройства";
+          const restoreText = device
+            ? `У «${name}» снова появится доступ. История устройства сохранится.`
+            : `Для устройства с ID ${String(restoreBtn.dataset.restore).slice(0, 16)}… будет снята старая блокировка. При следующем подключении оно появится в списке заново.`;
     
           const ok = await askConfirm({
             title: "Восстановить доступ?",
-            text: `У «${name}» снова появится доступ. История устройства сохранится.`,
+            text: restoreText,
             ok: "Восстановить",
             cancel: "Отмена",
           });
