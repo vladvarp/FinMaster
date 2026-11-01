@@ -958,7 +958,8 @@ def remember_device(
     ))[:8]
     devices_by_id = {str(item.get("id") or ""): dict(item) for item in data["devices"] if item.get("id")}
     prev = devices_by_id.get(cid, {})
-    revoked = set(data.get("revoked_devices") or [])
+    revoked_before = set(data.get("revoked_devices") or [])
+    revoked = set(revoked_before)
     merged_history = list(prev.get("history") or []) if isinstance(prev.get("history"), list) else []
     merged_surfaces = set(prev.get("surfaces") or []) if isinstance(prev.get("surfaces"), list) else set()
     first_seen = str(prev.get("first_seen") or "")
@@ -976,7 +977,7 @@ def remember_device(
         if old.get("revoked_at") or old_id in revoked:
             revoked.add(cid)
         revoked.discard(old_id)
-    if revoked:
+    if revoked != revoked_before:
         save_remote_settings(revoked_devices=list(revoked))
         data = remote_settings()
 
