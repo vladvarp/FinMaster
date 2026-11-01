@@ -13,7 +13,7 @@ window.FAQ_TOC = [
   {
     title: "Заказы и деньги",
     items: [
-      { id: "orders", title: "Заказы", keys: "позиция формула фильтр скидка оплатить заморозить" },
+      { id: "orders", title: "Заказы", keys: "позиция формула фильтр скидка оплатить заморозить", subs: [{ id: "card", title: "Карточка заказа" }, { id: "positions", title: "Позиции" }, { id: "list", title: "Список и действия" }] },
       { id: "formulas", title: "Формулы", keys: "выражение профиль скобки запятая умножить скидка количество цена" },
       { id: "dashboard", title: "Дашборд", keys: "kpi график инсайты выручка" },
       { id: "analytics", title: "Аналитика", keys: "фильтр сравнение динамика период" },
@@ -27,8 +27,8 @@ window.FAQ_TOC = [
   {
     title: "Работы и схемы",
     items: [
-      { id: "calendar", title: "Календарь", keys: "таймлайн линейный линейка навигатор рамка полоса гант неделя месяц выходные пауза" },
-      { id: "calculator", title: "Калькулятор", keys: "нода схема формула связь блюпринт пример оператор константа результат провод итог" },
+      { id: "calendar", title: "Календарь", keys: "таймлайн линейный линейка навигатор рамка полоса гант неделя месяц выходные пауза", subs: [{ id: "views", title: "Виды календаря" }, { id: "states", title: "Цвета, выходные и паузы" }, { id: "side", title: "Правая панель" }] },
+      { id: "calculator", title: "Калькулятор", keys: "нода схема формула связь блюпринт пример оператор константа результат провод итог", subs: [{ id: "basics", title: "Основы схемы" }, { id: "example", title: "Пример" }, { id: "reference", title: "Типы нод и связи" }] },
       { id: "presentation", title: "Презентация", keys: "блок kpi холст инфографика" },
       { id: "cloud", title: "Облако", keys: "карта галактика 3d долг" },
       { id: "vault", title: "Хранилище", keys: "копилка пополнение снятие цель bank телефон" },
@@ -66,10 +66,10 @@ window.FAQ_TOC = [
   {
     title: "Телефон и интернет",
     items: [
-      { id: "phone", title: "Подключение телефона", keys: "qr wi-fi доступ устройства экран вкладки стенд" },
+      { id: "phone", title: "Подключение телефона", keys: "qr wi-fi доступ устройства экран вкладки стенд", subs: [{ id: "connect", title: "Подключение" }, { id: "devices", title: "Устройства и доступ" }, { id: "sync", title: "Синхронизация экранов" }] },
       { id: "console", title: "Консоль", keys: "сеть лог мост telegram ngrok ctrl ё очистить" },
       { id: "ngrok", title: "Интернет через ngrok", keys: "токен path store туннель" },
-      { id: "telegram", title: "Telegram-бот", keys: "botfather mini app снимок голос вопрос долги чат стенд токен хранилище bank" },
+      { id: "telegram", title: "Telegram-бот", keys: "botfather mini app снимок голос вопрос долги чат стенд токен хранилище bank", subs: [{ id: "connect", title: "Подключение бота" }, { id: "chat", title: "Кнопки и команды" }, { id: "requests", title: "Запросы и ответы" }] },
       { id: "mobile", title: "Экран телефона", keys: "вкладки свайп заказы календарь стенд проиграть" },
       { id: "bank", title: "Хранилище на телефоне", keys: "bank копилка операции отчёты пополнение снятие страница все операции" },
       { id: "desk", title: "Интерфейс компьютера в браузере", keys: "desk ссылка web" },
@@ -79,7 +79,7 @@ window.FAQ_TOC = [
     title: "Если что-то не так",
     items: [
       { id: "safety", title: "Что видит телефон", keys: "токен безопасность ссылка" },
-      { id: "settings", title: "Где лежат настройки", keys: "appdata config документы экспорт импорт fms архив голос словарь" },
+      { id: "settings", title: "Где лежат настройки", keys: "appdata config документы экспорт импорт fms архив голос словарь", subs: [{ id: "window", title: "Окно настроек" }, { id: "program", title: "Настройки программы" }, { id: "archive", title: "Архив и папки" }] },
       { id: "trouble", title: "Частые неполадки", keys: "не открывается порт ngrok бот корзина" },
     ],
   },
