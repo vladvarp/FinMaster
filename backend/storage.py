@@ -966,15 +966,28 @@ def remember_device(
     revoked_before = set(data.get("revoked_devices") or [])
     revoked = set(revoked_before)
     merged_history = list(prev.get("history") or []) if isinstance(prev.get("history"), list) else []
-    merged_surfaces = set(prev.get("surfaces") or []) if isinstance(prev.get("surfaces"), list) else set()
+    merged_surfaces = {
+        str(value) for value in (prev.get("surfaces") or [])
+        if str(value) in _DEVICE_SURFACES
+    } if isinstance(prev.get("surfaces"), list) else set()
+    merged_surface_seen = dict(prev.get("surface_seen") or {}) if isinstance(prev.get("surface_seen"), dict) else {}
+    legacy_info: dict[str, Any] = {}
     first_seen = str(prev.get("first_seen") or "")
     for old_id in legacy_ids:
         old = devices_by_id.pop(old_id, None)
         if not old:
             continue
-        merged_surfaces.update(old.get("surfaces") or [])
-        if old.get("surface"):
+        if isinstance(old.get("surfaces"), list):
+            merged_surfaces.update(str(value) for value in old["surfaces"] if str(value) in _DEVICE_SURFACES)
+        if old.get("surface") in _DEVICE_SURFACES:
             merged_surfaces.add(old["surface"])
+        if isinstance(old.get("surface_seen"), dict):
+            for key, value in old["surface_seen"].items():
+                merged_surface_seen.setdefault(key, value)
+        if isinstance(old.get("info"), dict):
+            for key, value in old["info"].items():
+                if value not in (None, ""):
+                    legacy_info.setdefault(key, value)
         if isinstance(old.get("history"), list):
             merged_history.extend(old["history"])
         if old.get("first_seen") and (not first_seen or str(old["first_seen"]) < first_seen):
@@ -987,7 +1000,8 @@ def remember_device(
         data = remote_settings()
 
     prev_info = prev.get("info") if isinstance(prev.get("info"), dict) else {}
-    merged = dict(prev_info)
+    merged = dict(legacy_info)
+    merged.update(prev_info)
     for key in _DEVICE_INFO_KEYS:
         value = incoming.get(key)
         if value in (None, ""):
@@ -1010,7 +1024,7 @@ def remember_device(
     merged_surfaces.add(kind)
     merged_surfaces = {item for item in merged_surfaces if item in _DEVICE_SURFACES}
     history = [item for item in merged_history if isinstance(item, dict)]
-    surface_seen = dict(prev.get("surface_seen") or {}) if isinstance(prev.get("surface_seen"), dict) else {}
+    surface_seen = merged_surface_seen
     last_surface = surface_seen.get(kind) if isinstance(surface_seen.get(kind), dict) else {}
     if record_history:
         history.append({
