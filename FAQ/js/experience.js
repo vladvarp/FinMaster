@@ -174,13 +174,13 @@
           if (!outgoing.has(targetKey)) outgoing.set(targetKey, { ...target, labels: [] });
           if (label) outgoing.get(targetKey).labels.push(label);
         }
-        const sourceSub = (topic.subs || []).find((item) => item.id === fromSub);
-        const sourceRoute = topic.id + (sourceSub ? "/" + sourceSub.id : "");
+        const sourceInfo = routeInfo(topic.id + (fromSub ? "/" + fromSub : ""));
+        const sourceRoute = sourceInfo?.route || topic.id;
         if (targetKey === current.route && sourceRoute !== current.route) {
           if (!incoming.has(sourceRoute)) {
             incoming.set(sourceRoute, {
               route: sourceRoute,
-              title: sourceSub ? topic.title + " · " + sourceSub.title : topic.title,
+              title: sourceInfo?.sub ? topic.title + " · " + sourceInfo.title : topic.title,
               group: topic.group,
               labels: []
             });
