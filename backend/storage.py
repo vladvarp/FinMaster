@@ -794,11 +794,17 @@ def remote_settings() -> dict[str, Any]:
     if port <= 0 or port > 65535:
         port = DEFAULT_REMOTE_PORT
     devices = [d for d in (raw.get("devices") or []) if isinstance(d, dict) and d.get("id")]
+    revoked_devices = list(dict.fromkeys(
+        str(cid).strip()
+        for cid in (raw.get("revoked_devices") or [])
+        if str(cid).strip()
+    ))[-MAX_DEVICES * 5:]
     out = {
         "token": token,
         "port": port,
         "autostart": bool(raw.get("autostart")),
         "devices": devices[:MAX_DEVICES],
+        "revoked_devices": revoked_devices,
         "ngrok": bool(raw.get("ngrok")),
         "via": str(raw.get("via") or "lan"),
         "telegram_offset": 0,
@@ -834,6 +840,13 @@ def save_remote_settings(**updates: Any) -> dict[str, Any]:
             d for d in updates["devices"]
             if isinstance(d, dict) and d.get("id")
         ][:MAX_DEVICES]
+
+    if "revoked_devices" in updates and isinstance(updates["revoked_devices"], list):
+        data["revoked_devices"] = list(dict.fromkeys(
+            str(cid).strip()
+            for cid in updates["revoked_devices"]
+            if str(cid).strip()
+        ))[-MAX_DEVICES * 5:]
 
     if "ngrok" in updates:
         data["ngrok"] = bool(updates["ngrok"])
@@ -974,9 +987,14 @@ def remember_device(
 
 
 def forget_device(cid: str) -> list[dict[str, Any]]:
+    cid = str(cid or "").strip()
     data = remote_settings()
-    devices = [d for d in data["devices"] if d.get("id") != cid]
-    return save_remote_settings(devices=devices)["devices"]
+    target = next((d for d in data["devices"] if str(d.get("id") or "") == cid), None)
+    revoked = list(data.get("revoked_devices") or [])
+    if target and target.get("revoked_at") and cid and cid not in revoked:
+        revoked.append(cid)
+    devices = [d for d in data["devices"] if str(d.get("id") or "") != cid]
+    return save_remote_settings(devices=devices, revoked_devices=revoked)["devices"]
 
 
 def revoke_device(cid: str) -> list[dict[str, Any]]:
@@ -988,7 +1006,10 @@ def revoke_device(cid: str) -> list[dict[str, Any]]:
         if str(device.get("id") or "") == cid:
             device["revoked_at"] = now_local_iso()
         devices.append(device)
-    return save_remote_settings(devices=devices)["devices"]
+    revoked = list(data.get("revoked_devices") or [])
+    if cid and cid not in revoked:
+        revoked.append(cid)
+    return save_remote_settings(devices=devices, revoked_devices=revoked)["devices"]
 
 def restore_device(cid: str) -> list[dict[str, Any]]:
     cid = str(cid or "").strip()
@@ -1001,15 +1022,19 @@ def restore_device(cid: str) -> list[dict[str, Any]]:
             device.pop("revoked_at", None)
         devices.append(device)
 
-    return save_remote_settings(devices=devices)["devices"]
+    revoked = [item for item in data.get("revoked_devices") or [] if str(item) != cid]
+    return save_remote_settings(devices=devices, revoked_devices=revoked)["devices"]
 
 def device_access_revoked(cid: str) -> bool:
     cid = str(cid or "").strip()
     if not cid:
         return False
+    data = remote_settings()
+    if cid in (data.get("revoked_devices") or []):
+        return True
     return any(
         str(item.get("id") or "") == cid and bool(item.get("revoked_at"))
-        for item in remote_settings()["devices"]
+        for item in data["devices"]
     )
 
 
