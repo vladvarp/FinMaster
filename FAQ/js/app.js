@@ -19,6 +19,8 @@
   let routeCursor = -1;
   let lastRoute = "";
 
+  if (themeToggle && document.documentElement.dataset.faqMode === "web") themeToggle.hidden = false;
+
   function programTheme() {
     const web = document.documentElement.dataset.faqMode === "web";
     try { return localStorage.getItem("finmaster.theme") || (web ? "dark" : "light"); }
