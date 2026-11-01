@@ -3702,17 +3702,15 @@
     till = clampDay(till, min, max);
     if (from > till) from = till;
 
-    // Открытая пауза сохраняет открытый статус при перемещении.
-    // Если её правую границу отодвинули на вчера, помечаем возобновление сегодня:
-    // при обратном перетаскивании на сегодня пауза снова становится открытой.
+    // У позиции без даты окончания пауза открыта, пока её правая граница
+    // не установлена раньше сегодняшнего дня. Тогда следующий день явно рабочий.
+    // При возврате границы на сегодня или дальше пауза снова становится открытой.
     const todayKey = dayKey(clockToday());
-    if (calDrag.pause0.open && calDrag.mode === "pause-end" && !dateDay(order.work_end) && dayKey(till) < todayKey) {
+    if (calDrag.mode === "pause-end" && !dateDay(order.work_end) && dayKey(till) >= todayKey) {
+      list[index] = { start: dayKey(from), end: "", open: true };
+    } else if (calDrag.mode === "pause-end" && !dateDay(order.work_end)) {
       list[index] = { start: dayKey(from), end: dayKey(till), resumeNext: true };
-    } else if (
-      (calDrag.pause0.open && calDrag.mode !== "pause-end") ||
-      (calDrag.mode === "pause-end" && !dateDay(order.work_end) && dayKey(till) === todayKey &&
-        (calDrag.pause0.open || calDrag.pause0.resumeNext))
-    ) {
+    } else if (calDrag.pause0.open && calDrag.mode !== "pause-end") {
       list[index] = { start: dayKey(from), end: "", open: true };
     } else {
       list[index] = { start: dayKey(from), end: dayKey(till) };
