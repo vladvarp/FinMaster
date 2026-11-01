@@ -537,7 +537,61 @@ def apply_export(file_path: str, ids: list[str], *, keep_unique_ngrok: bool = Tr
                 cid = str(item.get("id") or "").strip()
                 if not cid:
                     continue
-                merged[cid] = dict(item)
+                incoming = dict(item)
+                existing = merged.get(cid)
+                if existing:
+                    combined = dict(existing)
+                    combined.update({
+                        key: value for key, value in incoming.items()
+                        if key not in {"history", "surfaces", "surface_seen", "first_seen", "info", "revoked_at"}
+                    })
+                    old_history = existing.get("history") if isinstance(existing.get("history"), list) else []
+                    new_history = incoming.get("history") if isinstance(incoming.get("history"), list) else []
+                    history_by_key = {}
+                    for event in [*old_history, *new_history]:
+                        if not isinstance(event, dict):
+                            continue
+                        event_key = (
+                            str(event.get("at") or ""),
+                            str(event.get("surface") or ""),
+                            str(event.get("ip") or ""),
+                            str(event.get("event") or ""),
+                        )
+                        history_by_key[event_key] = dict(event)
+                    combined["history"] = sorted(
+                        history_by_key.values(),
+                        key=lambda event: str(event.get("at") or ""),
+                    )[-100:]
+                    surfaces = set()
+                    for source in (existing.get("surfaces"), incoming.get("surfaces")):
+                        if isinstance(source, list):
+                            surfaces.update(str(value) for value in source if str(value) in {"mobile", "bank", "desk"})
+                    for source in (existing, incoming):
+                        if source.get("surface") in {"mobile", "bank", "desk"}:
+                            surfaces.add(source["surface"])
+                    combined["surfaces"] = sorted(surfaces)
+                    first_values = [
+                        str(value) for value in (existing.get("first_seen"), incoming.get("first_seen"))
+                        if value
+                    ]
+                    if first_values:
+                        combined["first_seen"] = min(first_values)
+                    old_info = existing.get("info") if isinstance(existing.get("info"), dict) else {}
+                    new_info = incoming.get("info") if isinstance(incoming.get("info"), dict) else {}
+                    combined["info"] = {**old_info, **new_info}
+                    old_seen = existing.get("surface_seen") if isinstance(existing.get("surface_seen"), dict) else {}
+                    new_seen = incoming.get("surface_seen") if isinstance(incoming.get("surface_seen"), dict) else {}
+                    combined_seen = dict(old_seen)
+                    for surface, stamp in new_seen.items():
+                        prev_stamp = combined_seen.get(surface)
+                        if not isinstance(prev_stamp, dict) or str(stamp.get("at") or "") >= str(prev_stamp.get("at") or ""):
+                            combined_seen[surface] = stamp
+                    combined["surface_seen"] = combined_seen
+                    if existing.get("revoked_at") or incoming.get("revoked_at"):
+                        combined["revoked_at"] = existing.get("revoked_at") or incoming.get("revoked_at")
+                    merged[cid] = combined
+                else:
+                    merged[cid] = incoming
             current_revoked = storage.remote_settings().get("revoked_devices") or []
             imported_revoked = payload.get("revoked_devices")
             if not isinstance(imported_revoked, list):
