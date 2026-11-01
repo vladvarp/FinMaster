@@ -257,7 +257,10 @@ def _guard_desk_api():
     fail = _desk_auth_fail()
     if fail:
         return fail
-    if storage.device_access_revoked(_desk_cid()):
+    cid = _desk_cid()
+    legacy_ids = _device_info().get("legacy_cids")
+    legacy_ids = legacy_ids if isinstance(legacy_ids, list) else []
+    if storage.device_access_revoked(cid) or any(storage.device_access_revoked(str(old_id)) for old_id in legacy_ids):
         return jsonify({"error": "Доступ к этому устройству закрыт."}), 403
     path = request.path
     if path in _DESK_DENY or path.startswith("/api/runtime/"):
@@ -280,7 +283,7 @@ def _device_info() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-_device_disk: dict[str, tuple[float, tuple]] = {}
+_device_disk: dict[tuple[str, str], tuple[float, tuple]] = {}
 
 
 def _client_ip() -> str:
@@ -315,7 +318,7 @@ def _client_profile() -> dict[str, Any]:
     return info
 
 
-def _remember_client(cid: str, name: str, surface: str) -> None:
+def _remember_client(cid: str, name: str, surface: str, record_history: bool = True) -> None:
     if not cid or cid == "pc" or surface == "desktop":
         return
     info = _client_profile()
@@ -331,11 +334,12 @@ def _remember_client(cid: str, name: str, surface: str) -> None:
         str(info.get("brands") or ""),
     )
     now = time.monotonic()
-    prev = _device_disk.get(cid)
-    if prev and prev[1] == sig and now - prev[0] < 30:
+    cache_key = (cid, surface)
+    prev = _device_disk.get(cache_key)
+    if prev and prev[1] == sig and now - prev[0] < 300 and not record_history:
         return
-    _device_disk[cid] = (now, sig)
-    storage.remember_device(cid, label, _client_ip(), info, surface=surface, via=via)
+    _device_disk[cache_key] = (now, sig)
+    storage.remember_device(cid, label, _client_ip(), info, surface=surface, via=via, record_history=record_history)
 
 
 def _note_desk_client() -> None:
@@ -344,8 +348,8 @@ def _note_desk_client() -> None:
         return
     info = _client_profile()
     name = str(info.get("name") or "Интерфейс ПК")[:80]
-    REMOTE.touch(cid, "desk", name)
-    _remember_client(cid, name, "desk")
+    new_connection = REMOTE.touch(cid, "desk", name)
+    _remember_client(cid, name, "desk", record_history=new_connection)
 
 
 def _log_actor() -> str:
@@ -407,7 +411,9 @@ def guard_remote_clients():
             netlog.add("http", "Запрос отклонён: неверный токен", level="err", source=_net_peer(), detail=path, key="deny-token")
             return jsonify({"error": "Сессия недействительна — отсканируйте QR-код заново."}), 401
         cid = str(request.args.get("cid") or "").strip()
-        if storage.device_access_revoked(cid):
+        legacy_ids = _device_info().get("legacy_cids")
+        legacy_ids = legacy_ids if isinstance(legacy_ids, list) else []
+        if storage.device_access_revoked(cid) or any(storage.device_access_revoked(str(old_id)) for old_id in legacy_ids):
             netlog.add("http", "Запрос отклонён: доступ устройства закрыт", level="warn", source=_net_peer(), detail=path, key=f"deny-device-{cid}")
             return jsonify({"error": "Доступ к этому устройству закрыт."}), 403
         return None
@@ -1009,6 +1015,7 @@ def _remote_public(ip: str | None = None, via: str | None = None) -> dict[str, A
         "autostart": bool(settings.get("autostart")),
         "windows_login": windows_login_enabled(ROOT),
         "devices": settings.get("devices") or [],
+        "revoked_devices": settings.get("revoked_devices") or [],
         "clients": REMOTE.clients(),
         "ngrok": bool(settings.get("ngrok")),
         "ngrok_ready": bool(settings.get("ngrok_token")),
@@ -2486,6 +2493,8 @@ def api_remote_rotate():
 
 @app.post("/api/remote/forget")
 def api_remote_forget():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
     data = request.get_json(silent=True) or {}
     cid = str(data.get("id") or "").strip()
     if not cid:
@@ -2500,8 +2509,51 @@ def api_remote_forget():
     g.netlog_key = f"revoke-{cid}"
     return jsonify({"ok": True, **payload, "devices": devices})
 
+@app.get("/api/remote/device/history")
+def api_remote_device_history():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    cid = str(request.args.get("id") or "").strip()
+    if not cid:
+        return jsonify({"error": "Не указано устройство."}), 400
+    devices = storage.remote_settings()["devices"]
+    if not any(str(item.get("id") or "") == cid for item in devices):
+        return jsonify({"error": "Устройство не найдено."}), 404
+    return jsonify({"ok": True, "history": storage.device_history(cid)})
+
+
+@app.post("/api/remote/device/delete")
+def api_remote_device_delete():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    cid = str(data.get("id") or "").strip()
+    if not cid:
+        return jsonify({"error": "Не указано устройство."}), 400
+
+    devices_before = storage.remote_settings()["devices"]
+    if not any(str(item.get("id") or "") == cid for item in devices_before):
+        return jsonify({"error": "Устройство не найдено в истории."}), 404
+
+    devices = storage.forget_device(cid)
+    REMOTE.drop(cid)
+
+    applog.add(
+        f"Устройство удалено из истории: {cid[:12]}",
+        where="Телефон",
+        actor=_log_actor(),
+    )
+    g.netlog_text = f"Устройство удалено из истории: {cid[:12]}"
+    g.netlog_level = "warn"
+    g.netlog_key = f"device-delete-{cid}"
+
+    return jsonify({"ok": True, **_remote_public(), "devices": devices})
+
+
 @app.post("/api/remote/restore")
 def api_remote_restore():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
     data = request.get_json(silent=True) or {}
     cid = str(data.get("id") or "").strip()
 
@@ -2514,12 +2566,14 @@ def api_remote_restore():
         None,
     )
 
-    if device is None:
-        return jsonify({"error": "Устройство не найдено в истории."}), 404
+    revoked_ids = storage.remote_settings().get("revoked_devices") or []
+    if device is None and cid not in revoked_ids:
+        return jsonify({"error": "Устройство не найдено в списке блокировок."}), 404
 
-    if not device.get("revoked_at"):
+    if device is not None and not device.get("revoked_at") and cid not in revoked_ids:
         return jsonify({"error": "Устройство уже имеет доступ."}), 409
 
+    # Поддерживает и старые блокировки, у которых запись устройства уже была удалена.
     devices = storage.restore_device(cid)
 
     applog.add(
@@ -2764,9 +2818,12 @@ def api_remote_pull():
     name = request.args.get("name") or ""
     info = _device_info()
     name = name or str(info.get("name") or "")
-    REMOTE.touch(cid, kind, name)
-    if kind in {"mobile", "bank"} and cid:
-        _remember_client(cid, name, kind)
+    # Фоновый опрос из основного приложения ПК не является удалённым клиентом.
+    # Браузерный интерфейс ПК регистрируется отдельно через _note_desk_client().
+    if kind != "desktop":
+        new_connection = REMOTE.touch(cid, kind, name)
+        if kind in {"mobile", "bank"} and cid:
+            _remember_client(cid, name, kind, record_history=new_connection)
     snap = REMOTE.wait(since)
     if "clients" not in snap:
         snap["clients"] = REMOTE.clients()
@@ -2797,8 +2854,8 @@ def api_remote_session():
     if cid:
         info = _device_info()
         name = name or str(info.get("name") or "")
-        REMOTE.touch(cid, kind, name)
-        _remember_client(cid, name, kind)
+        new_connection = REMOTE.touch(cid, kind, name)
+        _remember_client(cid, name, kind, record_history=new_connection)
         g.netlog_text = (
             f"Хранилище открыло сессию: {name or cid[:8]}"
             if kind == "bank"
@@ -2941,7 +2998,7 @@ def api_remote_autosave():
 @app.post("/api/remote/leave")
 def api_remote_leave():
     data = request.get_json(silent=True) or {}
-    REMOTE.drop(str(data.get("cid") or ""))
+    REMOTE.drop(str(data.get("cid") or ""), str(data.get("kind") or "mobile"))
     return jsonify({"ok": True})
 
 

@@ -301,33 +301,40 @@ class RemoteSession:
 
     def _prune_locked(self) -> bool:
         now = time.time()
-        stale = [cid for cid, c in self._clients.items() if now - c.get("seen", 0) > CLIENT_TTL]
-        for cid in stale:
-            gone = self._clients.pop(cid, None) or {}
-            name = str(gone.get("name") or cid)
-            kind = str(gone.get("kind") or "")
-            netlog.add("client", f"Пропал из сети: {name}", level="warn", source=kind or cid)
-        return bool(stale)
+        changed = False
+        for cid, client in list(self._clients.items()):
+            surfaces = client.setdefault("surfaces", {})
+            stale = [surface for surface, seen in surfaces.items() if now - float(seen or 0) > CLIENT_TTL]
+            for surface in stale:
+                surfaces.pop(surface, None)
+                changed = True
+                netlog.add("client", f"Интерфейс отключился: {client.get('name') or cid}", level="warn", source=surface)
+            if not surfaces:
+                self._clients.pop(cid, None)
+                changed = True
+        return changed
 
-    def touch(self, cid: str, kind: str = "mobile", name: str = "") -> None:
+    def touch(self, cid: str, kind: str = "mobile", name: str = "") -> bool:
         if not cid:
-            return
+            return False
         now = time.time()
+        surface = kind if kind in {"mobile", "bank", "desk"} else "mobile"
         with self._cond:
+            pruned = self._prune_locked()
             is_new = cid not in self._clients
-            client = self._clients.setdefault(cid, {"kind": kind, "name": name, "since": now})
+            client = self._clients.setdefault(cid, {"kind": surface, "name": name, "since": now, "surfaces": {}})
+            surfaces = client.setdefault("surfaces", {})
+            surface_new = surface not in surfaces
+            surfaces[surface] = now
             client["seen"] = now
-            client["kind"] = kind or client.get("kind") or "mobile"
+            client["kind"] = surface
             if name:
                 client["name"] = name
-            pruned = self._prune_locked()
-            if is_new:
-                if (kind or "") == "desktop":
-                    netlog.add("client", "Компьютер на связи", level="ok", source="desktop", key="desktop-on")
-                else:
-                    netlog.add("client", f"В сети: {name or cid}", level="ok", source=kind or cid)
-            if is_new or pruned:
+            if is_new or surface_new:
+                netlog.add("client", f"В сети: {name or cid} · {surface}", level="ok", source=surface)
+            if is_new or surface_new or pruned:
                 self._bump()
+            return surface_new
 
     def _desk_clear_locked(self) -> None:
         self._desk_id = ""
@@ -393,15 +400,24 @@ class RemoteSession:
                 self._bump()
         if released:
             netlog.add("session", f"Браузер закрыл управление: {released}", level="warn", key="desk-leave")
-        self.drop(cid)
+        self.drop(cid, "desk")
 
-    def drop(self, cid: str) -> None:
+    def drop(self, cid: str, kind: str | None = None) -> None:
         with self._cond:
-            gone = self._clients.pop(cid, None)
-            if gone is not None:
-                name = str(gone.get("name") or cid)
-                netlog.add("client", f"Отключился: {name}", level="warn", source=str(gone.get("kind") or cid))
-                self._bump()
+            client = self._clients.get(cid)
+            if client is None:
+                return
+            if kind:
+                surfaces = client.setdefault("surfaces", {})
+                surfaces.pop(kind, None)
+                if surfaces:
+                    client["kind"] = next(iter(surfaces))
+                else:
+                    self._clients.pop(cid, None)
+            else:
+                self._clients.pop(cid, None)
+            netlog.add("client", f"Интерфейс отключился: {client.get('name') or cid}", level="warn", source=kind or cid)
+            self._bump()
 
     def _live_clients(self) -> list[dict[str, Any]]:
         self._prune_locked()
@@ -409,6 +425,7 @@ class RemoteSession:
             {
                 "id": cid,
                 "kind": c.get("kind", "mobile"),
+                "surfaces": sorted(c.get("surfaces", {}).keys()),
                 "name": c.get("name", ""),
                 "since": c.get("since", 0),
                 "seen": c.get("seen", 0),
@@ -419,7 +436,10 @@ class RemoteSession:
     def clients(self, kind: str | None = None) -> list[dict[str, Any]]:
         with self._cond:
             items = self._live_clients()
-        return [c for c in items if kind is None or c["kind"] == kind]
+        if kind is None:
+            return items
+        surface = "desk" if kind == "desktop" else kind
+        return [client for client in items if surface in client.get("surfaces", [])]
 
     # ---------- синхронизация ----------
 

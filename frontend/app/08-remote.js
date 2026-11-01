@@ -859,42 +859,59 @@
   function renderRemoteDevices() {
     const box = $("remote-clients");
     if (!box) return;
-    const live = new Map(mobileClients().map((c) => [c.id, c]));
+    const live = new Map(mobileClients().map((client) => [client.id, client]));
     const devices = remote.devices || [];
-    const online = devices.filter((d) => live.has(d.id)).length;
+    const knownIds = new Set(devices.map((device) => device.id));
+    const orphanRevoked = (remote.revoked_devices || []).filter((id) => !knownIds.has(id));
+    const online = devices.filter((device) => {
+      const client = live.get(device.id);
+      return !device.revoked_at && client && (client.surfaces || []).length;
+    }).length;
     const title = $("remote-devices-title");
     if (title) {
       if (!devices.length) title.textContent = "Устройства";
       else if (online) title.textContent = `Устройства · ${devices.length} · в сети ${online}`;
       else title.textContent = `Устройства · ${devices.length}`;
     }
-    if (!devices.length) {
-      box.innerHTML = `<div class="remote-empty">Запомненных устройств нет. Отсканируйте QR, откройте ссылку с телефона или интерфейс ПК в браузере.</div>`;
+    if (!devices.length && !orphanRevoked.length) {
+      box.innerHTML = `<div class="remote-empty">Запомненных устройств нет. Откройте ссылку с телефона, хранилище или интерфейс ПК в браузере.</div>`;
       return;
     }
-    box.innerHTML = devices
-      .map((d) => {
-        const revoked = !!d.revoked_at;
-        const on = !revoked && live.has(d.id);
-        const when = d.seen_at ? new Date(d.seen_at).toLocaleString("ru-RU") : "";
-        const model = d.info?.model && d.info.model !== d.name ? d.info.model : "";
-        const kind = deviceSurfaceLabel(d.surface);
-        const via = d.via === "ngrok" ? "интернет" : d.via === "lan" ? "локально" : "";
-        return `<div class="remote-device ${on ? "is-on" : "is-off"}">
-          <span class="rd-dot" title="${revoked ? "доступ закрыт" : on ? "в сети" : "не в сети"}"></span>
-          <div class="rd-body">
-            <strong>${esc(d.name || "Устройство")}<span class="rd-kind">${esc(kind)}</span></strong>
-            <small>${revoked ? '<span class="offline">доступ закрыт</span>' : on ? '<span class="online">в сети</span>' : '<span class="offline">не в сети</span>'}${
-              via ? ` · ${esc(via)}` : ""
-            }${d.ip ? ` · ${esc(d.ip)}` : ""}${model ? ` · ${esc(model)}` : ""}${when ? ` · ${esc(when)}` : ""}</small>
-          </div>
-          <button type="button" class="btn small rd-info" data-device-info="${esc(d.id)}" title="О устройстве" aria-label="О устройстве">i</button>
-          ${revoked
-            ? `<button type="button" class="btn small" data-restore="${esc(d.id)}">Разблокировать</button>`
-            : `<button type="button" class="btn small" data-forget="${esc(d.id)}">Заблокировать</button>`}
-        </div>`;
-      })
-      .join("");
+    const surfaceNames = { desk: "ПК", bank: "Хранилище", mobile: "Телефон" };
+    box.innerHTML = devices.map((device) => {
+      const revoked = !!device.revoked_at;
+      const client = live.get(device.id);
+      const active = new Set(revoked ? [] : (client?.surfaces || []));
+      const on = active.size > 0;
+      const when = device.seen_at ? new Date(device.seen_at).toLocaleString("ru-RU") : "";
+      const model = device.info?.model && device.info.model !== device.name ? device.info.model : "";
+      const via = device.via === "ngrok" ? "интернет" : device.via === "lan" ? "локально" : "";
+      const indicators = ["desk", "bank", "mobile"].map((surface) =>
+        `<span class="rd-surface ${active.has(surface) ? "active" : ""}" title="${surfaceNames[surface]}">${surfaceNames[surface]}</span>`
+      ).join("");
+      return `<div class="remote-device ${on ? "is-on" : "is-off"}">
+        <span class="rd-dot" title="${revoked ? "доступ закрыт" : on ? "в сети" : "не в сети"}"></span>
+        <div class="rd-body">
+          <strong>${esc(device.name || "Устройство")}</strong>
+          <div class="rd-surfaces">${indicators}</div>
+          <small>${revoked ? '<span class="offline">доступ закрыт для всех интерфейсов</span>' : on ? '<span class="online">в сети</span>' : '<span class="offline">не в сети</span>'}${via ? ` · ${esc(via)}` : ""}${device.ip ? ` · ${esc(device.ip)}` : ""}${model ? ` · ${esc(model)}` : ""}${when ? ` · ${esc(when)}` : ""}</small>
+        </div>
+        <button type="button" class="btn small rd-info" data-device-info="${esc(device.id)}" title="Сведения об устройстве" aria-label="Сведения об устройстве">i</button>
+        <button type="button" class="btn small" data-device-history="${esc(device.id)}">История</button>
+        ${revoked
+          ? `<button type="button" class="btn small" data-restore="${esc(device.id)}">Разблокировать</button>`
+          : `<button type="button" class="btn small" data-forget="${esc(device.id)}">Заблокировать</button>`}
+        <button type="button" class="btn small danger" data-device-delete="${esc(device.id)}">Удалить</button>
+      </div>`;
+    }).join("") + orphanRevoked.map((id) => `
+      <div class="remote-device is-off">
+        <span class="rd-dot" title="доступ закрыт"></span>
+        <div class="rd-body">
+          <strong>Удалённая запись устройства</strong>
+          <small><span class="offline">доступ закрыт для всех интерфейсов</span> · ID ${esc(String(id).slice(0, 16))}… · запись истории отсутствует</small>
+        </div>
+        <button type="button" class="btn small" data-restore="${esc(id)}">Разблокировать</button>
+      </div>`).join("");
   }
 
   function deviceSurfaceLabel(surface) {
@@ -910,7 +927,7 @@
     const via = device.via === "ngrok" ? "Интернет" : device.via === "lan" ? "Локальная сеть" : "";
     return [
       ["Имя", device.name || "Устройство"],
-      ["Раздел", deviceSurfaceLabel(device.surface)],
+      ["Интерфейсы", (device.surfaces || [device.surface]).map((surface) => ({ desk: "ПК", bank: "Хранилище", mobile: "Телефон" }[surface] || surface)).join(", ")],
       ["Статус", device.revoked_at ? "доступ закрыт" : online ? "в сети" : "не в сети"],
       ["Канал", via],
       ["Адрес", device.ip],
@@ -958,6 +975,31 @@
         .join("");
     }
     $("device-info-modal")?.classList.add("open");
+  }
+
+  async function openDeviceHistory(id) {
+    const device = (remote.devices || []).find((item) => item.id === id);
+    if (!device) return;
+    const title = $("device-info-title");
+    const body = $("device-info-body");
+    if (title) title.textContent = `История · ${device.name || "Устройство"}`;
+    if (body) body.innerHTML = '<div class="remote-empty">Загружаю историю…</div>';
+    $("device-info-modal")?.classList.add("open");
+    try {
+      const response = await fetch(`/api/remote/device/history?id=${encodeURIComponent(id)}`, { cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Не удалось получить историю");
+      const names = { desk: "Интерфейс ПК", bank: "Хранилище", mobile: "Телефон" };
+      const items = Array.isArray(data.history) ? data.history.slice().reverse() : [];
+      if (body) body.innerHTML = items.length ? items.map((item) => {
+        const at = item.at ? new Date(item.at).toLocaleString("ru-RU") : "Время неизвестно";
+        const surface = names[item.surface] || item.surface || "Интерфейс";
+        const via = item.via === "ngrok" ? "Интернет" : "Локальная сеть";
+        return `<div class="device-info-row"><span>${esc(at)}<br><small>${esc(via)} · ${esc(item.ip || "адрес неизвестен")}</small></span><b>${esc(surface)}</b></div>`;
+      }).join("") : '<div class="remote-empty">История подключений пока пуста.</div>';
+    } catch (err) {
+      if (body) body.innerHTML = `<div class="remote-empty">${esc(err.message || err)}</div>`;
+    }
   }
 
   function remoteDeskUrl() {
@@ -2443,7 +2485,34 @@
         openDeviceInfo(info.dataset.deviceInfo);
         return;
       }
+      const history = e.target.closest("[data-device-history]");
+      if (history) {
+        openDeviceHistory(history.dataset.deviceHistory);
+        return;
+      }
     
+      const deleteBtn = e.target.closest("[data-device-delete]");
+      if (deleteBtn) {
+        const device = (remote.devices || []).find((item) => item.id === deleteBtn.dataset.deviceDelete);
+        const name = device?.name || "устройства";
+        const ok = await askConfirm({
+          title: "Удалить устройство из списка?",
+          text: `Запись «${name}» и история подключений будут удалены. Если устройство заблокировано, запрет сохранится отдельной строкой — его можно будет снять кнопкой «Разблокировать». Если доступ открыт и устройство остаётся подключённым, оно появится в списке снова.`,
+          ok: "Удалить",
+          cancel: "Отмена",
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          const res = await apiPost("/api/remote/device/delete", { id: deleteBtn.dataset.deviceDelete });
+          renderRemoteModal(res);
+          toast("Устройство удалено из списка");
+        } catch (err) {
+          toast(`Не удалось удалить устройство: ${err.message || err}`);
+        }
+        return;
+      }
+
       const restoreBtn = e.target.closest("[data-restore]");
       if (restoreBtn) {
         try {
@@ -2451,10 +2520,13 @@
             (item) => item.id === restoreBtn.dataset.restore
           );
           const name = device?.name || "устройства";
+          const restoreText = device
+            ? `У «${name}» снова появится доступ. История устройства сохранится.`
+            : `Для устройства с ID ${String(restoreBtn.dataset.restore).slice(0, 16)}… будет снята старая блокировка. При следующем подключении оно появится в списке заново.`;
     
           const ok = await askConfirm({
             title: "Восстановить доступ?",
-            text: `У «${name}» снова появится доступ. История устройства сохранится.`,
+            text: restoreText,
             ok: "Восстановить",
             cancel: "Отмена",
           });

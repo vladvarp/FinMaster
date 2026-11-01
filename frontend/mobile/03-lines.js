@@ -603,9 +603,10 @@
     if (kind === "ok") bar._t = setTimeout(() => bar.classList.remove("show"), 1600);
   }
 
-  function noteOffline() {
+  function noteOffline(error) {
     state.offline = true;
-    setSync("err", "нет связи с компьютером");
+    const detail = String(error?.message || "").trim();
+    setSync("err", detail ? "нет связи: " + detail.slice(0, 110) : "нет связи с компьютером");
   }
 
   function noteOnline() {

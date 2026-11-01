@@ -400,9 +400,16 @@ def export_parts() -> list[dict[str, Any]]:
     elif data.get("ngrok_token"):
         parts.append({"id": "ngrok", "label": "Токен ngrok", "on": True, "detail": ""})
     users_n = len(data.get("users") or [])
-    if data.get("telegram_bot_token") or users_n:
-        detail = f"{users_n} пол." if users_n else "без пользователей"
-        parts.append({"id": "telegram", "label": "Telegram: бот и пользователи", "on": True, "detail": detail})
+    remote_data = storage.remote_settings()
+    devices_n = len(remote_data.get("devices") or [])
+    revoked_n = len(remote_data.get("revoked_devices") or [])
+    if data.get("telegram_bot_token") or users_n or devices_n or revoked_n:
+        details = [f"{users_n} пол."] if users_n else ["без пользователей"]
+        if devices_n:
+            details.append(f"{devices_n} устр. с историей")
+        if revoked_n:
+            details.append(f"{revoked_n} блок.")
+        parts.append({"id": "telegram", "label": "Telegram: бот, пользователи, устройства и история", "on": True, "detail": " · ".join(details)})
     return parts
 
 
@@ -420,9 +427,15 @@ def inspect_export(file_path: str) -> list[dict[str, Any]]:
         parts.append({"id": "ngrok", "label": "Токены ngrok", "on": True, "detail": detail,
                       "conflicts": [{"prefix": str(x.get("token") or "")[:6]} for x in conflicts]})
     users_n = len(payload.get("users") or [])
-    if payload.get("telegram_bot_token") or users_n:
-        detail = f"{users_n} пол." if users_n else "без пользователей"
-        parts.append({"id": "telegram", "label": "Telegram: бот и пользователи", "on": True, "detail": detail})
+    devices_n = len(payload.get("devices") or [])
+    revoked_n = len(payload.get("revoked_devices") or [])
+    if payload.get("telegram_bot_token") or users_n or devices_n or revoked_n:
+        details = [f"{users_n} пол."] if users_n else ["без пользователей"]
+        if devices_n:
+            details.append(f"{devices_n} устр. с историей")
+        if revoked_n:
+            details.append(f"{revoked_n} блок.")
+        parts.append({"id": "telegram", "label": "Telegram: бот, пользователи, устройства и история", "on": True, "detail": " · ".join(details)})
     return parts
 
 
@@ -439,10 +452,15 @@ def write_export(file_path: str, ids: list[str]) -> None:
         elif data.get("ngrok_token"):
             payload["ngrok_token"] = data["ngrok_token"]
     if "telegram" in chosen:
-        if not data.get("telegram_bot_token") and not data.get("users"):
-            raise ValueError("Токен бота и пользователи ещё не сохранены.")
+        remote = storage.remote_settings()
+        remote_devices = list(remote.get("devices") or [])
+        remote_revoked = list(remote.get("revoked_devices") or [])
+        if not data.get("telegram_bot_token") and not data.get("users") and not remote_devices and not remote_revoked:
+            raise ValueError("Токен бота, пользователи и устройства ещё не сохранены.")
         payload["telegram_bot_token"] = data.get("telegram_bot_token") or ""
         payload["users"] = list(data.get("users") or [])
+        payload["devices"] = remote_devices
+        payload["revoked_devices"] = remote_revoked
     blob = _protect(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
     dest = os.path.abspath(file_path)
     parent = os.path.dirname(dest)
@@ -505,6 +523,93 @@ def apply_export(file_path: str, ids: list[str], *, keep_unique_ngrok: bool = Tr
                     str(person.get("name") or ""),
                     extra=person,
                 )
+
+        imported_devices = payload.get("devices")
+        if isinstance(imported_devices, list) or isinstance(payload.get("revoked_devices"), list):
+            if not isinstance(imported_devices, list):
+                imported_devices = []
+            current = storage.remote_settings().get("devices") or []
+            merged = {
+                str(item.get("id") or ""): dict(item)
+                for item in current
+                if isinstance(item, dict) and str(item.get("id") or "").strip()
+            }
+            for item in imported_devices:
+                if not isinstance(item, dict):
+                    continue
+                cid = str(item.get("id") or "").strip()
+                if not cid:
+                    continue
+                incoming = dict(item)
+                existing = merged.get(cid)
+                if existing:
+                    combined = dict(existing)
+                    combined.update({
+                        key: value for key, value in incoming.items()
+                        if key not in {"history", "surfaces", "surface_seen", "first_seen", "info", "revoked_at"}
+                    })
+                    old_history = existing.get("history") if isinstance(existing.get("history"), list) else []
+                    new_history = incoming.get("history") if isinstance(incoming.get("history"), list) else []
+                    history_by_key = {}
+                    for event in [*old_history, *new_history]:
+                        if not isinstance(event, dict):
+                            continue
+                        event_key = (
+                            str(event.get("at") or ""),
+                            str(event.get("surface") or ""),
+                            str(event.get("ip") or ""),
+                            str(event.get("event") or ""),
+                        )
+                        history_by_key[event_key] = dict(event)
+                    combined["history"] = sorted(
+                        history_by_key.values(),
+                        key=lambda event: str(event.get("at") or ""),
+                    )[-100:]
+                    surfaces = set()
+                    for source in (existing.get("surfaces"), incoming.get("surfaces")):
+                        if isinstance(source, list):
+                            surfaces.update(str(value) for value in source if str(value) in {"mobile", "bank", "desk"})
+                    for source in (existing, incoming):
+                        if source.get("surface") in {"mobile", "bank", "desk"}:
+                            surfaces.add(source["surface"])
+                    combined["surfaces"] = sorted(surfaces)
+                    first_values = [
+                        str(value) for value in (existing.get("first_seen"), incoming.get("first_seen"))
+                        if value
+                    ]
+                    if first_values:
+                        combined["first_seen"] = min(first_values)
+                    old_info = existing.get("info") if isinstance(existing.get("info"), dict) else {}
+                    new_info = incoming.get("info") if isinstance(incoming.get("info"), dict) else {}
+                    combined["info"] = {**old_info, **new_info}
+                    old_seen = existing.get("surface_seen") if isinstance(existing.get("surface_seen"), dict) else {}
+                    new_seen = incoming.get("surface_seen") if isinstance(incoming.get("surface_seen"), dict) else {}
+                    combined_seen = dict(old_seen)
+                    for surface, stamp in new_seen.items():
+                        if not isinstance(stamp, dict):
+                            continue
+                        prev_stamp = combined_seen.get(surface)
+                        if not isinstance(prev_stamp, dict) or str(stamp.get("at") or "") >= str(prev_stamp.get("at") or ""):
+                            combined_seen[surface] = stamp
+                    combined["surface_seen"] = combined_seen
+                    if existing.get("revoked_at") or incoming.get("revoked_at"):
+                        combined["revoked_at"] = existing.get("revoked_at") or incoming.get("revoked_at")
+                    merged[cid] = combined
+                else:
+                    merged[cid] = incoming
+            current_revoked = storage.remote_settings().get("revoked_devices") or []
+            imported_revoked = payload.get("revoked_devices")
+            if not isinstance(imported_revoked, list):
+                imported_revoked = []
+            revoked = list(dict.fromkeys(
+                str(cid).strip()
+                for cid in [*current_revoked, *imported_revoked]
+                if str(cid).strip()
+            ))
+            storage.save_remote_settings(
+                devices=list(merged.values())[:storage.MAX_DEVICES],
+                revoked_devices=revoked,
+            )
     save(data)
 
 
