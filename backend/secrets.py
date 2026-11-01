@@ -401,7 +401,7 @@ def export_parts() -> list[dict[str, Any]]:
         parts.append({"id": "ngrok", "label": "Токен ngrok", "on": True, "detail": ""})
     users_n = len(data.get("users") or [])
     devices_n = len(storage.remote_settings().get("devices") or [])
-    if data.get("telegram_bot_token") or users_n:
+    if data.get("telegram_bot_token") or users_n or devices_n:
         details = [f"{users_n} пол."] if users_n else ["без пользователей"]
         if devices_n:
             details.append(f"{devices_n} устр.")
@@ -445,11 +445,12 @@ def write_export(file_path: str, ids: list[str]) -> None:
         elif data.get("ngrok_token"):
             payload["ngrok_token"] = data["ngrok_token"]
     if "telegram" in chosen:
-        if not data.get("telegram_bot_token") and not data.get("users"):
-            raise ValueError("Токен бота и пользователи ещё не сохранены.")
+        remote_devices = list(storage.remote_settings().get("devices") or [])
+        if not data.get("telegram_bot_token") and not data.get("users") and not remote_devices:
+            raise ValueError("Токен бота, пользователи и устройства ещё не сохранены.")
         payload["telegram_bot_token"] = data.get("telegram_bot_token") or ""
         payload["users"] = list(data.get("users") or [])
-        payload["devices"] = list(storage.remote_settings().get("devices") or [])
+        payload["devices"] = remote_devices
     blob = _protect(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
     dest = os.path.abspath(file_path)
     parent = os.path.dirname(dest)
