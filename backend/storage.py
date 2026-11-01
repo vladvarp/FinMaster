@@ -1040,7 +1040,7 @@ def remember_device(
     devices = [item for item in data["devices"] if str(item.get("id") or "") not in set(legacy_ids + [cid])]
     devices.insert(0, {
         "id": cid,
-        "name": str(name or prev.get("name") or fallback).strip() or fallback,
+        "name": str(merged.get("model") or prev.get("name") or name or fallback).strip() or fallback,
         "ip": str(ip or prev.get("ip") or ""),
         "seen_at": seen,
         "first_seen": first_seen or str(prev.get("first_seen") or seen),
