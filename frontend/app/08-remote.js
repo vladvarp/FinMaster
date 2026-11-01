@@ -892,6 +892,7 @@
           ${revoked
             ? `<button type="button" class="btn small" data-restore="${esc(d.id)}">Разблокировать</button>`
             : `<button type="button" class="btn small" data-forget="${esc(d.id)}">Заблокировать</button>`}
+          <button type="button" class="btn small danger" data-device-delete="${esc(d.id)}">Удалить</button>
         </div>`;
       })
       .join("");
@@ -2444,6 +2445,28 @@
         return;
       }
     
+      const deleteBtn = e.target.closest("[data-device-delete]");
+      if (deleteBtn) {
+        const device = (remote.devices || []).find((item) => item.id === deleteBtn.dataset.deviceDelete);
+        const name = device?.name || "устройства";
+        const ok = await askConfirm({
+          title: "Удалить устройство из списка?",
+          text: `Запись «${name}» будет удалена из истории. Доступ по действующей ссылке не блокируется; если устройство подключится снова, оно появится в списке.`,
+          ok: "Удалить",
+          cancel: "Отмена",
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          const res = await apiPost("/api/remote/device/delete", { id: deleteBtn.dataset.deviceDelete });
+          renderRemoteModal(res);
+          toast("Устройство удалено из списка");
+        } catch (err) {
+          toast(`Не удалось удалить устройство: ${err.message || err}`);
+        }
+        return;
+      }
+
       const restoreBtn = e.target.closest("[data-restore]");
       if (restoreBtn) {
         try {
