@@ -917,7 +917,7 @@
     const via = device.via === "ngrok" ? "Интернет" : device.via === "lan" ? "Локальная сеть" : "";
     return [
       ["Имя", device.name || "Устройство"],
-      ["Раздел", deviceSurfaceLabel(device.surface)],
+      ["Интерфейсы", (device.surfaces || [device.surface]).map((surface) => ({ desk: "ПК", bank: "Хранилище", mobile: "Телефон" }[surface] || surface)).join(", ")],
       ["Статус", device.revoked_at ? "доступ закрыт" : online ? "в сети" : "не в сети"],
       ["Канал", via],
       ["Адрес", device.ip],
