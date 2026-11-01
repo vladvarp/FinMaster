@@ -3611,6 +3611,7 @@
             from: parseDay(pause.start),
             till: parseDay(pauseEndKey(target, pause)),
             open: pauseIsOpen(target, pause),
+            resumeNext: !!pause.resumeNext,
           }
         : null,
       originDay: calDayFromPoint(track, e.clientX, win.days),
@@ -3701,9 +3702,17 @@
     till = clampDay(till, min, max);
     if (from > till) from = till;
 
-    // Перемещение открытой паузы не должно превращать её визуальный край в дату окончания.
-    // Закрываем её только при перетаскивании правой границы.
-    if (calDrag.pause0.open && calDrag.mode !== "pause-end") {
+    // Открытая пауза сохраняет открытый статус при перемещении.
+    // Если её правую границу отодвинули на вчера, помечаем возобновление сегодня:
+    // при обратном перетаскивании на сегодня пауза снова становится открытой.
+    const todayKey = dayKey(clockToday());
+    if (calDrag.pause0.open && calDrag.mode === "pause-end" && !dateDay(order.work_end) && dayKey(till) < todayKey) {
+      list[index] = { start: dayKey(from), end: dayKey(till), resumeNext: true };
+    } else if (
+      (calDrag.pause0.open && calDrag.mode !== "pause-end") ||
+      (calDrag.mode === "pause-end" && !dateDay(order.work_end) && dayKey(till) === todayKey &&
+        (calDrag.pause0.open || calDrag.pause0.resumeNext))
+    ) {
       list[index] = { start: dayKey(from), end: "", open: true };
     } else {
       list[index] = { start: dayKey(from), end: dayKey(till) };
