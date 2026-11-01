@@ -320,6 +320,7 @@ class RemoteSession:
         now = time.time()
         surface = kind if kind in {"mobile", "bank", "desk"} else "mobile"
         with self._cond:
+            pruned = self._prune_locked()
             is_new = cid not in self._clients
             client = self._clients.setdefault(cid, {"kind": surface, "name": name, "since": now, "surfaces": {}})
             surfaces = client.setdefault("surfaces", {})
@@ -329,7 +330,6 @@ class RemoteSession:
             client["kind"] = surface
             if name:
                 client["name"] = name
-            pruned = self._prune_locked()
             if is_new or surface_new:
                 netlog.add("client", f"В сети: {name or cid} · {surface}", level="ok", source=surface)
             if is_new or surface_new or pruned:
