@@ -6,22 +6,80 @@
   const shell = document.querySelector(".shell");
   const menuBtn = document.getElementById("menu");
   const here = document.getElementById("here");
+  const trail = document.getElementById("trail");
+  const themeToggle = document.getElementById("theme-toggle");
+  const backButton = document.getElementById("nav-back");
+  const forwardButton = document.getElementById("nav-forward");
   const flat = toc.flatMap((group) => group.items.map((item) => ({ ...item, group: group.title })));
   let indexPromise = null;
   let pending = null;
   let loadToken = 0;
   let loadedId = "";
+  let routeHistory = [];
+  let routeCursor = -1;
+  let lastRoute = "";
 
   function programTheme() {
-    try { return localStorage.getItem("finmaster.theme") === "dark" ? "dark" : "light"; }
-    catch (err) { return "light"; }
+    try {
+      return localStorage.getItem("finmaster.theme") || localStorage.getItem("finmaster.faq.theme") || "dark";
+    } catch (err) { return "dark"; }
+  }
+
+  function paintThemeControl() {
+    const dark = document.documentElement.dataset.theme === "dark";
+    const icon = themeToggle?.querySelector(".theme-icon");
+    const label = themeToggle?.querySelector(".theme-label");
+    if (icon) icon.textContent = dark ? "☼" : "☾";
+    if (label) label.textContent = dark ? "Светлая тема" : "Тёмная тема";
+    themeToggle?.setAttribute("aria-pressed", dark ? "true" : "false");
+    themeToggle?.setAttribute("title", dark ? "Переключить на светлую тему" : "Переключить на тёмную тему");
+  }
+
+  function applyTheme(value) {
+    const next = value === "light" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try {
+      const programKeyExists = localStorage.getItem("finmaster.theme") !== null;
+      localStorage.setItem(programKeyExists ? "finmaster.theme" : "finmaster.faq.theme", next);
+    } catch (err) { /* тема действует до закрытия страницы */ }
+    paintThemeControl();
+    if (window.FAQLive) window.FAQLive.mount(doc, true);
   }
 
   document.documentElement.dataset.theme = programTheme();
+  paintThemeControl();
+  themeToggle?.addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
   window.addEventListener("storage", (event) => {
-    if (event.key && event.key !== "finmaster.theme") return;
+    if (event.key && !["finmaster.theme", "finmaster.faq.theme"].includes(event.key)) return;
     document.documentElement.dataset.theme = programTheme();
+    paintThemeControl();
     if (window.FAQLive) window.FAQLive.mount(doc, true);
+  });
+
+  function updateRouteButtons() {
+    if (backButton) backButton.disabled = routeCursor <= 0;
+    if (forwardButton) forwardButton.disabled = routeCursor < 0 || routeCursor >= routeHistory.length - 1;
+  }
+
+  function trackRoute() {
+    const route = location.hash || "#about";
+    if (route === lastRoute) return;
+    if (routeCursor > 0 && routeHistory[routeCursor - 1] === route) routeCursor -= 1;
+    else if (routeCursor < routeHistory.length - 1 && routeHistory[routeCursor + 1] === route) routeCursor += 1;
+    else {
+      routeHistory = routeHistory.slice(0, routeCursor + 1);
+      routeHistory.push(route);
+      routeCursor = routeHistory.length - 1;
+    }
+    lastRoute = route;
+    updateRouteButtons();
+  }
+
+  backButton?.addEventListener("click", () => {
+    if (routeCursor > 0) location.hash = routeHistory[routeCursor - 1];
+  });
+  forwardButton?.addEventListener("click", () => {
+    if (routeCursor < routeHistory.length - 1) location.hash = routeHistory[routeCursor + 1];
   });
 
   menuBtn.addEventListener("click", () => {
@@ -277,6 +335,87 @@
     return open || doc;
   }
 
+  function fillTrail() {
+    if (!trail) return;
+    trail.innerHTML = "";
+    const route = hashParts();
+    const item = flat.find((entry) => entry.id === route.id);
+    const sub = item?.subs?.find((entry) => entry.id === route.sub);
+    const add = (label, href, current) => {
+      if (trail.childNodes.length) {
+        const sep = document.createElement("span");
+        sep.className = "trail-sep";
+        sep.textContent = "›";
+        trail.appendChild(sep);
+      }
+      if (current) {
+        const span = document.createElement("span");
+        span.className = "trail-current";
+        span.textContent = label;
+        trail.appendChild(span);
+      } else {
+        const link = document.createElement("a");
+        link.href = href;
+        link.textContent = label;
+        trail.appendChild(link);
+      }
+    };
+    add("Справка", "#about", route.id === "about" && !sub);
+    if (item) {
+      add(item.group, "", false);
+      if (sub) {
+        add(item.title, "#" + item.id, false);
+        add(sub.title, "", true);
+      } else add(item.title, "", true);
+    }
+  }
+
+  function fillLinkMap() {
+    const root = visibleRoot();
+    root.querySelector(".link-map")?.remove();
+    const targets = new Map();
+    root.querySelectorAll('a[href^="#"]').forEach((link) => {
+      const raw = decodeURIComponent(link.getAttribute("href").slice(1));
+      const [id, subId] = raw.split("/");
+      const item = flat.find((entry) => entry.id === id);
+      if (!item) return;
+      const sub = item.subs?.find((entry) => entry.id === subId);
+      const target = id + (sub ? "/" + sub.id : "");
+      if (!targets.has(target)) targets.set(target, { item, sub, target });
+    });
+    if (!targets.size) return;
+    const details = document.createElement("details");
+    details.className = "link-map";
+    const summary = document.createElement("summary");
+    summary.textContent = "Карта переходов по связанным разделам";
+    details.appendChild(summary);
+    const body = document.createElement("div");
+    body.className = "link-map-body";
+    const groups = new Map();
+    [...targets.values()].forEach((entry) => {
+      if (!groups.has(entry.item.group)) groups.set(entry.item.group, []);
+      groups.get(entry.item.group).push(entry);
+    });
+    groups.forEach((entries, groupName) => {
+      const section = document.createElement("section");
+      section.className = "link-map-group";
+      const heading = document.createElement("strong");
+      heading.textContent = groupName;
+      const links = document.createElement("div");
+      links.className = "link-map-links";
+      entries.forEach((entry) => {
+        const link = document.createElement("a");
+        link.href = "#" + entry.target;
+        link.textContent = entry.sub ? entry.item.title + " · " + entry.sub.title : entry.item.title;
+        links.appendChild(link);
+      });
+      section.append(heading, links);
+      body.appendChild(section);
+    });
+    details.appendChild(body);
+    root.appendChild(details);
+  }
+
   function fillHere() {
     const heads = [...visibleRoot().querySelectorAll("h2, h3")];
     if (!heads.length) {
@@ -297,6 +436,8 @@
       });
       here.appendChild(link);
     });
+    fillTrail();
+    fillLinkMap();
   }
 
   async function load(id) {
@@ -308,7 +449,11 @@
       const res = await fetch("topics/" + id + ".html");
       if (!res.ok) throw new Error(String(res.status));
       if (token !== loadToken) return;
-      doc.innerHTML = await res.text();
+      const html = await res.text();
+      if (document.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        const transition = document.startViewTransition(() => { doc.innerHTML = html; });
+        await transition.finished.catch(() => {});
+      } else doc.innerHTML = html;
       document.title = (doc.querySelector("h1")?.textContent || "Справка") + " — FinMaster";
       loadedId = id;
       showSub();
@@ -370,6 +515,7 @@
   });
 
   window.addEventListener("hashchange", () => {
+    trackRoute();
     const id = currentId();
     if (loadedId === id && doc.querySelector("[data-sub]")) {
       showSub();
