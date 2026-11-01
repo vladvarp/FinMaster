@@ -451,6 +451,7 @@ def write_export(file_path: str, ids: list[str]) -> None:
         payload["telegram_bot_token"] = data.get("telegram_bot_token") or ""
         payload["users"] = list(data.get("users") or [])
         payload["devices"] = remote_devices
+        payload["revoked_devices"] = list(storage.remote_settings().get("revoked_devices") or [])
     blob = _protect(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
     dest = os.path.abspath(file_path)
     parent = os.path.dirname(dest)
@@ -529,7 +530,19 @@ def apply_export(file_path: str, ids: list[str], *, keep_unique_ngrok: bool = Tr
                 if not cid:
                     continue
                 merged[cid] = dict(item)
-            storage.save_remote_settings(devices=list(merged.values())[:storage.MAX_DEVICES])
+            current_revoked = storage.remote_settings().get("revoked_devices") or []
+            imported_revoked = payload.get("revoked_devices")
+            if not isinstance(imported_revoked, list):
+                imported_revoked = []
+            revoked = list(dict.fromkeys(
+                str(cid).strip()
+                for cid in [*current_revoked, *imported_revoked]
+                if str(cid).strip()
+            ))
+            storage.save_remote_settings(
+                devices=list(merged.values())[:storage.MAX_DEVICES],
+                revoked_devices=revoked,
+            )
     save(data)
 
 
