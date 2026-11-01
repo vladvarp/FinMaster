@@ -400,9 +400,12 @@ def export_parts() -> list[dict[str, Any]]:
     elif data.get("ngrok_token"):
         parts.append({"id": "ngrok", "label": "Токен ngrok", "on": True, "detail": ""})
     users_n = len(data.get("users") or [])
+    devices_n = len(storage.remote_settings().get("devices") or [])
     if data.get("telegram_bot_token") or users_n:
-        detail = f"{users_n} пол." if users_n else "без пользователей"
-        parts.append({"id": "telegram", "label": "Telegram: бот и пользователи", "on": True, "detail": detail})
+        details = [f"{users_n} пол."] if users_n else ["без пользователей"]
+        if devices_n:
+            details.append(f"{devices_n} устр.")
+        parts.append({"id": "telegram", "label": "Telegram: бот, пользователи и устройства", "on": True, "detail": " · ".join(details)})
     return parts
 
 
@@ -420,9 +423,12 @@ def inspect_export(file_path: str) -> list[dict[str, Any]]:
         parts.append({"id": "ngrok", "label": "Токены ngrok", "on": True, "detail": detail,
                       "conflicts": [{"prefix": str(x.get("token") or "")[:6]} for x in conflicts]})
     users_n = len(payload.get("users") or [])
-    if payload.get("telegram_bot_token") or users_n:
-        detail = f"{users_n} пол." if users_n else "без пользователей"
-        parts.append({"id": "telegram", "label": "Telegram: бот и пользователи", "on": True, "detail": detail})
+    devices_n = len(payload.get("devices") or [])
+    if payload.get("telegram_bot_token") or users_n or devices_n:
+        details = [f"{users_n} пол."] if users_n else ["без пользователей"]
+        if devices_n:
+            details.append(f"{devices_n} устр.")
+        parts.append({"id": "telegram", "label": "Telegram: бот, пользователи и устройства", "on": True, "detail": " · ".join(details)})
     return parts
 
 
@@ -443,6 +449,7 @@ def write_export(file_path: str, ids: list[str]) -> None:
             raise ValueError("Токен бота и пользователи ещё не сохранены.")
         payload["telegram_bot_token"] = data.get("telegram_bot_token") or ""
         payload["users"] = list(data.get("users") or [])
+        payload["devices"] = list(storage.remote_settings().get("devices") or [])
     blob = _protect(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
     dest = os.path.abspath(file_path)
     parent = os.path.dirname(dest)
@@ -505,6 +512,23 @@ def apply_export(file_path: str, ids: list[str], *, keep_unique_ngrok: bool = Tr
                     str(person.get("name") or ""),
                     extra=person,
                 )
+
+        imported_devices = payload.get("devices")
+        if isinstance(imported_devices, list):
+            current = storage.remote_settings().get("devices") or []
+            merged = {
+                str(item.get("id") or ""): dict(item)
+                for item in current
+                if isinstance(item, dict) and str(item.get("id") or "").strip()
+            }
+            for item in imported_devices:
+                if not isinstance(item, dict):
+                    continue
+                cid = str(item.get("id") or "").strip()
+                if not cid:
+                    continue
+                merged[cid] = dict(item)
+            storage.save_remote_settings(devices=list(merged.values())[:storage.MAX_DEVICES])
     save(data)
 
 
