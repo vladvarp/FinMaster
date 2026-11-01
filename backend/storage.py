@@ -1056,11 +1056,15 @@ def remember_device(
 
 
 def forget_device(cid: str) -> list[dict[str, Any]]:
-    # Удаление записи означает «забыть устройство»: вместе с историей снимается и блокировка.
+    # Удаляем историю, но не снимаем уже установленный запрет: он остаётся
+    # в revoked_devices и отображается отдельно, пока пользователь не разблокирует ID.
     cid = str(cid or "").strip()
     data = remote_settings()
+    target = next((item for item in data["devices"] if str(item.get("id") or "") == cid), None)
     devices = [d for d in data["devices"] if str(d.get("id") or "") != cid]
-    revoked = [item for item in data.get("revoked_devices") or [] if str(item) != cid]
+    revoked = list(data.get("revoked_devices") or [])
+    if target and target.get("revoked_at") and cid and cid not in revoked:
+        revoked.append(cid)
     return save_remote_settings(devices=devices, revoked_devices=revoked)["devices"]
 
 
