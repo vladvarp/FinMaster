@@ -404,8 +404,8 @@ def export_parts() -> list[dict[str, Any]]:
     if data.get("telegram_bot_token") or users_n or devices_n:
         details = [f"{users_n} пол."] if users_n else ["без пользователей"]
         if devices_n:
-            details.append(f"{devices_n} устр.")
-        parts.append({"id": "telegram", "label": "Telegram: бот, пользователи и устройства", "on": True, "detail": " · ".join(details)})
+            details.append(f"{devices_n} устр. с историей")
+        parts.append({"id": "telegram", "label": "Telegram: бот, пользователи, устройства и история", "on": True, "detail": " · ".join(details)})
     return parts
 
 
