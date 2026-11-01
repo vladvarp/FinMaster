@@ -62,6 +62,7 @@
 .modal-card.remote-modal > .modal-title-row,
 .modal-card.remote-modal > p,
 .modal-card.remote-modal > .modal-actions { flex: 0 0 auto; }
+.modal-card.remote-modal > .modal-actions { margin-top: 14px; }
 .modal-card.phone-cal-modal {
   width: min(1100px, calc(100vw - 32px));
   max-width: 1100px;
