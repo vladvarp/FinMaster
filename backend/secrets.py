@@ -400,11 +400,15 @@ def export_parts() -> list[dict[str, Any]]:
     elif data.get("ngrok_token"):
         parts.append({"id": "ngrok", "label": "Токен ngrok", "on": True, "detail": ""})
     users_n = len(data.get("users") or [])
-    devices_n = len(storage.remote_settings().get("devices") or [])
-    if data.get("telegram_bot_token") or users_n or devices_n:
+    remote_data = storage.remote_settings()
+    devices_n = len(remote_data.get("devices") or [])
+    revoked_n = len(remote_data.get("revoked_devices") or [])
+    if data.get("telegram_bot_token") or users_n or devices_n or revoked_n:
         details = [f"{users_n} пол."] if users_n else ["без пользователей"]
         if devices_n:
             details.append(f"{devices_n} устр. с историей")
+        if revoked_n:
+            details.append(f"{revoked_n} блок.")
         parts.append({"id": "telegram", "label": "Telegram: бот, пользователи, устройства и история", "on": True, "detail": " · ".join(details)})
     return parts
 
@@ -445,13 +449,15 @@ def write_export(file_path: str, ids: list[str]) -> None:
         elif data.get("ngrok_token"):
             payload["ngrok_token"] = data["ngrok_token"]
     if "telegram" in chosen:
-        remote_devices = list(storage.remote_settings().get("devices") or [])
-        if not data.get("telegram_bot_token") and not data.get("users") and not remote_devices:
+        remote = storage.remote_settings()
+        remote_devices = list(remote.get("devices") or [])
+        remote_revoked = list(remote.get("revoked_devices") or [])
+        if not data.get("telegram_bot_token") and not data.get("users") and not remote_devices and not remote_revoked:
             raise ValueError("Токен бота, пользователи и устройства ещё не сохранены.")
         payload["telegram_bot_token"] = data.get("telegram_bot_token") or ""
         payload["users"] = list(data.get("users") or [])
         payload["devices"] = remote_devices
-        payload["revoked_devices"] = list(storage.remote_settings().get("revoked_devices") or [])
+        payload["revoked_devices"] = remote_revoked
     blob = _protect(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
     dest = os.path.abspath(file_path)
     parent = os.path.dirname(dest)
@@ -516,7 +522,7 @@ def apply_export(file_path: str, ids: list[str], *, keep_unique_ngrok: bool = Tr
                 )
 
         imported_devices = payload.get("devices")
-        if isinstance(imported_devices, list):
+        if isinstance(imported_devices, list) or isinstance(payload.get("revoked_devices"), list):
             current = storage.remote_settings().get("devices") or []
             merged = {
                 str(item.get("id") or ""): dict(item)
