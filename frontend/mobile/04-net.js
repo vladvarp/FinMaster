@@ -379,7 +379,10 @@
       navReport();
       pollLoop();
     } catch (err) {
-      if (!state.stopped) blocked("Нет связи", "Компьютер недоступен. Проверьте, что оба устройства в одной сети.");
+      console.error("[FinMaster mobile] Ошибка начального подключения:", err);
+      if (!state.stopped) {
+        blocked("Нет связи", err?.message || "Компьютер недоступен. Проверьте, что оба устройства в одной сети.");
+      }
     }
   }
 
@@ -406,7 +409,8 @@
         if (state.version <= before) await sleep(400);
       } catch (err) {
         if (state.stopped) return;
-        noteOffline();
+        console.error("[FinMaster mobile] Ошибка синхронизации:", err);
+        noteOffline(err);
         await sleep(2000);
       }
     }
