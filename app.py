@@ -2502,6 +2502,8 @@ def api_remote_forget():
 
 @app.post("/api/remote/device/delete")
 def api_remote_device_delete():
+    if not _is_local():
+        return jsonify({"error": "Только на этом компьютере."}), 403
     data = request.get_json(silent=True) or {}
     cid = str(data.get("id") or "").strip()
     if not cid:
