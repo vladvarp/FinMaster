@@ -3235,8 +3235,6 @@ class TelegramBot:
         return self._screen_home(session)
 
     def _screen_home(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
-        settings = storage.remote_settings()
-        info = {"url": "", "access": REMOTE.enabled, "ngrok": bool(settings.get("ngrok"))}
         doc, live = self._doc_of(session)
         title = str(doc.get("title") or "")
         path = session.path or _live_path()
