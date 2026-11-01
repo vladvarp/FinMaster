@@ -2500,6 +2500,32 @@ def api_remote_forget():
     g.netlog_key = f"revoke-{cid}"
     return jsonify({"ok": True, **payload, "devices": devices})
 
+@app.post("/api/remote/device/delete")
+def api_remote_device_delete():
+    data = request.get_json(silent=True) or {}
+    cid = str(data.get("id") or "").strip()
+    if not cid:
+        return jsonify({"error": "Не указано устройство."}), 400
+
+    devices_before = storage.remote_settings()["devices"]
+    if not any(str(item.get("id") or "") == cid for item in devices_before):
+        return jsonify({"error": "Устройство не найдено в истории."}), 404
+
+    devices = storage.forget_device(cid)
+    REMOTE.drop(cid)
+
+    applog.add(
+        f"Устройство удалено из истории: {cid[:12]}",
+        where="Телефон",
+        actor=_log_actor(),
+    )
+    g.netlog_text = f"Устройство удалено из истории: {cid[:12]}"
+    g.netlog_level = "warn"
+    g.netlog_key = f"device-delete-{cid}"
+
+    return jsonify({"ok": True, **_remote_public(), "devices": devices})
+
+
 @app.post("/api/remote/restore")
 def api_remote_restore():
     data = request.get_json(silent=True) or {}
