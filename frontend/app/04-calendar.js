@@ -2315,20 +2315,24 @@
       const rowRect = row.getBoundingClientRect();
       return rowRect.bottom > rect.top && rowRect.top < rect.bottom;
     });
-    if (!first) return { scrollTop: gantt.scrollTop, candidates: [] };
-    const index = rows.indexOf(first);
-    return {
+    const anchor = {
       scrollTop: gantt.scrollTop,
-      candidates: rows.slice(index).map((row) => ({
-        id: row.dataset.calId || "",
-        line: row.dataset.calLine || "",
-        top: row.getBoundingClientRect().top - rect.top,
-      })),
+      scrollLeft: gantt.scrollLeft,
+      candidates: [],
     };
+    if (!first) return anchor;
+    const index = rows.indexOf(first);
+    anchor.candidates = rows.slice(index).map((row) => ({
+      id: row.dataset.calId || "",
+      line: row.dataset.calLine || "",
+      top: row.getBoundingClientRect().top - rect.top,
+    }));
+    return anchor;
   }
 
   function restoreTimelineScrollAnchor(gantt, anchor) {
     if (!gantt || !anchor) return;
+    gantt.scrollLeft = Math.min(anchor.scrollLeft || 0, gantt.scrollWidth - gantt.clientWidth);
     const rows = [...gantt.querySelectorAll(".gantt-row[data-cal-id]")];
     const rect = gantt.getBoundingClientRect();
     for (const candidate of anchor.candidates || []) {
