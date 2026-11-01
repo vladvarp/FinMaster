@@ -257,7 +257,10 @@ def _guard_desk_api():
     fail = _desk_auth_fail()
     if fail:
         return fail
-    if storage.device_access_revoked(_desk_cid()):
+    cid = _desk_cid()
+    legacy_ids = _device_info().get("legacy_cids")
+    legacy_ids = legacy_ids if isinstance(legacy_ids, list) else []
+    if storage.device_access_revoked(cid) or any(storage.device_access_revoked(str(old_id)) for old_id in legacy_ids):
         return jsonify({"error": "Доступ к этому устройству закрыт."}), 403
     path = request.path
     if path in _DESK_DENY or path.startswith("/api/runtime/"):
@@ -408,7 +411,9 @@ def guard_remote_clients():
             netlog.add("http", "Запрос отклонён: неверный токен", level="err", source=_net_peer(), detail=path, key="deny-token")
             return jsonify({"error": "Сессия недействительна — отсканируйте QR-код заново."}), 401
         cid = str(request.args.get("cid") or "").strip()
-        if storage.device_access_revoked(cid):
+        legacy_ids = _device_info().get("legacy_cids")
+        legacy_ids = legacy_ids if isinstance(legacy_ids, list) else []
+        if storage.device_access_revoked(cid) or any(storage.device_access_revoked(str(old_id)) for old_id in legacy_ids):
             netlog.add("http", "Запрос отклонён: доступ устройства закрыт", level="warn", source=_net_peer(), detail=path, key=f"deny-device-{cid}")
             return jsonify({"error": "Доступ к этому устройству закрыт."}), 403
         return None
