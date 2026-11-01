@@ -20,9 +20,9 @@
   let lastRoute = "";
 
   function programTheme() {
-    try {
-      return localStorage.getItem("finmaster.theme") || localStorage.getItem("finmaster.faq.theme") || "dark";
-    } catch (err) { return "dark"; }
+    const web = document.documentElement.dataset.faqMode === "web";
+    try { return localStorage.getItem("finmaster.theme") || (web ? "dark" : "light"); }
+    catch (err) { return web ? "dark" : "light"; }
   }
 
   function paintThemeControl() {
@@ -39,8 +39,7 @@
     const next = value === "light" ? "light" : "dark";
     document.documentElement.dataset.theme = next;
     try {
-      const programKeyExists = localStorage.getItem("finmaster.theme") !== null;
-      localStorage.setItem(programKeyExists ? "finmaster.theme" : "finmaster.faq.theme", next);
+      localStorage.setItem("finmaster.theme", next);
     } catch (err) { /* тема действует до закрытия страницы */ }
     paintThemeControl();
     if (window.FAQLive) window.FAQLive.mount(doc);
@@ -50,7 +49,7 @@
   paintThemeControl();
   themeToggle?.addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
   window.addEventListener("storage", (event) => {
-    if (event.key && !["finmaster.theme", "finmaster.faq.theme"].includes(event.key)) return;
+    if (event.key && event.key !== "finmaster.theme") return;
     document.documentElement.dataset.theme = programTheme();
     paintThemeControl();
     if (window.FAQLive) window.FAQLive.mount(doc);
