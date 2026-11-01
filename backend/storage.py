@@ -793,13 +793,17 @@ def remote_settings() -> dict[str, Any]:
         port = DEFAULT_REMOTE_PORT
     if port <= 0 or port > 65535:
         port = DEFAULT_REMOTE_PORT
-    devices = [d for d in (raw.get("devices") or []) if isinstance(d, dict) and d.get("id")]
+    devices = [dict(d) for d in (raw.get("devices") or []) if isinstance(d, dict) and d.get("id")]
     raw_revoked = raw.get("revoked_devices") if isinstance(raw.get("revoked_devices"), list) else []
     revoked_devices = list(dict.fromkeys(
         str(cid).strip()
         for cid in raw_revoked
         if str(cid).strip()
     ))[-MAX_DEVICES * 5:]
+    revoked_set = set(revoked_devices)
+    for device in devices:
+        if str(device.get("id") or "") in revoked_set and not device.get("revoked_at"):
+            device["revoked_at"] = str(device.get("seen_at") or now_local_iso())
     out = {
         "token": token,
         "port": port,
