@@ -2,10 +2,8 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
-  <link rel="stylesheet" href="/mobile.css">
-  <link rel="stylesheet" href="stage.css">
-  <link rel="stylesheet" href="../assets/mobile.css">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")||localStorage.getItem("finmaster.faq.theme")||"dark"}catch(e){document.documentElement.dataset.theme="dark"}</script>
+  <link rel="stylesheet" href="stage-mobile.css">
   <style>
     html, body { background: #f4f7fb !important; color-scheme: light; }
     html[data-theme="dark"], html[data-theme="dark"] body { background: #0b1220 !important; color-scheme: dark; }
