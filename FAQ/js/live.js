@@ -1,5 +1,6 @@
 (function () {
   const STYLE = { app: "/styles.css", mobile: "/mobile.css" };
+  let staticSource = false;
   let appDoc = null;
   let mobileDoc = null;
   let themeIcons = null;
@@ -104,14 +105,17 @@
     const doc = document.implementation.createHTMLDocument("");
     doc.documentElement.lang = "ru";
     doc.documentElement.dataset.theme = theme();
+    const base = doc.createElement("base");
+    base.href = document.baseURI;
+    doc.head.appendChild(base);
     const appCss = doc.createElement("link");
     appCss.rel = "stylesheet";
     appCss.href = css;
     const frameCss = doc.createElement("link");
     frameCss.rel = "stylesheet";
-    frameCss.href = "/faq/blocks/stage.css";
+    frameCss.href = new URL("blocks/stage.css", document.baseURI).href;
     const chrome = doc.createElement("script");
-    chrome.src = "blocks/chrome.js";
+    chrome.src = new URL("blocks/chrome.js", document.baseURI).href;
     doc.head.append(appCss, frameCss, chrome);
     const stage = doc.createElement("div");
     stage.className = row ? "stage is-row" : "stage";
@@ -154,11 +158,23 @@
     if (failed) return false;
     if (appDoc) return true;
     try {
-      appDoc = await loadDoc("/");
+      // GitHub Pages не запускает Flask: там используем HTML-снимок,
+      // который workflow собирает из исходной разметки приложения.
       try {
-        const js = await (await fetch("/app.js", { credentials: "same-origin" })).text();
-        themeIcons = extractIcons(js);
-      } catch (err) { themeIcons = null; }
+        appDoc = await loadDoc(new URL("assets/source/app.html", document.baseURI).href);
+        staticSource = true;
+        STYLE.app = new URL("assets/app.css", document.baseURI).href;
+        STYLE.mobile = new URL("assets/mobile.css", document.baseURI).href;
+      } catch (staticError) {
+        if (location.hostname.endsWith("github.io")) throw staticError;
+        appDoc = await loadDoc("/");
+      }
+      if (!staticSource) {
+        try {
+          const js = await (await fetch("/app.js", { credentials: "same-origin" })).text();
+          themeIcons = extractIcons(js);
+        } catch (err) { themeIcons = null; }
+      }
       return true;
     } catch (err) {
       failed = true;
@@ -166,42 +182,57 @@
     }
   }
 
+  function mountBlock(host) {
+    const frame = document.createElement("iframe");
+    frame.className = "live-frame";
+    frame.title = host.getAttribute("aria-label") || "Элемент FinMaster";
+    if (host.dataset.width) frame.style.maxWidth = host.dataset.width + "px";
+    const part = host.dataset.part ? "?part=" + encodeURIComponent(host.dataset.part) : "";
+    frame.src = new URL("blocks/" + encodeURIComponent(host.dataset.block) + ".html" + part, document.baseURI).href;
+    host.textContent = "";
+    host.appendChild(frame);
+    bind(frame);
+  }
+
   async function mount(root, selectorsOnly) {
     if (!root) return;
     const hosts = [...root.querySelectorAll(selectorsOnly ? "[data-sel]" : "[data-sel], [data-block]")];
     if (!hosts.length) return;
+
+    // Самостоятельные демонстрационные блоки не зависят от доступности Flask-приложения.
+    const blockHosts = hosts.filter((host) => host.dataset.block);
+    blockHosts.forEach(mountBlock);
+
+    const selectorHosts = hosts.filter((host) => !host.dataset.block);
+    if (!selectorHosts.length) return;
+
     const token = ++job;
     const ok = await ensure();
     if (token !== job) return;
     if (!ok) {
-      hosts.forEach(offline);
+      selectorHosts.forEach(offline);
       return;
     }
-    if (hosts.some((host) => host.dataset.doc === "mobile") && !mobileDoc) {
-      try { mobileDoc = await loadDoc("/mobile.html"); }
-      catch (err) { mobileDoc = null; }
+    if (selectorHosts.some((host) => host.dataset.doc === "mobile") && !mobileDoc) {
+      try {
+        mobileDoc = staticSource
+          ? await loadDoc(new URL("assets/source/mobile.html", document.baseURI).href)
+          : await loadDoc("/mobile.html");
+      } catch (err) { mobileDoc = null; }
     }
     if (token !== job) return;
-    hosts.forEach((host) => {
+    selectorHosts.forEach((host) => {
       const frame = document.createElement("iframe");
       frame.className = "live-frame";
       frame.title = host.getAttribute("aria-label") || "Элемент FinMaster";
       if (host.dataset.width) frame.style.maxWidth = host.dataset.width + "px";
-      if (host.dataset.block) {
-        const part = host.dataset.part ? "?part=" + encodeURIComponent(host.dataset.part) : "";
-        frame.src = "blocks/" + encodeURIComponent(host.dataset.block) + ".html" + part;
-        host.textContent = "";
-        host.appendChild(frame);
-        bind(frame);
-        return;
-      }
       const source = host.dataset.doc === "mobile" ? mobileDoc : appDoc;
       if (!source) { offline(host); return; }
       let found = [];
       try { found = [...source.querySelectorAll(host.dataset.sel)]; }
       catch (err) { found = []; }
       if (!found.length) {
-        host.innerHTML = "<p class=\"live-off\">Элемент не найден в окне программы.</p>";
+        host.innerHTML = '<p class="live-off">Элемент не найден в окне программы.</p>';
         return;
       }
       frame.srcdoc = srcdoc(found.map(present), host.dataset.doc === "mobile" ? STYLE.mobile : STYLE.app, host.dataset.flow === "row");
