@@ -148,6 +148,7 @@
 
   async function api(path, options = {}) {
     const sep = path.includes("?") ? "&" : "?";
+    const legacy = (() => { try { return JSON.parse(localStorage.getItem("finmaster.device.legacy_cids") || "[]"); } catch { return []; } })();
     const extra = `t=${encodeURIComponent(state.token)}&cid=${encodeURIComponent(state.cid)}&name=${encodeURIComponent(deviceName())}`;
     const headers = {
       "Content-Type": "application/json",
@@ -156,7 +157,13 @@
       ...(options.headers || {}),
     };
     const device = deviceHeader();
-    if (device) headers["X-FM-Device"] = device;
+    if (device) {
+      try {
+        const payload = JSON.parse(decodeURIComponent(escape(atob(device))));
+        payload.legacy_cids = legacy;
+        headers["X-FM-Device"] = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+      } catch { headers["X-FM-Device"] = device; }
+    }
     const res = await fetch(`${path}${sep}${extra}`, {
       ...options,
       headers,
@@ -315,8 +322,16 @@
     const fromUrl = params.get("t");
     state.token = fromUrl || localStorage.getItem(LS_TOKEN) || "";
     state.stopped = false;
-    state.cid = localStorage.getItem(LS_CID) || uid();
-    localStorage.setItem(LS_CID, state.cid);
+    const sharedKey = "finmaster.device.cid";
+    const legacyKeys = ["finmaster.remote.cid", "finmaster.bank.cid", "finmaster.desk.id"];
+    const legacyIds = [...new Set([
+      ...legacyKeys.map((key) => localStorage.getItem(key) || ""),
+      ...(JSON.parse(localStorage.getItem("finmaster.device.legacy_cids") || "[]")),
+    ].filter(Boolean))];
+    state.cid = localStorage.getItem(sharedKey) || localStorage.getItem(LS_CID) || uid();
+    localStorage.setItem(sharedKey, state.cid);
+    localStorage.setItem("finmaster.device.legacy_cids", JSON.stringify(legacyIds.filter((id) => id !== state.cid)));
+    legacyKeys.forEach((key) => localStorage.setItem(key, state.cid));
     try {
       await detectDeviceProfile();
     } catch {
