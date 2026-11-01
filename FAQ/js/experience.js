@@ -49,6 +49,11 @@
   function setTheme(next) {
     const value = next === "light" ? "light" : "dark";
     root.dataset.theme = value;
+    document.querySelectorAll("iframe.live-frame").forEach((frame) => {
+      try {
+        frame.contentWindow?.postMessage({ type: "faq-theme", theme: value }, "*");
+      } catch (err) {}
+    });
     if (!embedded) {
       try {
         if (localStorage.getItem("finmaster.faq.theme") !== value) {
