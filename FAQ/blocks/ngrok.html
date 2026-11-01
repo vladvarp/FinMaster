@@ -2,60 +2,181 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="stage.css">
   <link rel="stylesheet" href="stand.css">
   <style>
-    .remote-fold { max-width: 520px; }
-
-    .ngrok-process-status {
-      margin-left: 3px;
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--ok);
+    .ngrok-demo { max-width: 720px; }
+    .ngrok-demo-intro { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+    .ngrok-demo-tabs { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; }
+    .ngrok-demo-tabs .btn { font-size:11px; }
+    .ngrok-demo-tabs .btn[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
+    .ngrok-demo .remote-fold { margin:0; }
+    .ngrok-demo .remote-fold-head { cursor:default; }
+    .ngrok-demo .remote-fold-body { display:block !important; }
+    .ngrok-demo .remote-ngrok-box { display:block; }
+    .ngrok-demo .remote-state { margin:0 0 10px; }
+    .ngrok-demo .remote-autostart { margin:7px 0; cursor:default; }
+    .ngrok-demo .remote-autostart input { pointer-events:none; }
+    .ngrok-demo .remote-ngrok-status { min-height:18px; }
+    .ngrok-demo .ngrok-process-actions { min-height:30px; }
+    .ngrok-demo .demo-link {
+      display:flex; align-items:center; gap:8px; margin-top:10px; padding:9px 11px;
+      border:1px solid var(--line); border-radius:9px; background:var(--bg-2);
+      color:var(--muted); font:12px var(--mono,Consolas,monospace); overflow-wrap:anywhere;
     }
-
-    .ngrok-process-actions {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 8px;
+    .ngrok-demo .demo-link[hidden] { display:none !important; }
+    .ngrok-demo .demo-link b { color:var(--ok); font:650 11px var(--sans); white-space:nowrap; }
+    .ngrok-demo .demo-spinner {
+      display:inline-block; width:11px; height:11px; border:2px solid var(--line);
+      border-top-color:var(--accent); border-radius:50%; animation:ngrok-spin .8s linear infinite;
+      vertical-align:-2px; margin-right:5px;
+    }
+    @keyframes ngrok-spin { to { transform:rotate(360deg); } }
+    .ngrok-demo-caption { margin:9px 0 0; color:var(--muted); font-size:11px; line-height:1.45; }
+    @media (prefers-reduced-motion: reduce) {
+      .ngrok-demo .remote-state.on .remote-dot, .ngrok-demo .demo-spinner { animation:none; }
     }
   </style>
 </head>
 <body>
-  <p class="hint">Тот же блок, что в окне «Телефон». Здесь выбирают активный токен, добавляют новые, переименовывают и удаляют сохранённые записи. Видны только первые шесть символов каждого токена.</p>
+  <div class="ngrok-demo" id="ngrok-demo">
+    <p class="ngrok-demo-intro">Автоматическая демонстрация переключает состояния. Можно выбрать этап вручную.</p>
+    <div class="ngrok-demo-tabs" role="group" aria-label="Состояния ngrok">
+      <button class="btn small" type="button" data-demo-state="off" aria-pressed="true">Выключен</button>
+      <button class="btn small" type="button" data-demo-state="starting" aria-pressed="false">Запуск</button>
+      <button class="btn small" type="button" data-demo-state="online" aria-pressed="false">Подключён</button>
+      <button class="btn small" type="button" data-demo-state="stopping" aria-pressed="false">Остановка</button>
+      <button class="btn small" type="button" data-demo-state="error" aria-pressed="false">Ошибка</button>
+    </div>
 
-  <div class="remote-fold">
-    <button type="button" class="remote-fold-head" tabindex="-1">
-      <span class="remote-fold-title">
-        Токен ngrok
-        <i class="token-dot on" title="Токен сохранён"></i>
-        <span class="ngrok-process-status">Процесс запущен</span>
-      </span>
-      <span class="remote-fold-ico">▾</span>
-    </button>
+    <div class="remote-state" id="demo-access-state">
+      <span class="remote-dot"></span><span id="demo-access-text">Доступ выключен</span>
+    </div>
+    <label class="remote-autostart">
+      <input type="checkbox" id="demo-access-toggle" tabindex="-1" />
+      Включить доступ
+    </label>
+    <label class="remote-autostart">
+      <input type="checkbox" id="demo-ngrok-toggle" tabindex="-1" />
+      Через интернет (ngrok)
+    </label>
 
-    <div class="remote-fold-body">
-      <div class="remote-ngrok-box show">
-        <div class="remote-ngrok-current">Активный токен: Рабочий аккаунт (2abc••••••)</div>
-        <div class="remote-tg-actions">
-          <button type="button" class="btn small primary" tabindex="-1">Управление токенами</button>
-          <button type="button" class="btn small" tabindex="-1">Проверить связь</button>
-        </div>
-
-        <div class="remote-ngrok-status">Туннель отвечает. QR ведёт на https-адрес.</div>
-
-        <div class="ngrok-process-actions">
-          <button type="button" class="btn small danger" tabindex="-1">Завершить принудительно</button>
+    <div class="remote-fold">
+      <div class="remote-fold-head">
+        <span class="remote-fold-title">
+          Токен ngrok
+          <i class="token-dot on" id="demo-token-dot" title="Токен сохранён"></i>
+          <span class="ngrok-process-status stopped" id="demo-process-status">Процесс не запущен</span>
+        </span>
+        <span class="remote-fold-ico">▾</span>
+      </div>
+      <div class="remote-fold-body">
+        <div class="remote-ngrok-box">
+          <div class="remote-ngrok-current">Активный токен: Рабочий аккаунт · 2abc••••••</div>
+          <div class="remote-tg-actions">
+            <button type="button" class="btn small primary" tabindex="-1">Управление токенами</button>
+            <button type="button" class="btn small" tabindex="-1">Проверить связь</button>
+          </div>
+          <div class="remote-ngrok-status" id="demo-ngrok-status">Туннель выключен. Токен сохранён.</div>
+          <div class="ngrok-process-actions">
+            <button type="button" class="btn small danger" id="demo-force-stop" tabindex="-1" hidden>Завершить принудительно</button>
+          </div>
+          <div class="demo-link" id="demo-public-link" hidden><b>ИНТЕРНЕТ</b> https://example.ngrok-free.app/m?t=••••••</div>
         </div>
       </div>
     </div>
+    <p class="ngrok-demo-caption" id="demo-caption" aria-live="polite">Токен сохранён, но туннель и удалённый доступ выключены.</p>
   </div>
 
   <script src="chrome.js"></script>
+  <script>
+    (function () {
+      var root = document.getElementById("ngrok-demo");
+      if (!root) return;
+      var states = ["off", "starting", "online", "stopping", "error"];
+      var current = 0;
+      var timer = 0;
+      var access = document.getElementById("demo-access-state");
+      var accessText = document.getElementById("demo-access-text");
+      var accessToggle = document.getElementById("demo-access-toggle");
+      var ngrokToggle = document.getElementById("demo-ngrok-toggle");
+      var process = document.getElementById("demo-process-status");
+      var dot = document.getElementById("demo-token-dot");
+      var status = document.getElementById("demo-ngrok-status");
+      var force = document.getElementById("demo-force-stop");
+      var link = document.getElementById("demo-public-link");
+      var caption = document.getElementById("demo-caption");
+      var tabs = Array.prototype.slice.call(root.querySelectorAll("[data-demo-state]"));
+
+      var view = {
+        off: {
+          access:false, ngrok:false, running:false, dot:"on", status:"Туннель выключен. Токен сохранён.",
+          accessText:"Доступ выключен", caption:"Токен сохранён, но туннель и удалённый доступ выключены.", force:false, link:false
+        },
+        starting: {
+          access:true, ngrok:true, running:true, dot:"on", status:'<span class="demo-spinner"></span>Запускаем ngrok и ждём публичный адрес…',
+          accessText:"Доступ включён — подключаем туннель", caption:"FinMaster запускает ngrok с выбранным Authtoken и ожидает адрес туннеля.", force:false, link:false
+        },
+        online: {
+          access:true, ngrok:true, running:true, dot:"live", status:"Туннель открыт. Сканируйте QR или сохраните ссылку в закладки — работает из любой сети.",
+          accessText:"Доступ включён — устройств в сети нет", caption:"Туннель отвечает. Публичный адрес можно открыть с телефона из другой сети.", force:false, link:true
+        },
+        stopping: {
+          access:false, ngrok:false, running:true, dot:"on", status:"Туннель выключен. Процесс ещё работает — его можно завершить принудительно.",
+          accessText:"Доступ выключен", caption:"Обычная остановка не завершила процесс. FinMaster показывает кнопку принудительного завершения через ngrok_stop.bat.", force:true, link:false
+        },
+        error: {
+          access:true, ngrok:true, running:true, dot:"err", status:"Не удалось установить соединение с туннелем. Проверьте Authtoken и связь с ngrok.",
+          accessText:"Доступ включён — ошибка туннеля", caption:"Процесс запущен, но туннель не отвечает. Это отличается от ситуации, когда ngrok.exe вообще не запущен.", force:false, link:false
+        }
+      };
+
+      function setState(name) {
+        var s = view[name] || view.off;
+        current = states.indexOf(name);
+        access.classList.toggle("on", s.access && name === "online");
+        accessText.textContent = s.accessText;
+        accessToggle.checked = s.access;
+        ngrokToggle.checked = s.ngrok;
+        process.textContent = s.running ? "Процесс запущен" : "Процесс не запущен";
+        process.classList.toggle("running", s.running);
+        process.classList.toggle("stopped", !s.running);
+        dot.className = "token-dot " + s.dot;
+        dot.title = s.dot === "err" ? "Ошибка туннеля" : s.dot === "live" ? "Туннель работает" : "Токен сохранён";
+        status.className = "remote-ngrok-status" + (name === "online" ? " ok" : name === "error" ? " err" : "");
+        status.innerHTML = s.status;
+        force.hidden = !s.force;
+        link.hidden = !s.link;
+        caption.textContent = s.caption;
+        tabs.forEach(function (tab) {
+          tab.setAttribute("aria-pressed", tab.getAttribute("data-demo-state") === name ? "true" : "false");
+        });
+      }
+
+      function next() {
+        current = (current + 1) % states.length;
+        setState(states[current]);
+      }
+
+      function restart() {
+        clearInterval(timer);
+        timer = setInterval(next, 4200);
+      }
+
+      tabs.forEach(function (tab) {
+        tab.addEventListener("click", function () {
+          setState(tab.getAttribute("data-demo-state"));
+          restart();
+        });
+      });
+
+      setState("off");
+      restart();
+    })();
+  </script>
   <script src="fit.js"></script>
 </body>
 </html>

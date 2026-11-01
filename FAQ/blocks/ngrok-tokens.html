@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <link rel="stylesheet" href="stand.css">
+  <style>
+    .ngrok-tokens-demo { max-width:720px; }
+    .ngrok-tokens-demo .modal { display:block !important; position:static !important; inset:auto !important; padding:0 !important; background:transparent !important; }
+    .ngrok-tokens-demo .modal-card { margin:0 auto; }
+    .ngrok-tokens-demo .ngrok-manager-card { width:min(620px,100%) !important; max-height:none !important; overflow:visible !important; }
+    .ngrok-tokens-demo #ngrok-token-list { max-height:none !important; overflow:visible !important; }
+    .ngrok-tokens-demo .ngrok-token-row { padding:10px 0; border-bottom:1px solid var(--line); }
+    .ngrok-tokens-demo .ngrok-token-row:last-child { border-bottom:0; }
+    .ngrok-tokens-demo .ngrok-token-main strong { display:flex; align-items:center; flex-wrap:wrap; gap:7px; font-size:13px; }
+    .ngrok-tokens-demo .ngrok-token-main small { font-family:var(--mono,Consolas,monospace); }
+    .ngrok-tokens-demo .token-active-label { color:var(--ok); font:700 10px var(--sans); }
+    .ngrok-tokens-demo .ngrok-token-actions { gap:5px; }
+    .ngrok-tokens-demo .ngrok-token-add { margin-top:12px; }
+    .ngrok-tokens-demo .ngrok-token-add .btn { justify-self:start; }
+    .ngrok-tokens-demo .modal-actions { margin-top:14px; }
+    .ngrok-tokens-demo .demo-note { margin:0 0 10px; color:var(--muted); font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="ngrok-tokens-demo">
+    <p class="demo-note">Так выглядит встроенное окно управления. Активная запись отмечена отдельно; полный Authtoken нигде в списке не раскрывается.</p>
+    <div class="modal open" id="ngrok-manager-modal">
+      <div class="modal-card settings-pack-modal ngrok-manager-card" role="dialog" aria-modal="true" aria-labelledby="ngrok-manager-title">
+        <h3 id="ngrok-manager-title">Токены ngrok</h3>
+        <p>Выберите активный токен или добавьте новый. Полностью токен не показывается — только первые шесть символов.</p>
+        <div id="ngrok-token-list" class="settings-pack-list">
+          <div class="ngrok-token-row">
+            <div class="ngrok-token-main">
+              <strong>Рабочий аккаунт <span class="token-active-label">АКТИВЕН</span></strong>
+              <small>2abc91••••••</small>
+            </div>
+            <div class="ngrok-token-actions">
+              <button type="button" class="btn small primary" tabindex="-1">Выбран</button>
+              <button type="button" class="btn small" tabindex="-1">Переименовать</button>
+              <button type="button" class="btn small danger" tabindex="-1">Удалить</button>
+            </div>
+          </div>
+          <div class="ngrok-token-row">
+            <div class="ngrok-token-main">
+              <strong>Резервный</strong>
+              <small>7fd302••••••</small>
+            </div>
+            <div class="ngrok-token-actions">
+              <button type="button" class="btn small" tabindex="-1">Выбрать</button>
+              <button type="button" class="btn small" tabindex="-1">Переименовать</button>
+              <button type="button" class="btn small danger" tabindex="-1">Удалить</button>
+            </div>
+          </div>
+          <div class="ngrok-token-row">
+            <div class="ngrok-token-main">
+              <strong>Тестовый</strong>
+              <small>a91c44••••••</small>
+            </div>
+            <div class="ngrok-token-actions">
+              <button type="button" class="btn small" tabindex="-1">Выбрать</button>
+              <button type="button" class="btn small" tabindex="-1">Переименовать</button>
+              <button type="button" class="btn small danger" tabindex="-1">Удалить</button>
+            </div>
+          </div>
+        </div>
+        <div class="ngrok-token-add">
+          <label class="field"><span>Новый Authtoken</span><input type="password" value="••••••••••••••••••••" readonly tabindex="-1" /></label>
+          <label class="field"><span>Название (необязательно)</span><input type="text" value="Например, Домашний аккаунт" readonly tabindex="-1" /></label>
+          <button type="button" class="btn primary" tabindex="-1">Добавить токен</button>
+        </div>
+        <div class="modal-actions"><button type="button" class="btn" tabindex="-1">Закрыть</button></div>
+      </div>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>
