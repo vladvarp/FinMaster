@@ -8,6 +8,8 @@
   let job = 0;
 
   function theme() {
+    const current = document.documentElement.dataset.theme;
+    if (current === "dark" || current === "light") return current;
     try { return localStorage.getItem("finmaster.theme") === "dark" ? "dark" : "light"; }
     catch (err) { return "light"; }
   }
@@ -116,6 +118,12 @@
       var el = event.target.closest && event.target.closest("button, a");
       if (el) event.preventDefault();
     }, true);
+    window.addEventListener("message", function (event) {
+      if (!event.data || event.data.type !== "faq-theme") return;
+      if (event.data.theme !== "light" && event.data.theme !== "dark") return;
+      document.documentElement.dataset.theme = event.data.theme;
+      post();
+    });
     if (window.ResizeObserver) new ResizeObserver(post).observe(document.body);
     window.addEventListener("load", post);
     window.addEventListener("message", function (event) {
