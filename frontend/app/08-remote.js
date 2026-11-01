@@ -861,6 +861,8 @@
     if (!box) return;
     const live = new Map(mobileClients().map((client) => [client.id, client]));
     const devices = remote.devices || [];
+    const knownIds = new Set(devices.map((device) => device.id));
+    const orphanRevoked = (remote.revoked_devices || []).filter((id) => !knownIds.has(id));
     const online = devices.filter((device) => {
       const client = live.get(device.id);
       return !device.revoked_at && client && (client.surfaces || []).length;
@@ -871,7 +873,7 @@
       else if (online) title.textContent = `Устройства · ${devices.length} · в сети ${online}`;
       else title.textContent = `Устройства · ${devices.length}`;
     }
-    if (!devices.length) {
+    if (!devices.length && !orphanRevoked.length) {
       box.innerHTML = `<div class="remote-empty">Запомненных устройств нет. Откройте ссылку с телефона, хранилище или интерфейс ПК в браузере.</div>`;
       return;
     }
@@ -901,7 +903,15 @@
           : `<button type="button" class="btn small" data-forget="${esc(device.id)}">Заблокировать</button>`}
         <button type="button" class="btn small danger" data-device-delete="${esc(device.id)}">Удалить</button>
       </div>`;
-    }).join("");
+    }).join("") + orphanRevoked.map((id) => `
+      <div class="remote-device is-off">
+        <span class="rd-dot" title="доступ закрыт"></span>
+        <div class="rd-body">
+          <strong>Удалённая запись устройства</strong>
+          <small><span class="offline">доступ закрыт для всех интерфейсов</span> · ID ${esc(String(id).slice(0, 16))}… · запись истории отсутствует</small>
+        </div>
+        <button type="button" class="btn small" data-restore="${esc(id)}">Разблокировать</button>
+      </div>`).join("");
   }
 
   function deviceSurfaceLabel(surface) {
