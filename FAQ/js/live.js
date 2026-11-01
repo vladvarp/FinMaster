@@ -216,7 +216,7 @@
       try { found = [...source.querySelectorAll(host.dataset.sel)]; }
       catch (err) { found = []; }
       if (!found.length) {
-        host.innerHTML = "<p class=\\"live-off\\">Элемент не найден в окне программы.</p>";
+        host.innerHTML = '<p class="live-off">Элемент не найден в окне программы.</p>';
         return;
       }
       frame.srcdoc = srcdoc(found.map(present), host.dataset.doc === "mobile" ? STYLE.mobile : STYLE.app, host.dataset.flow === "row");
