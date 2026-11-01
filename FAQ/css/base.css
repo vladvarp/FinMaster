@@ -14,7 +14,9 @@
   --ok: #ecfdf5;
   --ok-line: #6ee7b7;
   --kbd: #f8fafc;
-  --shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+  --shadow: 0 12px 34px rgba(15, 23, 42, 0.08);
+  --surface-hover: color-mix(in srgb, var(--accent-soft) 70%, var(--card));
+  --focus: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
   --sidebar: 292px;
   color-scheme: light;
 }
@@ -35,7 +37,9 @@ html[data-theme="dark"] {
   --ok: #052e24;
   --ok-line: #065f46;
   --kbd: #0f172a;
-  --shadow: none;
+  --shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
+  --surface-hover: #1b2940;
+  --focus: 0 0 0 3px rgba(147, 197, 253, 0.28);
   color-scheme: dark;
 }
 
@@ -51,6 +55,9 @@ html, body {
 }
 
 button, input { font: inherit; color: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: none; box-shadow: var(--focus); }
+html { scroll-behavior: smooth; }
 
 a { color: var(--accent); }
 
