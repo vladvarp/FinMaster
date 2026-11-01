@@ -2818,9 +2818,12 @@ def api_remote_pull():
     name = request.args.get("name") or ""
     info = _device_info()
     name = name or str(info.get("name") or "")
-    new_connection = REMOTE.touch(cid, kind, name)
-    if kind in {"mobile", "bank"} and cid:
-        _remember_client(cid, name, kind, record_history=new_connection)
+    # Фоновый опрос из основного приложения ПК не является удалённым клиентом.
+    # Браузерный интерфейс ПК регистрируется отдельно через _note_desk_client().
+    if kind != "desktop":
+        new_connection = REMOTE.touch(cid, kind, name)
+        if kind in {"mobile", "bank"} and cid:
+            _remember_client(cid, name, kind, record_history=new_connection)
     snap = REMOTE.wait(since)
     if "clients" not in snap:
         snap["clients"] = REMOTE.clients()
