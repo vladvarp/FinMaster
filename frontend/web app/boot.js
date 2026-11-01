@@ -7,9 +7,14 @@
   let cid = "";
   try {
     const legacyKeys = ["finmaster.remote.cid", "finmaster.bank.cid", "finmaster.desk.id"];
+    let savedLegacy = [];
+    try {
+      const parsed = JSON.parse(localStorage.getItem("finmaster.device.legacy_cids") || "[]");
+      if (Array.isArray(parsed)) savedLegacy = parsed;
+    } catch { /* повреждённый кеш не мешает запуску */ }
     const legacyIds = [...new Set([
       ...legacyKeys.map((key) => localStorage.getItem(key) || ""),
-      ...(JSON.parse(localStorage.getItem("finmaster.device.legacy_cids") || "[]")),
+      ...savedLegacy,
     ].filter(Boolean))];
     cid = localStorage.getItem(sharedCidKey) || localStorage.getItem(cidKey) || sessionStorage.getItem(cidKey) || "";
     if (!cid) cid = Math.random().toString(36).slice(2) + Date.now().toString(36);
