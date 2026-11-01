@@ -101,7 +101,7 @@
     post();
   `;
 
-  function srcdoc(nodes, css, row) {
+  function srcdoc(nodes, css, row, mobile) {
     const doc = document.implementation.createHTMLDocument("");
     doc.documentElement.lang = "ru";
     doc.documentElement.dataset.theme = theme();
@@ -113,7 +113,7 @@
     appCss.href = css;
     const frameCss = doc.createElement("link");
     frameCss.rel = "stylesheet";
-    frameCss.href = new URL("blocks/stage.css", document.baseURI).href;
+    frameCss.href = new URL(mobile ? "blocks/stage-mobile.css" : "blocks/stage.css", document.baseURI).href;
     const chrome = doc.createElement("script");
     chrome.src = new URL("blocks/chrome.js", document.baseURI).href;
     doc.head.append(appCss, frameCss, chrome);
@@ -235,7 +235,7 @@
         host.innerHTML = '<p class="live-off">Элемент не найден в окне программы.</p>';
         return;
       }
-      frame.srcdoc = srcdoc(found.map(present), host.dataset.doc === "mobile" ? STYLE.mobile : STYLE.app, host.dataset.flow === "row");
+      frame.srcdoc = srcdoc(found.map(present), host.dataset.doc === "mobile" ? STYLE.mobile : STYLE.app, host.dataset.flow === "row", host.dataset.doc === "mobile");
       host.textContent = "";
       host.appendChild(frame);
       bind(frame);
