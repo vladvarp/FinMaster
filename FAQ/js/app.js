@@ -348,9 +348,9 @@
         sep.textContent = "›";
         trail.appendChild(sep);
       }
-      if (current) {
+      if (current || !href) {
         const span = document.createElement("span");
-        span.className = "trail-current";
+        span.className = current ? "trail-current" : "trail-group";
         span.textContent = label;
         trail.appendChild(span);
       } else {
@@ -362,7 +362,7 @@
     };
     add("Справка", "#about", route.id === "about" && !sub);
     if (item) {
-      add(item.group, "", false);
+      add(item.group, null, false);
       if (sub) {
         add(item.title, "#" + item.id, false);
         add(sub.title, "", true);
@@ -420,6 +420,8 @@
     const heads = [...visibleRoot().querySelectorAll("h2, h3")];
     if (!heads.length) {
       here.hidden = true;
+      fillTrail();
+      fillLinkMap();
       return;
     }
     here.hidden = false;
@@ -531,6 +533,7 @@
     load(id);
   });
   if (!location.hash) history.replaceState(null, "", "#about");
+  trackRoute();
   warm();
   load(currentId());
 })();
