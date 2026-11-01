@@ -1016,7 +1016,7 @@ def remember_device(
         try:
             previous_at = datetime.fromisoformat(str(last_surface.get("at") or ""))
             changed = (datetime.now().astimezone() - previous_at).total_seconds() >= 300
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             changed = True
     if changed:
         history.append({
