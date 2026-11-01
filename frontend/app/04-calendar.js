@@ -808,16 +808,6 @@
     return dateDay(pause?.end);
   }
 
-  function previousWorkDay(day) {
-    const start = day instanceof Date ? dayStart(day) : parseDay(day);
-    return start ? addDays(start, -1) : null;
-  }
-
-  function followingWorkDay(day) {
-    const start = day instanceof Date ? dayStart(day) : parseDay(day);
-    return start ? addDays(start, 1) : null;
-  }
-
   function pauseOnDay(order, day) {
     const key = typeof day === "string" ? String(day).slice(0, 10) : dayKey(dayStart(day));
     const todayKey = dayKey(clockToday());
