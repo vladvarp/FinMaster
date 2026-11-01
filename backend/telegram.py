@@ -1296,6 +1296,11 @@ def send_link_choice(
     else:
         lines.append("\nМост ngrok включён, но публичная ссылка пока недоступна.")
 
+    if not lan_urls and not public_url:
+        lines.append(
+            "\nНе удалось получить адреса. Проверьте окно «Телефон» на компьютере."
+        )
+
     from backend import secrets as token_store
 
     tokens = token_store.ngrok_token_list()
@@ -2336,10 +2341,15 @@ class TelegramBot:
             notice = (
                 f"Токен ngrok переключён: <b>{html_esc(label)}</b>"
                 + (f" · <code>{html_esc(prefix)}…</code>" if prefix else "")
-                + "\n\n<b>Выберите тип подключения</b>"
             )
         else:
-            notice = "<b>Выберите тип подключения</b>"
+            notice = "Токен ngrok переключён."
+
+        tunnel = flags.get("tunnel") if isinstance(flags.get("tunnel"), dict) else {}
+        tunnel_error = str(tunnel.get("error") or "").strip()
+        if flags.get("ngrok") and tunnel_error:
+            notice += f"\n\n{html_esc(tunnel_error)}"
+        notice += "\n\n<b>Выберите тип подключения</b>"
 
         session = self._chat(chat_id)
         send_link_choice(
