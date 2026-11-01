@@ -315,7 +315,7 @@ def _client_profile() -> dict[str, Any]:
     return info
 
 
-def _remember_client(cid: str, name: str, surface: str) -> None:
+def _remember_client(cid: str, name: str, surface: str, record_history: bool = True) -> None:
     if not cid or cid == "pc" or surface == "desktop":
         return
     info = _client_profile()
@@ -333,10 +333,10 @@ def _remember_client(cid: str, name: str, surface: str) -> None:
     now = time.monotonic()
     cache_key = (cid, surface)
     prev = _device_disk.get(cache_key)
-    if prev and prev[1] == sig and now - prev[0] < 300:
+    if prev and prev[1] == sig and now - prev[0] < 300 and not record_history:
         return
     _device_disk[cache_key] = (now, sig)
-    storage.remember_device(cid, label, _client_ip(), info, surface=surface, via=via)
+    storage.remember_device(cid, label, _client_ip(), info, surface=surface, via=via, record_history=record_history)
 
 
 def _note_desk_client() -> None:
@@ -345,8 +345,8 @@ def _note_desk_client() -> None:
         return
     info = _client_profile()
     name = str(info.get("name") or "Интерфейс ПК")[:80]
-    REMOTE.touch(cid, "desk", name)
-    _remember_client(cid, name, "desk")
+    new_connection = REMOTE.touch(cid, "desk", name)
+    _remember_client(cid, name, "desk", record_history=new_connection)
 
 
 def _log_actor() -> str:
@@ -2806,9 +2806,9 @@ def api_remote_pull():
     name = request.args.get("name") or ""
     info = _device_info()
     name = name or str(info.get("name") or "")
-    REMOTE.touch(cid, kind, name)
+    new_connection = REMOTE.touch(cid, kind, name)
     if kind in {"mobile", "bank"} and cid:
-        _remember_client(cid, name, kind)
+        _remember_client(cid, name, kind, record_history=new_connection)
     snap = REMOTE.wait(since)
     if "clients" not in snap:
         snap["clients"] = REMOTE.clients()
@@ -2839,8 +2839,8 @@ def api_remote_session():
     if cid:
         info = _device_info()
         name = name or str(info.get("name") or "")
-        REMOTE.touch(cid, kind, name)
-        _remember_client(cid, name, kind)
+        new_connection = REMOTE.touch(cid, kind, name)
+        _remember_client(cid, name, kind, record_history=new_connection)
         g.netlog_text = (
             f"Хранилище открыло сессию: {name or cid[:8]}"
             if kind == "bank"
