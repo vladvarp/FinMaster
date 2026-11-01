@@ -1,5 +1,9 @@
 (function () {
   function theme() {
+    try {
+      const parentTheme = parent.document.documentElement.dataset.theme;
+      if (parentTheme === "dark" || parentTheme === "light") return parentTheme;
+    } catch (err) {}
     try { return localStorage.getItem("finmaster.theme") === "dark" ? "dark" : "light"; }
     catch (err) { return "light"; }
   }
