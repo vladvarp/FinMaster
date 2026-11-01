@@ -2,7 +2,7 @@ window.FAQ_TOC = [
   {
     title: "Начало",
     items: [
-      { id: "guide", title: "Как пользоваться справкой", keys: "навигация тема светлая тёмная темная поиск назад вперёд вперед история гиперссылки карта переходов браузер", subs: [{ id: "theme", title: "Тема оформления" }, { id: "search", title: "Поиск" }, { id: "history", title: "Переходы и содержание" }, { id: "visuals", title: "Изображения и мобильная версия" }], subs: [{ id: "snapshots", title: "Снимки" }, { id: "navigation", title: "Отмена и повтор" }, { id: "reports", title: "Истории отчётов" }] },
+      { id: "guide", title: "Как пользоваться справкой", keys: "навигация тема светлая тёмная темная поиск назад вперёд вперед история гиперссылки карта переходов браузер", subs: [{ id: "theme", title: "Тема оформления" }, { id: "search", title: "Поиск" }, { id: "history", title: "Переходы и содержание" }, { id: "visuals", title: "Изображения и мобильная версия" }]
       { id: "about", title: "О программе", keys: "реклама преимущества исходники не скомпилирована pyinstaller exe сборка сравнение рецензия файл", subs: [{ id: "how", title: "Как устроена работа" }, { id: "open", title: "Открытость и устройство" }, { id: "compare", title: "Сравнение" }, { id: "review", title: "Обзор программы" }] },
       { id: "start", title: "С чего начать", keys: "запуск установка exe python первый поиск справка", subs: [{ id: "launch", title: "Запуск" }, { id: "setup", title: "Подготовка и первый отчёт" }, { id: "search", title: "Поиск по справке" }] },
       { id: "reports", title: "Файлы отчётов", keys: "fmaster fbak сохранить открыть новый автосохранение корзина вернуться к отчёту", subs: [{ id: "files", title: "Файлы отчётов" }, { id: "autosave", title: "Автосохранение" }, { id: "folder", title: "Папка FinMaster" }, { id: "delete", title: "Удаление" }, { id: "backup", title: "Резервные копии" }, { id: "close", title: "Закрытие и создание" }] },
@@ -59,7 +59,7 @@ window.FAQ_TOC = [
         { id: "keywords", title: "Ключевые слова" },
         { id: "test", title: "Тест" },
       ] },
-      { id: "history", title: "История", keys: "отмена снимок часы до и после ctrl z все истории" },
+      { id: "history", title: "История", keys: "отмена снимок часы до и после ctrl z все истории", subs: [{ id: "snapshots", title: "Снимки" }, { id: "navigation", title: "Отмена и повтор" }, { id: "reports", title: "Истории отчётов" }] },
       { id: "backups", title: "Резервные копии", keys: "fbak копия другие отчёты удалить все вернуться смотреть", subs: [{ id: "current", title: "Копия текущего отчёта" }, { id: "other", title: "Копии других отчётов" }, { id: "open", title: "Просмотр и восстановление" }] },
     ],
   },
