@@ -691,6 +691,33 @@ html[data-theme="dark"] .token-dot.err {
 }
 .remote-device.is-off { opacity: 0.72; }
 .remote-empty { color: var(--muted); font-size: 13px; }
+
+.rd-surfaces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 3px;
+}
+.rd-surface {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--card);
+  font: 650 10px var(--sans);
+  opacity: .62;
+}
+.rd-surface.active {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 48%, var(--line));
+  background: color-mix(in srgb, var(--ok) 10%, var(--card));
+  opacity: 1;
+}
+.remote-device { flex-wrap: wrap; }
+.remote-device .rd-body { flex: 1 1 180px; }
+
 .rd-info {
   width: 32px;
   min-width: 32px;
