@@ -4,6 +4,7 @@
 
   const $ = (id) => document.getElementById(id);
   const LS_CID = "finmaster.bank.cid";
+  const SHARED_CID = "finmaster.device.cid";
 
   const state = {
     token: "",
@@ -238,14 +239,19 @@
   function cid() {
     let id = "";
     try {
-      id = localStorage.getItem(LS_CID) || "";
+      id = localStorage.getItem(SHARED_CID) || localStorage.getItem(LS_CID) || "";
     } catch {
       id = "";
     }
     if (!id) {
-      id = `bank-${uid()}`;
+      id = uid();
       try {
+        localStorage.setItem(SHARED_CID, id);
         localStorage.setItem(LS_CID, id);
+        const legacyKeys = ["finmaster.remote.cid", "finmaster.bank.cid", "finmaster.desk.id"];
+        const legacyIds = [...new Set([...legacyKeys.map((key) => localStorage.getItem(key) || ""), ...(JSON.parse(localStorage.getItem("finmaster.device.legacy_cids") || "[]"))].filter(Boolean))].filter((value) => value !== id);
+        localStorage.setItem("finmaster.device.legacy_cids", JSON.stringify(legacyIds));
+        legacyKeys.forEach((key) => localStorage.setItem(key, id));
       } catch {
         /* приватный режим */
       }
@@ -255,6 +261,7 @@
 
   async function api(path, options = {}) {
     const sep = path.includes("?") ? "&" : "?";
+    const legacy = (() => { try { return JSON.parse(localStorage.getItem("finmaster.device.legacy_cids") || "[]"); } catch { return []; } })();
     const extra = `t=${encodeURIComponent(state.token)}&cid=${encodeURIComponent(state.cid)}&name=${encodeURIComponent(deviceName())}&kind=bank`;
     const headers = {
       "Content-Type": "application/json",
@@ -263,7 +270,13 @@
       ...(options.headers || {}),
     };
     const device = deviceHeader();
-    if (device) headers["X-FM-Device"] = device;
+    if (device) {
+      try {
+        const payload = JSON.parse(decodeURIComponent(escape(atob(device))));
+        payload.legacy_cids = legacy;
+        headers["X-FM-Device"] = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+      } catch { headers["X-FM-Device"] = device; }
+    }
     const res = await fetch(`${path}${sep}${extra}`, { ...options, headers });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401 || res.status === 403) {
@@ -564,7 +577,7 @@
     });
     document.addEventListener("focusout", () => setTimeout(flushPending, 0));
     window.addEventListener("pagehide", () => {
-      const body = JSON.stringify({ cid: state.cid });
+      const body = JSON.stringify({ cid: state.cid, kind: "bank" });
       navigator.sendBeacon?.(
         `/api/remote/leave?t=${encodeURIComponent(state.token)}`,
         new Blob([body], { type: "application/json" })
