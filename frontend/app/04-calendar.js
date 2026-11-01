@@ -2241,17 +2241,14 @@
     }
 
     const board = $("cal-board");
-    const selectedId = cal.selected || "";
-    const ganttRowsBefore = selectedId
-      ? [...board.querySelectorAll(".gantt-row[data-cal-id]:not(.is-line)")].findIndex((el) => el.dataset.calId === selectedId)
-      : -1;
     const keepY = board.scrollTop;
     const keepCols = {};
     board.querySelectorAll(".cal-col-body").forEach((el) => {
       const day = el.closest("[data-cal-day]")?.dataset.calDay;
       if (day) keepCols[day] = el.scrollTop;
     });
-    const keepGanttY = document.querySelector("#gantt-scroll .gantt")?.scrollTop || 0;
+    const ganttBefore = document.querySelector("#gantt-scroll .gantt");
+    const ganttAnchor = captureTimelineScrollAnchor(ganttBefore);
     if (cal.mode === "classic") board.innerHTML = renderClassicCalendar(win, list, load);
     else if (cal.mode === "extended") board.innerHTML = renderExtendedCalendar(win, list, load);
     else board.innerHTML = renderTimelineCalendar(win, list, load);
@@ -2261,7 +2258,7 @@
       if (day && keepCols[day]) el.scrollTop = keepCols[day];
     });
     const ganttEl = document.querySelector("#gantt-scroll .gantt");
-    if (ganttEl) ganttEl.scrollTop = keepGanttY;
+    if (ganttEl) restoreTimelineScrollAnchor(ganttEl, ganttAnchor);
     $("cal-side").innerHTML = renderCalendarSide(win, all, list);
     const reveal = cal.revealDay ? parseDay(cal.revealDay) : null;
     cal.revealDay = "";
@@ -2269,11 +2266,6 @@
       if (reveal && cal.mode !== "timeline") {
         const cell = document.querySelector(`[data-cal-day="${cssEscape(dayKey(reveal))}"]`);
         cell?.scrollIntoView({ block: "nearest", inline: "nearest" });
-      }
-      if (ganttRowsBefore >= 0 && selectedId && calendarState().mode === "timeline") {
-        const rows = [...document.querySelectorAll("#gantt-scroll .gantt-row[data-cal-id]:not(.is-line)")];
-        const after = rows.findIndex((el) => el.dataset.calId === selectedId);
-        if (after >= 0 && after !== ganttRowsBefore) rows[after].scrollIntoView({ block: "nearest" });
       }
     });
   }
@@ -2315,10 +2307,52 @@
     refreshTimelineGantt();
   }
 
+  function captureTimelineScrollAnchor(gantt) {
+    if (!gantt) return null;
+    const rect = gantt.getBoundingClientRect();
+    const rows = [...gantt.querySelectorAll(".gantt-row[data-cal-id]")];
+    const first = rows.find((row) => {
+      const rowRect = row.getBoundingClientRect();
+      return rowRect.bottom > rect.top && rowRect.top < rect.bottom;
+    });
+    const anchor = {
+      scrollTop: gantt.scrollTop,
+      scrollLeft: gantt.scrollLeft,
+      candidates: [],
+    };
+    if (!first) return anchor;
+    const index = rows.indexOf(first);
+    anchor.candidates = rows.slice(index).map((row) => ({
+      id: row.dataset.calId || "",
+      line: row.dataset.calLine || "",
+      top: row.getBoundingClientRect().top - rect.top,
+    }));
+    return anchor;
+  }
+
+  function restoreTimelineScrollAnchor(gantt, anchor) {
+    if (!gantt || !anchor) return;
+    gantt.scrollLeft = Math.min(anchor.scrollLeft || 0, gantt.scrollWidth - gantt.clientWidth);
+    const rows = [...gantt.querySelectorAll(".gantt-row[data-cal-id]")];
+    const rect = gantt.getBoundingClientRect();
+    for (const candidate of anchor.candidates || []) {
+      const row = rows.find((item) =>
+        item.dataset.calId === candidate.id &&
+        (item.dataset.calLine || "") === candidate.line
+      );
+      if (!row) continue;
+      const currentTop = row.getBoundingClientRect().top - rect.top;
+      gantt.scrollTop += currentTop - candidate.top;
+      return;
+    }
+    gantt.scrollTop = Math.min(anchor.scrollTop || 0, gantt.scrollHeight - gantt.clientHeight);
+  }
+
   function refreshTimelineGantt() {
     const host = $("gantt-scroll");
     if (!host) return;
-    const keepY = host.querySelector(".gantt")?.scrollTop || 0;
+    const previousGantt = host.querySelector(".gantt");
+    const scrollAnchor = captureTimelineScrollAnchor(previousGantt);
     const win = calendarWindow();
     const list = calendarOrders();
     const load = calendarLoadMap(
@@ -2330,7 +2364,7 @@
     const next = tmp.querySelector("#gantt-scroll");
     if (next) host.replaceWith(next);
     const gantt = $("gantt-scroll")?.querySelector(".gantt");
-    if (gantt) gantt.scrollTop = keepY;
+    if (gantt) restoreTimelineScrollAnchor(gantt, scrollAnchor);
   }
 
   function timelineZoomAt(ratio, factor) {
