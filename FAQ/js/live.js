@@ -1,5 +1,6 @@
 (function () {
   const STYLE = { app: "/styles.css", mobile: "/mobile.css" };
+  let staticSource = false;
   let appDoc = null;
   let mobileDoc = null;
   let themeIcons = null;
@@ -157,11 +158,23 @@
     if (failed) return false;
     if (appDoc) return true;
     try {
-      appDoc = await loadDoc("/");
+      // GitHub Pages не запускает Flask: там используем HTML-снимок,
+      // который workflow собирает из исходной разметки приложения.
       try {
-        const js = await (await fetch("/app.js", { credentials: "same-origin" })).text();
-        themeIcons = extractIcons(js);
-      } catch (err) { themeIcons = null; }
+        appDoc = await loadDoc(new URL("assets/source/app.html", document.baseURI).href);
+        staticSource = true;
+        STYLE.app = new URL("assets/app.css", document.baseURI).href;
+        STYLE.mobile = new URL("assets/mobile.css", document.baseURI).href;
+      } catch (staticError) {
+        if (location.hostname.endsWith("github.io")) throw staticError;
+        appDoc = await loadDoc("/");
+      }
+      if (!staticSource) {
+        try {
+          const js = await (await fetch("/app.js", { credentials: "same-origin" })).text();
+          themeIcons = extractIcons(js);
+        } catch (err) { themeIcons = null; }
+      }
       return true;
     } catch (err) {
       failed = true;
@@ -201,8 +214,11 @@
       return;
     }
     if (selectorHosts.some((host) => host.dataset.doc === "mobile") && !mobileDoc) {
-      try { mobileDoc = await loadDoc("/mobile.html"); }
-      catch (err) { mobileDoc = null; }
+      try {
+        mobileDoc = staticSource
+          ? await loadDoc(new URL("assets/source/mobile.html", document.baseURI).href)
+          : await loadDoc("/mobile.html");
+      } catch (err) { mobileDoc = null; }
     }
     if (token !== job) return;
     selectorHosts.forEach((host) => {
