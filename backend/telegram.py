@@ -2195,8 +2195,11 @@ class TelegramBot:
             slot.ask = f"Кнопка: {hint}"
             slot.ask_body = {"data": data, "button": hint, "chat_id": chat_id, "from": slot.who}
         if data == "L":
+            session = self._chat(chat_id)
+            if mid is not None:
+                session.message_id = int(mid)
             info = self._status_for(chat_id)
-            send_link_choice(token, chat_id, info)
+            send_link_choice(token, chat_id, info, session.message_id)
             return
 
         if data.startswith("Ll:") or data == "Lg":
