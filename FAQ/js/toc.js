@@ -2,9 +2,9 @@ window.FAQ_TOC = [
   {
     title: "Начало",
     items: [
-      { id: "guide", title: "Как пользоваться справкой", keys: "навигация тема светлая тёмная темная поиск назад вперёд вперед история гиперссылки карта переходов браузер" },
-      { id: "about", title: "О программе", keys: "реклама преимущества исходники не скомпилирована pyinstaller exe сборка сравнение рецензия файл" },
-      { id: "start", title: "С чего начать", keys: "запуск установка exe python первый поиск справка" },
+      { id: "guide", title: "Как пользоваться справкой", keys: "навигация тема светлая тёмная темная поиск назад вперёд вперед история гиперссылки карта переходов браузер", subs: [{ id: "theme", title: "Тема оформления" }, { id: "search", title: "Поиск" }, { id: "history", title: "Переходы и содержание" }, { id: "visuals", title: "Изображения и мобильная версия" }], subs: [{ id: "snapshots", title: "Снимки" }, { id: "navigation", title: "Отмена и повтор" }, { id: "reports", title: "Истории отчётов" }] },
+      { id: "about", title: "О программе", keys: "реклама преимущества исходники не скомпилирована pyinstaller exe сборка сравнение рецензия файл", subs: [{ id: "how", title: "Как устроена работа" }, { id: "open", title: "Открытость и устройство" }, { id: "compare", title: "Сравнение" }, { id: "review", title: "Обзор программы" }] },
+      { id: "start", title: "С чего начать", keys: "запуск установка exe python первый поиск справка", subs: [{ id: "launch", title: "Запуск" }, { id: "setup", title: "Подготовка и первый отчёт" }, { id: "search", title: "Поиск по справке" }] },
       { id: "reports", title: "Файлы отчётов", keys: "fmaster fbak сохранить открыть новый автосохранение корзина вернуться к отчёту", subs: [{ id: "files", title: "Файлы отчётов" }, { id: "autosave", title: "Автосохранение" }, { id: "folder", title: "Папка FinMaster" }, { id: "delete", title: "Удаление" }, { id: "backup", title: "Резервные копии" }, { id: "close", title: "Закрытие и создание" }] },
       { id: "interface", title: "Окно программы", keys: "панель тема поиск дата тост стартовый галактики", subs: [{ id: "start", title: "Стартовый экран" }, { id: "sidebar", title: "Боковая панель" }, { id: "top", title: "Верхняя панель" }, { id: "theme", title: "Тема" }, { id: "date", title: "Выбор даты" }, { id: "feedback", title: "Короткие сообщения" }] },
       { id: "update", title: "Обновление", keys: "github коммит целостность янтарное красное свечение вся история скачать update.vbs" },
@@ -60,7 +60,7 @@ window.FAQ_TOC = [
         { id: "test", title: "Тест" },
       ] },
       { id: "history", title: "История", keys: "отмена снимок часы до и после ctrl z все истории" },
-      { id: "backups", title: "Резервные копии", keys: "fbak копия другие отчёты удалить все вернуться смотреть" },
+      { id: "backups", title: "Резервные копии", keys: "fbak копия другие отчёты удалить все вернуться смотреть", subs: [{ id: "current", title: "Копия текущего отчёта" }, { id: "other", title: "Копии других отчётов" }, { id: "open", title: "Просмотр и восстановление" }] },
     ],
   },
   {
@@ -68,7 +68,7 @@ window.FAQ_TOC = [
     items: [
       { id: "phone", title: "Подключение телефона", keys: "qr wi-fi доступ устройства экран вкладки стенд", subs: [{ id: "connect", title: "Подключение" }, { id: "devices", title: "Устройства и доступ" }, { id: "sync", title: "Синхронизация экранов" }] },
       { id: "console", title: "Консоль", keys: "сеть лог мост telegram ngrok ctrl ё очистить" },
-      { id: "ngrok", title: "Интернет через ngrok", keys: "токен path store туннель" },
+      { id: "ngrok", title: "Интернет через ngrok", keys: "токен path store туннель", subs: [{ id: "install", title: "Установка и подключение" }, { id: "tokens", title: "Токены" }, { id: "status", title: "Состояние и неполадки" }] },
       { id: "telegram", title: "Telegram-бот", keys: "botfather mini app снимок голос вопрос долги чат стенд токен хранилище bank", subs: [{ id: "connect", title: "Подключение бота" }, { id: "chat", title: "Кнопки и команды" }, { id: "requests", title: "Запросы и ответы" }] },
       { id: "mobile", title: "Экран телефона", keys: "вкладки свайп заказы календарь стенд проиграть" },
       { id: "bank", title: "Хранилище на телефоне", keys: "bank копилка операции отчёты пополнение снятие страница все операции" },
@@ -80,7 +80,7 @@ window.FAQ_TOC = [
     items: [
       { id: "safety", title: "Что видит телефон", keys: "токен безопасность ссылка" },
       { id: "settings", title: "Где лежат настройки", keys: "appdata config документы экспорт импорт fms архив голос словарь", subs: [{ id: "window", title: "Окно настроек" }, { id: "program", title: "Настройки программы" }, { id: "archive", title: "Архив и папки" }] },
-      { id: "trouble", title: "Частые неполадки", keys: "не открывается порт ngrok бот корзина" },
+      { id: "trouble", title: "Частые неполадки", keys: "не открывается порт ngrok бот корзина", subs: [{ id: "phone", title: "Телефон и ссылки" }, { id: "network", title: "Сеть и бот" }, { id: "app", title: "Окно и файлы" }] },
     ],
   },
 ];
