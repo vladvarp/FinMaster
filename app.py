@@ -1010,6 +1010,7 @@ def _remote_public(ip: str | None = None, via: str | None = None) -> dict[str, A
         "autostart": bool(settings.get("autostart")),
         "windows_login": windows_login_enabled(ROOT),
         "devices": settings.get("devices") or [],
+        "revoked_devices": settings.get("revoked_devices") or [],
         "clients": REMOTE.clients(),
         "ngrok": bool(settings.get("ngrok")),
         "ngrok_ready": bool(settings.get("ngrok_token")),
@@ -2556,12 +2557,14 @@ def api_remote_restore():
         None,
     )
 
-    if device is None:
-        return jsonify({"error": "Устройство не найдено в истории."}), 404
+    revoked_ids = storage.remote_settings().get("revoked_devices") or []
+    if device is None and cid not in revoked_ids:
+        return jsonify({"error": "Устройство не найдено в списке блокировок."}), 404
 
-    if not device.get("revoked_at"):
+    if device is not None and not device.get("revoked_at") and cid not in revoked_ids:
         return jsonify({"error": "Устройство уже имеет доступ."}), 409
 
+    # Поддерживает и старые блокировки, у которых запись устройства уже была удалена.
     devices = storage.restore_device(cid)
 
     applog.add(
