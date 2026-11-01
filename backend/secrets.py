@@ -523,6 +523,8 @@ def apply_export(file_path: str, ids: list[str], *, keep_unique_ngrok: bool = Tr
 
         imported_devices = payload.get("devices")
         if isinstance(imported_devices, list) or isinstance(payload.get("revoked_devices"), list):
+            if not isinstance(imported_devices, list):
+                imported_devices = []
             current = storage.remote_settings().get("devices") or []
             merged = {
                 str(item.get("id") or ""): dict(item)
