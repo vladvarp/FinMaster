@@ -48,6 +48,30 @@
       });
     });
     node.querySelectorAll("script, iframe").forEach((el) => el.remove());
+
+    // Логотип приложения в демонстрациях FAQ встраиваем как SVG,
+    // чтобы iframe не запрашивал /favicon.svg с корня GitHub Pages.
+    node.querySelectorAll('img[src$="favicon.svg"]').forEach((img) => {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 0 32 32");
+      svg.setAttribute("width", img.getAttribute("width") || "38");
+      svg.setAttribute("height", img.getAttribute("height") || "38");
+      svg.setAttribute("aria-hidden", img.getAttribute("aria-hidden") || "true");
+
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("width", "32");
+      rect.setAttribute("height", "32");
+      rect.setAttribute("rx", "8");
+      rect.setAttribute("fill", "#0f766e");
+
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", "M8 10h16v2.4H8zm0 4.8h16v2.4H8zm0 4.8h10v2.4H8z");
+      path.setAttribute("fill", "#eafaf7");
+
+      svg.append(rect, path);
+      img.replaceWith(svg);
+    });
+
     if (node.hasAttribute("hidden")) node.removeAttribute("hidden");
     paintTheme(node);
     return node;
