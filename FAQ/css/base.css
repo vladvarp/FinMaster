@@ -52,9 +52,11 @@ html, body {
   font-family: "Segoe UI", sans-serif;
   font-size: 16px;
   line-height: 1.55;
+  transition: background-color .22s ease, color .22s ease;
 }
 
 button, input { font: inherit; color: inherit; }
+button, input, a { transition-property: color, background-color, border-color, box-shadow; transition-duration: .18s; transition-timing-function: ease; }
 button { -webkit-tap-highlight-color: transparent; }
 :focus-visible { outline: none; box-shadow: var(--focus); }
 html { scroll-behavior: smooth; }
