@@ -318,7 +318,7 @@ class RemoteSession:
         if not cid:
             return False
         now = time.time()
-        surface = kind if kind in {"mobile", "bank", "desk"} else "mobile"
+        surface = "desk" if kind == "desktop" else kind if kind in {"mobile", "bank", "desk"} else "mobile"
         with self._cond:
             pruned = self._prune_locked()
             is_new = cid not in self._clients
