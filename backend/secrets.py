@@ -583,6 +583,8 @@ def apply_export(file_path: str, ids: list[str], *, keep_unique_ngrok: bool = Tr
                     new_seen = incoming.get("surface_seen") if isinstance(incoming.get("surface_seen"), dict) else {}
                     combined_seen = dict(old_seen)
                     for surface, stamp in new_seen.items():
+                        if not isinstance(stamp, dict):
+                            continue
                         prev_stamp = combined_seen.get(surface)
                         if not isinstance(prev_stamp, dict) or str(stamp.get("at") or "") >= str(prev_stamp.get("at") or ""):
                             combined_seen[surface] = stamp
