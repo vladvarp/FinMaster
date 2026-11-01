@@ -243,6 +243,8 @@
       clearInterval(timer);
       show(btn.dataset.tab);
     });
+    const initialPart = new URLSearchParams(location.search).get("part");
+    if (titles[initialPart]) show(initialPart);
     document.getElementById("play").addEventListener("click", () => {
       clearInterval(timer);
       let i = 0;
