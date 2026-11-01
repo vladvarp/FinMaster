@@ -174,9 +174,18 @@
           if (!outgoing.has(targetKey)) outgoing.set(targetKey, { ...target, labels: [] });
           if (label) outgoing.get(targetKey).labels.push(label);
         }
-        if (targetKey === current.route && topic.id !== current.id) {
-          if (!incoming.has(topic.id)) incoming.set(topic.id, { route: topic.id, title: topic.title, group: topic.group, labels: [] });
-          if (label) incoming.get(topic.id).labels.push(label);
+        const sourceSub = (topic.subs || []).find((item) => item.id === fromSub);
+        const sourceRoute = topic.id + (sourceSub ? "/" + sourceSub.id : "");
+        if (targetKey === current.route && sourceRoute !== current.route) {
+          if (!incoming.has(sourceRoute)) {
+            incoming.set(sourceRoute, {
+              route: sourceRoute,
+              title: sourceSub ? topic.title + " · " + sourceSub.title : topic.title,
+              group: topic.group,
+              labels: []
+            });
+          }
+          if (label) incoming.get(sourceRoute).labels.push(label);
         }
       });
     });
