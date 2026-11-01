@@ -58,18 +58,25 @@
     if (indexPromise) return indexPromise;
     indexPromise = Promise.all(flat.map(async (item) => {
       const res = await fetch("topics/" + item.id + ".html");
-      if (!res.ok) return { ...item, headings: [], text: "" };
+      if (!res.ok) return { ...item, headings: [], text: "", links: [] };
       const html = await res.text();
       const parsed = new DOMParser().parseFromString(html, "text/html");
       const headings = [...parsed.querySelectorAll("h2, h3")].map((head) => ({
         text: head.textContent.trim(),
         sub: head.closest("[data-sub]")?.getAttribute("data-sub") || "",
       }));
+      const links = [...parsed.querySelectorAll('a[href^="#"]')].map((anchor) => ({
+        href: anchor.getAttribute("href"),
+        label: (anchor.textContent || "").trim(),
+        fromSub: anchor.closest("[data-sub]")?.getAttribute("data-sub") || "",
+      }));
       const text = (parsed.body.textContent || "").replace(/\s+/g, " ").trim();
-      return { ...item, headings, text };
+      return { ...item, headings, text, links };
     }));
     return indexPromise;
   }
+
+  window.FAQGetIndex = warm;
 
   function parseQuery(raw) {
     const phrases = [];
@@ -302,13 +309,36 @@
   async function load(id) {
     const token = ++loadToken;
     if (!(search.value || "").trim()) renderNav(id);
-    doc.innerHTML = "<p class=\"lead\">Открываю раздел…</p>";
+    doc.classList.add("is-loading");
     here.hidden = true;
     try {
       const res = await fetch("topics/" + id + ".html");
       if (!res.ok) throw new Error(String(res.status));
+      const html = await res.text();
       if (token !== loadToken) return;
-      doc.innerHTML = await res.text();
+
+      const updateContent = () => {
+        doc.innerHTML = html;
+        doc.classList.remove("is-loading");
+      };
+      if (document.startViewTransition) {
+        let updated = false;
+        try {
+          const transition = document.startViewTransition(() => {
+            updateContent();
+            updated = true;
+          });
+          await transition.updateCallbackDone;
+        } catch (err) {
+          if (!updated) updateContent();
+        }
+      } else {
+        updateContent();
+        doc.classList.remove("content-enter");
+        void doc.offsetWidth;
+        doc.classList.add("content-enter");
+      }
+
       document.title = (doc.querySelector("h1")?.textContent || "Справка") + " — FinMaster";
       loadedId = id;
       showSub();
@@ -329,6 +359,8 @@
     } catch (err) {
       if (token !== loadToken) return;
       doc.innerHTML = "<h1>Раздел не открылся</h1><p>Проверьте, что рядом с этой страницей лежит папка <code>topics</code>. Справка рассчитана на обычные ссылки: и из окна программы, и с сайта репозитория.</p>";
+    } finally {
+      if (token === loadToken) doc.classList.remove("is-loading");
     }
   }
 
