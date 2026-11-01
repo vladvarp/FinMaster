@@ -52,6 +52,14 @@
   padding: 0 8px 12px;
 }
 
+.brand img {
+  display: block;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  object-fit: contain;
+}
+
 .brand strong { font-size: 16px; }
 
 .brand span { color: var(--muted); font-size: 12px; margin-right: auto; }
