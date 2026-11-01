@@ -324,9 +324,14 @@
     state.stopped = false;
     const sharedKey = "finmaster.device.cid";
     const legacyKeys = ["finmaster.remote.cid", "finmaster.bank.cid", "finmaster.desk.id"];
+    let savedLegacy = [];
+    try {
+      const parsed = JSON.parse(localStorage.getItem("finmaster.device.legacy_cids") || "[]");
+      if (Array.isArray(parsed)) savedLegacy = parsed;
+    } catch { /* повреждённый кеш не мешает запуску */ }
     const legacyIds = [...new Set([
       ...legacyKeys.map((key) => localStorage.getItem(key) || ""),
-      ...(JSON.parse(localStorage.getItem("finmaster.device.legacy_cids") || "[]")),
+      ...savedLegacy,
     ].filter(Boolean))];
     state.cid = localStorage.getItem(sharedKey) || localStorage.getItem(LS_CID) || uid();
     localStorage.setItem(sharedKey, state.cid);
