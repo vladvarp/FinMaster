@@ -234,3 +234,9 @@ html[data-theme="dark"] mark.hit { background: #854d0e; color: #fff7ed; }
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
   ::view-transition-old(faq-document), ::view-transition-new(faq-document) { animation: none; }
 }
+
+.faq-toolbar-shot { padding: 18px; }
+.faq-toolbar-preview { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.faq-toolbar-preview span { display: inline-flex; align-items: center; justify-content: center; min-height: 38px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font-size: 13px; font-weight: 650; }
+.faq-toolbar-preview .preview-theme { margin-left: auto; background: var(--accent-soft); color: var(--accent); }
+.trail-group { color: var(--muted); }
