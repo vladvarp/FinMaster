@@ -915,11 +915,14 @@ def _callback_notice(data: str) -> str:
         "D": "Карточка заказа…",
         "Vr": "Отменяю распознавание…",
         "Ng": "Переключаю мост ngrok…",
+        "Nt": "Открываю список токенов ngrok…",
     }
     if data in fixed:
         return fixed[data]
     if data.startswith("Ll:"):
         return "Получаю локальную ссылку…"
+    if data.startswith("Ns:"):
+        return "Переключаю токен ngrok…"
     if data.startswith("Ri:"):
         return "Открываю отчёт…"
     if data.startswith("Oi:"):
@@ -1123,8 +1126,7 @@ def welcome_text(info: Any = None) -> str:
         "<b>FinMaster</b>\n"
         "отчёты, заказы и снимки прямо здесь\n\n"
         f"{channel_block(info)}\n\n"
-        "Кнопки внизу: <b>Отчёты</b>, <b>Заказы</b>, <b>Снимок</b>, <b>Ссылка</b>, <b>Хранилище</b>, <b>Интерфейс ПК</b>, <b>Новая ссылка</b>, <b>Голос</b>.\n"
-        "«Открыть» — телефон. «Хранилище» — копилки на телефоне. «Интерфейс ПК» — тот же экран, что на компьютере.\n"
+        "Основные разделы: <b>Отчёты</b> и <b>Заказы</b>. Снимок и голосовые запросы доступны в нижней клавиатуре чата.\n"
         "Голосом или текстом можно спросить долги, заказы, кассу, календарь, заказчика — отвечу по открытому отчёту.\n"
         "В списке заказов можно написать имя или номер — найду."
     )
@@ -1244,11 +1246,17 @@ def send_access(token: str, chat_id: str, url: str, info: Any = None, message_id
     link = str(url or flags.get("url") or "").strip()
     send_html(token, chat_id, access_text(link, flags), _inline(access_rows(link, flags)), preview=False, message_id=message_id)
 
-def send_link_choice(token: str, chat_id: str, info: Any = None) -> None:
+def send_link_choice(
+    token: str,
+    chat_id: str,
+    info: Any = None,
+    message_id: int | None = None,
+    notice: str = "",
+) -> None:
     flags = _status(info)
 
     if not flags.get("access"):
-        send_access(token, chat_id, str(flags.get("url") or ""), flags)
+        send_access(token, chat_id, str(flags.get("url") or ""), flags, message_id)
         return
 
     lan_urls = flags.get("lan_urls")
@@ -1265,7 +1273,7 @@ def send_link_choice(token: str, chat_id: str, info: Any = None) -> None:
     ]
 
     rows: list[list[dict[str, Any]]] = []
-    lines = ["<b>Выберите тип подключения</b>"]
+    lines = [notice or "<b>Выберите тип подключения</b>"]
 
     for index, url in enumerate(lan_urls[:2]):
         lines.append(
@@ -1283,22 +1291,66 @@ def send_link_choice(token: str, chat_id: str, info: Any = None) -> None:
         )
         rows.append([_btn("Интернет (ngrok)", "Lg")])
     elif not flags.get("ngrok"):
-        lines.append(
-            "\nИнтернет-ссылка недоступна: мост ngrok выключен."
-        )
+        lines.append("\nИнтернет-ссылка недоступна: мост ngrok выключен.")
     else:
-        lines.append(
-            "\nМост ngrok включён, но публичная ссылка пока недоступна."
-        )
+        lines.append("\nМост ngrok включён, но публичная ссылка пока недоступна.")
 
     if not lan_urls and not public_url:
         lines.append(
             "\nНе удалось получить адреса. Проверьте окно «Телефон» на компьютере."
         )
 
+    from backend import secrets as token_store
+
+    tokens = token_store.ngrok_token_list()
+    active = next((item for item in tokens if item.get("active")), None)
+    if active:
+        label = str(active.get("name") or "Без названия")
+        prefix = str(active.get("prefix") or "")
+        lines.append(
+            f"\n<b>Активный токен ngrok:</b> {html_esc(label)}"
+            + (f" · <code>{html_esc(prefix)}…</code>" if prefix else "")
+        )
+
+    rows.append([_btn("Токены ngrok", "Nt")])
     rows.append([_btn("Назад", "Da")])
 
-    send_html(token, chat_id, "\n".join(lines), _inline(rows))
+    send_html(token, chat_id, "\n".join(lines), _inline(rows), message_id=message_id)
+
+
+def send_ngrok_token_choice(
+    token: str,
+    chat_id: str,
+    message_id: int | None = None,
+) -> None:
+    from backend import secrets as token_store
+
+    tokens = token_store.ngrok_token_list()
+    lines = ["<b>Токены ngrok</b>"]
+    rows: list[list[dict[str, Any]]] = []
+
+    if not tokens:
+        lines.append(
+            "Сохранённых токенов пока нет. Добавьте их в окне «Телефон» на компьютере."
+        )
+    else:
+        lines.append("Выберите токен для интернет-подключения:")
+        for item in tokens:
+            token_id = str(item.get("id") or "")
+            if not token_id:
+                continue
+            name = str(item.get("name") or "Без названия")
+            prefix = str(item.get("prefix") or "")
+            active = bool(item.get("active"))
+            title = ("✓ " if active else "") + name
+            if prefix:
+                title += f" · {prefix}…"
+            if active:
+                title += " · активен"
+            rows.append([_btn(title[:60], f"Ns:{token_id}")])
+
+    rows.append([_btn("Назад к типам подключения", "L")])
+    send_html(token, chat_id, "\n".join(lines), _inline(rows), message_id=message_id)
 
 def send_link(token: str, chat_id: str, url: str, info: Any = None) -> str:
     token = str(token or "").strip()
@@ -1444,6 +1496,7 @@ class TelegramBot:
         self._on_rotate: Callable[[], Any] | None = None
         self._on_access: Callable[[bool], Any] | None = None
         self._on_ngrok: Callable[[bool], Any] | None = None
+        self._on_ngrok_token: Callable[[str], Any] | None = None
         self._skip = True
         self._chats: dict[str, ChatSession] = {}
         self._group_told: set[str] = set()
@@ -1544,6 +1597,7 @@ class TelegramBot:
         on_rotate: Callable[[], Any] | None = None,
         on_access: Callable[[bool], Any] | None = None,
         on_ngrok: Callable[[bool], Any] | None = None,
+        on_ngrok_token: Callable[[str], Any] | None = None,
     ) -> None:
         token = str(token or "").strip()
         with self._lock:
@@ -1553,6 +1607,7 @@ class TelegramBot:
             self._on_rotate = on_rotate
             self._on_access = on_access
             self._on_ngrok = on_ngrok
+            self._on_ngrok_token = on_ngrok_token
             if not same:
                 self._token = token
                 self._offset = max(0, int(offset or 0))
@@ -2139,8 +2194,11 @@ class TelegramBot:
             slot.ask = f"Кнопка: {hint}"
             slot.ask_body = {"data": data, "button": hint, "chat_id": chat_id, "from": slot.who}
         if data == "L":
+            session = self._chat(chat_id)
+            if mid is not None:
+                session.message_id = int(mid)
             info = self._status_for(chat_id)
-            send_link_choice(token, chat_id, info)
+            send_link_choice(token, chat_id, info, session.message_id)
             return
 
         if data.startswith("Ll:") or data == "Lg":
@@ -2251,6 +2309,57 @@ class TelegramBot:
             str(flags.get("url") or ""),
             flags,
             session.message_id,
+        )
+
+    def _select_ngrok_token(self, token: str, chat_id: str, token_id: str) -> None:
+        with self._lock:
+            cb = self._on_ngrok_token
+
+        if cb is None:
+            send_html(token, chat_id, "Переключение токенов ngrok недоступно.")
+            return
+
+        try:
+            result = cb(str(token_id or ""))
+        except Exception as exc:
+            send_html(
+                token,
+                chat_id,
+                f"Не удалось переключить токен ngrok: {html_esc(str(exc))}",
+                _inline([[_btn("К списку токенов", "Nt"), _btn("Назад", "L")]]),
+            )
+            return
+
+        flags = _status(result if isinstance(result, dict) else None)
+        from backend import secrets as token_store
+
+        active = next(
+            (item for item in token_store.ngrok_token_list() if item.get("active")),
+            None,
+        )
+        if active:
+            label = str(active.get("name") or "Без названия")
+            prefix = str(active.get("prefix") or "")
+            notice = (
+                f"Токен ngrok переключён: <b>{html_esc(label)}</b>"
+                + (f" · <code>{html_esc(prefix)}…</code>" if prefix else "")
+            )
+        else:
+            notice = "Токен ngrok переключён."
+
+        tunnel = flags.get("tunnel") if isinstance(flags.get("tunnel"), dict) else {}
+        tunnel_error = str(tunnel.get("error") or "").strip()
+        if flags.get("ngrok") and tunnel_error:
+            notice += f"\n\n{html_esc(tunnel_error)}"
+        notice += "\n\n<b>Выберите тип подключения</b>"
+
+        session = self._chat(chat_id)
+        send_link_choice(
+            token,
+            chat_id,
+            flags,
+            message_id=session.message_id,
+            notice=notice,
         )
 
     def _show_voice(self, token: str, chat_id: str) -> None:
@@ -2410,6 +2519,10 @@ class TelegramBot:
         session = self._chat(chat_id)
         if data == "Ng":
             self._toggle_ngrok(token, chat_id)
+        elif data == "Nt":
+            send_ngrok_token_choice(token, chat_id, session.message_id)
+        elif data.startswith("Ns:"):
+            self._select_ngrok_token(token, chat_id, data.split(":", 1)[1])
         elif data in {"Wh", "Wa"}:
             self._toggle_web_access(token, chat_id, data == "Wh")
         elif data == "Bk":
@@ -3122,8 +3235,6 @@ class TelegramBot:
         return self._screen_home(session)
 
     def _screen_home(self, session: ChatSession) -> tuple[str, list[list[dict[str, str]]]]:
-        settings = storage.remote_settings()
-        info = {"url": "", "access": REMOTE.enabled, "ngrok": bool(settings.get("ngrok"))}
         doc, live = self._doc_of(session)
         title = str(doc.get("title") or "")
         path = session.path or _live_path()
@@ -3132,12 +3243,9 @@ class TelegramBot:
             current = f"Сейчас: <b>{html_esc(title)}</b>\n{html_esc(os.path.basename(path))}\n<i>{mark}</i>"
         else:
             current = "Отчёт ещё не выбран — откройте файл из папки FinMaster."
-        text = f"{welcome_text(info)}\n\n{current}"
+        text = f"<b>Основное меню</b>\n\n{current}"
         rows = [
-            [web_access_btn(info, "Wh")],
             [_btn("Отчёты", "R"), _btn("Заказы", "O")],
-            [_btn("Хранилище", "Bk"), _btn("Ссылка на телефон", "L")],
-            [_btn("Новая ссылка", "N")],
         ]
         return text, rows
 
