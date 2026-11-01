@@ -339,7 +339,8 @@
     trail.innerHTML = "";
     const route = hashParts();
     const item = flat.find((entry) => entry.id === route.id);
-    const sub = item?.subs?.find((entry) => entry.id === route.sub);
+    const activeSub = currentSub();
+    const sub = item?.subs?.find((entry) => entry.id === activeSub);
     const add = (label, href, current) => {
       if (trail.childNodes.length) {
         const sep = document.createElement("span");
@@ -519,8 +520,10 @@
     trackRoute();
     const id = currentId();
     if (loadedId === id && doc.querySelector("[data-sub]")) {
-      showSub();
-      fillHere();
+      const updateSub = () => { showSub(); fillHere(); };
+      if (document.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        document.startViewTransition(updateSub);
+      } else updateSub();
       if (!(search.value || "").trim()) renderNav(id);
       const root = visibleRoot();
       if (window.FAQLive && [...root.querySelectorAll(".live")].some((host) => !host.querySelector("iframe"))) {
