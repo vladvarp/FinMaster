@@ -436,7 +436,10 @@ class RemoteSession:
     def clients(self, kind: str | None = None) -> list[dict[str, Any]]:
         with self._cond:
             items = self._live_clients()
-        return [c for c in items if kind is None or c["kind"] == kind]
+        if kind is None:
+            return items
+        surface = "desk" if kind == "desktop" else kind
+        return [client for client in items if surface in client.get("surfaces", [])]
 
     # ---------- синхронизация ----------
 
