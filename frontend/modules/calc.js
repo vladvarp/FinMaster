@@ -29,6 +29,7 @@
   const DASH_PORTS = [
     { id: "orders", name: "Заказов" },
     { id: "lines", name: "Позиций" },
+    { id: "quantity", name: "Количество" },
     { id: "after", name: "К оплате" },
     { id: "afterActive", name: "Без отмен" },
     { id: "paid", name: "Оплачено" },
@@ -45,8 +46,9 @@
     { id: "monthCost", name: "Расход месяца" },
     { id: "forecast", name: "Прогноз месяца" },
   ];
-  const DASH_DEFAULT = ["orders", "after", "paid", "unpaid"];
-  const FILTER_PORTS = ["orders", "lines", "after", "paid", "unpaid", "cost", "net"];
+  const DASH_DEFAULT = ["orders", "quantity", "after", "paid", "unpaid"];
+  const DASH_LEGACY_DEFAULT = ["orders", "after", "paid", "unpaid"];
+  const FILTER_PORTS = ["orders", "lines", "quantity", "after", "paid", "unpaid", "cost", "net"];
   const presentValues = new Map();
 
   let api = null;
@@ -690,9 +692,14 @@
 
   function normalizeDashPorts(list) {
     const allowed = new Set(DASH_PORTS.map((item) => item.id));
+    const source = Array.isArray(list) && list.length
+      ? list
+      : DASH_DEFAULT;
+    const isLegacyDefault = source.length === DASH_LEGACY_DEFAULT.length
+      && DASH_LEGACY_DEFAULT.every((id) => source.includes(id));
     const out = [];
     const seen = new Set();
-    (Array.isArray(list) ? list : DASH_DEFAULT).forEach((id) => {
+    (isLegacyDefault ? DASH_DEFAULT : source).forEach((id) => {
       const key = String(id || "");
       if (!allowed.has(key) || seen.has(key)) return;
       seen.add(key);
@@ -749,6 +756,7 @@
     node.customers = filterList(node, "customers", "customer");
     node.orderIds = filterList(node, "orderIds", "orderId");
     node.payFilters = filterList(node, "payFilters", "payFilter");
+    node.payStatusFilters = filterList(node, "payStatusFilters");
     node.orderTypes = filterList(node, "orderTypes", "orderType");
     node.products = filterList(node, "products", "product");
     node.statuses = filterList(node, "statuses", "status");
@@ -767,6 +775,7 @@
       orderIds: [],
       period: "all",
       payFilters: [],
+      payStatusFilters: [],
       statuses: [],
       orderTypes: [],
       products: [],
@@ -783,6 +792,7 @@
         orderIds: Array.isArray(node.orderIds) ? node.orderIds.slice() : [],
         period: node?.period || "all",
         payFilters: Array.isArray(node.payFilters) ? node.payFilters.slice() : [],
+        payStatusFilters: Array.isArray(node.payStatusFilters) ? node.payStatusFilters.slice() : [],
         statuses: Array.isArray(node.statuses) ? node.statuses.slice() : [],
         orderTypes: Array.isArray(node.orderTypes) ? node.orderTypes.slice() : [],
         products: Array.isArray(node.products) ? node.products.slice() : [],
@@ -951,7 +961,7 @@
       ${multiPickHtml(
         nid,
         "payFilters",
-        "Фильтр",
+        "Оплата заказа",
         DASH_PAY_MULTI.map(([id, label]) => ({ id, label })),
         Array.isArray(node.payFilters) ? node.payFilters : [],
         {
@@ -960,6 +970,14 @@
           title: "Несколько фильтров оплаты",
         }
       )}
+      ${node.type === "filter" ? multiPickHtml(nid, "payStatusFilters", "Статус оплаты", [
+        { id: "paid", label: "Оплаченные" },
+        { id: "unpaid", label: "Не оплаченные" },
+      ], Array.isArray(node.payStatusFilters) ? node.payStatusFilters : [], {
+        getValue: (item) => item.id,
+        getLabel: (item) => item.label,
+        title: "Оплаченные и неоплаченные единицы количества",
+      }) : ""}
       ${multiPickHtml(nid, "orderTypes", "Тип", types, Array.isArray(node.orderTypes) ? node.orderTypes : [], { title: "Несколько типов" })}
       ${multiPickHtml(nid, "products", "Продукт", products, Array.isArray(node.products) ? node.products : [], { title: "Несколько продуктов" })}
       ${multiPickHtml(nid, "statuses", "Статус", statuses, Array.isArray(node.statuses) ? node.statuses : [], { title: "Несколько статусов" })}
@@ -1996,6 +2014,7 @@
       node.orderIds = [];
       node.period = "all";
       node.payFilters = [];
+      node.payStatusFilters = [];
       node.statuses = [];
       node.orderTypes = [];
       node.products = [];
@@ -2007,6 +2026,7 @@
       node.orderIds = [];
       node.period = "all";
       node.payFilters = [];
+      node.payStatusFilters = [];
       node.statuses = [];
       node.orderTypes = [];
       node.products = [];
@@ -4914,7 +4934,7 @@
         const bp = activeBlueprint();
         const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node) : null;
         const field = clearMulti.dataset.filterMultiClear || "";
-        const allowed = new Set(["customers", "orderIds", "payFilters", "orderTypes", "products", "statuses"]);
+        const allowed = new Set(["customers", "orderIds", "payFilters", "payStatusFilters", "orderTypes", "products", "statuses"]);
         if (!node || !allowed.has(field) || (node.type !== "filter" && node.type !== "dashboard")) return;
         node[field] = [];
         if (field === "customers") {
@@ -5186,7 +5206,7 @@
         const checked = [...(box?.querySelectorAll(`input[data-filter-multi="${cssEsc(field)}"]:checked`) || [])].map((el) =>
           String(el.value || "").trim()
         );
-        const allowed = new Set(["customers", "orderIds", "payFilters", "orderTypes", "products", "statuses"]);
+        const allowed = new Set(["customers", "orderIds", "payFilters", "payStatusFilters", "orderTypes", "products", "statuses"]);
         if (!allowed.has(field)) return;
         node[field] = uniqueStrings(checked).slice(0, FILTER_MULTI_MAX);
         if (field === "customers") {

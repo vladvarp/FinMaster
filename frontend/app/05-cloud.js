@@ -751,6 +751,9 @@
     const payFilters = (Array.isArray(opts.payFilters) ? opts.payFilters : opts.payFilter && opts.payFilter !== "all" ? [opts.payFilter] : [])
       .map((id) => String(id || "").trim())
       .filter((id) => id && id !== "all");
+    const payStatusFilters = (Array.isArray(opts.payStatusFilters) ? opts.payStatusFilters : [])
+      .map((id) => String(id || "").trim())
+      .filter((id) => id === "paid" || id === "unpaid");
     const statuses = (Array.isArray(opts.statuses) ? opts.statuses : opts.status ? [opts.status] : [])
       .map((name) => String(name || "").trim())
       .filter(Boolean);
@@ -797,6 +800,37 @@
     } else if (period && period !== "all") {
       rows = rows.filter(({ line }) => dashPeriodMatch(line.order_date, period));
     }
+    if (payStatusFilters.length === 1) {
+      const wantPaid = payStatusFilters[0] === "paid";
+      rows = rows.flatMap(({ order, line, totals }) => {
+        if (totals.expense) return [];
+        const quantity = Math.max(0, Number(qtyValue(line)) || 0);
+        if (quantity <= 0) return [];
+        const amount = Math.max(0, Number(totals.after) || 0);
+        const paidAmount = Math.min(amount, Math.max(0, Number(totals.paid) || 0));
+        const unitAmount = amount / quantity;
+        const paidQuantity = amount <= 0.005
+          ? quantity
+          : Math.min(quantity, Math.max(0, Math.round(paidAmount / unitAmount)));
+        const unpaidQuantity = Math.max(0, quantity - paidQuantity);
+        const selectedQuantity = wantPaid ? paidQuantity : unpaidQuantity;
+        if (selectedQuantity <= 0) return [];
+        const selectedAmount = wantPaid ? paidAmount : Math.max(0, amount - paidAmount);
+        const share = selectedQuantity / quantity;
+        return [{
+          order,
+          line,
+          quantity: selectedQuantity,
+          totals: {
+            ...totals,
+            total: (Number(totals.total) || 0) * share,
+            after: selectedAmount,
+            paid: wantPaid ? paidAmount : 0,
+            unpaid: wantPaid ? 0 : Math.max(0, Number(totals.unpaid) || 0),
+          },
+        }];
+      });
+    }
     const s = summarize(rows);
     const active = rows.filter(({ line }) => !/отмен|аннул|черн/i.test(line.status));
     const as = summarize(active);
@@ -824,6 +858,7 @@
     return {
       orders: s.orderCount,
       lines: s.count,
+      quantity: rows.reduce((sum, row) => sum + (Number(row.quantity ?? qtyValue(row.line)) || 0), 0),
       after: s.after,
       afterActive: as.after,
       paid: s.paid,
