@@ -46,7 +46,8 @@
     { id: "monthCost", name: "Расход месяца" },
     { id: "forecast", name: "Прогноз месяца" },
   ];
-  const DASH_DEFAULT = ["orders", "after", "paid", "unpaid"];
+  const DASH_DEFAULT = ["orders", "quantity", "after", "paid", "unpaid"];
+  const DASH_LEGACY_DEFAULT = ["orders", "after", "paid", "unpaid"];
   const FILTER_PORTS = ["orders", "lines", "quantity", "after", "paid", "unpaid", "cost", "net"];
   const presentValues = new Map();
 
@@ -691,9 +692,14 @@
 
   function normalizeDashPorts(list) {
     const allowed = new Set(DASH_PORTS.map((item) => item.id));
+    const source = Array.isArray(list) && list.length
+      ? list
+      : DASH_DEFAULT;
+    const isLegacyDefault = source.length === DASH_LEGACY_DEFAULT.length
+      && DASH_LEGACY_DEFAULT.every((id) => source.includes(id));
     const out = [];
     const seen = new Set();
-    (Array.isArray(list) ? list : DASH_DEFAULT).forEach((id) => {
+    (isLegacyDefault ? DASH_DEFAULT : source).forEach((id) => {
       const key = String(id || "");
       if (!allowed.has(key) || seen.has(key)) return;
       seen.add(key);
