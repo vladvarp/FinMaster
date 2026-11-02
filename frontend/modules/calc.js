@@ -29,6 +29,7 @@
   const DASH_PORTS = [
     { id: "orders", name: "Заказов" },
     { id: "lines", name: "Позиций" },
+    { id: "quantity", name: "Количество" },
     { id: "after", name: "К оплате" },
     { id: "afterActive", name: "Без отмен" },
     { id: "paid", name: "Оплачено" },
@@ -46,7 +47,7 @@
     { id: "forecast", name: "Прогноз месяца" },
   ];
   const DASH_DEFAULT = ["orders", "after", "paid", "unpaid"];
-  const FILTER_PORTS = ["orders", "lines", "after", "paid", "unpaid", "cost", "net"];
+  const FILTER_PORTS = ["orders", "lines", "quantity", "after", "paid", "unpaid", "cost", "net"];
   const presentValues = new Map();
 
   let api = null;
