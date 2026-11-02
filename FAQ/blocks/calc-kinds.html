@@ -235,21 +235,38 @@
           </select>
         </label>
         <div class="calc-filter-row">
-          <span>Фильтр</span>
-          <div class="calc-multi-wrap"><details class="calc-multi" title="Фильтр оплаты"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>С долгом</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Оплаченные</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Этот месяц</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Без цены</span></label></div></details></div>
+          <span>Оплата заказа</span>
+          <div class="calc-multi-wrap"><details class="calc-multi" title="Несколько фильтров оплаты"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>С долгом</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Оплаченные</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Этот месяц</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Без цены</span></label></div></details></div>
+        </div>
+        <div class="calc-filter-row">
+          <span>Статус оплаты</span>
+          <div class="calc-multi-wrap"><details class="calc-multi" title="Оплаченные и неоплаченные единицы количества"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Оплаченные</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Не оплаченные</span></label></div></details></div>
+        </div>
+        <div class="calc-filter-row">
+          <span>Тип</span>
+          <div class="calc-multi-wrap"><details class="calc-multi" title="Несколько типов"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Мебель</span></label></div></details></div>
+        </div>
+        <div class="calc-filter-row">
+          <span>Продукт</span>
+          <div class="calc-multi-wrap"><details class="calc-multi" title="Несколько продуктов"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Кухня</span></label></div></details></div>
+        </div>
+        <div class="calc-filter-row">
+          <span>Статус</span>
+          <div class="calc-multi-wrap"><details class="calc-multi" title="Несколько статусов"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>В работе</span></label></div></details></div>
         </div>
       </div>
       <div class="calc-ports">
-        <div class="calc-row out"><span class="calc-row-name">Заказов</span><b>1</b><i class="calc-port out"></i></div>
-        <div class="calc-row out"><span class="calc-row-name">Позиций</span><b>2</b><i class="calc-port out"></i></div>
-        <div class="calc-row out"><span class="calc-row-name">К оплате</span><b>27 000</b><i class="calc-port out"></i></div>
-        <div class="calc-row out"><span class="calc-row-name">Оплачено</span><b>10 000</b><i class="calc-port out"></i></div>
-        <div class="calc-row out"><span class="calc-row-name">Долг</span><b>17 000</b><i class="calc-port out"></i></div>
-        <div class="calc-row out"><span class="calc-row-name">Расходы</span><b>0</b><i class="calc-port out"></i></div>
-        <div class="calc-row out"><span class="calc-row-name">Чистыми</span><b>27 000</b><i class="calc-port out"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Заказов</span><b>1</b><i class="calc-port out" title="Заказов"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Позиций</span><b>2</b><i class="calc-port out" title="Позиций"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Количество</span><b>2</b><i class="calc-port out" title="Количество"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">К оплате</span><b>27 000</b><i class="calc-port out" title="К оплате"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Оплачено</span><b>10 000</b><i class="calc-port out" title="Оплачено"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Долг</span><b>17 000</b><i class="calc-port out" title="Долг"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Расходы</span><b>0</b><i class="calc-port out" title="Расходы"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Чистыми</span><b>27 000</b><i class="calc-port out" title="Чистыми"></i></div>
       </div>
     </article>
-    <p>Входов нет. Срез задаётся на самой карточке: заказчик, заказ, период, оплата, тип, продукт, статус. На стенде период «Этот месяц» и одна кухня: две позиции, к оплате 27 000, оплачено 10 000, долг 17 000. Если пунктов выбрано больше одного, справа появляется × и сбрасывает выбор. Цифры уходят выходами, как у обычной ноды.</p>
+    <p>Входов нет. Срез на самой карточке: заказчик, заказ, период, оплата заказа, статус оплаты, тип, продукт и статус. «С» и «По» появляются, когда период — «Диапазон». «Статус оплаты» делит количество позиции на оплаченные и неоплаченные единицы. На стенде период «Этот месяц» и одна кухня: две позиции, количество 2, к оплате 27 000, оплачено 10 000, долг 17 000, расходы 0, чистыми 27 000. Если пунктов выбрано больше одного, справа появляется × и сбрасывает выбор.</p>
   </section>
 
   <section class="kind">
@@ -264,6 +281,10 @@
           <span>Заказчик</span>
           <div class="calc-multi-wrap"><details class="calc-multi" title="Несколько заказчиков"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Иванов</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Петров</span></label></div></details></div>
         </div>
+        <div class="calc-filter-row">
+          <span>Заказ</span>
+          <div class="calc-multi-wrap"><details class="calc-multi" title="Несколько заказов"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>1042 — Кухня</span></label></div></details></div>
+        </div>
         <label class="calc-filter-row">
           <span>Период</span>
           <select class="calc-filter-input" aria-label="Период">
@@ -275,15 +296,32 @@
             <option value="range">Диапазон</option>
           </select>
         </label>
+        <div class="calc-filter-row">
+          <span>Оплата заказа</span>
+          <div class="calc-multi-wrap"><details class="calc-multi" title="Несколько фильтров оплаты"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>С долгом</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Оплаченные</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Этот месяц</span></label><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Без цены</span></label></div></details></div>
+        </div>
+        <div class="calc-filter-row">
+          <span>Тип</span>
+          <div class="calc-multi-wrap"><details class="calc-multi" title="Несколько типов"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Мебель</span></label></div></details></div>
+        </div>
+        <div class="calc-filter-row">
+          <span>Продукт</span>
+          <div class="calc-multi-wrap"><details class="calc-multi" title="Несколько продуктов"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>Кухня</span></label></div></details></div>
+        </div>
+        <div class="calc-filter-row">
+          <span>Статус</span>
+          <div class="calc-multi-wrap"><details class="calc-multi" title="Несколько статусов"><summary class="calc-multi-sum calc-filter-input">Все</summary><div class="calc-multi-list"><label class="calc-multi-opt"><input type="checkbox" tabindex="-1" /><span>В работе</span></label></div></details></div>
+        </div>
       </div>
       <div class="calc-ports">
-        <div class="calc-row out"><span class="calc-row-name">Заказов</span><b>1</b><i class="calc-port out"></i></div>
-        <div class="calc-row out"><span class="calc-row-name">К оплате</span><b>27 000</b><i class="calc-port out"></i></div>
-        <div class="calc-row out"><span class="calc-row-name">Оплачено</span><b>10 000</b><i class="calc-port out"></i></div>
-        <div class="calc-row out"><span class="calc-row-name">Долг</span><b>17 000</b><i class="calc-port out"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Заказов</span><b>1</b><i class="calc-port out" title="Заказов"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Количество</span><b>2</b><i class="calc-port out" title="Количество"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">К оплате</span><b>27 000</b><i class="calc-port out" title="К оплате"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Оплачено</span><b>10 000</b><i class="calc-port out" title="Оплачено"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Долг</span><b>17 000</b><i class="calc-port out" title="Долг"></i></div>
       </div>
     </article>
-    <p>Те же фильтры, что у фильтра, но набор выходов свой. Сразу после создания их четыре: заказы, к оплате, оплачено, долг. Кнопка + или правый клик по порту добавляет остальные метрики: без отмен, средний чек, просрочка, прогноз месяца. Лишние так же снимаются.</p>
+    <p>Те же срезы, кроме «Статус оплаты»: он есть только у фильтра. Сразу после создания пять выходов: заказы, количество, к оплате, оплачено и долг. Кнопка + или правый клик по выходу добавляет остальные метрики и снимает лишние, если выход не занят связью.</p>
   </section>
 
   <section class="kind">
