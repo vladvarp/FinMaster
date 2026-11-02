@@ -824,6 +824,7 @@
     return {
       orders: s.orderCount,
       lines: s.count,
+      quantity: rows.reduce((sum, { line }) => sum + (Number(qtyValue(line)) || 0), 0),
       after: s.after,
       afterActive: as.after,
       paid: s.paid,
