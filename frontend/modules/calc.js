@@ -968,6 +968,8 @@
         { id: "paid", label: "Оплаченные" },
         { id: "unpaid", label: "Не оплаченные" },
       ], Array.isArray(node.payStatusFilters) ? node.payStatusFilters : [], {
+        getValue: (item) => item.id,
+        getLabel: (item) => item.label,
         title: "Оплаченные и неоплаченные единицы количества",
       }) : ""}
       ${multiPickHtml(nid, "orderTypes", "Тип", types, Array.isArray(node.orderTypes) ? node.orderTypes : [], { title: "Несколько типов" })}
