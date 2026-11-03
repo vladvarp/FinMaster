@@ -4413,10 +4413,17 @@
         }
       } else if (g === "status" || g === "order_type") {
         if (!e.target.value) return;
+        const paid = g === "status" && e.target.value === paidStatus()?.name;
         (order.lines || []).forEach((line) => {
           if (isFrozenLine(line) || isExpenseLine(line)) return;
           if (g === "status" && statusLocked(line.status)) return;
           line[g] = e.target.value;
+          if (paid) {
+            const after = lineTotals(line, order).after;
+            line.paid = after;
+            line.paid_expr = String(after);
+            line.payment_date = dayKey(clockToday());
+          }
         });
         markDirty();
       } else if (g === "order_date" || g === "payment_date") {
@@ -4520,6 +4527,12 @@
     } else {
       const prevKind = key === "order_type" ? typeKind(line.order_type) : "";
       line[key] = key === "notes" ? String(e.target.value || "").slice(0, 2000) : e.target.type === "number" ? num(e.target.value) : e.target.value;
+      if (key === "status" && line.status === paidStatus()?.name && !isExpenseLine(line) && !isFrozenLine(line)) {
+        const after = lineTotals(line, order).after;
+        line.paid = after;
+        line.paid_expr = String(after);
+        line.payment_date = dayKey(clockToday());
+      }
       if (key === "notes") {
         const on = lineHasNote(line);
         card.querySelectorAll(`[data-line="${cssEscape(line.id)}"] .note-btn`).forEach((btn) => btn.classList.toggle("has-note", on));
