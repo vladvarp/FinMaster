@@ -788,6 +788,11 @@
     return parts.join(" · ") || "все заказы";
   }
 
+  function paymentDateMode() {
+    try { return localStorage.getItem("finmaster.paymentDateMode") === "1"; }
+    catch { return false; }
+  }
+
   function dashRows() {
     const order = focusedOrder();
     let rows = order
@@ -797,7 +802,7 @@
     if (!f || focusedOrder()) return rows;
     if (f.filter && f.filter !== "all") rows = rows.filter(({ order: o }) => orderFilterMatch(o, f.filter));
     if (f.status) rows = rows.filter(({ line }) => line.status === f.status);
-    if (f.period && f.period !== "all") rows = rows.filter(({ line }) => dashPeriodMatch(line.order_date, f.period));
+    if (f.period && f.period !== "all") rows = rows.filter(({ line }) => dashPeriodMatch(paymentDateMode() ? line.payment_date : line.order_date, f.period));
     return rows;
   }
 
@@ -1217,8 +1222,10 @@
     const min = $("f-min").value === "" ? null : num($("f-min").value);
     const max = $("f-max").value === "" ? null : num($("f-max").value);
     const unpaidOnly = $("f-unpaid").checked;
+    const paymentMode = dateField === "payment_date";
 
     return allRows().filter(({ order, line, totals }) => {
+      if (paymentMode && (totals.expense || totals.paid <= 0.005)) return false;
       if (q && !matchesSearch(order, line, q)) return false;
       const dt = dateDay(line[dateField]);
       if (from && dt && dt < from) return false;
@@ -1229,19 +1236,31 @@
       if (customer && !String(order.customer).toLowerCase().includes(customer)) return false;
       if (product && !String(line.product).toLowerCase().includes(product)) return false;
       if (unit && line.unit !== unit) return false;
-      if (min != null && totals.after < min) return false;
-      if (max != null && totals.after > max) return false;
-      if (unpaidOnly && totals.unpaid <= 0) return false;
+      const amount = paymentMode ? totals.paid : totals.after;
+      if (min != null && amount < min) return false;
+      if (max != null && amount > max) return false;
+      if (unpaidOnly && !paymentMode && totals.unpaid <= 0) return false;
       return true;
+    }).map((row) => {
+      if (!paymentMode) return row;
+      const paid = row.totals.paid;
+      return { ...row, totals: { ...row.totals, total: paid, after: paid, paid, unpaid: 0, cost: 0, expense: false } };
     });
   }
 
   function periodStats(from, to, dateField = "order_date") {
-    const rows = allRows().filter(({ line }) => {
+    const paymentMode = dateField === "payment_date";
+    const rows = allRows().filter(({ line, totals }) => {
+      if (paymentMode && (totals.expense || totals.paid <= 0.005)) return false;
       const dt = dateDay(line[dateField]);
+      if (paymentMode && !dt) return false;
       if (from && (!dt || dt < from)) return false;
       if (to && (!dt || dt > to)) return false;
       return true;
+    }).map((row) => {
+      if (!paymentMode) return row;
+      const paid = row.totals.paid;
+      return { ...row, totals: { ...row.totals, total: paid, after: paid, paid, unpaid: 0, cost: 0, expense: false } };
     });
     return summarize(rows);
   }
@@ -1282,6 +1301,16 @@
 
   function renderKpis() {
     const rows = dashScopedRows();
+    if (paymentDateMode()) {
+      const received = rows.reduce((sum, row) => sum + row.totals.paid, 0);
+      const orders = new Set(rows.map(({ order }) => order.id));
+      const customers = new Set(rows.map(({ order }) => String(order.customer || "").trim()).filter(Boolean));
+      $("kpi-row").innerHTML = `
+        <div class="kpi"><div class="label">Заказов с оплатой</div><div class="value">${orders.size}</div><div class="sub">${rows.length} позиций</div></div>
+        <div class="kpi ok"><div class="label">Фактические поступления</div><div class="value">${money(received)}</div><div class="sub">по датам оплаты</div></div>
+        <div class="kpi"><div class="label">Оплачено позиций</div><div class="value">${rows.length}</div><div class="sub">${customers.size} заказчиков</div></div>`;
+      return;
+    }
     const s = summarize(rows);
     const active = rows.filter(({ line }) => !/отмен|аннул|черн/i.test(line.status));
     const as = summarize(active);
@@ -1344,6 +1373,28 @@
     const box = $("insights");
     if (!box) return;
     const rows = dashScopedRows();
+    if (paymentDateMode()) {
+      if (!rows.length) { box.innerHTML = `<div class="empty">Нет позиций с указанной датой оплаты.</div>`; return; }
+      const now = new Date();
+      const currentKey = monthKeyOf(now.toISOString());
+      const previousKey = monthKeyOf(new Date(now.getFullYear(), now.getMonth() - 1, 15).toISOString());
+      let current = 0, previous = 0;
+      rows.forEach(({ line, totals }) => {
+        const key = monthKeyOf(line.payment_date);
+        if (key === currentKey) current += totals.paid;
+        if (key === previousKey) previous += totals.paid;
+      });
+      const total = rows.reduce((sum, row) => sum + row.totals.paid, 0);
+      const topCustomer = topBy(rows, ({ order }) => order.customer, ({ totals }) => totals.paid);
+      const topProduct = topBy(rows, ({ line }) => line.product, ({ totals }) => totals.paid);
+      box.innerHTML = [
+        insightCard({ tint: "#059669", ico: "₽", label: "Поступления за месяц", value: money(current), note: `предыдущий месяц: ${money(previous)}`, trend: trendChip(current, previous) }),
+        insightCard({ tint: "#0f766e", ico: "Σ", label: "Всего поступило", value: money(total), note: `${rows.length} оплаченных позиций` }),
+        insightCard({ tint: "#2563eb", ico: "↗", label: "Крупнейший заказчик", value: topCustomer ? money(topCustomer.value) : "—", note: topCustomer?.key || "нет данных" }),
+        insightCard({ tint: "#7c3aed", ico: "◆", label: "Позиция с наибольшей оплатой", value: topProduct ? money(topProduct.value) : "—", note: topProduct?.key || "нет данных" }),
+      ].join("");
+      return;
+    }
     if (!rows.length) {
       box.innerHTML = `<div class="empty">Добавьте первый заказ — здесь появятся выводы по выручке, долгам и заказчикам.</div>`;
       return;
@@ -1570,6 +1621,15 @@
   function trendDatasets(rows, group, dateField, lastN, chart) {
     const map = new Map();
     rows.forEach(({ line, totals }) => {
+      if (dateField === "payment_date") {
+        if (totals.expense || totals.paid <= 0.005 || !dateDay(line.payment_date)) return;
+        const k = groupKey(line.payment_date, group);
+        let b = map.get(k);
+        if (!b) { b = { after: 0, paid: 0, unpaid: 0, cost: 0 }; map.set(k, b); }
+        b.after += totals.paid;
+        b.paid += totals.paid;
+        return;
+      }
       const k = groupKey(line[dateField] || line.order_date, group);
       let b = map.get(k);
       if (!b) {
@@ -1585,6 +1645,9 @@
     });
     let labels = [...map.keys()].sort();
     if (lastN) labels = labels.slice(-lastN);
+    if (dateField === "payment_date") {
+      return { labels, datasets: labels.length ? [{ label: "Фактические поступления", color: "#059669", fill: true, values: labels.map((k) => map.get(k)?.paid || 0) }] : [] };
+    }
     const on = lineSeriesOn(chart);
     const datasets = LINE_METRICS.filter((m) => on[m.id]).map((m) => ({
       label: m.label,
@@ -2119,8 +2182,10 @@
     const rows = dashRows();
     const win = dashChartWindow();
     if (!win) return rows;
-    return rows.filter(({ line }) => {
-      const dt = dateDay(line.order_date);
+    const dateField = paymentDateMode() ? "payment_date" : "order_date";
+    return rows.filter(({ line, totals }) => {
+      if (dateField === "payment_date" && (totals.expense || totals.paid <= 0.005)) return false;
+      const dt = dateDay(line[dateField]);
       if (!dt) return win.undated;
       if (win.from && dt < win.from) return false;
       if (win.to && dt > win.to) return false;
@@ -2152,7 +2217,7 @@
     const byStatus = {};
     rows.forEach(({ line, totals }) => {
       const name = line.status || "Без статуса";
-      byStatus[name] = (byStatus[name] || 0) + totals.after;
+      byStatus[name] = (byStatus[name] || 0) + (paymentDateMode() ? totals.paid : totals.after);
     });
     FinCharts.doughnut(
       $("chart-dash-pie"),
@@ -2353,7 +2418,10 @@
 
   function renderDashboard() {
     renderDashFocus();
-    paintTrendLine($("chart-dash-line"), dashRows(), "day", "order_date");
+    const paymentMode = paymentDateMode();
+    const title = $("dash-chart-title");
+    if (title) title.textContent = paymentMode ? "Фактические поступления по датам оплаты" : "Выручка по дням";
+    paintTrendLine($("chart-dash-line"), dashRows(), "day", paymentMode ? "payment_date" : "order_date");
     refreshDashScope();
   }
 
@@ -3734,21 +3802,21 @@
 
     const a = periodStats($("c-a-from").value, $("c-a-to").value, dateField);
     const b = periodStats($("c-b-from").value, $("c-b-to").value, dateField);
-    $("cmp-a").innerHTML = cmpHtml(a);
-    $("cmp-b").innerHTML = cmpHtml(b);
-    const withCost = a.cost > 0.005 || b.cost > 0.005;
+    $("cmp-a").innerHTML = cmpHtml(a, dateField);
+    $("cmp-b").innerHTML = cmpHtml(b, dateField);
+    const withCost = dateField !== "payment_date" && (a.cost > 0.005 || b.cost > 0.005);
     FinCharts.bar($("chart-an-bar"), {
       tinyLabels: true,
-      labels: withCost ? ["Выручка", "Оплачено", "Долг", "Расход", "Чистыми", "Позиции"] : ["Выручка", "Оплачено", "Долг", "Позиции"],
+      labels: dateField === "payment_date" ? ["Поступления", "Позиции"] : withCost ? ["Выручка", "Оплачено", "Долг", "Расход", "Чистыми", "Позиции"] : ["Выручка", "Оплачено", "Долг", "Позиции"],
       scale: "group",
-      formats: withCost ? ["money", "money", "money", "money", "money", "count"] : ["money", "money", "money", "count"],
+      formats: dateField === "payment_date" ? ["money", "count"] : withCost ? ["money", "money", "money", "money", "money", "count"] : ["money", "money", "money", "count"],
       legend: [
         { label: "Период A", color: "#0f766e" },
         { label: "Период B", color: "#c9a227" },
       ],
       datasets: [
-        { values: withCost ? [a.after, a.paid, a.unpaid, a.cost, a.net, a.count] : [a.after, a.paid, a.unpaid, a.count], color: "#0f766e" },
-        { values: withCost ? [b.after, b.paid, b.unpaid, b.cost, b.net, b.count] : [b.after, b.paid, b.unpaid, b.count], color: "#c9a227" },
+        { values: dateField === "payment_date" ? [a.paid, a.count] : withCost ? [a.after, a.paid, a.unpaid, a.cost, a.net, a.count] : [a.after, a.paid, a.unpaid, a.count], color: "#0f766e" },
+        { values: dateField === "payment_date" ? [b.paid, b.count] : withCost ? [b.after, b.paid, b.unpaid, b.cost, b.net, b.count] : [b.after, b.paid, b.unpaid, b.count], color: "#c9a227" },
       ],
     });
 
@@ -3765,7 +3833,7 @@
             <td class="num">${totals.expense ? `−${esc(money(totals.cost))}` : esc(money(totals.after))}</td>
             <td class="num">${totals.expense ? "—" : esc(money(totals.paid))}</td>
             <td class="num">${totals.expense ? "—" : esc(money(totals.unpaid))}</td>
-            <td>${esc(dateDay(line.order_date))}</td>
+            <td>${esc(dateDay(line[dateField]))}</td>
             <td>${
               totals.expense
                 ? `<span class="pill expense-pill">${esc(kindLabel(totals.kind))}</span>`
@@ -3798,18 +3866,18 @@
       : `<div class="empty">Ничего не найдено — ослабьте фильтры.</div>`;
   }
 
-  function cmpHtml(s) {
+  function cmpHtml(s, dateField = "order_date") {
+    if (dateField === "payment_date") return `<div class="kpis" style="grid-template-columns:1fr 1fr;margin:0">
+      <div class="kpi ok"><div class="label">Поступления</div><div class="value" style="font-size:18px">${money(s.paid)}</div></div>
+      <div class="kpi"><div class="label">Позиции / заказы</div><div class="value" style="font-size:18px">${s.count} / ${s.orderCount}</div></div>
+    </div>`;
     return `<div class="kpis" style="grid-template-columns:1fr 1fr;margin:0">
       <div class="kpi"><div class="label">Выручка</div><div class="value" style="font-size:18px">${money(s.after)}</div></div>
       <div class="kpi"><div class="label">Оплачено</div><div class="value" style="font-size:18px">${money(s.paid)}</div></div>
       <div class="kpi warn"><div class="label">Долг</div><div class="value" style="font-size:18px">${money(s.unpaid)}</div></div>
       <div class="kpi"><div class="label">Позиции / заказы</div><div class="value" style="font-size:18px">${s.count} / ${s.orderCount}</div></div>
-      ${
-        s.cost
-          ? `<div class="kpi cost"><div class="label">Расход</div><div class="value" style="font-size:18px">−${money(s.cost)}</div></div>
-      <div class="kpi ${s.net >= 0 ? "ok" : "warn"}"><div class="label">Чистыми</div><div class="value" style="font-size:18px">${money(s.net)}</div></div>`
-          : ""
-      }
+      ${s.cost ? `<div class="kpi cost"><div class="label">Расход</div><div class="value" style="font-size:18px">−${money(s.cost)}</div></div>
+      <div class="kpi ${s.net >= 0 ? "ok" : "warn"}"><div class="label">Чистыми</div><div class="value" style="font-size:18px">${money(s.net)}</div></div>` : ""}
     </div>`;
   }
 
