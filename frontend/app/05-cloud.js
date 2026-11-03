@@ -1089,6 +1089,11 @@
     syncMoneyFmt(moneyDecimals());
     updateChrome();
     fillFilterSelects();
+    const paymentMode = localStorage.getItem("finmaster.paymentDateMode") === "1";
+    const paymentToggle = $("payment-date-mode");
+    if (paymentToggle) paymentToggle.checked = paymentMode;
+    const dateField = $("f-date-field");
+    if (dateField) dateField.value = paymentMode ? "payment_date" : "order_date";
     if (state.view === "dashboard") renderDashboard();
     if (state.view === "orders") renderOrders();
     if (state.view === "analytics") renderAnalytics();
@@ -3700,6 +3705,21 @@
         $(id).addEventListener("change", () => state.view === "analytics" && renderAnalytics());
       }
     );
+    $("f-date-field").addEventListener("change", () => {
+      const enabled = $("f-date-field").value === "payment_date";
+      localStorage.setItem("finmaster.paymentDateMode", enabled ? "1" : "0");
+      const toggle = $("payment-date-mode");
+      if (toggle) toggle.checked = enabled;
+    });
+    $("payment-date-mode")?.addEventListener("change", () => {
+      const enabled = $("payment-date-mode").checked;
+      localStorage.setItem("finmaster.paymentDateMode", enabled ? "1" : "0");
+      $("f-date-field").value = enabled ? "payment_date" : "order_date";
+      if (state.view === "dashboard") renderDashboard();
+      if (state.view === "analytics") renderAnalytics();
+      if (state.view === "cashflow") renderCashflow();
+      if (state.view === "forecast") renderForecast();
+    });
     $("btn-filters-reset").addEventListener("click", () => {
       ["f-from", "f-to", "f-customer", "f-product", "f-min", "f-max", "c-a-from", "c-a-to", "c-b-from", "c-b-to"].forEach((id) => ($(id).value = ""));
       $("f-status").value = "";
