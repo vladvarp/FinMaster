@@ -3,6 +3,11 @@
   const FORECAST_MODEL_COLORS = ["#c9a227", "#7c3aed", "#0891b2", "#db2777", "#ea580c", "#16a34a", "#64748b", "#0ea5e9"];
   const forecastUi = { metric: "revenue", horizon: 12, series: "ensemble" };
 
+  function paymentDateMode() {
+    try { return localStorage.getItem("finmaster.paymentDateMode") === "1"; }
+    catch { return false; }
+  }
+
   function forecastAvg(values) {
     if (!values.length) return 0;
     let sum = 0;
@@ -363,15 +368,17 @@
     return { models: fitted, ensemble, low, high, hold, ensembleSmape, picked: source.map((model) => model.name) };
   }
 
-  function forecastCollect() {
+  function forecastCollect(metric) {
     const buckets = new Map();
+    const paymentMode = metric === "paid" && paymentDateMode();
     (state.doc?.orders || []).forEach((order) => {
       (order.lines || []).forEach((line) => {
         if (isFrozenLine(line)) return;
-        const day = dateDay(line.order_date) || orderNewestStamp(order);
+        const totals = lineTotals(line, order);
+        if (paymentMode && (totals.expense || totals.paid <= 0.005)) return;
+        const day = paymentMode ? dateDay(line.payment_date) : dateDay(line.order_date) || orderNewestStamp(order);
         if (!day || day.length < 7) return;
         const key = day.slice(0, 7);
-        const totals = lineTotals(line, order);
         const row = buckets.get(key) || { revenue: 0, paid: 0, cost: 0 };
         if (totals.expense) row.cost += totals.cost;
         else {
@@ -385,7 +392,7 @@
   }
 
   function forecastHistory(metric) {
-    const buckets = forecastCollect();
+    const buckets = forecastCollect(metric);
     const keys = [...buckets.keys()].sort();
     if (!keys.length) return { months: [], values: [], partial: false };
     let end = keys[keys.length - 1];
@@ -455,7 +462,9 @@
     if (horizonBox) horizonBox.value = String(horizon);
     const history = forecastHistory(metric);
     if (history.values.length < 3) {
-      forecastEmpty("Нужно хотя бы три месяца с заказами. Прогноз строится по датам позиций в этом отчёте.");
+      forecastEmpty(paymentDateMode() && metric === "paid"
+        ? "Нужно хотя бы три месяца с поступлениями по датам оплаты."
+        : "Нужно хотя бы три месяца с заказами. Прогноз строится по датам позиций в этом отчёте.");
       return;
     }
     const result = forecastSeries(history.values, horizon, FORECAST_PERIOD, meta.allowNegative);
@@ -544,9 +553,11 @@
     const checked = result.hold ? `Проверка на последних ${result.hold} мес.` : "Ряд короткий, проверка на хвосте недоступна.";
     const partial = history.partial ? " Текущий неполный месяц в обучение не входит." : "";
     $("forecast-note").textContent = `${checked}${partial} Медиана моделей: ${result.picked.slice(0, 4).join(", ")}.`;
-    $("forecast-chart-sub").textContent = showBand
-      ? `${meta.label.toLowerCase()} · ансамбль и коридор. Кнопки над графиком переключают модель`
-      : `${meta.label.toLowerCase()} · ${selected.name}`;
+    $("forecast-chart-sub").textContent = paymentDateMode() && metric === "paid"
+      ? (showBand ? "поступления по датам оплаты · ансамбль и коридор" : `поступления по датам оплаты · ${selected.name}`)
+      : (showBand
+          ? `${meta.label.toLowerCase()} · ансамбль и коридор. Кнопки над графиком переключают модель`
+          : `${meta.label.toLowerCase()} · ${selected.name}`);
   }
 
   function bindForecast() {
