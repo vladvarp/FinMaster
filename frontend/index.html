@@ -139,6 +139,10 @@
           </div>
         </div>
         <div class="top-right">
+          <label class="payment-date-switch" title="Переключить графики на фактические поступления по датам оплаты">
+            <input type="checkbox" id="payment-date-mode" />
+            <span>По факту оплаты</span>
+          </label>
           <div class="file-quick" role="group" aria-label="Файл">
             <button class="btn icon" type="button" id="btn-home" title="К списку отчётов" aria-label="К списку отчётов">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -240,7 +244,7 @@
           <div class="grid-2">
             <div class="card">
               <div class="chart-head">
-                <h3>Выручка по дням</h3>
+                <h3 id="dash-chart-title">Выручка по дням</h3>
                 <div class="chart-legend" id="dash-line-legend"></div>
               </div>
               <div class="chart-zoom" id="dash-line-zoom" hidden></div>
@@ -406,6 +410,11 @@
               <h3>Долг по заказчикам</h3>
               <div class="chart-box"><canvas id="chart-cash-pie"></canvas></div>
             </div>
+          </div>
+          <div class="card" id="cash-receipts-card" style="margin-top:12px" hidden>
+            <h3>Фактические поступления <span class="insights-sub">по датам оплаты</span></h3>
+            <div class="chart-box"><canvas id="chart-cash-paid"></canvas></div>
+            <p class="hint" id="cash-receipts-note"></p>
           </div>
           <div class="grid-2" style="margin-top:12px">
             <div class="card">
