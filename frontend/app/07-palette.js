@@ -1132,9 +1132,10 @@
     if (act === "payall") {
       (order.lines || []).forEach((line) => {
         if (isFrozenLine(line) || isExpenseLine(line)) return;
-        const after = lineTotals(line).after;
-        line.paid = after;
-        line.paid_expr = String(after);
+        const totals = lineTotals(line);
+        if (totals.unpaid <= 0.005) return;
+        line.paid = totals.after;
+        line.paid_expr = String(totals.after);
         line.payment_date = dayKey(clockToday());
         applyPaidIfCovered(line);
       });
