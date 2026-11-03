@@ -161,6 +161,11 @@
     return { dso: dsoWeight ? dsoSum / dsoWeight : 0, known: dsoWeight > 0, delays };
   }
 
+  function paymentDateMode() {
+    try { return localStorage.getItem("finmaster.paymentDateMode") === "1"; }
+    catch { return false; }
+  }
+
   function cashData() {
     const terms = cashTerms();
     const today = dayStart(new Date());
@@ -231,12 +236,44 @@
         : "В дебиторку входят неоплаченные позиции без отмен и аннулирований";
     renderCashKpi(data);
     renderCashForecast(data);
+    renderCashReceipts();
     renderCashPie(data);
     renderCashCalendar(data);
     renderCashAging(data);
     renderCashChips(data);
     renderCashTable(data);
     renderCashDebtors(data);
+  }
+
+  function renderCashReceipts() {
+    const card = $("cash-receipts-card");
+    if (!card) return;
+    const enabled = paymentDateMode();
+    card.hidden = !enabled;
+    if (!enabled) return;
+    const buckets = new Map();
+    let total = 0;
+    let count = 0;
+    allRows().forEach(({ line, totals }) => {
+      if (isFrozenLine(line) || totals.expense || totals.paid <= 0.005) return;
+      const day = dateDay(line.payment_date);
+      if (!day) return;
+      const key = day.slice(0, 7);
+      buckets.set(key, (buckets.get(key) || 0) + totals.paid);
+      total += totals.paid;
+      count += 1;
+    });
+    const keys = [...buckets.keys()].sort();
+    const labels = keys.map((key) => {
+      const [year, month] = key.split("-");
+      return new Intl.DateTimeFormat("ru-RU", { month: "short", year: "2-digit" }).format(new Date(Number(year), Number(month) - 1, 1));
+    });
+    FinCharts.line($("chart-cash-paid"), {
+      labels,
+      datasets: keys.length ? [{ values: keys.map((key) => round2(buckets.get(key))), color: "#059669", label: "Фактические поступления", fill: true }] : [],
+    });
+    const note = $("cash-receipts-note");
+    if (note) note.textContent = keys.length ? `Всего ${money(total)} · ${count} оплаченных позиций · группировка по месяцам даты оплаты` : "Нет оплаченных позиций с указанной датой оплаты.";
   }
 
   function renderCashKpi(data) {
