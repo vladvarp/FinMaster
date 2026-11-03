@@ -4532,6 +4532,16 @@
         line.paid = after;
         line.paid_expr = String(after);
         line.payment_date = dayKey(clockToday());
+
+        const paidInput = tr.querySelector('[data-lk="paid_expr"]');
+        if (paidInput) {
+          paidInput.value = String(after);
+          paidInput.dataset.expr = String(after);
+          paidInput.dataset.showing = "expr";
+          paidInput.classList.remove("invalid");
+        }
+        const paymentDateInput = tr.querySelector('[data-lk="payment_date"]');
+        if (paymentDateInput) paymentDateInput.value = line.payment_date;
       }
       if (key === "notes") {
         const on = lineHasNote(line);
