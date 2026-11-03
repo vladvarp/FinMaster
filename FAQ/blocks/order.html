@@ -43,7 +43,7 @@
       <div class="field"><label>Статус всем строкам</label>
         <select id="g-status"><option value="">— не менять —</option><option>Новый заказ</option><option>Выполняется</option><option>Ожидание</option><option>Не оплачено</option><option>Оплачено</option><option>Отменено</option></select>
       </div>
-      <button class="btn small primary" type="button" id="act-payall" title="В каждую строку запишет её итог и сегодняшнюю дату оплаты">Оплатить все типы</button>
+      <button class="btn small primary" type="button" id="act-payall" title="Оплатит только неоплаченные и частично оплаченные позиции; даты уже оплаченных не изменятся">Оплатить все типы</button>
     </div>
     <div class="table-wrap">
       <table class="data">
@@ -290,6 +290,7 @@
       const day = today();
       [...lines.querySelectorAll("tr")].forEach((row) => {
         const t = lineOf(row);
+        if (t.unpaid <= 0.005) return;
         const paid = row.querySelector('[data-k="paid"]');
         paid.dataset.showing = "expr";
         paid.dataset.expr = String(Math.round(t.after * 100) / 100);
