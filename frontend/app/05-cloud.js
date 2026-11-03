@@ -3710,11 +3710,14 @@
       localStorage.setItem("finmaster.paymentDateMode", enabled ? "1" : "0");
       const toggle = $("payment-date-mode");
       if (toggle) toggle.checked = enabled;
+      Object.assign(lineZoom.analytics, { preset: "all", fromKey: "", toKey: "" });
     });
     $("payment-date-mode")?.addEventListener("change", () => {
       const enabled = $("payment-date-mode").checked;
       localStorage.setItem("finmaster.paymentDateMode", enabled ? "1" : "0");
       $("f-date-field").value = enabled ? "payment_date" : "order_date";
+      Object.assign(lineZoom.dash, { preset: "all", fromKey: "", toKey: "" });
+      Object.assign(lineZoom.analytics, { preset: "all", fromKey: "", toKey: "" });
       if (state.view === "dashboard") renderDashboard();
       if (state.view === "analytics") renderAnalytics();
       if (state.view === "cashflow") renderCashflow();
