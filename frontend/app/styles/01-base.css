@@ -504,6 +504,27 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   gap: 12px;
 }
 .top-left, .top-right { display: flex; gap: 8px; align-items: center; }
+.payment-date-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.payment-date-switch input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.payment-date-switch:has(input:checked) { color: var(--accent); font-weight: 600; }
+@media (max-width: 900px) {
+  .payment-date-switch span { max-width: 74px; white-space: normal; line-height: 1.15; }
+}
 .search {
   width: min(420px, 42vw);
   position: relative;
