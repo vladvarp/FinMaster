@@ -797,7 +797,7 @@
     if (!f || focusedOrder()) return rows;
     if (f.filter && f.filter !== "all") rows = rows.filter(({ order: o }) => orderFilterMatch(o, f.filter));
     if (f.status) rows = rows.filter(({ line }) => line.status === f.status);
-    if (f.period && f.period !== "all") rows = rows.filter(({ line }) => dashPeriodMatch(line.order_date, f.period));
+    if (f.period && f.period !== "all") rows = rows.filter(({ line }) => dashPeriodMatch(rowDateIso(line, dashDateField()), f.period));
     return rows;
   }
 
@@ -1220,7 +1220,7 @@
 
     return allRows().filter(({ order, line, totals }) => {
       if (q && !matchesSearch(order, line, q)) return false;
-      const dt = dateDay(line[dateField]);
+      const dt = rowDateIso(line, dateField);
       if (from && dt && dt < from) return false;
       if (to && dt && dt > to) return false;
       if (from && !dt) return false;
@@ -1238,7 +1238,7 @@
 
   function periodStats(from, to, dateField = "order_date") {
     const rows = allRows().filter(({ line }) => {
-      const dt = dateDay(line[dateField]);
+      const dt = rowDateIso(line, dateField);
       if (from && (!dt || dt < from)) return false;
       if (to && (!dt || dt > to)) return false;
       return true;
@@ -1351,16 +1351,17 @@
     const now = new Date();
     const curKey = monthKeyOf(now.toISOString());
     const prevKey = monthKeyOf(new Date(now.getFullYear(), now.getMonth() - 1, 15).toISOString());
+    const fact = payFactOn("dashboard");
     let curMonth = 0;
     let prevMonth = 0;
     let curMonthCost = 0;
     rows.forEach(({ line, totals }) => {
-      const k = monthKeyOf(line.order_date);
+      const k = monthKeyOf(fact ? rowDateIso(line, "payment_date") : line.order_date);
       if (k === curKey) {
-        curMonth += totals.after;
-        curMonthCost += totals.cost;
+        if (totals.expense) curMonthCost += totals.cost;
+        else curMonth += fact ? totals.paid : totals.after;
       }
-      if (k === prevKey) prevMonth += totals.after;
+      if (!totals.expense && k === prevKey) prevMonth += fact ? totals.paid : totals.after;
     });
 
     const s = summarize(rows);
@@ -1369,12 +1370,16 @@
     const forecast = curMonth ? (curMonth / dayOfMonth) * daysInMonth : 0;
 
     const orderSums = new Map();
-    rows.forEach(({ order, totals }) => orderSums.set(order.id, (orderSums.get(order.id) || 0) + totals.after));
+    rows.forEach(({ order, totals }) => {
+      const add = fact && !totals.expense ? totals.paid : totals.after;
+      orderSums.set(order.id, (orderSums.get(order.id) || 0) + add);
+    });
     const paidOrders = [...orderSums.values()].filter((v) => v > 0);
     const avgCheck = paidOrders.length ? paidOrders.reduce((a, b) => a + b, 0) / paidOrders.length : 0;
 
-    const topCustomer = topBy(rows, ({ order }) => order.customer, ({ totals }) => totals.after);
-    const topProduct = topBy(rows, ({ line }) => line.product, ({ totals }) => totals.after);
+    const moneyOf = ({ totals }) => (fact && !totals.expense ? totals.paid : totals.after);
+    const topCustomer = topBy(rows, ({ order }) => order.customer, moneyOf);
+    const topProduct = topBy(rows, ({ line }) => line.product, moneyOf);
 
     const monthAgo = localStamp(new Date(now.getTime() - 30 * 86400000));
     const overdue = rows.filter(({ line, totals }) => totals.unpaid > 0.005 && line.order_date && dateDay(line.order_date) < monthAgo);
@@ -1384,7 +1389,8 @@
     const recentOrders = new Set();
     const olderOrders = new Set();
     rows.forEach(({ order, line }) => {
-      const d = dateDay(line.order_date);
+      if (fact && isExpenseLine(line)) return;
+      const d = fact ? dateDay(line.payment_date) : dateDay(line.order_date);
       if (!d) return;
       if (d >= monthAgo) recentOrders.add(order.id);
       else if (d >= twoMonthsAgo) olderOrders.add(order.id);
@@ -1415,7 +1421,7 @@
       insightCard({
         tint: "#0f766e",
         ico: "▲",
-        label: "Выручка за месяц",
+        label: fact ? "Поступило за месяц" : "Выручка за месяц",
         value: money(curMonth),
         note: `прошлый месяц ${money(prevMonth)}`,
         trend: trendChip(curMonth, prevMonth),
@@ -1466,7 +1472,7 @@
       insightCard({
         tint: "#0284c7",
         ico: "◐",
-        label: "Заказов за 30 дней",
+        label: fact ? "Оплат за 30 дней" : "Заказов за 30 дней",
         value: String(recentOrders.size),
         note: `предыдущие 30 дней: ${olderOrders.size}`,
         trend: trendChip(recentOrders.size, olderOrders.size),
@@ -1570,7 +1576,9 @@
   function trendDatasets(rows, group, dateField, lastN, chart) {
     const map = new Map();
     rows.forEach(({ line, totals }) => {
-      const k = groupKey(line[dateField] || line.order_date, group);
+      const iso = rowDateIso(line, dateField);
+      if (dateField === "payment_date" && !iso) return;
+      const k = groupKey(iso, group);
       let b = map.get(k);
       if (!b) {
         b = { after: 0, paid: 0, unpaid: 0, cost: 0 };
@@ -2119,8 +2127,9 @@
     const rows = dashRows();
     const win = dashChartWindow();
     if (!win) return rows;
+    const field = dashDateField();
     return rows.filter(({ line }) => {
-      const dt = dateDay(line.order_date);
+      const dt = rowDateIso(line, field);
       if (!dt) return win.undated;
       if (win.from && dt < win.from) return false;
       if (win.to && dt > win.to) return false;
@@ -2132,15 +2141,15 @@
     const win = dashChartWindow();
     const range = win?.from && win?.to ? `${win.from} — ${win.to}` : "";
     const order = focusedOrder();
+    let text;
     if (order) {
       const base = `только заказ ${order.number || "—"}`;
-      return range ? `${base} · ${range}` : base;
-    }
-    if (remoteStatsActive()) {
+      text = range ? `${base} · ${range}` : base;
+    } else if (remoteStatsActive()) {
       const base = `фильтры сводки: ${remoteStatsLabel()}`;
-      return range ? `${base} · ${range}` : base;
-    }
-    return range || "считаются по всем заказам отчёта";
+      text = range ? `${base} · ${range}` : base;
+    } else text = range || "считаются по всем заказам отчёта";
+    return payFactOn("dashboard") ? `${text} · по дате оплаты` : text;
   }
 
   function refreshDashScope() {
@@ -2276,15 +2285,17 @@
   }
 
   function dashDayTitle(label) {
+    const fact = payFactOn("dashboard");
     const p = zoomParseIso(zoomKeyDate(label));
-    if (!p) return "Без даты заказа";
-    return `${p.d} ${ZOOM_MONTHS_GEN[p.m]} ${p.y}`;
+    if (!p) return fact ? "Без даты оплаты" : "Без даты заказа";
+    return `${p.d} ${ZOOM_MONTHS_GEN[p.m]} ${p.y}${fact ? " · оплата" : ""}`;
   }
 
   function dashRowsForLabel(label) {
+    const field = dashDateField();
     const iso = zoomKeyDate(label);
     return dashRows().filter(({ line }) => {
-      const dt = dateDay(line.order_date);
+      const dt = rowDateIso(line, field);
       return iso ? dt === iso : !dt;
     });
   }
@@ -2338,6 +2349,7 @@
               : line.status || "—";
             return `<tr>
               <td>${esc(order.number || "—")}</td>
+              <td>${esc(order.name || "—")}</td>
               <td>${esc(order.customer || "—")}</td>
               <td>${esc(line.product || line.order_type || "—")}</td>
               <td class="num">${esc(amount)}</td>
@@ -2346,14 +2358,17 @@
             </tr>`;
           })
           .join("")
-      : `<tr><td colspan="6">В этот день нет позиций</td></tr>`;
-    $("dash-day-table").innerHTML = `<table class="data"><thead><tr><th>№</th><th>Заказчик</th><th>Позиция</th><th class="num">Итог</th><th class="num">Долг</th><th>Статус</th></tr></thead><tbody>${body}</tbody></table>`;
+      : `<tr><td colspan="7">В этот день нет позиций</td></tr>`;
+    $("dash-day-table").innerHTML = `<table class="data"><thead><tr><th>№</th><th>Название</th><th>Заказчик</th><th>Позиция</th><th class="num">Итог</th><th class="num">Долг</th><th>Статус</th></tr></thead><tbody>${body}</tbody></table>`;
     modal.classList.add("open");
   }
 
   function renderDashboard() {
+    paintPayFact("dashboard");
+    const title = $("dash-line-title");
+    if (title) title.textContent = payFactOn("dashboard") ? "По дате оплаты" : "Выручка по дням";
     renderDashFocus();
-    paintTrendLine($("chart-dash-line"), dashRows(), "day", "order_date");
+    paintTrendLine($("chart-dash-line"), dashRows(), "day", dashDateField());
     refreshDashScope();
   }
 
@@ -2581,6 +2596,56 @@
     ["status", "Статус", 140],
     ["actions", "", 156],
   ];
+
+  function payFactOn(section) {
+    const box = state.doc?.ui?.pay_fact;
+    return !!(box && box[section]);
+  }
+
+  function setPayFact(section, on) {
+    if (!state.doc) return;
+    const ui = ensureUi();
+    if (!ui.pay_fact || typeof ui.pay_fact !== "object") ui.pay_fact = {};
+    const next = !!on;
+    if (!!ui.pay_fact[section] === next) return;
+    ui.pay_fact[section] = next;
+    if (section === "cash") cashResetFilters();
+    markDirty("Факт оплаты");
+  }
+
+  function paintPayFact(section) {
+    const on = payFactOn(section);
+    document.querySelectorAll(`[data-pay-fact="${section}"]`).forEach((el) => {
+      el.checked = on;
+    });
+  }
+
+  function dashDateField() {
+    return payFactOn("dashboard") ? "payment_date" : "order_date";
+  }
+
+  function rowDateIso(line, dateField) {
+    if (dateField === "payment_date" && !isExpenseLine(line)) return dateDay(line.payment_date) || "";
+    return dateDay(line.order_date) || "";
+  }
+
+  function bindPayFact() {
+    document.addEventListener("change", (e) => {
+      const input = e.target?.closest?.("[data-pay-fact]");
+      if (!input || !state.doc) return;
+      const section = input.dataset.payFact;
+      if (!["dashboard", "analytics", "cash", "forecast"].includes(section)) return;
+      setPayFact(section, input.checked);
+      if (section === "analytics") {
+        const field = $("f-date-field");
+        if (field) field.value = payFactOn("analytics") ? "payment_date" : "order_date";
+      }
+      if (section === "dashboard") renderDashboard();
+      else if (section === "analytics") renderAnalytics();
+      else if (section === "cash") renderCashflow();
+      else if (section === "forecast") renderForecast();
+    });
+  }
 
   function ensureUi() {
     if (!state.doc.ui || typeof state.doc.ui !== "object") state.doc.ui = { sidebar_collapsed: false, column_widths: {} };
@@ -3725,11 +3790,14 @@
   }
 
   function renderAnalytics() {
+    paintPayFact("analytics");
+    const fieldEl = $("f-date-field");
+    if (fieldEl) fieldEl.value = payFactOn("analytics") ? "payment_date" : "order_date";
     fillFilterSelects();
     const rows = analyticsRows();
     const s = summarize(rows);
     const group = $("f-group").value;
-    const dateField = $("f-date-field").value;
+    const dateField = fieldEl?.value === "payment_date" ? "payment_date" : "order_date";
     paintTrendLine($("chart-an-line"), rows, group, dateField);
 
     const a = periodStats($("c-a-from").value, $("c-a-to").value, dateField);
@@ -3755,7 +3823,7 @@
     $("analytics-table").innerHTML = rows.length
       ? `<table class="data"><thead><tr>
           <th>№</th><th>Заказчик</th><th>Название</th><th>Тип</th><th>Продукт</th><th>Кол-во</th>
-          <th>Итог</th><th>Оплачено</th><th>Долг</th><th>Дата</th><th>Статус</th>
+          <th>Итог</th><th>Оплачено</th><th>Долг</th><th>${dateField === "payment_date" ? "Дата оплаты" : "Дата"}</th><th>Статус</th>
         </tr></thead><tbody>${rows
           .map(
             ({ order, line, totals }) => `<tr class="${totals.expense ? "is-expense" : ""}">
@@ -3765,7 +3833,7 @@
             <td class="num">${totals.expense ? `−${esc(money(totals.cost))}` : esc(money(totals.after))}</td>
             <td class="num">${totals.expense ? "—" : esc(money(totals.paid))}</td>
             <td class="num">${totals.expense ? "—" : esc(money(totals.unpaid))}</td>
-            <td>${esc(dateDay(line.order_date))}</td>
+            <td>${esc(rowDateIso(line, dateField))}</td>
             <td>${
               totals.expense
                 ? `<span class="pill expense-pill">${esc(kindLabel(totals.kind))}</span>`

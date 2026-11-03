@@ -240,8 +240,14 @@
           <div class="grid-2">
             <div class="card">
               <div class="chart-head">
-                <h3>Выручка по дням</h3>
-                <div class="chart-legend" id="dash-line-legend"></div>
+                <h3 id="dash-line-title">Выручка по дням</h3>
+                <div class="chart-head-tools">
+                  <label class="pay-fact" id="dash-pay-fact" title="График, плитки и списки по дате оплаты. Выключено — по дате заказа.">
+                    <input type="checkbox" data-pay-fact="dashboard" />
+                    По факту оплаты
+                  </label>
+                  <div class="chart-legend" id="dash-line-legend"></div>
+                </div>
               </div>
               <div class="chart-zoom" id="dash-line-zoom" hidden></div>
               <div class="chart-box"><canvas id="chart-dash-line"></canvas></div>
@@ -336,6 +342,10 @@
                 <button class="btn small" type="button" id="btn-preset-month">Этот месяц</button>
                 <button class="btn small" type="button" id="btn-preset-year">Этот год</button>
               </div>
+              <label class="pay-fact" title="Фильтры, график и сравнение по дате оплаты. Выключено — как выбрано в поле даты.">
+                <input type="checkbox" data-pay-fact="analytics" />
+                По факту оплаты
+              </label>
               <label class="filter-check"><input type="checkbox" id="f-unpaid" /> Только долги</label>
               <button class="btn small" type="button" id="btn-filters-reset">Сбросить</button>
             </div>
@@ -393,37 +403,41 @@
                 <option value="90">Прогноз на 90 дней</option>
               </select>
               <button class="btn" type="button" id="cash-copy">Копировать сводку</button>
+              <label class="pay-fact" title="Уже пришедшие деньги по дате оплаты. Выключено — дебиторка и прогноз поступлений.">
+                <input type="checkbox" data-pay-fact="cash" />
+                По факту оплаты
+              </label>
             </div>
             <div class="right hint" id="cash-note"></div>
           </div>
           <div class="kpis" id="cash-kpi"></div>
           <div class="grid-2">
             <div class="card">
-              <h3>Прогноз поступлений <span class="insights-sub">накопительно: по сроку оплаты и с учётом платёжной дисциплины заказчиков</span></h3>
+              <h3><span id="cash-line-title">Прогноз поступлений</span> <span class="insights-sub" id="cash-line-sub">накопительно: по сроку оплаты и с учётом платёжной дисциплины заказчиков</span></h3>
               <div class="chart-box"><canvas id="chart-cash-line"></canvas></div>
             </div>
             <div class="card">
-              <h3>Долг по заказчикам</h3>
+              <h3 id="cash-pie-title">Долг по заказчикам</h3>
               <div class="chart-box"><canvas id="chart-cash-pie"></canvas></div>
             </div>
           </div>
           <div class="grid-2" style="margin-top:12px">
             <div class="card">
-              <h3>Платёжный календарь <span class="insights-sub">нажмите день, чтобы отфильтровать реестр</span></h3>
+              <h3>Платёжный календарь <span class="insights-sub" id="cash-cal-sub">нажмите день, чтобы отфильтровать реестр</span></h3>
               <div id="cash-calendar"></div>
             </div>
             <div class="card">
-              <h3>Старение дебиторки</h3>
+              <h3 id="cash-aging-title">Старение дебиторки</h3>
               <div id="cash-aging"></div>
             </div>
           </div>
           <div class="card" style="margin-top:12px">
-            <h3>Реестр дебиторки <span class="insights-sub">оплата одной кнопкой, напоминание — в буфер обмена</span></h3>
+            <h3><span id="cash-table-title">Реестр дебиторки</span> <span class="insights-sub" id="cash-table-sub">оплата одной кнопкой, напоминание — в буфер обмена</span></h3>
             <div class="chips" id="cash-chips"></div>
             <div class="table-wrap" id="cash-table"></div>
           </div>
           <div class="card" style="margin-top:12px">
-            <h3>Кто должен <span class="insights-sub">дисциплина — средняя задержка оплаты относительно срока</span></h3>
+            <h3><span id="cash-debtors-title">Кто должен</span> <span class="insights-sub" id="cash-debtors-sub">дисциплина — средняя задержка оплаты относительно срока</span></h3>
             <div class="table-wrap" id="cash-debtors"></div>
           </div>
         </div>
@@ -437,6 +451,10 @@
                 <option value="cost">Затраты</option>
                 <option value="net">Чистыми</option>
               </select>
+              <label class="pay-fact" title="Ряд по дате оплаты. Выключено — по дате заказа.">
+                <input type="checkbox" data-pay-fact="forecast" />
+                По факту оплаты
+              </label>
               <select id="forecast-horizon" class="btn" title="На сколько вперёд считать">
                 <option value="6">6 месяцев</option>
                 <option value="12" selected>12 месяцев</option>

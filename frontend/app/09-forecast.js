@@ -363,12 +363,18 @@
     return { models: fitted, ensemble, low, high, hold, ensembleSmape, picked: source.map((model) => model.name) };
   }
 
+  function forecastLineDay(line, order) {
+    if (!payFactOn("forecast")) return dateDay(line.order_date) || orderNewestStamp(order);
+    if (isExpenseLine(line)) return dateDay(line.order_date) || "";
+    return dateDay(line.payment_date) || "";
+  }
+
   function forecastCollect() {
     const buckets = new Map();
     (state.doc?.orders || []).forEach((order) => {
       (order.lines || []).forEach((line) => {
         if (isFrozenLine(line)) return;
-        const day = dateDay(line.order_date) || orderNewestStamp(order);
+        const day = forecastLineDay(line, order);
         if (!day || day.length < 7) return;
         const key = day.slice(0, 7);
         const totals = lineTotals(line, order);
@@ -446,6 +452,8 @@
   }
 
   function renderForecast() {
+    paintPayFact("forecast");
+    const byPayment = payFactOn("forecast");
     const metric = forecastUi.metric;
     const horizon = forecastUi.horizon;
     const meta = forecastMetricMeta(metric);
@@ -455,7 +463,11 @@
     if (horizonBox) horizonBox.value = String(horizon);
     const history = forecastHistory(metric);
     if (history.values.length < 3) {
-      forecastEmpty("Нужно хотя бы три месяца с заказами. Прогноз строится по датам позиций в этом отчёте.");
+      forecastEmpty(
+        byPayment
+          ? "Нужно хотя бы три месяца с датой оплаты. Прогноз строится по фактическим оплатам в этом отчёте."
+          : "Нужно хотя бы три месяца с заказами. Прогноз строится по датам позиций в этом отчёте."
+      );
       return;
     }
     const result = forecastSeries(history.values, horizon, FORECAST_PERIOD, meta.allowNegative);
@@ -543,10 +555,12 @@
       ${body}</tbody></table>`;
     const checked = result.hold ? `Проверка на последних ${result.hold} мес.` : "Ряд короткий, проверка на хвосте недоступна.";
     const partial = history.partial ? " Текущий неполный месяц в обучение не входит." : "";
-    $("forecast-note").textContent = `${checked}${partial} Медиана моделей: ${result.picked.slice(0, 4).join(", ")}.`;
+    const factNote = byPayment ? " Ряд по дате оплаты." : "";
+    $("forecast-note").textContent = `${checked}${partial}${factNote} Медиана моделей: ${result.picked.slice(0, 4).join(", ")}.`;
+    const basis = byPayment ? "по дате оплаты · " : "";
     $("forecast-chart-sub").textContent = showBand
-      ? `${meta.label.toLowerCase()} · ансамбль и коридор. Кнопки над графиком переключают модель`
-      : `${meta.label.toLowerCase()} · ${selected.name}`;
+      ? `${basis}${meta.label.toLowerCase()} · ансамбль и коридор. Кнопки над графиком переключают модель`
+      : `${basis}${meta.label.toLowerCase()} · ${selected.name}`;
   }
 
   function bindForecast() {

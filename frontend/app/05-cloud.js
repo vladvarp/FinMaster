@@ -2772,6 +2772,7 @@
       const btn = e.target.closest("button[data-view]");
       if (btn) setView(btn.dataset.view);
     });
+    bindPayFact();
     bindCashflow();
     bindCalendar();
     bindFileMenu();
@@ -3696,8 +3697,11 @@
 
     ["f-from", "f-to", "f-date-field", "f-group", "f-status", "f-type", "f-customer", "f-product", "f-unit", "f-min", "f-max", "f-unpaid", "c-a-from", "c-a-to", "c-b-from", "c-b-to"].forEach(
       (id) => {
-        $(id).addEventListener("input", () => state.view === "analytics" && renderAnalytics());
-        $(id).addEventListener("change", () => state.view === "analytics" && renderAnalytics());
+        if (id !== "f-date-field") $(id).addEventListener("input", () => state.view === "analytics" && renderAnalytics());
+        $(id).addEventListener("change", () => {
+          if (id === "f-date-field" && state.doc) setPayFact("analytics", $(id).value === "payment_date");
+          if (state.view === "analytics") renderAnalytics();
+        });
       }
     );
     $("btn-filters-reset").addEventListener("click", () => {
@@ -3745,8 +3749,8 @@
       if (!next && LINE_METRICS.every((m) => (m.id === id ? false : on[m.id]))) return;
       chartPrefs.series[chart] = { ...on, [id]: next };
       persistChartPrefs();
-      if (chart === "analytics") paintTrendLine($("chart-an-line"), analyticsRows(), $("f-group").value, $("f-date-field").value);
-      else paintTrendLine($("chart-dash-line"), dashRows(), "day", "order_date");
+      if (chart === "analytics") paintTrendLine($("chart-an-line"), analyticsRows(), $("f-group").value, $("f-date-field").value === "payment_date" ? "payment_date" : "order_date");
+      else paintTrendLine($("chart-dash-line"), dashRows(), "day", dashDateField());
     });
     document.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-zoom-preset]");

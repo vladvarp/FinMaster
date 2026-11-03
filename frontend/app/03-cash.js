@@ -221,6 +221,14 @@
   }
 
   function renderCashflow() {
+    paintPayFact("cash");
+    const fact = payFactOn("cash");
+    paintCashHorizonLabels(fact);
+    paintCashTitles(fact);
+    if (fact) {
+      renderCashFact();
+      return;
+    }
     const data = cashData();
     const terms = $("cash-terms");
     if (terms && document.activeElement !== terms) terms.value = data.terms;
@@ -384,10 +392,352 @@
       <p class="hint aging-hint">Безнадёжная зона (просрочка больше 30 дней): ${money(bad)} — ${badShare}% дебиторки.${badShare >= 20 ? " Портфель требует работы с должниками." : ""}</p>`;
   }
 
+  const CASH_FACT_BUCKETS = [
+    { id: "early", label: "Раньше срока", color: "#0f766e" },
+    { id: "ontime", label: "В срок", color: "#059669" },
+    { id: "d7", label: "Позже на 1–7 дней", color: "#f59e0b" },
+    { id: "d30", label: "Позже на 8–30 дней", color: "#f97316" },
+    { id: "d60", label: "Позже на 31–60 дней", color: "#dc2626" },
+    { id: "d60p", label: "Позже больше 60 дней", color: "#7f1d1d" },
+    { id: "nodue", label: "Нет даты заказа", color: "#64748b" },
+  ];
+
+  function cashFactBucket(item, terms) {
+    if (item.lead == null) return "nodue";
+    const late = item.lead - terms;
+    if (late < -1) return "early";
+    if (late <= 1) return "ontime";
+    if (late <= 7) return "d7";
+    if (late <= 30) return "d30";
+    if (late <= 60) return "d60";
+    return "d60p";
+  }
+
+  function cashFactData() {
+    const terms = cashTerms();
+    const today = dayStart(new Date());
+    const history = cashDiscipline(terms);
+    const items = [];
+    allRows().forEach(({ order, line, totals }) => {
+      if (totals.expense || totals.paid <= 0.005) return;
+      const paidDay = parseDay(line.payment_date);
+      if (!paidDay) return;
+      const ordered = parseDay(line.order_date);
+      const customer = String(order.customer || "").trim() || "Без заказчика";
+      items.push({
+        order,
+        line,
+        totals,
+        customer,
+        amount: totals.paid,
+        due: paidDay,
+        lead: ordered ? Math.max(0, dayDiff(ordered, paidDay)) : null,
+      });
+    });
+    items.sort((a, b) => b.due - a.due || b.amount - a.amount);
+    return { terms, today, items, received: cashSum(items), history };
+  }
+
+  function cashFactVisible(data) {
+    const f = cashState();
+    const horizon = cashHorizon();
+    return data.items.filter((it) => {
+      if (f.customer && it.customer !== f.customer) return false;
+      if (f.bucket && cashFactBucket(it, data.terms) !== f.bucket) return false;
+      const ago = dayDiff(it.due, data.today);
+      const ahead = dayDiff(data.today, it.due);
+      if (f.day === "earlier" && !(ago > horizon)) return false;
+      if (f.day === "ahead" && !(ahead > horizon)) return false;
+      if (f.day && f.day !== "earlier" && f.day !== "ahead" && dayKey(it.due) !== f.day) return false;
+      if (f.filter === "week" && !(ago >= 0 && ago <= 7)) return false;
+      if (f.filter === "earlier" && !(ago > horizon)) return false;
+      if (f.filter === "ahead" && !(ahead > horizon)) return false;
+      return true;
+    });
+  }
+
+  function cashFactLateText(item, terms) {
+    if (item.lead == null) return "нет даты заказа";
+    const late = Math.round(item.lead - terms);
+    if (late > 1) return `позже на ${late} ${daysWord(late)}`;
+    if (late < -1) return `раньше на ${Math.abs(late)} ${daysWord(late)}`;
+    return "в срок";
+  }
+
+  function paintCashHorizonLabels(fact) {
+    const sel = $("cash-horizon");
+    if (!sel) return;
+    [...sel.options].forEach((opt) => {
+      opt.textContent = fact ? `Факт за ${opt.value} дней` : `Прогноз на ${opt.value} дней`;
+    });
+  }
+
+  function paintCashTitles(fact) {
+    const set = (id, text) => {
+      const el = $(id);
+      if (el) el.textContent = text;
+    };
+    set("cash-line-title", fact ? "Поступления по факту" : "Прогноз поступлений");
+    set("cash-line-sub", fact ? "накопительно за горизонт, по дате оплаты" : "накопительно: по сроку оплаты и с учётом платёжной дисциплины заказчиков");
+    set("cash-pie-title", fact ? "Кто заплатил" : "Долг по заказчикам");
+    set("cash-cal-sub", fact ? "дни, когда деньги уже пришли" : "нажмите день, чтобы отфильтровать реестр");
+    set("cash-aging-title", fact ? "Когда платили относительно срока" : "Старение дебиторки");
+    set("cash-table-title", fact ? "Реестр оплат" : "Реестр дебиторки");
+    set("cash-table-sub", fact ? "только позиции с суммой и датой оплаты" : "оплата одной кнопкой, напоминание — в буфер обмена");
+    set("cash-debtors-title", fact ? "Кто платил" : "Кто должен");
+    set("cash-debtors-sub", fact ? "сумма оплат и средняя задержка относительно срока" : "дисциплина — средняя задержка оплаты относительно срока");
+  }
+
+  function renderCashFactChart(data) {
+    const horizon = cashHorizon();
+    const step = horizon <= 30 ? 1 : 7;
+    const marks = [];
+    for (let ago = horizon; ago >= 0; ago -= step) marks.push(ago);
+    if (marks[marks.length - 1] !== 0) marks.push(0);
+    const start = addDays(data.today, -horizon);
+    const labels = marks.map((ago) => (ago === 0 ? "сегодня" : dayShortFmt.format(addDays(data.today, -ago))));
+    const values = marks.map((ago) => cashSum(data.items.filter((it) => it.due >= start && it.due <= addDays(data.today, -ago))));
+    FinCharts.line($("chart-cash-line"), {
+      labels,
+      datasets: [{ values, color: "#0f766e", label: "Поступило", fill: true }],
+    });
+  }
+
+  function renderCashFactCalendar(data) {
+    const horizon = cashHorizon();
+    const days = new Map();
+    const earlier = [];
+    const ahead = [];
+    data.items.forEach((it) => {
+      const ago = dayDiff(it.due, data.today);
+      const future = dayDiff(data.today, it.due);
+      if (ago > horizon) {
+        earlier.push(it);
+        return;
+      }
+      if (future > horizon) {
+        ahead.push(it);
+        return;
+      }
+      const key = dayKey(it.due);
+      if (!days.has(key)) days.set(key, { day: it.due, items: [] });
+      days.get(key).items.push(it);
+    });
+    const rows = [];
+    if (earlier.length) rows.push(cashDayRow({ key: "earlier", title: "Раньше", note: `дальше ${horizon} ${daysWord(horizon)} назад`, items: earlier, tone: "" }));
+    [...days.values()]
+      .sort((a, b) => a.day - b.day)
+      .forEach((g) => {
+        const ago = dayDiff(g.day, data.today);
+        const note = ago === 0 ? "сегодня" : ago > 0 ? `${ago} ${daysWord(ago)} назад` : `через ${dayDiff(data.today, g.day)} ${daysWord(dayDiff(data.today, g.day))}`;
+        rows.push(cashDayRow({ key: dayKey(g.day), title: dayLongFmt.format(g.day), note, items: g.items, tone: ago === 0 ? "soon" : "" }));
+      });
+    if (ahead.length) rows.push(cashDayRow({ key: "ahead", title: "Позже", note: "дата оплаты ещё впереди", items: ahead, tone: "" }));
+    $("cash-calendar").innerHTML = rows.length
+      ? `<div class="cash-days">${rows.join("")}</div>`
+      : `<div class="empty">Оплат с датой пока нет.</div>`;
+  }
+
+  function renderCashFactAging(data) {
+    const f = cashState();
+    const groups = CASH_FACT_BUCKETS.map((b) => {
+      const items = data.items.filter((it) => cashFactBucket(it, data.terms) === b.id);
+      return { ...b, items, sum: cashSum(items) };
+    });
+    const total = data.received;
+    if (total <= 0.005) {
+      $("cash-aging").innerHTML = `<div class="empty">Нет оплат с датой — сравнивать со сроком нечего.</div>`;
+      return;
+    }
+    const stack = groups
+      .filter((g) => g.sum > 0.005)
+      .map((g) => `<span class="aging-seg" style="flex:${g.sum};background:${g.color}" title="${esc(g.label)}: ${esc(money(g.sum))}"></span>`)
+      .join("");
+    const rows = groups
+      .map(
+        (g) => `<button type="button" class="aging-row${f.bucket === g.id ? " active" : ""}${g.sum > 0.005 ? "" : " dim"}" data-cash-bucket="${g.id}">
+          <i style="background:${g.color}"></i>
+          <span class="aging-label">${esc(g.label)}</span>
+          <span class="aging-share">${Math.round((g.sum / total) * 100)}%</span>
+          <span class="aging-sum">${esc(money(g.sum))}</span>
+        </button>`
+      )
+      .join("");
+    $("cash-aging").innerHTML = `<div class="aging-stack">${stack}</div><div class="aging-rows">${rows}</div>
+      <p class="hint aging-hint">Срок здесь — дата заказа плюс ${data.terms} ${daysWord(data.terms)}. Клик по корзине фильтрует реестр оплат.</p>`;
+  }
+
+  function renderCashFactChips(data) {
+    const f = cashState();
+    const horizon = cashHorizon();
+    const counts = {
+      all: data.items.length,
+      week: data.items.filter((it) => {
+        const ago = dayDiff(it.due, data.today);
+        return ago >= 0 && ago <= 7;
+      }).length,
+      earlier: data.items.filter((it) => dayDiff(it.due, data.today) > horizon).length,
+      ahead: data.items.filter((it) => dayDiff(data.today, it.due) > horizon).length,
+    };
+    const chip = (id, label) =>
+      `<button type="button" class="chip ${f.filter === id ? "active" : ""}" data-cash-filter="${id}">${label}<span class="chip-count">${counts[id]}</span></button>`;
+    let html = chip("all", "Все") + chip("week", "7 дней") + chip("earlier", "Раньше") + chip("ahead", "Позже");
+    if (f.day) html += `<button type="button" class="chip active" data-cash-clear="day" title="Убрать фильтр">День: ${esc(cashDayLabel(f.day))} ✕</button>`;
+    if (f.bucket) {
+      const bucket = CASH_FACT_BUCKETS.find((b) => b.id === f.bucket);
+      html += `<button type="button" class="chip active" data-cash-clear="bucket" title="Убрать фильтр">${esc(bucket?.label || f.bucket)} ✕</button>`;
+    }
+    if (f.customer) html += `<button type="button" class="chip active" data-cash-clear="customer" title="Убрать фильтр">${esc(f.customer)} ✕</button>`;
+    $("cash-chips").innerHTML = html;
+  }
+
+  function renderCashFactTable(data) {
+    const rows = cashFactVisible(data);
+    if (!rows.length) {
+      $("cash-table").innerHTML = `<div class="empty">Под выбранный фильтр нет оплат.</div>`;
+      return;
+    }
+    const body = rows
+      .map((it) => {
+        const bucket = CASH_FACT_BUCKETS.find((b) => b.id === cashFactBucket(it, data.terms));
+        return `<tr data-cash-line="${esc(it.line.id)}" data-cash-order="${esc(it.order.id)}" data-cash-customer="${esc(it.customer)}">
+          <td><button type="button" class="link-btn" data-cash-act="customer">${esc(it.customer)}</button></td>
+          <td>${esc(it.order.number || "—")}${it.order.name ? `<small class="cash-sub">${esc(it.order.name)}</small>` : ""}</td>
+          <td>${esc(it.line.product || "без продукта")}<small class="cash-sub">${esc(qtyValue(it.line))} ${esc(it.line.unit || "")}</small></td>
+          <td class="num">${esc(money(it.amount))}</td>
+          <td>${esc(cashDateText(it.due))}</td>
+          <td><span class="pill" style="background:${bucket?.color || "#64748b"}">${esc(cashFactLateText(it, data.terms))}</span></td>
+          <td><span class="pill" style="background:${statusMeta(it.line.status).color}">${esc(it.line.status)}</span></td>
+          <td class="cash-acts"><button class="btn small" type="button" data-cash-act="open">Заказ</button></td>
+        </tr>`;
+      })
+      .join("");
+    $("cash-table").innerHTML = `<table class="data cash-table"><thead><tr>
+        <th>Заказчик</th><th>Заказ</th><th>Позиция</th><th class="num">Оплачено</th><th>Дата оплаты</th><th>От срока</th><th>Статус</th><th></th>
+      </tr></thead><tbody>${body}</tbody>
+      <tfoot><tr>
+        <td colspan="3">Итого ${rows.length} ${posWord(rows.length)}</td>
+        <td class="num">${esc(money(cashSum(rows)))}</td>
+        <td colspan="4"></td>
+      </tr></tfoot></table>`;
+  }
+
+  function renderCashFactPayers(data) {
+    const map = new Map();
+    data.items.forEach((it) => {
+      const cur = map.get(it.customer) || { paid: 0, count: 0, orders: new Set(), last: null, leadSum: 0, leadN: 0 };
+      cur.paid += it.amount;
+      cur.count += 1;
+      cur.orders.add(it.order.id);
+      if (!cur.last || it.due > cur.last) cur.last = it.due;
+      if (it.lead != null) {
+        cur.leadSum += it.lead;
+        cur.leadN += 1;
+      }
+      map.set(it.customer, cur);
+    });
+    const list = [...map.entries()].map(([name, v]) => ({ name, ...v })).sort((a, b) => b.paid - a.paid);
+    if (!list.length) {
+      $("cash-debtors").innerHTML = `<div class="empty">Оплат с датой пока нет.</div>`;
+      return;
+    }
+    const body = list
+      .map((c) => {
+        const avg = c.leadN ? Math.round(c.leadSum / c.leadN - data.terms) : null;
+        const delay = avg == null ? "нет даты заказа" : cashDelayText(avg, true);
+        return `<tr data-cash-customer="${esc(c.name)}">
+          <td><button type="button" class="link-btn" data-cash-dact="filter">${esc(c.name)}</button></td>
+          <td class="num">${esc(money(c.paid))}</td>
+          <td class="num">${c.count} / ${c.orders.size}</td>
+          <td>${esc(cashDateText(c.last))}</td>
+          <td>${esc(delay)}</td>
+        </tr>`;
+      })
+      .join("");
+    $("cash-debtors").innerHTML = `<table class="data cash-table"><thead><tr>
+        <th>Заказчик</th><th class="num">Оплачено</th><th class="num">Поз. / зак.</th><th>Последняя оплата</th><th>От срока</th>
+      </tr></thead><tbody>${body}</tbody></table>`;
+  }
+
+  function cashFactSummary(data) {
+    const week = data.items.filter((it) => {
+      const ago = dayDiff(it.due, data.today);
+      return ago >= 0 && ago <= 7;
+    });
+    const month = data.items.filter((it) => {
+      const ago = dayDiff(it.due, data.today);
+      return ago >= 0 && ago <= 30;
+    });
+    const dso = Math.round(data.history.dso);
+    const out = [
+      `Касса по факту оплаты — ${state.doc.title || "отчёт"}`,
+      `На дату: ${dayLongFmt.format(data.today)}`,
+      "",
+      `Поступило с датой оплаты: ${money(data.received)} (${data.items.length} ${posWord(data.items.length)})`,
+      `За 7 дней: ${money(cashSum(week))}, за 30 дней: ${money(cashSum(month))}`,
+      `Средний срок от заказа до оплаты: ${data.history.known ? `${dso} ${daysWord(dso)}` : "нет данных"}`,
+      "",
+      "Как платили относительно срока:",
+    ];
+    CASH_FACT_BUCKETS.forEach((b) => {
+      const sum = cashSum(data.items.filter((it) => cashFactBucket(it, data.terms) === b.id));
+      if (sum > 0.005) out.push(`  • ${b.label}: ${money(sum)}`);
+    });
+    return out.join("\n");
+  }
+
+  function renderCashFact() {
+    const data = cashFactData();
+    const terms = $("cash-terms");
+    if (terms && document.activeElement !== terms) terms.value = data.terms;
+    $("cash-horizon").value = String(cashHorizon());
+    $("cash-note").textContent = "В этом режиме только деньги с заполненной датой оплаты. Долги и кнопка «Оплата» вернутся, если выключить тумблер.";
+    const week = data.items.filter((it) => {
+      const ago = dayDiff(it.due, data.today);
+      return ago >= 0 && ago <= 7;
+    });
+    const month = data.items.filter((it) => {
+      const ago = dayDiff(it.due, data.today);
+      return ago >= 0 && ago <= 30;
+    });
+    const dso = Math.round(data.history.dso);
+    $("cash-kpi").innerHTML = `
+      <div class="kpi ok">
+        <div class="label">Поступило за 7 дней</div>
+        <div class="value">${money(cashSum(week))}</div>
+        <div class="sub">${week.length} ${posWord(week.length)} · за 30 дней ${money(cashSum(month))}</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Поступило за 30 дней</div>
+        <div class="value">${money(cashSum(month))}</div>
+        <div class="sub">${month.length} ${posWord(month.length)}</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Средний срок оплаты</div>
+        <div class="value">${data.history.known ? `${dso} ${daysWord(dso)}` : "нет данных"}</div>
+        <div class="sub">от даты заказа до даты оплаты</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Всего с датой оплаты</div>
+        <div class="value">${money(data.received)}</div>
+        <div class="sub">${data.items.length} ${posWord(data.items.length)}</div>
+      </div>
+    `;
+    renderCashFactChart(data);
+    renderCashPie(data);
+    renderCashFactCalendar(data);
+    renderCashFactAging(data);
+    renderCashFactChips(data);
+    renderCashFactTable(data);
+    renderCashFactPayers(data);
+  }
+
   function cashDayLabel(key) {
     if (key === "overdue") return "просрочка";
     if (key === "nodate") return "без срока";
     if (key === "later") return "за горизонтом";
+    if (key === "earlier") return "раньше";
+    if (key === "ahead") return "позже";
     const day = keyToDay(key);
     return day ? dayShortFmt.format(day) : key;
   }
@@ -598,7 +948,7 @@
     if (!btn) return;
     const tr = btn.closest("tr[data-cash-line]");
     if (!tr) return;
-    const data = cashData();
+    const data = payFactOn("cash") ? cashFactData() : cashData();
     const item = data.items.find((it) => it.line.id === tr.dataset.cashLine);
     if (!item) return;
     const act = btn.dataset.cashAct;
@@ -657,7 +1007,8 @@
     });
     $("cash-copy")?.addEventListener("click", () => {
       if (!state.doc) return;
-      cashCopy(cashSummaryText(cashData()), "Сводка по кассе скопирована");
+      if (payFactOn("cash")) cashCopy(cashFactSummary(cashFactData()), "Сводка по оплатам скопирована");
+      else cashCopy(cashSummaryText(cashData()), "Сводка по кассе скопирована");
     });
     $("cash-calendar")?.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-cash-day]");
