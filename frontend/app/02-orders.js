@@ -1228,6 +1228,7 @@
       if (paymentMode && (totals.expense || totals.paid <= 0.005)) return false;
       if (q && !matchesSearch(order, line, q)) return false;
       const dt = dateDay(line[dateField]);
+      if (paymentMode && !dt) return false;
       if (from && dt && dt < from) return false;
       if (to && dt && dt > to) return false;
       if (from && !dt) return false;
@@ -1610,6 +1611,11 @@
     const on = lineSeriesOn(chart);
     const el = $(LINE_LEGEND_ID[chart] || LINE_LEGEND_ID.dash);
     if (!el) return;
+    const paymentMode = chart === "dash" ? paymentDateMode() : chart === "analytics" && $("f-date-field")?.value === "payment_date";
+    if (paymentMode) {
+      el.innerHTML = `<span class="chart-leg on"><i style="background:#059669"></i>Фактические поступления</span>`;
+      return;
+    }
     el.innerHTML = LINE_METRICS.map(
       (m) =>
         `<button type="button" class="chart-leg ${on[m.id] ? "on" : ""}" data-line-chart="${chart}" data-line-series="${m.id}" title="${on[m.id] ? "Скрыть ряд" : "Показать ряд"}">
@@ -2205,7 +2211,7 @@
       const base = `фильтры сводки: ${remoteStatsLabel()}`;
       return range ? `${base} · ${range}` : base;
     }
-    return range || "считаются по всем заказам отчёта";
+    return range || (paymentDateMode() ? "считаются по датам фактической оплаты" : "считаются по всем заказам отчёта");
   }
 
   function refreshDashScope() {
