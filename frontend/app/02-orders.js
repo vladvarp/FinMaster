@@ -2186,11 +2186,13 @@
 
   function dashScopedRows() {
     const rows = dashRows();
-    const win = dashChartWindow();
-    if (!win) return rows;
     const dateField = paymentDateMode() ? "payment_date" : "order_date";
-    return rows.filter(({ line, totals }) => {
-      if (dateField === "payment_date" && (totals.expense || totals.paid <= 0.005)) return false;
+    const datedRows = dateField === "payment_date"
+      ? rows.filter(({ line, totals }) => !totals.expense && totals.paid > 0.005 && !!dateDay(line.payment_date))
+      : rows;
+    const win = dashChartWindow();
+    if (!win) return datedRows;
+    return datedRows.filter(({ line }) => {
       const dt = dateDay(line[dateField]);
       if (!dt) return win.undated;
       if (win.from && dt < win.from) return false;
@@ -3804,6 +3806,8 @@
     const s = summarize(rows);
     const group = $("f-group").value;
     const dateField = $("f-date-field").value;
+    const unpaidFilter = $("f-unpaid");
+    if (unpaidFilter) unpaidFilter.disabled = dateField === "payment_date";
     paintTrendLine($("chart-an-line"), rows, group, dateField);
 
     const a = periodStats($("c-a-from").value, $("c-a-to").value, dateField);
@@ -3829,16 +3833,16 @@
     $("analytics-table").innerHTML = rows.length
       ? `<table class="data"><thead><tr>
           <th>№</th><th>Заказчик</th><th>Название</th><th>Тип</th><th>Продукт</th><th>Кол-во</th>
-          <th>Итог</th><th>Оплачено</th><th>Долг</th><th>Дата</th><th>Статус</th>
+          <th>${dateField === "payment_date" ? "Поступление" : "Итог"}</th><th>${dateField === "payment_date" ? "—" : "Оплачено"}</th><th>${dateField === "payment_date" ? "—" : "Долг"}</th><th>Дата</th><th>Статус</th>
         </tr></thead><tbody>${rows
           .map(
             ({ order, line, totals }) => `<tr class="${totals.expense ? "is-expense" : ""}">
             <td>${esc(order.number)}</td><td>${esc(order.customer)}</td><td>${esc(order.name)}</td>
             <td>${esc(line.order_type)}</td><td>${esc(line.product)}</td>
             <td class="num">${esc(qtyValue(line))} ${esc(line.unit)}</td>
-            <td class="num">${totals.expense ? `−${esc(money(totals.cost))}` : esc(money(totals.after))}</td>
-            <td class="num">${totals.expense ? "—" : esc(money(totals.paid))}</td>
-            <td class="num">${totals.expense ? "—" : esc(money(totals.unpaid))}</td>
+            <td class="num">${totals.expense ? `−${esc(money(totals.cost))}` : esc(money(dateField === "payment_date" ? totals.paid : totals.after))}</td>
+            <td class="num">${totals.expense || dateField === "payment_date" ? "—" : esc(money(totals.paid))}</td>
+            <td class="num">${totals.expense || dateField === "payment_date" ? "—" : esc(money(totals.unpaid))}</td>
             <td>${esc(dateDay(line[dateField]))}</td>
             <td>${
               totals.expense
@@ -3852,8 +3856,8 @@
             <td colspan="5">Итого</td>
             <td class="num">${rows.length} поз.</td>
             <td class="num">${esc(money(s.after))}</td>
-            <td class="num">${esc(money(s.paid))}</td>
-            <td class="num">${esc(money(s.unpaid))}</td>
+            <td class="num">${dateField === "payment_date" ? "—" : esc(money(s.paid))}</td>
+            <td class="num">${dateField === "payment_date" ? "—" : esc(money(s.unpaid))}</td>
             <td colspan="2">${s.orderCount} зак.</td>
           </tr>${
             s.cost
