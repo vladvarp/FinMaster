@@ -2900,7 +2900,7 @@
             <div class="field"><label>Статус всем строкам</label>
               <select data-g="status"><option value="">— не менять —</option>${optionList(statusNames, "")}</select>
             </div>
-            <button class="btn small primary" data-act="payall" title="В каждую строку запишет её итог, сегодняшнюю дату оплаты и при полной оплате поставит статус «оплачено»">Оплатить все типы</button>
+            <button class="btn small primary" data-act="payall" title="Оплатит только неоплаченные и частично оплаченные позиции, не меняя даты уже оплаченных">Оплатить все типы</button>
           </div>
           <div class="table-wrap">
             <table class="data">
