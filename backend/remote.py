@@ -34,6 +34,7 @@ def _history_payload(raw: Any) -> dict[str, Any]:
                 "label": str(item.get("label") or "Правка"),
                 "source": item.get("source") if item.get("source") in {"mobile", "desk", "web"} else "pc",
                 "device": str(item.get("device") or {"mobile": "Телефон", "web": "WEB", "desk": "Браузер"}.get(str(item.get("source") or ""), "ПК")),
+                "unsaved": bool(item.get("unsaved")),
             }
         )
     try:
@@ -49,6 +50,7 @@ def _history_payload(raw: Any) -> dict[str, Any]:
         "redo": bool(data.get("redo")),
         "index": index,
         "limit": max(5, min(200, limit)),
+        "saved_id": str(data.get("saved_id") or ""),
         "items": items,
     }
 

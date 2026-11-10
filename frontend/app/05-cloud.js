@@ -1446,7 +1446,7 @@
     }
     if (res.recent) renderRecent(res.recent);
     else if (res.path) pushLocalRecent(res.path, res.document.title);
-    setClean();
+    setClean({ keepHistoryPin: true });
     applyPreviewMode();
     showApp();
     setView(next);
@@ -1609,7 +1609,7 @@
           if (picked.cancelled || !picked.path) return false;
           path = picked.path;
         }
-        const history = historyDiskPayload();
+        const history = historyDiskPayload({ asSaved: true });
         let body = { path, document: state.doc, history, new_id: fromPreview };
         if (window.FM_DESK && window.FM_DESK_BASE && window.FM_DESK_BASE.path === path && typeof window.FM_DESK_PATCH === "function") {
           let patch = null;

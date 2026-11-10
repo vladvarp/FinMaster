@@ -431,7 +431,43 @@ def _clean_history_item(item: dict[str, Any]) -> dict[str, Any] | None:
         "source": str(item.get("source") or "") if str(item.get("source") or "") in {"mobile", "web", "desk", "pc"} else "pc",
         "device": str(item.get("device") or {"mobile": "Телефон", "web": "WEB", "desk": "Браузер"}.get(str(item.get("source") or ""), "ПК")),
         "file": _snap_name(item.get("file") or item_id),
+        **({"unsaved": True} if item.get("unsaved") else {}),
     }
+
+
+def _history_index(value: Any, fallback: int) -> int:
+    if value is None:
+        return fallback
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _trim_history_items(items: list[dict[str, Any]], index: int, saved_id: str) -> tuple[list[dict[str, Any]], int, str]:
+    """Лимит не съедает последнее сохранение: при 20 шагах оно остаётся 21-м."""
+    limit = history_limit()
+    pin = str(saved_id or "")
+    rows = [item for item in items if isinstance(item, dict)]
+    if pin and not any(str(item.get("id") or "") == pin for item in rows):
+        pin = ""
+    while len(rows) > limit:
+        saved_at = next((i for i, item in enumerate(rows) if str(item.get("id") or "") == pin), -1) if pin else -1
+        if saved_at == 0 and len(rows) == limit + 1:
+            break
+        drop = 1 if saved_at == 0 else 0
+        del rows[drop]
+        if index > drop:
+            index -= 1
+        elif index == drop:
+            index = min(drop, len(rows) - 1) if rows else -1
+    if rows and (index < 0 or index >= len(rows)):
+        index = len(rows) - 1
+    if not rows:
+        index = -1
+    if pin and not any(str(item.get("id") or "") == pin for item in rows):
+        pin = ""
+    return rows, index, pin
 
 
 def load_history_meta(report_path: str) -> dict[str, Any]:
@@ -453,7 +489,10 @@ def load_history_meta(report_path: str) -> dict[str, Any]:
         index = len(items) - 1
     if not items:
         index = -1
-    return {"index": index, "items": items, "folder": os.path.basename(folder), "meta": True}
+    saved_id = str(meta.get("saved_id") or "")
+    if saved_id and not any(str(item.get("id") or "") == saved_id for item in items):
+        saved_id = ""
+    return {"index": index, "items": items, "folder": os.path.basename(folder), "meta": True, "saved_id": saved_id}
 
 
 def load_doc_history(report_path: str) -> dict[str, Any]:
@@ -481,16 +520,9 @@ def load_doc_history(report_path: str) -> dict[str, Any]:
         if doc is None:
             continue
         items.append({**info, "file": used, "doc": doc})
-    limit = history_limit()
-    if len(items) > limit:
-        extra = len(items) - limit
-        items = items[extra:]
-        index = max(-1, int(meta.get("index") or -1) - extra)
-    else:
-        index = int(meta.get("index") if meta.get("index") is not None else len(items) - 1)
-    if items and (index < 0 or index >= len(items)):
-        index = len(items) - 1
-    return {"index": index, "items": items, "folder": os.path.basename(folder)}
+    index = _history_index(meta.get("index"), len(items) - 1)
+    items, index, saved_id = _trim_history_items(items, index, str(meta.get("saved_id") or ""))
+    return {"index": index, "items": items, "folder": os.path.basename(folder), "saved_id": saved_id}
 
 
 def read_history_document(report_path: str, snap_id: str) -> dict[str, Any] | None:
@@ -560,18 +592,9 @@ def _append_doc_history(report_path: str, payload: dict[str, Any]) -> dict[str, 
     new_ids = {item["id"] for item in keep}
     if old_ids and new_ids.isdisjoint(old_ids) and len(keep) < max(1, len(old_items)):
         return load_doc_history(report_path)
+    index = _history_index(payload.get("index"), len(keep) - 1)
+    keep, index, saved_id = _trim_history_items(keep, index, str(payload.get("saved_id") or ""))
     keep_files = {HISTORY_META, *(item["file"] for item in keep)}
-    limit = history_limit()
-    if len(keep) > limit:
-        extra = len(keep) - limit
-        for gone in keep[:extra]:
-            keep_files.discard(gone["file"])
-        keep = keep[extra:]
-        index = max(-1, int(payload.get("index") or -1) - extra)
-    else:
-        index = int(payload.get("index") if payload.get("index") is not None else len(keep) - 1)
-    if keep and (index < 0 or index >= len(keep)):
-        index = len(keep) - 1
     try:
         for name in os.listdir(folder):
             if name in keep_files:
@@ -590,6 +613,7 @@ def _append_doc_history(report_path: str, payload: dict[str, Any]) -> dict[str, 
             "path": os.path.abspath(report_path),
             "title": title or os.path.splitext(os.path.basename(report_path))[0],
             "index": index,
+            "saved_id": saved_id,
             "items": keep,
         },
     )
@@ -652,17 +676,9 @@ def save_doc_history(report_path: str, payload: dict[str, Any]) -> dict[str, Any
         ok = {id(item) for item in written}
         keep = [item for item in keep if id(item) in ok or os.path.isfile(os.path.join(folder, item["file"]))]
         keep_files = {HISTORY_META, *(item["file"] for item in keep)}
-    limit = history_limit()
-    if len(keep) > limit:
-        extra = len(keep) - limit
-        for gone in keep[:extra]:
-            keep_files.discard(gone["file"])
-        keep = keep[extra:]
-        index = max(-1, int(payload.get("index") or -1) - extra)
-    else:
-        index = int(payload.get("index") if isinstance(payload, dict) and payload.get("index") is not None else len(keep) - 1)
-    if keep and (index < 0 or index >= len(keep)):
-        index = len(keep) - 1
+    index = _history_index(payload.get("index") if isinstance(payload, dict) else None, len(keep) - 1)
+    keep, index, saved_id = _trim_history_items(keep, index, str(payload.get("saved_id") or "") if isinstance(payload, dict) else "")
+    keep_files = {HISTORY_META, *(item["file"] for item in keep)}
     try:
         for name in os.listdir(folder):
             if name in keep_files:
@@ -681,6 +697,7 @@ def save_doc_history(report_path: str, payload: dict[str, Any]) -> dict[str, Any
             "path": os.path.abspath(report_path),
             "title": title or os.path.splitext(os.path.basename(report_path))[0],
             "index": index,
+            "saved_id": saved_id,
             "items": keep,
         },
     )

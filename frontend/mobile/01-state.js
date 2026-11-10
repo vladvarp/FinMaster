@@ -34,7 +34,7 @@
     library: { path: "", items: [] },
     listsSig: "",
     clients: [],
-    history: { undo: false, redo: false, index: -1, limit: 40, items: [] },
+    history: { undo: false, redo: false, index: -1, limit: 40, saved_id: "", items: [] },
     view: "orders",
     orderId: null,
     ordersResume: null,

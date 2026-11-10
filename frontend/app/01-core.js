@@ -129,6 +129,7 @@
     pendingLabel: "",
     saveChain: Promise.resolve(),
     savedStack: null,
+    savedId: "",
     limit: HISTORY_LIMIT_DEFAULT,
   };
 
@@ -269,6 +270,7 @@
       label: label || "Правка",
       source: meta?.source || actor.source,
       device: meta?.device || actor.device,
+      unsaved: true,
       json,
     };
   }
@@ -286,10 +288,16 @@
   }
 
   function historyTrim() {
+    const pin = history.savedId || "";
     while (history.stack.length > history.limit) {
-      history.stack.shift();
-      history.index = Math.max(0, history.index - 1);
+      const savedAt = pin ? history.stack.findIndex((item) => item.id === pin) : -1;
+      if (savedAt === 0 && history.stack.length === history.limit + 1) break;
+      const drop = savedAt === 0 ? 1 : 0;
+      history.stack.splice(drop, 1);
+      if (history.index > drop) history.index -= 1;
+      else if (history.index === drop) history.index = Math.min(drop, history.stack.length - 1);
     }
+    if (history.index >= history.stack.length) history.index = Math.max(0, history.stack.length - 1);
   }
 
   function historyCommit(label, meta, opts = {}) {
@@ -311,6 +319,7 @@
     const text = (cur && historyGuessLabel(cur.json, snap)) || label || history.pendingLabel || "Правка";
     const src = meta || (remote.applying ? { source: "mobile", device: remoteDeviceName(remote.origin) } : localActor());
     history.stack = history.stack.slice(0, history.index + 1);
+    if (history.savedId && !history.stack.some((item) => item.id === history.savedId)) history.savedId = "";
     history.stack.push(historyItem(snap, text, src));
     historyTrim();
     history.index = history.stack.length - 1;
@@ -335,30 +344,37 @@
       redo: history.index < history.stack.length - 1,
       index: history.index,
       limit: history.limit,
+      saved_id: history.savedId || "",
       items: history.stack.map((item) => ({
         id: item.id,
         at: item.at,
         label: item.label,
         source: item.source,
         device: item.device,
+        unsaved: !!item.unsaved,
       })),
     };
   }
 
-  function historyDiskPayload() {
+  function historyDiskPayload(opts = {}) {
+    const asSaved = !!opts.asSaved;
+    const savedId = asSaved ? (history.stack[history.index]?.id || "") : (history.savedId || "");
+    const pack = (item) => ({
+      id: item.id,
+      at: item.at,
+      label: item.label,
+      source: item.source,
+      device: item.device,
+      file: item.file || undefined,
+      unsaved: asSaved ? false : !!item.unsaved,
+    });
     if (window.FM_DESK) {
       const snap = history.stack[history.index];
       return {
         append: true,
         index: history.index,
-        items: history.stack.map((item) => ({
-          id: item.id,
-          at: item.at,
-          label: item.label,
-          source: item.source,
-          device: item.device,
-          file: item.file || undefined,
-        })),
+        saved_id: savedId,
+        items: history.stack.map(pack),
         snap: snap
           ? { id: snap.id, at: snap.at, label: snap.label, source: snap.source, device: snap.device }
           : null,
@@ -366,6 +382,7 @@
     }
     return {
       index: history.index,
+      saved_id: savedId,
       items: history.stack.map((item) => {
         let doc = null;
         try {
@@ -373,17 +390,27 @@
         } catch {
           doc = null;
         }
-        return { id: item.id, file: item.file || undefined, at: item.at, label: item.label, source: item.source, device: item.device, doc };
-      }).filter((item) => item.doc),
+        return doc ? { ...pack(item), doc } : null;
+      }).filter(Boolean),
     };
   }
 
   function markHistorySaved() {
     if (history.index < 0 || !history.stack.length) {
       history.savedStack = null;
+      history.savedId = "";
+      renderHistoryPanel();
       return;
     }
+    history.stack.forEach((item) => { item.unsaved = false; });
+    history.savedId = history.stack[history.index].id;
     history.savedStack = history.stack.slice(0, history.index + 1);
+    renderHistoryPanel();
+  }
+
+  function historySavedIdOf(payload) {
+    const id = String(payload?.saved_id || "");
+    return id && history.stack.some((item) => item.id === id) ? id : "";
   }
 
   function persistHistoryNow() {
@@ -409,6 +436,8 @@
     history.pendingLabel = "";
     history.stack = saved.slice();
     history.index = saved.length - 1;
+    history.savedId = history.stack[history.index]?.id || history.savedId || "";
+    history.stack.forEach((item) => { item.unsaved = false; });
     updateHistoryButtons();
     await persistHistoryNow();
   }
@@ -424,6 +453,16 @@
     }, 400);
   }
 
+  function finishAdoptedHistory() {
+    const at = history.savedId ? history.stack.findIndex((item) => item.id === history.savedId) : -1;
+    if (at >= 0) {
+      history.savedStack = history.stack.slice(0, at + 1);
+      renderHistoryPanel();
+      return;
+    }
+    markHistorySaved();
+  }
+
   function adoptHistory(payload, limit) {
     if (limit != null) history.limit = clampHistoryLimit(limit);
     const items = Array.isArray(payload?.items) ? payload.items : [];
@@ -435,6 +474,7 @@
         label: item.label || "Правка",
         source: item.source === "mobile" || item.source === "desk" || item.source === "web" ? item.source : "pc",
         device: item.device || (item.source === "mobile" ? "Телефон" : item.source === "web" ? "WEB" : item.source === "desk" ? "Браузер" : "ПК"),
+        unsaved: item.unsaved === true,
         json: "",
       }));
       if (!labels.length) {
@@ -442,9 +482,12 @@
         return;
       }
       history.stack = labels;
+      history.savedId = historySavedIdOf(payload);
       historyTrim();
       let index = Number(payload.index);
       if (!Number.isInteger(index) || index < 0 || index >= history.stack.length) index = history.stack.length - 1;
+      const savedAt = history.savedId ? history.stack.findIndex((item) => item.id === history.savedId) : -1;
+      if (savedAt >= 0) index = savedAt;
       if (state.doc && history.stack[index]) {
         try { history.stack[index].json = JSON.stringify(state.doc); } catch { /* экран уже показывает отчёт */ }
       }
@@ -452,7 +495,7 @@
       history.pending = false;
       history.pendingLabel = "";
       updateHistoryButtons();
-      markHistorySaved();
+      finishAdoptedHistory();
       return;
     }
     const restored = [];
@@ -466,6 +509,7 @@
           label: item.label || "Правка",
           source: item.source === "mobile" || item.source === "desk" || item.source === "web" ? item.source : "pc",
           device: item.device || (item.source === "mobile" ? "Телефон" : item.source === "web" ? "WEB" : item.source === "desk" ? "Браузер" : "ПК"),
+          unsaved: item.unsaved === true,
           json: JSON.stringify(item.doc),
         });
       } catch {
@@ -477,16 +521,21 @@
       return;
     }
     history.stack = restored;
+    history.savedId = historySavedIdOf(payload);
     historyTrim();
     let index = Number(payload?.index);
     if (!Number.isInteger(index) || index < 0 || index >= history.stack.length) index = history.stack.length - 1;
     const key = historyKey(state.doc);
     const match = history.stack.findIndex((item) => historyKey(item.json) === key);
+    if (match >= 0 && history.stack[match].id !== history.savedId) {
+      history.savedId = history.stack[match].id;
+      history.stack.forEach((item, i) => { item.unsaved = i > match; });
+    }
     history.index = match >= 0 ? match : index;
     history.pending = false;
     history.pendingLabel = "";
     updateHistoryButtons();
-    markHistorySaved();
+    finishAdoptedHistory();
   }
 
   function updateHistoryButtons() {
@@ -567,15 +616,14 @@
   async function setHistoryLimit(value) {
     const next = clampHistoryLimit(value);
     history.limit = next;
-    const extra = history.stack.length - history.limit;
-    if (extra > 0) {
-      history.stack = history.stack.slice(extra);
-      history.index = Math.max(0, history.index - extra);
-    }
+    historyTrim();
     if (state.desktop) {
       try {
         const res = await apiPost("/api/history/limit", { limit: next });
-        if (res.history_limit) history.limit = clampHistoryLimit(res.history_limit);
+        if (res.history_limit) {
+          history.limit = clampHistoryLimit(res.history_limit);
+          historyTrim();
+        }
       } catch {
         /* keep local */
       }
@@ -1699,7 +1747,8 @@
     list.innerHTML = rows
       .map((item) => {
         const i = history.stack.indexOf(item);
-        return `<div class="history-item ${i === history.index ? "active" : ""}">
+        const tone = item.id && item.id === history.savedId ? "is-saved" : item.unsaved ? "is-dirty" : "";
+        return `<div class="history-item ${i === history.index ? "active" : ""} ${tone}">
           <button type="button" class="history-jump" data-history-id="${esc(item.id)}">
             <span class="history-item-top"><b>${esc(historyItemLabel(item, i))}</b><time>${esc(historyTime(item.at))}</time></span>
             <small>${esc(item.device || (item.source === "mobile" ? "Телефон" : item.source === "web" ? "WEB" : item.source === "desk" ? "Браузер" : "ПК"))}</small>

@@ -50,7 +50,7 @@
   </style>
 </head>
 <body>
-  <p class="hint">Стенд панели часов. Нижний снимок — текущий. «≠» сравнивает выбранный шаг с открытым отчётом.</p>
+  <p class="hint">Стенд панели часов. Зелёная строка — последнее сохранение, оно остаётся сверх числа «Хранить». Оранжевая — правка ещё не записана в файл. Нижний снимок здесь текущий. «≠» сравнивает выбранный шаг с открытым отчётом.</p>
   <div class="history-panel">
     <div class="history-panel-h">
       <strong>История</strong>
@@ -59,14 +59,14 @@
     <button class="btn small history-manage" type="button" tabindex="-1">Резервные копии</button>
     <button class="btn small history-manage" type="button" tabindex="-1">Все истории отчётов</button>
     <div class="history-list">
-      <div class="history-item">
+      <div class="history-item is-saved">
         <button type="button" class="history-jump" tabindex="-1">
           <span class="history-item-top"><b>1042 Кухня · цена 18 000 → 16 000</b><time>23.10, 18:40</time></span>
           <small>ПК</small>
         </button>
         <button type="button" class="btn small history-diff" title="До и после относительно открытого отчёта" tabindex="-1">≠</button>
       </div>
-      <div class="history-item active">
+      <div class="history-item active is-dirty">
         <button type="button" class="history-jump" tabindex="-1">
           <span class="history-item-top"><b>1042 Кухня · цена 16 000 → 18 000</b><time>23.10, 18:42</time></span>
           <small>ПК</small>

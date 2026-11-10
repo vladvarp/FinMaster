@@ -34,7 +34,8 @@
               .reverse()
               .map((item) => {
                 const i = items.indexOf(item);
-                return `<div class="hist-info ${i === index ? "active" : ""}">
+                const tone = item.id && item.id === state.history.saved_id ? "is-saved" : item.unsaved ? "is-dirty" : "";
+                return `<div class="hist-info ${i === index ? "active" : ""} ${tone}">
                   <span>${esc(item.label || "Правка")}</span>
                   <small>${esc([historyTime(item.at), item.device || (item.source === "mobile" ? "Телефон" : "ПК")].filter(Boolean).join(" · "))}</small>
                 </div>`;

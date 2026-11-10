@@ -1537,11 +1537,7 @@
       if (ok) toast("Снимок восстановлен с телефона");
     } else if (cmd.type === "history_limit") {
       history.limit = clampHistoryLimit(cmd.limit);
-      const extra = history.stack.length - history.limit;
-      if (extra > 0) {
-        history.stack = history.stack.slice(extra);
-        history.index = Math.max(0, history.index - extra);
-      }
+      historyTrim();
       updateHistoryButtons();
       persistHistorySoon();
       toast(`Хранить снимков: ${history.limit}`);

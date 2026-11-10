@@ -591,9 +591,15 @@
     scheduleAutosave();
   }
 
-  function setClean() {
+  function setClean(opts = {}) {
     state.dirty = false;
-    markHistorySaved();
+    const at = history.savedId ? history.stack.findIndex((item) => item.id === history.savedId) : -1;
+    if (opts.keepHistoryPin && at >= 0) {
+      history.savedStack = history.stack.slice(0, at + 1);
+      renderHistoryPanel();
+    } else {
+      markHistorySaved();
+    }
     updateChrome();
     syncDirty();
     remotePublish();

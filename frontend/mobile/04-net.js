@@ -427,6 +427,7 @@
       redo: !!raw?.redo,
       index: Number.isInteger(raw?.index) ? raw.index : -1,
       limit: Math.max(5, Math.min(200, Number(raw?.limit) || 40)),
+      saved_id: String(raw?.saved_id || ""),
       items,
     };
   }

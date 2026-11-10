@@ -1745,8 +1745,13 @@ def _history_for_client(saved: dict) -> dict:
     for item in saved.get("items") or []:
         if not isinstance(item, dict):
             continue
-        items.append({key: item.get(key) for key in ("id", "at", "label", "source", "device", "file")})
-    return {"index": saved.get("index"), "items": items, "folder": saved.get("folder")}
+        items.append({key: item.get(key) for key in ("id", "at", "label", "source", "device", "file", "unsaved")})
+    return {
+        "index": saved.get("index"),
+        "items": items,
+        "folder": saved.get("folder"),
+        "saved_id": str(saved.get("saved_id") or ""),
+    }
 
 
 @app.post("/api/write")
