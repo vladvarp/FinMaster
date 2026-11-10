@@ -671,33 +671,52 @@
               <button type="button" class="search-clear" data-search-clear="cloud-search" title="Очистить" aria-label="Очистить поиск">×</button>
               <kbd>/</kbd>
             </label>
-            <label class="cloud-control">
+            <div class="cloud-control">
               <span>Геометрия</span>
-              <select id="cloud-layout">
-                <option value="galaxy">Звёздные системы</option>
-                <option value="orbit">Орбитальное кольцо</option>
-                <option value="timeline">Финансовая ось</option>
-                <option value="constellation">Созвездия работ</option>
-              </select>
-            </label>
-            <label class="cloud-control">
+              <div class="cloud-select" data-cloud-select="layout" data-value="galaxy">
+                <button type="button" class="cloud-select-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Геометрия">
+                  <b class="cloud-select-value">Звёздные системы</b>
+                </button>
+                <div class="cloud-select-menu" role="listbox">
+                  <button type="button" role="option" data-value="galaxy" aria-selected="true">Звёздные системы</button>
+                  <button type="button" role="option" data-value="orbit">Орбитальное кольцо</button>
+                  <button type="button" role="option" data-value="timeline">Финансовая ось</button>
+                  <button type="button" role="option" data-value="constellation">Созвездия работ</button>
+                </div>
+              </div>
+            </div>
+            <div class="cloud-control">
               <span>Цвет</span>
-              <select id="cloud-color">
-                <option value="status">По статусу</option>
-                <option value="customer">По заказчику</option>
-                <option value="debt">По оплате</option>
-                <option value="type">По типу</option>
-              </select>
-            </label>
-            <label class="cloud-control">
+              <div class="cloud-select" data-cloud-select="color" data-value="status">
+                <button type="button" class="cloud-select-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Цвет">
+                  <b class="cloud-select-value">По статусу</b>
+                </button>
+                <div class="cloud-select-menu" role="listbox">
+                  <button type="button" role="option" data-value="status" aria-selected="true">По статусу</button>
+                  <button type="button" role="option" data-value="kind">По виду</button>
+                  <button type="button" role="option" data-value="customer">По заказчику</button>
+                  <button type="button" role="option" data-value="debt">По оплате</button>
+                  <button type="button" role="option" data-value="share">По доле долга</button>
+                  <button type="button" role="option" data-value="type">По типу</button>
+                  <button type="button" role="option" data-value="product">По продукту</button>
+                  <button type="button" role="option" data-value="month">По месяцу</button>
+                </div>
+              </div>
+            </div>
+            <div class="cloud-control">
               <span>Размер</span>
-              <select id="cloud-size">
-                <option value="amount">По сумме</option>
-                <option value="debt">По долгу</option>
-                <option value="quantity">По количеству</option>
-                <option value="equal">Одинаковый</option>
-              </select>
-            </label>
+              <div class="cloud-select" data-cloud-select="size" data-value="amount">
+                <button type="button" class="cloud-select-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Размер">
+                  <b class="cloud-select-value">По сумме</b>
+                </button>
+                <div class="cloud-select-menu" role="listbox">
+                  <button type="button" role="option" data-value="amount" aria-selected="true">По сумме</button>
+                  <button type="button" role="option" data-value="debt">По долгу</button>
+                  <button type="button" role="option" data-value="quantity">По количеству</button>
+                  <button type="button" role="option" data-value="equal">Одинаковый</button>
+                </div>
+              </div>
+            </div>
             <label class="cloud-switch" title="Оставить только позиции с долгом">
               <input type="checkbox" id="cloud-debt" />
               <span></span>
@@ -723,10 +742,10 @@
                 <button class="btn primary" type="button" id="cloud-add-order">+ Создать заказ</button>
               </div>
               <div class="cloud-tooltip" id="cloud-tooltip" hidden></div>
-              <div class="cloud-heat-scale" id="cloud-heat-scale" hidden>
+              <div class="cloud-heat-scale" id="cloud-heat-scale" hidden title="Цвет узла — сумма долга. Подпись у крупного долга — его доля от всего долга в кадре.">
                 <b>Тепло долга</b>
                 <span class="cloud-heat-bar" aria-hidden="true"></span>
-                <span class="cloud-heat-ends"><i>слабый</i><i>сильный</i></span>
+                <span class="cloud-heat-ends"><i id="cloud-heat-lo">0</i><i id="cloud-heat-mid"></i><i id="cloud-heat-hi"></i></span>
                 <small id="cloud-heat-sum">неоплаченных позиций нет</small>
               </div>
               <div class="cloud-hint" id="cloud-hint"><b>Стрелка</b> заказчик → заказ → позиция · <b>колесо</b> масштаб · <b>drag</b> карта · <b>узел</b> сдвинуть · <b>двойной клик</b> открыть · <b>T</b> автотур · <b>Esc</b> свернуть карту</div>

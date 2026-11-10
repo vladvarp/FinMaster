@@ -112,37 +112,130 @@
     return Math.abs(h);
   }
 
+  const CLOUD_FLOW_COLORS = { income: "#0f766e", tax: "#d97706", cost: "#db2777", mixed: "#64748b" };
+  const CLOUD_MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+
   function cloudCategoryColor(value) {
     return CLOUD_COLORS[cloudHash(value) % CLOUD_COLORS.length];
   }
 
+  function cloudMonthKey(iso) {
+    const day = parseDay(iso);
+    if (!day || Number.isNaN(day.getTime())) return "";
+    return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  function cloudMonthLabel(key) {
+    if (!key) return "Без даты";
+    const [year, month] = String(key).split("-");
+    return `${CLOUD_MONTHS[Number(month) - 1] || month} ${year}`;
+  }
+
+  function cloudLatestMonth(keys) {
+    const list = keys.filter(Boolean).sort();
+    return list.length ? list[list.length - 1] : "";
+  }
+
+  function cloudOneOr(values, many, empty) {
+    const list = unique(values);
+    if (!list.length) return empty;
+    return list.length === 1 ? list[0] : many;
+  }
+
+  function cloudDominantFlow(rows) {
+    const score = { income: 0, tax: 0, cost: 0 };
+    rows.forEach(({ t }) => {
+      const flow = t.expense ? (t.kind === "tax" ? "tax" : "cost") : "income";
+      score[flow] += t.expense ? t.cost : t.after;
+    });
+    let best = "income";
+    let max = -1;
+    Object.entries(score).forEach(([flow, amount]) => {
+      if (amount > max) {
+        max = amount;
+        best = flow;
+      }
+    });
+    return max > 0.005 ? best : "income";
+  }
+
+  function cloudShareColor(item) {
+    if (item.flow === "tax" || item.flow === "cost") return CLOUD_FLOW_COLORS[item.flow];
+    const value = Number(item.value) || 0;
+    const debt = Number(item.debt) || 0;
+    const ratio = value > 0.005 ? Math.max(0, Math.min(1, debt / value)) : (debt > 0.005 ? 1 : 0);
+    const stops = [[0, [5, 150, 105]], [0.5, [217, 119, 6]], [1, [220, 38, 38]]];
+    const index = ratio < 0.5 ? 0 : 1;
+    const from = stops[index];
+    const to = stops[index + 1];
+    const u = (ratio - from[0]) / (to[0] - from[0] || 1);
+    const hex = (n) => Math.round(n).toString(16).padStart(2, "0");
+    const mix = (i) => from[1][i] + (to[1][i] - from[1][i]) * u;
+    return `#${hex(mix(0))}${hex(mix(1))}${hex(mix(2))}`;
+  }
+
   function cloudNodeColor(kind, item) {
     const mode = cloudState().color;
-    if (kind === "customer") return mode === "debt" ? (item.debt > 0.005 ? "#dc2626" : "#059669") : cloudCategoryColor(item.customer);
+    const flow = item.flow || "income";
+    if (mode === "kind") return CLOUD_FLOW_COLORS[flow] || CLOUD_FLOW_COLORS.mixed;
+    if (kind === "line" && (flow === "tax" || flow === "cost") && (mode === "status" || mode === "debt" || mode === "share")) return CLOUD_FLOW_COLORS[flow];
+    if (kind === "customer") {
+      if (mode === "debt") {
+        if ((item.value || 0) <= 0.005 && (flow === "tax" || flow === "cost")) return CLOUD_FLOW_COLORS[flow];
+        return item.debt > 0.005 ? "#dc2626" : "#059669";
+      }
+      if (mode === "share") return cloudShareColor(item);
+      if (mode === "type") return cloudCategoryColor(item.type || "Разные типы");
+      if (mode === "product") return cloudCategoryColor(item.product || "Разные продукты");
+      if (mode === "month") return cloudCategoryColor(item.month || "Без даты");
+      return cloudCategoryColor(item.customer);
+    }
     if (mode === "customer") return cloudCategoryColor(item.customer);
     if (mode === "type") return cloudCategoryColor(item.type || "Без типа");
+    if (mode === "product") return cloudCategoryColor(item.product || "Без продукта");
+    if (mode === "month") return cloudCategoryColor(item.month || "Без даты");
     if (mode === "debt") {
+      if ((flow === "tax" || flow === "cost") && (item.value || 0) <= 0.005) return CLOUD_FLOW_COLORS[flow];
       if (item.debt <= 0.005) return "#059669";
       if (item.paid > 0.005) return "#f59e0b";
       return "#dc2626";
     }
-    return statusMeta(item.status || "Без статуса").color;
+    if (mode === "share") return cloudShareColor(item);
+    if (!item.status) return CLOUD_FLOW_COLORS[flow] || "#64748b";
+    return statusMeta(item.status).color;
   }
 
   function cloudRadius(kind, item, maxima) {
-    if (kind === "customer") {
-      const factor = Math.min(1.45, Math.sqrt(Math.max(0, item.value) / Math.max(1, maxima.value)));
-      return 17 + factor * 13;
-    }
-    if (kind === "order") {
-      const factor = Math.min(1.25, Math.sqrt(Math.max(0, item.value) / Math.max(1, maxima.value)));
-      return 10 + factor * 10;
+    if (kind === "customer" || kind === "order") {
+      const basis = item.span != null ? item.span : item.value;
+      const cap = kind === "customer" ? 1.45 : 1.25;
+      const base = kind === "customer" ? 17 : 10;
+      const gain = kind === "customer" ? 13 : 10;
+      const factor = Math.min(cap, Math.sqrt(Math.max(0, basis) / Math.max(1, maxima.amount)));
+      return base + factor * gain;
     }
     const mode = cloudState().size;
     if (mode === "equal") return 6;
-    const key = mode === "debt" ? "debt" : mode === "quantity" ? "quantity" : "value";
+    const key = mode === "debt" ? "debt" : mode === "quantity" ? "quantity" : "amount";
     const factor = Math.sqrt(Math.max(0, item[key]) / Math.max(1, maxima[key]));
     return 4.5 + factor * 9.5;
+  }
+
+  function cloudLinePack(line, order) {
+    const t = lineTotals(line, order);
+    const expense = !!t.expense;
+    const flow = expense ? (t.kind === "tax" ? "tax" : "cost") : "income";
+    const percentMode = expense && t.mode !== "amount";
+    return {
+      line,
+      t,
+      expense,
+      flow,
+      amount: expense ? t.cost : t.after,
+      month: cloudMonthKey(line.order_date),
+      quantity: percentMode ? t.percent : Math.abs(qtyValue(line)),
+      unit: percentMode ? "%" : (line.unit || ""),
+    };
   }
 
   function cloudGraphData() {
@@ -153,34 +246,51 @@
       const orderText = [order.number, order.name, order.customer, order.notes].join(" ").toLocaleLowerCase("ru");
       const lines = (order.lines || []).filter((line) => {
         if (isFrozenLine(line)) return false;
-        const t = lineTotals(line);
-        if (t.expense) return false;
-        if (debtOnly && t.unpaid <= 0.005) return false;
+        const pack = cloudLinePack(line, order);
+        if (debtOnly && (pack.expense || pack.t.unpaid <= 0.005)) return false;
         if (!query || orderText.includes(query)) return true;
-        return [line.product, line.order_type, line.status, line.unit].join(" ").toLocaleLowerCase("ru").includes(query);
+        const flowName = pack.expense ? kindLabel(pack.flow) : "";
+        return [line.product, line.order_type, pack.expense ? "" : line.status, line.unit, flowName].join(" ").toLocaleLowerCase("ru").includes(query);
       });
       if (lines.length) orderRows.push({ order, lines });
     });
 
-    const maxima = { value: 1, debt: 1, quantity: 1 };
-    orderRows.forEach(({ lines }) => lines.forEach((line) => {
-      const t = lineTotals(line);
-      maxima.value = Math.max(maxima.value, t.after);
-      maxima.debt = Math.max(maxima.debt, t.unpaid);
-      maxima.quantity = Math.max(maxima.quantity, Math.abs(qtyValue(line)));
-    }));
+    const maxima = { amount: 1, debt: 1, quantity: 1 };
+    const packedRows = orderRows.map(({ order, lines }) => {
+      const packed = lines.map((line) => cloudLinePack(line, order));
+      packed.forEach((pack) => {
+        maxima.amount = Math.max(maxima.amount, pack.amount);
+        maxima.debt = Math.max(maxima.debt, pack.t.unpaid);
+        maxima.quantity = Math.max(maxima.quantity, pack.quantity);
+      });
+      return { order, packed };
+    });
 
     const customers = new Map();
-    orderRows.forEach(({ order, lines }) => {
+    packedRows.forEach(({ order, packed }) => {
       const name = String(order.customer || "Без заказчика").trim() || "Без заказчика";
-      if (!customers.has(name)) customers.set(name, { customer: name, orders: [], value: 0, paid: 0, debt: 0, positions: 0 });
+      if (!customers.has(name)) {
+        customers.set(name, {
+          customer: name,
+          orders: [],
+          rows: [],
+          value: 0,
+          paid: 0,
+          debt: 0,
+          cost: 0,
+          positions: 0,
+        });
+      }
       const c = customers.get(name);
       c.orders.push(order);
-      lines.forEach((line) => {
-        const t = lineTotals(line);
-        c.value += t.after;
-        c.paid += t.paid;
-        c.debt += t.unpaid;
+      packed.forEach((pack) => {
+        c.rows.push(pack);
+        if (pack.expense) c.cost += pack.t.cost;
+        else {
+          c.value += pack.t.after;
+          c.paid += pack.t.paid;
+          c.debt += pack.t.unpaid;
+        }
         c.positions += 1;
       });
     });
@@ -189,33 +299,46 @@
     const edges = [];
     customers.forEach((c) => {
       const id = `customer:${c.customer}`;
-      nodes.push({
+      const month = cloudLatestMonth(c.rows.map((pack) => pack.month));
+      const node = {
         id,
         kind: "customer",
         label: c.customer,
         customer: c.customer,
+        flow: cloudDominantFlow(c.rows),
         value: c.value,
+        amount: Math.max(c.value, c.cost),
+        span: Math.max(c.value, c.cost),
         paid: c.paid,
         debt: c.debt,
+        cost: c.cost,
         count: c.orders.length,
         positions: c.positions,
-        color: cloudNodeColor("customer", c),
-        radius: cloudRadius("customer", c, maxima),
-      });
+        type: cloudOneOr(c.rows.map((pack) => pack.line.order_type), "Разные типы", "Без типа"),
+        product: cloudOneOr(c.rows.map((pack) => pack.line.product), "Разные продукты", "Без продукта"),
+        month,
+        monthLabel: cloudMonthLabel(month),
+      };
+      node.color = cloudNodeColor("customer", node);
+      node.radius = cloudRadius("customer", node, maxima);
+      nodes.push(node);
     });
 
-    orderRows.forEach(({ order, lines }) => {
+    packedRows.forEach(({ order, packed }) => {
       const customer = String(order.customer || "Без заказчика").trim() || "Без заказчика";
-      const totals = lines.reduce((acc, line) => {
-        const t = lineTotals(line);
-        acc.value += t.after;
-        acc.paid += t.paid;
-        acc.debt += t.unpaid;
+      const income = packed.filter((pack) => !pack.expense);
+      const totals = packed.reduce((acc, pack) => {
+        if (pack.expense) acc.cost += pack.t.cost;
+        else {
+          acc.value += pack.t.after;
+          acc.paid += pack.t.paid;
+          acc.debt += pack.t.unpaid;
+        }
         return acc;
-      }, { value: 0, paid: 0, debt: 0 });
-      const first = lines.find((line) => line.order_date) || lines[0];
-      const statuses = unique(lines.map((line) => line.status).filter(Boolean));
-      const types = unique(lines.map((line) => line.order_type).filter(Boolean));
+      }, { value: 0, paid: 0, debt: 0, cost: 0 });
+      const first = packed.find((pack) => pack.line.order_date) || packed[0];
+      const statuses = unique(income.map((pack) => pack.line.status));
+      const month = cloudLatestMonth(packed.map((pack) => pack.month));
       const orderNode = {
         id: `order:${order.id}`,
         rawId: order.id,
@@ -225,43 +348,55 @@
         number: order.number || "—",
         name: order.name || "Без названия",
         customer,
-        status: statuses.length === 1 ? statuses[0] : "Смешанные статусы",
+        flow: cloudDominantFlow(packed),
+        status: !income.length ? "" : statuses.length === 1 ? statuses[0] : statuses.length ? "Смешанные статусы" : "Без статуса",
         statuses,
-        type: types.length === 1 ? types[0] : "Несколько типов",
+        type: cloudOneOr(packed.map((pack) => pack.line.order_type), "Несколько типов", "Без типа"),
+        product: cloudOneOr(packed.map((pack) => pack.line.product), "Разные продукты", "Без продукта"),
+        month,
+        monthLabel: cloudMonthLabel(month),
         value: totals.value,
+        amount: Math.max(totals.value, totals.cost),
+        span: Math.max(totals.value, totals.cost),
         paid: totals.paid,
         debt: totals.debt,
-        count: lines.length,
-        time: first?.order_date ? parseDay(first.order_date)?.getTime() ?? NaN : NaN,
+        cost: totals.cost,
+        count: packed.length,
+        time: first?.line.order_date ? parseDay(first.line.order_date)?.getTime() ?? NaN : NaN,
       };
       orderNode.color = cloudNodeColor("order", orderNode);
       orderNode.radius = cloudRadius("order", orderNode, maxima);
       nodes.push(orderNode);
       edges.push({ source: orderNode.parent, target: orderNode.id, kind: "customer" });
 
-      lines.forEach((line, index) => {
-        const t = lineTotals(line);
+      packed.forEach((pack, index) => {
+        const line = pack.line;
         const lineNode = {
           id: `line:${order.id}:${line.id}`,
           rawId: line.id,
           orderId: order.id,
           kind: "line",
           parent: orderNode.id,
-          label: line.product || line.order_type || `Позиция ${index + 1}`,
-          product: line.product || "Без продукта",
+          flow: pack.flow,
+          label: line.product || line.order_type || kindLabel(pack.flow) || `Позиция ${index + 1}`,
+          product: line.product || (pack.expense ? kindLabel(pack.flow) : "Без продукта"),
           type: line.order_type || "Без типа",
-          status: line.status || "Без статуса",
+          status: pack.expense ? "" : (line.status || "Без статуса"),
           customer,
           orderNumber: order.number || "—",
           orderName: order.name || "Без названия",
-          value: t.after,
-          paid: t.paid,
-          debt: t.unpaid,
-          quantity: Math.abs(qtyValue(line)),
-          unit: line.unit || "",
-          discount: t.discount,
+          value: pack.expense ? 0 : pack.t.after,
+          amount: pack.amount,
+          paid: pack.expense ? 0 : pack.t.paid,
+          debt: pack.expense ? 0 : pack.t.unpaid,
+          cost: pack.expense ? pack.t.cost : 0,
+          quantity: pack.quantity,
+          unit: pack.unit,
+          discount: pack.t.discount,
+          month: pack.month,
+          monthLabel: cloudMonthLabel(pack.month),
           orderDate: line.order_date || "",
-          paymentDate: line.payment_date || "",
+          paymentDate: pack.expense ? "" : (line.payment_date || ""),
           time: line.order_date ? parseDay(line.order_date)?.getTime() ?? orderNode.time : orderNode.time,
         };
         lineNode.color = cloudNodeColor("line", lineNode);
@@ -290,22 +425,41 @@
       <div class="${debt > 0.005 ? "debt" : ""}"><span>Долг</span><b>${esc(money(debt))}</b><small>${cloudPercent(paid, value)}% собрано</small></div>`;
   }
 
-  function renderCloudLegend(graph) {
+  function cloudLegendItems(graph) {
     const mode = cloudState().color;
-    let items;
+    const lines = graph.nodes.filter((node) => node.kind === "line");
+    const flowChip = (flow, label) => (lines.some((node) => node.flow === flow) ? [[label, CLOUD_FLOW_COLORS[flow]]] : []);
     if (mode === "debt") {
-      items = [["Оплачено", "#059669"], ["Частично", "#f59e0b"], ["Не оплачено", "#dc2626"]];
-    } else {
-      const key = mode === "customer" ? "customer" : mode === "type" ? "type" : "status";
-      const map = new Map();
-      graph.nodes.filter((node) => node.kind === "line").forEach((node) => {
-        const name = node[key] || "Без значения";
-        if (!map.has(name)) map.set(name, node.color);
-      });
-      items = [...map.entries()].slice(0, 9);
+      return [["Оплачено", "#059669"], ["Частично", "#f59e0b"], ["Не оплачено", "#dc2626"], ...flowChip("tax", "Налог"), ...flowChip("cost", "Затрата")];
     }
+    if (mode === "kind") return [...flowChip("income", "Доход"), ...flowChip("tax", "Налог"), ...flowChip("cost", "Затрата")];
+    if (mode === "share") {
+      return [["Нет долга", "#059669"], ["Половина", "#d97706"], ["Весь долг", "#dc2626"], ...flowChip("tax", "Налог"), ...flowChip("cost", "Затрата")];
+    }
+    if (mode === "month") {
+      const map = new Map();
+      lines.forEach((node) => {
+        const key = node.month || "";
+        if (!map.has(key)) map.set(key, [node.monthLabel || "Без даты", node.color]);
+      });
+      return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).map((entry) => entry[1]).slice(0, 9);
+    }
+    const key = mode === "customer" ? "customer" : mode === "type" ? "type" : mode === "product" ? "product" : "status";
+    const map = new Map();
+    lines.forEach((node) => {
+      if (mode === "status" && (node.flow === "tax" || node.flow === "cost")) return;
+      const name = node[key] || "Без значения";
+      if (!map.has(name)) map.set(name, node.color);
+    });
+    const items = [...map.entries()].slice(0, 9);
+    if (mode === "status") items.push(...flowChip("tax", "Налог"), ...flowChip("cost", "Затрата"));
+    return items;
+  }
+
+  function renderCloudLegend(graph) {
+    const items = cloudLegendItems(graph);
     $("cloud-legend").innerHTML = [
-      ...(cloudState().heat ? [`<span class="cloud-legend-heat" title="Цвет показывает, где сосредоточен долг"><i></i>тепло долга: слабый → сильный</span>`] : []),
+      ...(cloudState().heat ? [`<span class="cloud-legend-heat" title="Цвет узла — сумма долга, подпись — доля от всего долга"><i></i>тепло долга: мало → много</span>`] : []),
       `<span class="cloud-legend-kind"><i class="customer"></i>звезда — заказчик</span>`,
       `<span class="cloud-legend-kind"><i class="order"></i>планета — заказ</span>`,
       `<span class="cloud-legend-kind"><i class="line"></i>спутник — позиция</span>`,
@@ -356,14 +510,23 @@
     let actions = "";
     if (node.kind === "customer") {
       meta = `${node.count} ${ordWord(node.count)} · ${node.positions} ${posWord(node.positions)}`;
-      metrics = cloudMetric("Оборот", money(node.value)) + cloudMetric("Оплачено", money(node.paid)) + cloudMetric("Долг", money(node.debt), node.debt > 0.005);
+      metrics = node.value <= 0.005 && node.cost > 0.005
+        ? cloudMetric("Расход", money(-node.cost))
+        : cloudMetric("Оборот", money(node.value)) + cloudMetric("Оплачено", money(node.paid)) + cloudMetric("Долг", money(node.debt), node.debt > 0.005);
       actions = `<button class="btn primary" type="button" data-cloud-customer="${esc(node.customer)}">Показать только связи</button>
         <button class="btn" type="button" data-cloud-focus="${esc(node.id)}">Центрировать</button>`;
     } else if (node.kind === "order") {
       meta = `${esc(node.customer)} · ${node.count} ${posWord(node.count)}`;
-      metrics = cloudMetric("Сумма", money(node.value)) + cloudMetric("Оплачено", money(node.paid)) + cloudMetric("Долг", money(node.debt), node.debt > 0.005);
+      metrics = node.value <= 0.005 && node.cost > 0.005
+        ? cloudMetric("Расход", money(-node.cost))
+        : cloudMetric("Сумма", money(node.value)) + cloudMetric("Оплачено", money(node.paid)) + cloudMetric("Долг", money(node.debt), node.debt > 0.005);
       actions = `<button class="btn primary" type="button" data-cloud-open="${esc(node.rawId)}">Открыть заказ</button>
         <button class="btn" type="button" data-cloud-snapshot="${esc(node.rawId)}">Снимок</button>
+        <button class="btn" type="button" data-cloud-focus="${esc(node.id)}">Центрировать</button>`;
+    } else if (node.flow === "tax" || node.flow === "cost") {
+      meta = `${esc(node.orderNumber)} · ${esc(node.orderName)}`;
+      metrics = cloudMetric("Расход", money(-(node.amount || node.cost || 0)));
+      actions = `<button class="btn primary" type="button" data-cloud-open="${esc(node.orderId)}">Открыть заказ</button>
         <button class="btn" type="button" data-cloud-focus="${esc(node.id)}">Центрировать</button>`;
     } else {
       meta = `${esc(node.orderNumber)} · ${esc(node.orderName)}`;
@@ -371,15 +534,19 @@
       actions = `<button class="btn primary" type="button" data-cloud-open="${esc(node.orderId)}">Открыть заказ</button>
         <button class="btn" type="button" data-cloud-focus="${esc(node.id)}">Центрировать</button>`;
     }
-    const progress = cloudPercent(node.paid, node.value);
+    const expenseNode = node.flow === "tax" || node.flow === "cost";
+    const progress = expenseNode ? 0 : cloudPercent(node.paid, node.value);
+    const flowLabel = node.flow === "tax" ? "Налог" : node.flow === "cost" ? "Затрата" : "";
     box.innerHTML = `<div class="cloud-detail">
       <div class="cloud-detail-top"><span class="cloud-detail-dot" style="--node:${esc(node.color)}"></span><span>${kind}</span></div>
       <h3>${esc(node.label)}</h3>
       <p>${meta}</p>
       <div class="cloud-detail-metrics">${metrics}</div>
-      <div class="cloud-progress"><span style="width:${progress}%"></span></div>
-      <div class="cloud-progress-label"><span>Собираемость</span><b>${progress}%</b></div>
+      ${expenseNode || node.value <= 0.005 ? "" : `<div class="cloud-progress"><span style="width:${progress}%"></span></div>
+      <div class="cloud-progress-label"><span>Собираемость</span><b>${progress}%</b></div>`}
+      ${flowLabel ? `<div class="cloud-detail-row"><span>Вид</span><b>${flowLabel}</b></div>` : ""}
       ${node.status ? `<div class="cloud-detail-row"><span>Статус</span><b>${esc(node.status)}</b></div>` : ""}
+      ${node.cost > 0.005 && !expenseNode && node.value > 0.005 ? `<div class="cloud-detail-row"><span>Расход</span><b>${esc(money(-node.cost))}</b></div>` : ""}
       ${node.type ? `<div class="cloud-detail-row"><span>Тип</span><b>${esc(node.type)}</b></div>` : ""}
       ${node.quantity != null ? `<div class="cloud-detail-row"><span>Количество</span><b>${esc(String(node.quantity))} ${esc(node.unit || "")}</b></div>` : ""}
       ${node.orderDate ? `<div class="cloud-detail-row"><span>Дата заказа</span><b>${esc(cashDateText(parseDay(node.orderDate)))}</b></div>` : ""}
@@ -394,9 +561,12 @@
       tip.hidden = true;
       return;
     }
-    const kind = node.kind === "galaxy" ? "Галактика" : node.kind === "customer" ? "Заказчик" : node.kind === "order" ? "Заказ" : "Позиция";
+    const expenseNode = node.flow === "tax" || node.flow === "cost";
+    const kind = node.kind === "galaxy" ? "Галактика" : node.kind === "customer" ? "Заказчик" : node.kind === "order" ? "Заказ" : expenseNode ? (node.flow === "tax" ? "Налог" : "Затрата") : "Позиция";
     const extra = node.kind === "galaxy"
       ? `${node.origin === "recent" ? "недавний" : "FinMaster"} · ${node.orders || 0} зак.`
+      : expenseNode
+      ? `расход ${esc(money(-(node.amount || node.cost || 0)))}`
       : `${esc(money(node.value))}${node.debt > 0.005 ? ` · долг ${esc(money(node.debt))}` : ""}`;
     tip.innerHTML = `<small>${kind}</small><b>${esc(node.label)}</b><span>${extra}</span>`;
     tip.hidden = false;
@@ -432,9 +602,9 @@
   function syncCloudControls() {
     const s = cloudState();
     if ($("cloud-search") && document.activeElement !== $("cloud-search")) $("cloud-search").value = s.query;
-    if ($("cloud-layout")) $("cloud-layout").value = s.layout;
-    if ($("cloud-color")) $("cloud-color").value = s.color;
-    if ($("cloud-size")) $("cloud-size").value = s.size;
+    cloudPickValue("layout", s.layout);
+    cloudPickValue("color", s.color);
+    cloudPickValue("size", s.size);
     if ($("cloud-debt")) $("cloud-debt").checked = !!s.debtOnly;
     $("cloud-labels")?.setAttribute("aria-pressed", String(s.labels !== false));
     $("cloud-motion")?.setAttribute("aria-pressed", String(s.motion !== false));
@@ -472,11 +642,62 @@
     const sum = $("cloud-heat-sum");
     if (!sum || !on) return;
     const nodes = (graph || cloudGraphData()).nodes || [];
-    const debt = nodes.filter((n) => n.kind === "line").reduce((acc, n) => acc + (n.debt || 0), 0);
+    const debts = nodes.filter((n) => n.kind === "line" && (n.debt || 0) > 0.01).map((n) => n.debt);
+    const debt = debts.reduce((acc, n) => acc + n, 0);
+    const peak = debts.reduce((acc, n) => Math.max(acc, n), 0);
+    const mid = peak > 0.01 ? Math.expm1(0.5 * Math.log1p(peak)) : 0;
     const foci = nodes.filter((n) => n.kind === "customer" && (n.debt || 0) > 0.01).length;
+    if ($("cloud-heat-lo")) $("cloud-heat-lo").textContent = "0";
+    if ($("cloud-heat-mid")) $("cloud-heat-mid").textContent = mid > 0.01 ? cloudShortMoney(mid) : "";
+    if ($("cloud-heat-hi")) $("cloud-heat-hi").textContent = peak > 0.01 ? cloudShortMoney(peak) : "";
     sum.textContent = debt > 0.01
       ? `в кадре ${money(debt)}${foci ? ` · ${foci} ${heatFociWord(foci)}` : ""}`
       : "неоплаченных позиций нет";
+  }
+
+  function cloudShortMoney(value) {
+    const n = Math.abs(Number(value) || 0);
+    if (n >= 1000000) {
+      const v = n / 1000000;
+      return `${(v >= 10 ? v.toFixed(0) : v.toFixed(1)).replace(".", ",")} млн`;
+    }
+    if (n >= 1000) return `${Math.round(n / 1000)} тыс`;
+    return money(n);
+  }
+
+  function closeCloudSelects() {
+    document.querySelectorAll(".cloud-select.open").forEach((root) => {
+      root.classList.remove("open");
+      root.querySelector(".cloud-select-btn")?.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  function cloudPickValue(id, value) {
+    const root = document.querySelector(`.cloud-select[data-cloud-select="${id}"]`);
+    if (!root) return;
+    const next = String(value || "");
+    root.dataset.value = next;
+    const opt = [...root.querySelectorAll("[data-value]")].find((el) => el.dataset.value === next);
+    const label = root.querySelector(".cloud-select-value");
+    if (label) label.textContent = opt?.textContent || next;
+    root.querySelectorAll("[role='option']").forEach((el) => el.setAttribute("aria-selected", String(el.dataset.value === next)));
+  }
+
+  function onCloudPick(id, value) {
+    if (id === "layout") {
+      cloudState().layout = value;
+      persistCloudPrefs();
+      orderCloud?.setOptions({ layout: value });
+      setTimeout(() => orderCloud?.fit(), 140);
+    } else if (id === "color") {
+      cloudState().color = value;
+      persistCloudPrefs();
+      renderCloud();
+    } else if (id === "size") {
+      cloudState().size = value;
+      persistCloudPrefs();
+      renderCloud();
+    }
   }
 
   function renderGalaxyCloud() {
@@ -577,21 +798,27 @@
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => orderCloud?.fit(), 180);
     });
-    $("cloud-layout")?.addEventListener("change", (e) => {
-      cloudState().layout = e.target.value;
-      persistCloudPrefs();
-      orderCloud?.setOptions({ layout: e.target.value });
-      setTimeout(() => orderCloud?.fit(), 140);
+    document.querySelectorAll(".cloud-select").forEach((root) => {
+      root.querySelector(".cloud-select-btn")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const open = root.classList.contains("open");
+        closeCloudSelects();
+        if (!open) {
+          root.classList.add("open");
+          root.querySelector(".cloud-select-btn")?.setAttribute("aria-expanded", "true");
+        }
+      });
+      root.querySelector(".cloud-select-menu")?.addEventListener("click", (e) => {
+        const opt = e.target.closest("[data-value]");
+        if (!opt) return;
+        e.stopPropagation();
+        cloudPickValue(root.dataset.cloudSelect, opt.dataset.value);
+        closeCloudSelects();
+        onCloudPick(root.dataset.cloudSelect, opt.dataset.value);
+      });
     });
-    $("cloud-color")?.addEventListener("change", (e) => {
-      cloudState().color = e.target.value;
-      persistCloudPrefs();
-      renderCloud();
-    });
-    $("cloud-size")?.addEventListener("change", (e) => {
-      cloudState().size = e.target.value;
-      persistCloudPrefs();
-      renderCloud();
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".cloud-select")) closeCloudSelects();
     });
     $("cloud-debt")?.addEventListener("change", (e) => {
       cloudState().debtOnly = e.target.checked;
@@ -941,6 +1168,7 @@
   }
 
   function syncCloudFullscreen() {
+    closeCloudSelects();
     const on = cloudFullscreenOn();
     $("cloud-board")?.classList.toggle("is-fullscreen", on);
     $("cloud-stage")?.classList.toggle("is-fullscreen", on);
@@ -2816,7 +3044,7 @@
       setView("orders");
       requestAnimationFrame(() => flashOrder(order.id));
     });
-    $("btn-share-many").addEventListener("click", () => openShare(null));
+    $("btn-share-many").addEventListener("click", () => openShareVisible());
     $("dash-focus")?.addEventListener("click", (e) => {
       if (e.target.closest("#focus-clear")) {
         state.remoteStats = null;
@@ -4156,6 +4384,11 @@
         }
       }
       if (e.key === "Escape") {
+        if (document.querySelector(".cloud-select.open")) {
+          e.preventDefault();
+          closeCloudSelects();
+          return;
+        }
         if ($("ask-modal")?.classList.contains("open")) {
           e.preventDefault();
           closeAskModal();
@@ -5201,6 +5434,28 @@
     const none = $("share-check-none");
     if (all) all.dataset.tip = words.length ? "Отметить найденные заказы и строки" : "Отметить все заказы и строки";
     if (none) none.dataset.tip = words.length ? "Снять галочки с найденных заказов и строк" : "Снять все галочки с заказов и строк";
+  }
+
+  function openShareVisible() {
+    const visible = new Set(filteredOrders().map((order) => order.id));
+    const lines = new Set();
+    const known = new Set();
+    (state.doc?.orders || []).forEach((order) => {
+      (order.lines || []).forEach((line) => {
+        if (isFrozenLine(line)) return;
+        known.add(line.id);
+        if (visible.has(order.id) && linePasses(order, line)) lines.add(line.id);
+      });
+    });
+    shareMemory = {
+      orders: visible,
+      lines,
+      known,
+      open: shareMemory?.open || new Set(),
+      title: shareMemory?.title || "",
+      folds: shareMemory?.folds || {},
+    };
+    openShare(null);
   }
 
   function openShare(orderOrId) {

@@ -82,6 +82,8 @@
   min-height: 0;
 }
 .cloud-bar {
+  position: relative;
+  z-index: 6;
   display: flex;
   align-items: flex-end;
   gap: 8px;
@@ -164,7 +166,13 @@
   padding-left: 2px;
   pointer-events: none;
 }
-.cloud-control select {
+.cloud-select {
+  position: relative;
+}
+.cloud-select.open { z-index: 8; }
+.cloud-select-btn {
+  display: flex;
+  align-items: center;
   width: 100%;
   height: 40px;
   min-height: 40px;
@@ -180,25 +188,51 @@
   color: var(--ink);
   font-size: 13px;
   font-weight: 600;
+  text-align: left;
   cursor: pointer;
-  color-scheme: inherit;
 }
-.cloud-control select:hover,
-.cloud-control select:focus {
-  border-color: var(--accent-2);
-  background-color: var(--control-bg);
-  background-image: var(--select-chevron);
-  background-position: var(--select-chevron-pos);
-  background-size: var(--select-chevron-size);
-  background-repeat: no-repeat;
-  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
-  color: var(--ink);
-}
-.cloud-control option {
-  background: var(--card);
-  color: var(--ink);
+.cloud-select-btn b {
+  min-width: 0;
+  overflow: hidden;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.cloud-select-btn:hover,
+.cloud-select.open .cloud-select-btn {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
+}
+.cloud-select-menu {
+  display: none;
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: 280px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.22);
+}
+.cloud-select.open .cloud-select-menu { display: block; }
+.cloud-select-menu button {
+  display: block;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font: 600 13px inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cloud-select-menu button:hover { background: color-mix(in srgb, var(--accent-2) 14%, transparent); }
+.cloud-select-menu button[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .cloud-control::after {
   display: none;
 }
@@ -280,6 +314,8 @@
 }
 
 .cloud-stage {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 282px;
   flex: 1 1 auto;
@@ -648,7 +684,7 @@ html[data-theme="dark"] .cloud-control {
   border: 0;
   box-shadow: none;
 }
-html[data-theme="dark"] .cloud-control select {
+html[data-theme="dark"] .cloud-select-btn {
   background-color: var(--control-bg);
   background-image: var(--select-chevron);
   background-position: var(--select-chevron-pos);
@@ -657,7 +693,10 @@ html[data-theme="dark"] .cloud-control select {
   color: var(--ink);
   border-color: var(--line);
 }
-html[data-theme="dark"] .cloud-control option { background: #1b2538; color: var(--ink); }
+html[data-theme="dark"] .cloud-select-menu {
+  background: #1b2538;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
 html[data-theme="dark"] .cloud-toolbar,
 html[data-theme="dark"] .cloud-kpis { box-shadow: 0 8px 28px rgba(0,0,0,0.28); }
 html[data-theme="dark"] .cloud-stage { box-shadow: 0 18px 50px rgba(0,0,0,0.38); }

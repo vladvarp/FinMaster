@@ -62,7 +62,7 @@
   };
   const prefTimers = {};
   const CLOUD_LAYOUTS = ["galaxy", "orbit", "timeline", "constellation"];
-  const CLOUD_COLOR_MODES = ["status", "customer", "debt", "type"];
+  const CLOUD_COLOR_MODES = ["status", "kind", "customer", "debt", "share", "type", "product", "month"];
   const CLOUD_SIZE_MODES = ["amount", "debt", "quantity", "equal"];
 
   function sanitizeCloudPrefs(raw) {

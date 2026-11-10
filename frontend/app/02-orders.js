@@ -950,7 +950,7 @@
   function lineFilterMatch(order, line) {
     const f = state.lineFilter;
     const has = (arr, val) => !arr.length || arr.includes(val);
-    if (!has(f.status, line.status || "")) return false;
+    if (f.status.length && (isExpenseLine(line) || !f.status.includes(line.status || ""))) return false;
     if (!has(f.type, line.order_type || "")) return false;
     if (!has(f.product, catalogNameKey(line.product))) return false;
     if (!has(f.unit, line.unit || "")) return false;
@@ -1037,7 +1037,7 @@
     const f = lineFilterState();
     const matched = rows.filter(({ order, line }) => linePasses(order, line)).length;
     const statusColorOf = (name) => (state.doc?.statuses || []).find((s) => s.name === name)?.color || "";
-    const status = facetList(rows, ({ line }) => ({ id: line.status || "", label: line.status || "без статуса", extra: { color: statusColorOf(line.status) } }));
+    const status = facetList(rows.filter(({ line }) => !isExpenseLine(line)), ({ line }) => ({ id: line.status || "", label: line.status || "без статуса", extra: { color: statusColorOf(line.status) } }));
     const type = facetList(rows, ({ line }) => ({ id: line.order_type || "", label: line.order_type || "без типа" }));
     const product = facetList(rows, ({ line }) => {
       const label = String(line.product || "").trim();

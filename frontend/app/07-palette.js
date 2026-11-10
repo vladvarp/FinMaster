@@ -169,7 +169,7 @@
           cloudState().layout = "constellation";
           persistCloudPrefs();
           setView("cloud");
-          if ($("cloud-layout")) $("cloud-layout").value = "constellation";
+          cloudPickValue("layout", "constellation");
         },
       },
     ];
@@ -374,9 +374,13 @@
     });
     [
       ["status", "по статусу"],
+      ["kind", "по виду"],
       ["customer", "по заказчику"],
       ["debt", "по оплате"],
+      ["share", "по доле долга"],
       ["type", "по типу"],
+      ["product", "по продукту"],
+      ["month", "по месяцу"],
     ].forEach(([id, name]) => {
       push({
         group: "Облако",

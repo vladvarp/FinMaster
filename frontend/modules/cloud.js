@@ -1470,20 +1470,22 @@
     }
 
     drawHeat3d(ctx, theme) {
-      const customers = this.heatGroup("customer");
+      const zoom = this.camera.zoom;
+      const lines = this.heatGroup("line");
       const orders = this.heatGroup("order");
-      const sources = customers.length ? customers : orders;
+      const customers = this.heatGroup("customer");
+      const sources = zoom >= 1.05 && lines.length ? lines : zoom >= 0.42 && orders.length ? orders : customers.length ? customers : orders;
       if (!sources.length) return;
-      const peak = this.heatPeak(sources);
+      const peak = this.heatPeakAll();
       const dark = !!theme.dark;
       ctx.save();
       ctx.globalCompositeOperation = dark ? "screen" : "source-over";
       sources.slice().sort((a, b) => (a.data.debt || 0) - (b.data.debt || 0)).forEach((n) => {
         const t = heatTone(n.data.debt, peak);
         const p = this.view(n);
-        if (!this.onScreen(p, 80)) return;
-        const rad = Math.min((70 + 150 * t) * p.s, Math.max(this.width, this.height) * 0.35);
-        this.paintHeatBlob(ctx, p.x, p.y, rad, t, (dark ? 0.42 : 0.36) + 0.32 * t, dark);
+        if (!this.onScreen(p, 40)) return;
+        const rad = Math.max(12, p.r * (2.1 + 2.6 * t));
+        this.paintHeatBlob(ctx, p.x, p.y, rad, t, (dark ? 0.36 : 0.3) + 0.34 * t, dark);
       });
       ctx.restore();
     }
@@ -1513,7 +1515,7 @@
         const hot = this.edgeIsHot(edge);
         const dim = !!(selected && !hot);
         const trunk = edge.kind === "customer";
-        const base = (edge.source.data && edge.source.data.color) || "#64748b";
+        const base = this.options.heat ? this.nodeInk(edge.target) : ((edge.source.data && edge.source.data.color) || "#64748b");
         const color = hot ? hexToRgba(selected.data.color, 0.95) : hexToRgba(base, trunk ? 0.82 : 0.62);
         this.drawLinkProjected(ctx, edge.source, edge.target, {
           lift: dashed ? 0.18 : trunk ? 0.16 : 0.1,
@@ -1626,7 +1628,7 @@
       const r = node.r || 19;
       const mass = clamp((r - 16) / 16, 0, 1);
       const brightness = clamp(0.4 + Math.log1p(Math.max(0, node.data.value || 0)) / 14, 0.4, 1);
-      return { mass, brightness, color: node.data.color || "#f59e0b" };
+      return { mass, brightness, color: this.nodeInk(node) };
     }
 
     paintStar(ctx, x, y, r, color, opt) {
@@ -1957,7 +1959,7 @@
         const matched = !searching || node.match;
         if (this.camera.zoom < 0.3 && node.data.kind === "line" && !related && !matched) return;
         ctx.globalAlpha = !focus || related ? 1 : 0.42;
-        const color = node.data.color || "#64748b";
+        const color = this.nodeInk(node);
         const selected = node === this.selected;
         const hovered = node === this.hovered;
         const cap = node.data.kind === "galaxy"
@@ -2011,7 +2013,7 @@
       const marks = this.heatGroup("customer");
       const foci = marks.length ? marks : this.heatGroup("order");
       if (!foci.length) return;
-      const peak = this.heatPeak(foci);
+      const peak = this.heatPeakAll();
       foci.forEach((n) => {
         const p = this.view(n);
         if (!this.onScreen(p, 24)) return;
@@ -2094,6 +2096,33 @@
       return Math.max(0.01, ...nodes.map((n) => n.data.debt || 0));
     }
 
+    heatPeakAll() {
+      let peak = 0.01;
+      this.nodes.forEach((n) => {
+        const debt = n.data.debt || 0;
+        if (debt > peak) peak = debt;
+      });
+      return peak;
+    }
+
+    heatTotal() {
+      let total = 0;
+      this.nodes.forEach((n) => {
+        if (n.data.kind === "line") total += Math.max(0, n.data.debt || 0);
+      });
+      return total;
+    }
+
+    nodeInk(node) {
+      const fallback = node.data.color || "#64748b";
+      if (!this.options.heat || this.isCatalog() || node.data.kind === "galaxy") return fallback;
+      const debt = node.data.debt || 0;
+      if (debt <= 0.01) return this.theme().dark ? "#475569" : "#94a3b8";
+      const [r, g, b] = heatRgb(heatTone(debt, this.heatPeakAll()), !!this.theme().dark);
+      const hex = (n) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, "0");
+      return `#${hex(r)}${hex(g)}${hex(b)}`;
+    }
+
     paintHeatBlob(ctx, x, y, radius, t, alpha, dark) {
       const [r, g, b] = heatRgb(t, dark);
       const grd = ctx.createRadialGradient(x, y, 0, x, y, radius);
@@ -2114,20 +2143,21 @@
       if (!customers.length && !orders.length && !lines.length) return;
       const zoom = this.camera.zoom;
       const dark = !!theme.dark;
+      const peak = this.heatPeakAll();
       ctx.save();
       ctx.globalCompositeOperation = dark ? "screen" : "source-over";
-      const paint = (nodes, baseR, spanR, a0, a1) => {
+      const paint = (nodes, mul) => {
         if (!nodes.length) return;
-        const peak = this.heatPeak(nodes);
         nodes.slice().sort((a, b) => (a.data.debt || 0) - (b.data.debt || 0)).forEach((n) => {
           const t = heatTone(n.data.debt, peak);
-          this.paintHeatBlob(ctx, n.x, n.y, baseR + spanR * t, t, a0 + (a1 - a0) * t, dark);
+          this.paintHeatBlob(ctx, n.x, n.y, n.r * (1.7 + 2.5 * t) * mul, t, (dark ? 0.24 : 0.2) + 0.38 * t, dark);
         });
       };
-      if (customers.length) paint(customers, 78, 170, dark ? 0.38 : 0.34, dark ? 0.88 : 0.72);
-      else paint(orders, 64, 140, dark ? 0.36 : 0.32, dark ? 0.86 : 0.7);
-      if (customers.length && zoom >= 0.48) paint(orders, 34, 72, dark ? 0.22 : 0.2, dark ? 0.58 : 0.48);
-      if (zoom >= 0.92) paint(lines, 16, 38, dark ? 0.2 : 0.18, dark ? 0.5 : 0.42);
+      if (zoom < 0.42) paint(customers.length ? customers : orders, 1.2);
+      else if (zoom < 1.05) {
+        paint(customers, 0.65);
+        paint(orders, 1);
+      } else paint(lines.length ? lines : orders, 1);
       ctx.restore();
     }
 
@@ -2136,7 +2166,7 @@
       const foci = marks.length ? marks : this.heatGroup("order");
       if (!foci.length) return;
       const zoom = this.camera.zoom;
-      const peak = this.heatPeak(foci);
+      const peak = this.heatPeakAll();
       foci.forEach((n) => {
         const t = heatTone(n.data.debt, peak);
         const [r, g, b] = heatRgb(t, theme.dark);
@@ -2172,7 +2202,7 @@
     drawHeatCallouts(ctx, theme) {
       const foci = this.heatCalloutNodes();
       if (!foci.length) return;
-      const peak = this.heatPeak(foci);
+      const peak = this.heatPeakAll();
       const placed = [];
       ctx.font = "600 11px Segoe UI, sans-serif";
       ctx.textAlign = "left";
@@ -2185,7 +2215,10 @@
         const t = heatTone(n.data.debt, peak);
         const [r, g, b] = heatRgb(t, theme.dark);
         const name = this.truncate(ctx, n.data.label || "Долг", 118);
-        const amount = compactMoney(n.data.debt);
+        const total = this.heatTotal();
+        const raw = total > 0.01 ? (n.data.debt / total) * 100 : 0;
+        const share = raw > 0 && raw < 1 ? "<1%" : `${Math.round(raw)}%`;
+        const amount = `${compactMoney(n.data.debt)} · ${share}`;
         const titleW = ctx.measureText(name).width;
         ctx.font = "700 10px ui-monospace, Consolas, monospace";
         const sumW = ctx.measureText(amount).width;
@@ -2400,7 +2433,7 @@
         const hot = this.edgeIsHot(edge);
         const dim = !!(selected && !hot);
         const trunk = edge.kind === "customer";
-        const base = (edge.source.data && edge.source.data.color) || (hot && selected ? selected.data.color : "#64748b");
+        const base = this.options.heat ? this.nodeInk(edge.target) : ((edge.source.data && edge.source.data.color) || (hot && selected ? selected.data.color : "#64748b"));
         const color = hot
           ? hexToRgba(selected.data.color, 0.95)
           : hexToRgba(base, trunk ? 0.82 : 0.68);
@@ -2437,7 +2470,7 @@
         const matched = !searching || node.match;
         if (zoom < 0.3 && node.data.kind === "line" && !related && !matched) return;
         ctx.globalAlpha = !focus || related ? 1 : 0.48;
-        const color = node.data.color || "#64748b";
+        const color = this.nodeInk(node);
         const selected = node === this.selected;
         const hovered = !ghost && node === this.hovered;
         const r = node.r;
@@ -2565,7 +2598,7 @@
         ctx.stroke();
       });
       this.nodes.forEach((n) => {
-        ctx.fillStyle = n.data.color;
+        ctx.fillStyle = this.nodeInk(n);
         ctx.beginPath();
         ctx.arc(n.x * scale + ox, n.y * scale + oy, n.data.kind === "galaxy" ? 4 : n.data.kind === "customer" ? 2.7 : 1.5, 0, TAU);
         ctx.fill();
