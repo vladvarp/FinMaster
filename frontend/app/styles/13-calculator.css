@@ -736,10 +736,26 @@ html[data-theme="dark"] .calc-mini-toggle {
 }
 .calc-node.is-planner { width: 300px; }
 .calc-node.is-planner .calc-node-sub {
-  margin: -2px 0 8px 30px;
+  margin: -2px 0 6px 30px;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.35;
+}
+.calc-planner-thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  margin: 0 0 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.calc-planner-thumb path {
+  fill: rgba(101, 163, 13, 0.2);
+  stroke: #65a30d;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
 }
 .calc-text-btn {
   height: 22px;
@@ -832,7 +848,97 @@ html[data-theme="dark"] .calc-mini-toggle {
   text-transform: uppercase;
   color: var(--muted);
 }
-.planner-plan-wrap { flex: 1; min-height: 240px; }
+.planner-plan-wrap { position: relative; flex: 1; min-height: 240px; }
+.planner-nudge {
+  position: absolute;
+  z-index: 3;
+  width: 0;
+  height: 0;
+}
+.planner-nudge[hidden] { display: none !important; }
+.planner-nudge-dir {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+.planner-nudge-dir svg { width: 12px; height: 12px; fill: currentColor; display: block; }
+.planner-nudge-dir.is-on,
+.planner-nudge-dir:hover { color: #fff; background: #65a30d; border-color: #65a30d; }
+.planner-nudge-dir[data-dir="n"] { transform: translate(0, -46px); }
+.planner-nudge-dir[data-dir="ne"] { transform: translate(33px, -33px); }
+.planner-nudge-dir[data-dir="ne"] svg { transform: rotate(45deg); }
+.planner-nudge-dir[data-dir="e"] { transform: translate(46px, 0); }
+.planner-nudge-dir[data-dir="e"] svg { transform: rotate(90deg); }
+.planner-nudge-dir[data-dir="se"] { transform: translate(33px, 33px); }
+.planner-nudge-dir[data-dir="se"] svg { transform: rotate(135deg); }
+.planner-nudge-dir[data-dir="s"] { transform: translate(0, 46px); }
+.planner-nudge-dir[data-dir="s"] svg { transform: rotate(180deg); }
+.planner-nudge-dir[data-dir="sw"] { transform: translate(-33px, 33px); }
+.planner-nudge-dir[data-dir="sw"] svg { transform: rotate(225deg); }
+.planner-nudge-dir[data-dir="w"] { transform: translate(-46px, 0); }
+.planner-nudge-dir[data-dir="w"] svg { transform: rotate(270deg); }
+.planner-nudge-dir[data-dir="nw"] { transform: translate(-33px, -33px); }
+.planner-nudge-dir[data-dir="nw"] svg { transform: rotate(315deg); }
+.planner-nudge-box {
+  position: absolute;
+  left: 0;
+  top: 68px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  color: var(--muted);
+  font-size: 12px;
+}
+.planner-nudge-box[hidden] { display: none !important; }
+.planner-nudge-box input {
+  width: 64px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--ink);
+  padding: 0 6px;
+  font: inherit;
+  font-size: 13px;
+}
+.planner-nudge-box.is-bad input { border-color: var(--danger); }
+.planner-nudge-box button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: #65a30d;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.planner-nudge-box button svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 #planner-plan, #planner-unfold {
   width: 100%;
   height: 100%;

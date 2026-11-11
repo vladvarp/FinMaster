@@ -1606,7 +1606,7 @@
     if (node.type === "filter" || node.type === "dashboard") return { w: 384, h: 420 };
     if (node.type === "planner") {
       const n = Array.isArray(node.outs) ? node.outs.filter((item) => item && item.on).length : 2;
-      return { w: 300, h: 96 + Math.max(1, n) * 28 };
+      return { w: 300, h: 380 + Math.max(1, n) * 28 };
     }
     if (node.type === "present") return { w: 220, h: 160 };
     if (node.type === "group") return { w: Math.max(160, node.w || 320), h: Math.max(120, node.h || 220) };
@@ -2348,6 +2348,114 @@
     return { x: plannerRound(nx), y: plannerRound(ny) };
   }
 
+  const PLANNER_NUDGE_DIRS = {
+    n: [0, -1],
+    ne: [1, -1],
+    e: [1, 0],
+    se: [1, 1],
+    s: [0, 1],
+    sw: [-1, 1],
+    w: [-1, 0],
+    nw: [-1, -1],
+  };
+
+  function plannerShift(node, nudge, dist) {
+    const vec = PLANNER_NUDGE_DIRS[nudge?.dir];
+    if (!vec || !(dist > 0)) return false;
+    const len = Math.hypot(vec[0], vec[1]) || 1;
+    const dx = (vec[0] / len) * dist;
+    const dy = (vec[1] / len) * dist;
+    const pts = node.points || [];
+    const near = (x, y, other) => other && Math.hypot(x - other.x, y - other.y) < 0.05;
+    if (nudge.kind === "point") {
+      const i = pts.findIndex((p) => p.id === nudge.id);
+      if (i < 0) return false;
+      const p = pts[i];
+      const prev = pts[(i - 1 + pts.length) % pts.length];
+      const next = pts[(i + 1) % pts.length];
+      const x = plannerClamp(p.x + dx, -500, 500);
+      const y = plannerClamp(p.y + dy, -500, 500);
+      if (near(x, y, prev) || near(x, y, next)) return false;
+      p.x = plannerRound(x);
+      p.y = plannerRound(y);
+      return true;
+    }
+    const wall = plannerWalls(node).find((item) => item.id === nudge.id);
+    if (!wall) return false;
+    const before = pts[(wall.index - 1 + pts.length) % pts.length];
+    const after = pts[(wall.index + 2) % pts.length];
+    const ax = plannerClamp(wall.a.x + dx, -500, 500);
+    const ay = plannerClamp(wall.a.y + dy, -500, 500);
+    const bx = plannerClamp(wall.b.x + dx, -500, 500);
+    const by = plannerClamp(wall.b.y + dy, -500, 500);
+    if (near(ax, ay, before) || near(bx, by, after) || Math.hypot(ax - bx, ay - by) < 0.05) return false;
+    wall.a.x = plannerRound(ax);
+    wall.a.y = plannerRound(ay);
+    wall.b.x = plannerRound(bx);
+    wall.b.y = plannerRound(by);
+    return true;
+  }
+
+  function plannerHideNudge() {
+    const el = $("planner-nudge");
+    if (el) el.hidden = true;
+    const box = el?.querySelector(".planner-nudge-box");
+    if (box) {
+      box.hidden = true;
+      box.classList.remove("is-bad");
+    }
+    if (session.planner) session.planner.nudge = null;
+  }
+
+  function plannerPlaceNudge() {
+    const el = $("planner-nudge");
+    const plan = $("planner-plan");
+    const node = plannerNode();
+    const nudge = session.planner?.nudge;
+    if (!el || !plan || !node || !nudge) return;
+    let world = null;
+    if (nudge.kind === "point") world = node.points.find((p) => p.id === nudge.id) || null;
+    else {
+      const wall = plannerWalls(node).find((item) => item.id === nudge.id);
+      if (wall) world = { x: (wall.a.x + wall.b.x) / 2, y: (wall.a.y + wall.b.y) / 2 };
+    }
+    if (!world) {
+      plannerHideNudge();
+      return;
+    }
+    const view = plannerView(plan, node.points, session.planner.viewLock);
+    const spot = view.to(world);
+    el.hidden = false;
+    el.style.left = `${spot.x}px`;
+    el.style.top = `${spot.y}px`;
+    el.querySelectorAll("[data-dir]").forEach((btn) => btn.classList.toggle("is-on", btn.dataset.dir === nudge.dir));
+    const box = el.querySelector(".planner-nudge-box");
+    if (box) {
+      box.hidden = !nudge.dir;
+      const below = spot.y + 116 <= plan.clientHeight;
+      box.style.top = below ? "68px" : "-68px";
+      box.style.transform = below ? "translate(-50%, 0)" : "translate(-50%, -100%)";
+    }
+  }
+
+  function plannerNudgeSubmit() {
+    const node = plannerNode();
+    const nudge = session.planner?.nudge;
+    const input = $("planner-nudge-input");
+    const box = document.querySelector("#planner-nudge .planner-nudge-box");
+    if (!node || !nudge?.dir || !input) return;
+    const value = plannerDraft(input.value);
+    const ok = value != null && plannerShift(node, nudge, value);
+    box?.classList.toggle("is-bad", !ok);
+    if (!ok) {
+      input.focus();
+      return;
+    }
+    plannerCommit(false);
+    input.focus();
+    input.select();
+  }
+
   function plannerNode() {
     const id = session.planner?.id;
     if (!id) return null;
@@ -2624,6 +2732,7 @@
       });
     }
     plannerSyncFields(model);
+    plannerPlaceNudge();
   }
 
   function plannerSyncFields(model) {
@@ -2808,9 +2917,26 @@
       <div class="planner-body">
         <div class="planner-stage">
           <div class="planner-cap">План пола</div>
-          <div class="planner-plan-wrap"><canvas id="planner-plan"></canvas></div>
+          <div class="planner-plan-wrap">
+            <canvas id="planner-plan"></canvas>
+            <div id="planner-nudge" class="planner-nudge" hidden>
+              <button type="button" class="planner-nudge-dir" data-dir="nw" aria-label="Вверх-влево"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+              <button type="button" class="planner-nudge-dir" data-dir="n" aria-label="Вверх"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+              <button type="button" class="planner-nudge-dir" data-dir="ne" aria-label="Вверх-вправо"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+              <button type="button" class="planner-nudge-dir" data-dir="w" aria-label="Влево"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+              <button type="button" class="planner-nudge-dir" data-dir="e" aria-label="Вправо"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+              <button type="button" class="planner-nudge-dir" data-dir="sw" aria-label="Вниз-влево"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+              <button type="button" class="planner-nudge-dir" data-dir="s" aria-label="Вниз"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+              <button type="button" class="planner-nudge-dir" data-dir="se" aria-label="Вниз-вправо"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+              <form class="planner-nudge-box" hidden>
+                <input id="planner-nudge-input" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="Сдвиг, метры" />
+                <span>м</span>
+                <button type="submit" aria-label="Сдвинуть"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.2 6.4 11.4 12.8 4.6"/></svg></button>
+              </form>
+            </div>
+          </div>
           <div class="planner-hint">
-            <span>Тяните угол. Клик по стене — длина справа. Двойной клик по стене добавляет угол. Shift держит линию прямой.</span>
+            <span>Тяните угол. Клик по стене — длина справа. Двойной клик по стене добавляет угол. Правый клик по углу или стене сдвигает их стрелками. Shift держит линию прямой.</span>
             <span class="planner-hint-btns">
               <button type="button" class="btn" id="planner-add-corner">Добавить угол</button>
               <button type="button" class="btn" id="planner-del-corner">Удалить угол</button>
@@ -3054,7 +3180,57 @@
       session.planner.sel = { kind: "point", id };
       plannerCommit(true);
     });
-    plan?.addEventListener("contextmenu", (e) => e.preventDefault());
+    plan?.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      const node = plannerNode();
+      if (!node || !session.planner) return;
+      const hit = plannerHit(plan, node, e.clientX, e.clientY);
+      if (!hit.pointId && !hit.wallId) {
+        plannerHideNudge();
+        plannerDraw();
+        return;
+      }
+      session.planner.sel = hit.pointId ? { kind: "point", id: hit.pointId } : { kind: "wall", id: hit.wallId };
+      session.planner.nudge = {
+        kind: hit.pointId ? "point" : "wall",
+        id: hit.pointId || hit.wallId,
+        dir: "",
+      };
+      const box = document.querySelector("#planner-nudge .planner-nudge-box");
+      const input = $("planner-nudge-input");
+      if (box) {
+        box.hidden = true;
+        box.classList.remove("is-bad");
+      }
+      if (input) input.value = "";
+      plannerDraw();
+    });
+    const nudge = $("planner-nudge");
+    nudge?.addEventListener("contextmenu", (e) => e.preventDefault());
+    nudge?.addEventListener("pointerdown", (e) => e.stopPropagation());
+    nudge?.addEventListener("click", (e) => {
+      const dir = e.target.closest("[data-dir]")?.dataset.dir || "";
+      const current = session.planner?.nudge;
+      if (!dir || !current || !PLANNER_NUDGE_DIRS[dir]) return;
+      current.dir = dir;
+      const box = nudge.querySelector(".planner-nudge-box");
+      if (box) {
+        box.hidden = false;
+        box.classList.remove("is-bad");
+      }
+      plannerPlaceNudge();
+      const input = $("planner-nudge-input");
+      input?.focus();
+      input?.select();
+    });
+    nudge?.querySelector("form")?.addEventListener("submit", (e) => {
+      e.preventDefault();
+      plannerNudgeSubmit();
+    });
+    modal.addEventListener("pointerdown", (e) => {
+      if (!session.planner?.nudge || e.target.closest("#planner-nudge")) return;
+      plannerHideNudge();
+    });
     unfoldHit(modal);
     if (window.ResizeObserver) {
       const stage = modal.querySelector(".planner-stage");
@@ -3110,7 +3286,8 @@
     if (!node) return;
     ensurePlannerModal();
     ensurePlanner(node);
-    session.planner = { id: nodeId, sel: null, drag: null, viewLock: null, hits: [], touched: false };
+    session.planner = { id: nodeId, sel: null, drag: null, viewLock: null, hits: [], touched: false, nudge: null };
+    plannerHideNudge();
     session.selected = nodeId;
     hidePortMenu();
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
@@ -3122,6 +3299,7 @@
     const node = plannerNode();
     if (node) node.name = plannerName(node);
     const touched = !!session.planner?.touched;
+    plannerHideNudge();
     session.planner = null;
     $("planner-modal")?.classList.remove("open");
     if (touched) dirty();
@@ -4500,6 +4678,32 @@
     </article>`;
   }
 
+  function plannerThumb(points) {
+    const pts = Array.isArray(points) ? points : [];
+    if (pts.length < 3) return "";
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    pts.forEach((p) => {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    });
+    const spanX = Math.max(0.05, maxX - minX);
+    const spanY = Math.max(0.05, maxY - minY);
+    const size = 64;
+    const pad = 3;
+    const scale = Math.min((size - pad * 2) / spanX, (size - pad * 2) / spanY);
+    const ox = (size - spanX * scale) / 2 - minX * scale;
+    const oy = (size - spanY * scale) / 2 - minY * scale;
+    const d = pts
+      .map((p, i) => `${i ? "L" : "M"}${(ox + p.x * scale).toFixed(1)} ${(oy + p.y * scale).toFixed(1)}`)
+      .join("") + "Z";
+    return `<svg class="calc-planner-thumb" viewBox="0 0 ${size} ${size}" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><path d="${d}"/></svg>`;
+  }
+
   function plannerNodeHtml(node, bp, graph) {
     const model = plannerModel(node);
     const ports = plannerOutputs(node, bp.links);
@@ -4512,6 +4716,7 @@
         <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
       </header>
       <div class="calc-node-sub">${esc(sub)}</div>
+      ${plannerThumb(node.points)}
       <div class="calc-ports">
         ${
           ports.length
@@ -6512,7 +6717,8 @@
         const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
         if (e.key === "Escape") {
           e.preventDefault();
-          closePlanner();
+          if (session.planner.nudge) plannerHideNudge();
+          else closePlanner();
           return;
         }
         if (!typing && (e.key === "Delete" || e.key === "Backspace") && session.planner.sel?.kind === "point") {
