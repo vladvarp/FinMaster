@@ -597,6 +597,10 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
     elif kind == "planner":
         node["name"] = _clip_text(raw.get("name"), 48, "Планировщик")
         node["height"] = round(_float_in_range(raw.get("height"), 2.7, 0.2, 30.0), 4)
+        color = str(raw.get("color") or "").strip().lower()
+        if not (len(color) == 7 and color.startswith("#") and all(ch in "0123456789abcdef" for ch in color[1:])):
+            color = "#65a30d"
+        node["color"] = color
         node["points"] = _planner_points(raw.get("points"))
         node["outs"] = _planner_outs(raw.get("outs"), node["points"])
     elif kind == "present":
