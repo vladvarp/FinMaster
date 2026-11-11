@@ -761,32 +761,34 @@ html[data-theme="dark"] .calc-mini-toggle {
   stroke-width: 1.6;
   stroke-linejoin: round;
 }
-.calc-planner-preview-title {
+.calc-planner-preview-info {
   position: absolute;
-  top: 10px;
-  left: 10px;
-  right: 10px;
-  overflow: hidden;
-  padding: 7px 10px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--planner-color, #65a30d) 82%, #111827);
+  top: 12px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
   color: #fff;
+  text-align: center;
+  pointer-events: none;
+  text-shadow: 0 1px 3px rgba(0,0,0,.9), 0 0 7px rgba(0,0,0,.65);
+}
+.calc-planner-preview-title {
+  max-width: 100%;
+  overflow: hidden;
   font-size: 13px;
   font-weight: 800;
   line-height: 1.25;
-  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-shadow: 0 1px 2px rgba(0,0,0,.35);
-  pointer-events: none;
 }
-.calc-planner-total {
-  margin: 0 0 8px;
-  color: var(--muted);
-  font-size: 11px;
-  text-align: right;
+.calc-planner-preview-area {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
 }
-.calc-planner-total b { color: var(--ink); font-weight: 800; }
 .calc-planner-color {
   flex: 0 0 24px;
   width: 24px;
