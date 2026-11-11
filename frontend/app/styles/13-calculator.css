@@ -741,21 +741,70 @@ html[data-theme="dark"] .calc-mini-toggle {
   font-size: 11px;
   line-height: 1.35;
 }
+.calc-planner-preview {
+  position: relative;
+  margin-bottom: 4px;
+}
 .calc-planner-thumb {
   display: block;
   width: 100%;
   height: auto;
   aspect-ratio: 1 / 1;
-  margin: 0 0 8px;
+  margin: 0;
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 8px;
 }
 .calc-planner-thumb path {
-  fill: rgba(101, 163, 13, 0.2);
-  stroke: #65a30d;
+  fill: color-mix(in srgb, var(--planner-color, #65a30d) 20%, transparent);
+  stroke: var(--planner-color, #65a30d);
   stroke-width: 1.6;
   stroke-linejoin: round;
+}
+.calc-planner-preview-info {
+  position: absolute;
+  top: 50%;
+  left: 8px;
+  right: 8px;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: #fff;
+  text-align: center;
+  pointer-events: none;
+  text-shadow: 0 1px 3px rgba(0,0,0,.9), 0 0 7px rgba(0,0,0,.65);
+}
+.calc-planner-preview-title {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.calc-planner-preview-area {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.calc-planner-color {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  margin: 0 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+  cursor: pointer;
+}
+.calc-node.is-planner .calc-row small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
 }
 .calc-text-btn {
   height: 22px;

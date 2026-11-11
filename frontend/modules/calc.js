@@ -1519,7 +1519,7 @@
           setVal(nodeId, id, Number.isFinite(value) ? value : 0);
         });
       } else if (node.type === "planner") {
-        plannerOutputs(node, links).forEach((port) => setVal(nodeId, port.id, port.area));
+        plannerOutputs(node, links).forEach((port) => setVal(nodeId, port.id, port.value ?? port.area));
       } else if (node.type === "present") {
         presentPorts(node).forEach((port) => {
           const link = (incoming[nodeId] || []).find((item) => item.toPort === port.id);
@@ -2122,6 +2122,9 @@
       ];
     } else node.points = points;
     node.height = plannerRound(plannerClamp(plannerNum(node.height, 2.7), 0.2, 30));
+    node.heightOut = !!node.heightOut;
+    const plannerColor = String(node.color || "").trim().toLowerCase();
+    node.color = /^#[0-9a-f]{6}$/.test(plannerColor) ? plannerColor : "#65a30d";
     const fresh = !Array.isArray(node.outs);
     const prev = fresh ? [] : node.outs;
     const byId = new Map(prev.filter((item) => item && item.id).map((item) => [String(item.id), item]));
@@ -2206,8 +2209,9 @@
     const linked = linkedFromPorts(node.id, links || []);
     const ports = [];
     model.rows.concat(model.sums).forEach((row) => {
-      if (row.on || linked.has(row.id)) ports.push({ id: row.id, name: row.name, area: row.area });
+      if (row.on || linked.has(row.id)) ports.push({ id: row.id, name: row.name, area: row.area, unit: "м²" });
     });
+    if (node.heightOut || linked.has("height")) ports.push({ id: "height", name: "Высота стен", value: model.height, unit: "м" });
     return ports;
   }
 
@@ -2776,6 +2780,12 @@
       el.disabled = linked.has(id);
       el.title = linked.has(id) ? "Сначала снимите связь на схеме" : "Вывести число на ноду";
     });
+    const heightOut = document.querySelector('#planner-side [data-planner-height-on]');
+    if (heightOut) {
+      heightOut.checked = !!(node.heightOut || linked.has("height"));
+      heightOut.disabled = linked.has("height");
+      heightOut.title = linked.has("height") ? "Сначала снимите связь на схеме" : "Вывести высоту стен на ноду";
+    }
     document.querySelectorAll("#planner-side [data-planner-row]").forEach((el) => {
       const wall = plannerSelWall(node);
       el.classList.toggle("is-sel", !!wall && el.dataset.plannerRow === wall.id);
@@ -2851,6 +2861,14 @@
     return `<div class="planner-block">
         <div class="planner-block-h">Площади <span data-planner-peri>периметр ${esc(fmtShort(model.peri))} м</span></div>
         ${rows}
+      </div>
+      <div class="planner-block">
+        <div class="planner-block-h">Параметры</div>
+        <div class="planner-metric">
+          <label class="planner-on" title="Вывести высоту стен на ноду"><input type="checkbox" data-planner-height-on ${node.heightOut ? "checked" : ""} /> На ноду</label>
+          <span class="planner-label">Высота стен</span>
+          <b>${esc(fmtShort(model.height))} м</b>
+        </div>
       </div>
       <div class="planner-block">
         <div class="planner-block-h">Сумма выбранных ${addSum}</div>
@@ -3003,6 +3021,16 @@
     $("planner-side")?.addEventListener("input", (e) => {
       const node = plannerNode();
       if (!node) return;
+      if (e.target.matches("[data-planner-height-on]")) {
+        const linked = linkedFromPorts(node.id, activeBlueprint()?.links || []);
+        if (linked.has("height")) {
+          e.target.checked = true;
+          return;
+        }
+        node.heightOut = !!e.target.checked;
+        plannerCommit(false);
+        return;
+      }
       const on = e.target.dataset?.plannerOn;
       if (on) {
         const out = (node.outs || []).find((item) => item.id === on);
@@ -3361,7 +3389,9 @@
     if (type === "planner") {
       const ids = [uid(), uid(), uid(), uid()];
       node.name = "Планировщик";
+      node.color = GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
       node.height = 2.7;
+      node.heightOut = false;
       node.points = [
         { id: ids[0], x: 0, y: 0 },
         { id: ids[1], x: 4, y: 0 },
@@ -4707,27 +4737,36 @@
   function plannerNodeHtml(node, bp, graph) {
     const model = plannerModel(node);
     const ports = plannerOutputs(node, bp.links);
+    const totalArea = model.floor + model.walls.reduce((sum, wall) => sum + wall.len * model.height, 0);
     const sub = `пол ${fmtShort(model.floor)} м² · ${model.walls.length} стен · h ${fmtShort(model.height)} м`;
-    return `<article class="calc-node is-planner ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+    return `<article class="calc-node is-planner ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(node.color || "#65a30d")}">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <input class="calc-pname calc-planner-name" data-planner-title="${esc(node.id)}" value="${esc(plannerName(node))}" maxlength="48" spellcheck="false" title="Имя планировщика" aria-label="Имя планировщика" />
+        <input class="calc-planner-color" type="color" data-planner-color="${esc(node.id)}" value="${esc(node.color || "#65a30d")}" title="Цвет плана" aria-label="Цвет плана" />
         <button type="button" class="calc-text-btn" data-planner-edit="${esc(node.id)}" title="План пола и площади">Редактор</button>
         <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
       </header>
       <div class="calc-node-sub">${esc(sub)}</div>
-      ${plannerThumb(node.points)}
+      <div class="calc-planner-preview">
+        ${plannerThumb(node.points)}
+        <div class="calc-planner-preview-info">
+          <div class="calc-planner-preview-title">${esc(plannerName(node))}</div>
+          <div class="calc-planner-preview-area">${esc(fmtShort(totalArea))} м²</div>
+        </div>
+      </div>
       <div class="calc-ports">
         ${
           ports.length
             ? ports
                 .map((port) => {
                   const value = graph.values[`${node.id}:${port.id}`];
-                  const shown = value != null && Number.isFinite(value) ? value : port.area;
-                  const tip = `${port.name} · ${fmtShort(shown)} м²`;
+                  const shown = value != null && Number.isFinite(value) ? value : (port.value ?? port.area);
+                  const unit = port.unit || "м²";
+                  const tip = `${port.name} · ${fmtShort(shown)} ${unit}`;
                   return `<div class="calc-row out">
                     <span class="calc-row-name" title="${esc(tip)}">${esc(port.name)}</span>
-                    <b>${esc(fmtShort(shown))}</b>
+                    <b>${esc(fmtShort(shown))} <small>${esc(unit)}</small></b>
                     <i class="calc-port out" data-port="${esc(port.id)}" data-io="out" title="${esc(tip)}"></i>
                   </div>`;
                 })
@@ -6447,6 +6486,20 @@
       }
     });
     root.addEventListener("input", (e) => {
+      if (e.target.dataset?.plannerColor) {
+        const nodeEl = e.target.closest("[data-node]");
+        const bp = activeBlueprint();
+        const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node) : null;
+        if (node?.type === "planner") {
+          node.color = String(e.target.value || "#65a30d").toLowerCase();
+          nodeEl.style.setProperty("--planner-color", node.color);
+          const path = nodeEl.querySelector(".calc-planner-thumb path");
+          if (path) {
+            path.style.stroke = node.color;
+          }
+        }
+        return;
+      }
       if (e.target.dataset?.groupColor) {
         const nodeEl = e.target.closest("[data-node]");
         const bp = activeBlueprint();
@@ -6584,6 +6637,12 @@
         const title = $("planner-title");
         if (title) title.value = node.name;
         dirty();
+        return;
+      }
+      if (e.target.dataset.plannerColor && node.type === "planner") {
+        node.color = String(e.target.value || "#65a30d").toLowerCase();
+        dirty();
+        render();
         return;
       }
       if (e.target.dataset.resultPrio && node.type === "result") {

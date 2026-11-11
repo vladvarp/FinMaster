@@ -330,17 +330,24 @@
     <article class="calc-node is-planner">
       <header class="calc-node-h">
         <input class="calc-pname calc-planner-name" value="Санузел" maxlength="48" readonly tabindex="-1" title="Имя планировщика" aria-label="Имя планировщика" />
+        <input class="calc-planner-color" type="color" value="#0ea5e9" disabled tabindex="-1" title="Цвет плана" />
         <button type="button" class="calc-text-btn" tabindex="-1">Редактор</button>
       </header>
       <div class="calc-node-sub">пол 12 м² · 4 стены · h 2,7 м</div>
-      <svg class="calc-planner-thumb" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><path d="M4 11H60V53H4Z"/></svg>
+      <div class="calc-planner-preview" style="--planner-color:#0ea5e9">
+        <svg class="calc-planner-thumb" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><path d="M4 11H60V53H4Z"/></svg>
+        <div class="calc-planner-preview-info">
+          <div class="calc-planner-preview-title">Санузел</div>
+          <div class="calc-planner-preview-area">49,8 м²</div>
+        </div>
+      </div>
       <div class="calc-ports">
-        <div class="calc-row out"><span class="calc-row-name">Пол</span><b>12</b><i class="calc-port out" title="Пол · 12 м²"></i></div>
-        <div class="calc-row out"><span class="calc-row-name">Стена 1</span><b>10,8</b><i class="calc-port out" title="Стена 1 · 10,8 м²"></i></div>
-        <div class="calc-row out"><span class="calc-row-name">3 стены</span><b>29,7</b><i class="calc-port out" title="3 стены · 29,7 м²"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Пол</span><b>12 <small>м²</small></b><i class="calc-port out" title="Пол · 12 м²"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Стена 1</span><b>10,8 <small>м²</small></b><i class="calc-port out" title="Стена 1 · 10,8 м²"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">3 стены</span><b>29,7 <small>м²</small></b><i class="calc-port out" title="3 стены · 29,7 м²"></i></div>
       </div>
     </article>
-    <p>Имя «Санузел» стоит в шапке ноды и то же имя — в шапке редактора. Под подписью — квадратная миниатюра плана, ширина и глубина в одном масштабе. Кнопка «Редактор» открывает его целиком. Комната 4×3 м, высота 2,7 м: пол 12 м². Стена 1 — 4×2,7 = 10,8 м², её включили отдельно. «3 стены» — сумма трёх стен из четырёх: 10,8 + 8,1 + 10,8 = 29,7 м². Четвёртая стена в эту сумму не входит и на ноду не выведена. Развёртка в редакторе строится сама.</p>
+    <p>Имя плана показано поверх миниатюры, под ней — общая площадь пола и всех стен. Цвет назначается случайно при создании; его можно поменять палитрой в шапке ноды. Выход «Высота стен» отдаёт высоту в метрах. В примере комната 4×3 м, высота 2,7 м: пол 12 м², стены суммарно 37,8 м², общая площадь — 49,8 м². Стена 1 — 4×2,7 = 10,8 м², её включили отдельно. «3 стены» — сумма трёх стен из четырёх: 29,7 м². Высота стен появляется среди выходов только при включённой галочке «На ноду» в разделе «Параметры». Развёртка в редакторе строится сама.</p>
   </section>
 
   <section class="kind">
