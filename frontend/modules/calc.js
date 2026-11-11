@@ -2196,17 +2196,23 @@
         index,
       });
     });
-    const areaOf = (id) => rows.find((row) => row.id === id)?.area || 0;
+    const rowById = new Map(rows.map((row) => [row.id, row]));
     const sums = (node.outs || [])
       .filter((item) => item.kind === "sum")
-      .map((item) => ({
-        id: item.id,
-        kind: "sum",
-        name: item.name || "Сумма",
-        on: !!item.on,
-        parts: item.parts || [],
-        area: (item.parts || []).reduce((sum, id) => sum + areaOf(id), 0),
-      }));
+      .map((item) => {
+        const selected = (item.parts || []).map((id) => rowById.get(id)).filter(Boolean);
+        const units = [...new Set(selected.map((row) => row.unit || "м²"))];
+        return {
+          id: item.id,
+          kind: "sum",
+          name: item.name || "Сумма",
+          on: !!item.on,
+          parts: item.parts || [],
+          area: selected.reduce((sum, row) => sum + row.area, 0),
+          value: selected.reduce((sum, row) => sum + (row.value ?? row.area), 0),
+          unit: units.length > 1 ? units.join(" / ") : (units[0] || "м²"),
+        };
+      });
     return { floor, height, walls, rows, sums, peri: walls.reduce((sum, wall) => sum + wall.len, 0) };
   }
 
@@ -2771,7 +2777,7 @@
       if (name && document.activeElement !== name) name.value = row.name;
     });
     model.sums.forEach((row) => {
-      setVal(row.id, `${fmtShort(row.area)} м²`);
+      setVal(row.id, `${fmtShort(row.value ?? row.area)} ${row.unit || "м²"}`);
       setNote(row.id, plannerSumNote(row.parts, model.walls.length));
       const name = document.querySelector(`#planner-side [data-planner-sum-name="${cssEsc(row.id)}"]`);
       if (name && document.activeElement !== name) name.value = row.name;
@@ -2782,7 +2788,7 @@
       const span = label.querySelector("span");
       const em = label.querySelector("em");
       if (span) span.textContent = row.name;
-      if (em) em.textContent = fmtShort(row.area);
+      if (em) em.textContent = `${fmtShort(row.value ?? row.area)} ${row.unit || "м²"}`;
     });
     document.querySelectorAll("#planner-side [data-planner-on]").forEach((el) => {
       const id = el.dataset.plannerOn;
@@ -2858,14 +2864,14 @@
         const parts = model.rows
           .map((row) => {
             const checked = sum.parts.includes(row.id) ? "checked" : "";
-            return `<label class="planner-part"><input type="checkbox" data-planner-part="${esc(sum.id)}" data-part="${esc(row.id)}" ${checked} /> <span>${esc(row.name)}</span> <em>${esc(fmtShort(row.area))}</em></label>`;
+            return `<label class="planner-part"><input type="checkbox" data-planner-part="${esc(sum.id)}" data-part="${esc(row.id)}" ${checked} /> <span>${esc(row.name)}</span> <em>${esc(fmtShort(row.value ?? row.area))} ${row.unit || "м²"}</em></label>`;
           })
           .join("");
         return `<div class="planner-sum" data-planner-row="${esc(sum.id)}">
           <div class="planner-sum-h">
             ${onBox(sum.id, sum.on)}
             <input class="planner-name" data-planner-sum-name="${esc(sum.id)}" value="${esc(sum.name)}" maxlength="48" aria-label="Имя суммы" />
-            <b data-planner-val="${esc(sum.id)}">${esc(fmtShort(sum.area))} м²</b>
+            <b data-planner-val="${esc(sum.id)}">${esc(fmtShort(sum.value ?? sum.area))} ${sum.unit || "м²"}</b>
             <button type="button" class="calc-x" data-planner-del-sum="${esc(sum.id)}" title="Удалить сумму">×</button>
           </div>
           <div class="planner-sum-tools">
@@ -3041,22 +3047,6 @@
     $("planner-side")?.addEventListener("input", (e) => {
       const node = plannerNode();
       if (!node) return;
-      const pogonazhId = e.target.dataset?.plannerPogonazh;
-      if (pogonazhId) {
-        const out = (node.outs || []).find((item) => item.id === pogonazhId && item.kind === "wall");
-        if (!out) return;
-        out.pogonazh = !!e.target.checked;
-        plannerCommit(false);
-        return;
-      }
-      const axisId = e.target.dataset?.plannerAxis;
-      if (axisId) {
-        const out = (node.outs || []).find((item) => item.id === axisId && item.kind === "wall");
-        if (!out) return;
-        out.pogonazhAxis = e.target.checked ? "length" : "height";
-        plannerCommit(false);
-        return;
-      }
       if (e.target.matches("[data-planner-height-on]")) {
         const linked = linkedFromPorts(node.id, activeBlueprint()?.links || []);
         if (linked.has("height")) {
@@ -3118,6 +3108,24 @@
       }
     });
     $("planner-side")?.addEventListener("change", (e) => {
+      const node = plannerNode();
+      if (!node) return;
+      const pogonazhId = e.target.dataset?.plannerPogonazh;
+      if (pogonazhId) {
+        const out = (node.outs || []).find((item) => item.id === pogonazhId && item.kind === "wall");
+        if (!out) return;
+        out.pogonazh = e.target.checked;
+        plannerCommit(false);
+        return;
+      }
+      const axisId = e.target.dataset?.plannerAxis;
+      if (axisId) {
+        const out = (node.outs || []).find((item) => item.id === axisId && item.kind === "wall");
+        if (!out) return;
+        out.pogonazhAxis = e.target.checked ? "length" : "height";
+        plannerCommit(false);
+        return;
+      }
       if (e.target.dataset?.plannerName || e.target.dataset?.plannerSumName) {
         if (session.planner) session.planner.touched = false;
         plannerCommit(false);
