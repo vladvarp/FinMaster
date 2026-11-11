@@ -6468,7 +6468,6 @@
           const path = nodeEl.querySelector(".calc-planner-thumb path");
           if (path) {
             path.style.stroke = node.color;
-            path.style.fill = node.color;
           }
         }
         return;
