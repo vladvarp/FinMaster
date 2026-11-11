@@ -4781,7 +4781,7 @@
   function plannerNodeHtml(node, bp, graph) {
     const model = plannerModel(node);
     const ports = plannerOutputs(node, bp.links);
-    const totalArea = model.floor + model.walls.reduce((sum, wall) => sum + wall.len * model.height, 0);
+    const totalArea = model.floor;
     const sub = `пол ${fmtShort(model.floor)} м² · ${model.walls.length} стен · h ${fmtShort(model.height)} м`;
     return `<article class="calc-node is-planner ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(node.color || "#65a30d")}">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
