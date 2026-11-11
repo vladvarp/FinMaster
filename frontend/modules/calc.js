@@ -2140,6 +2140,8 @@
         kind: "wall",
         name: name && !plannerAutoName(name) ? name.slice(0, 48) : "",
         on: old ? !!old.on : false,
+        pogonazh: !!old?.pogonazh,
+        pogonazhAxis: old?.pogonazhAxis === "length" ? "length" : "height",
       });
     });
     const sums = prev.filter((item) => item && item.kind === "sum").slice(0, PLANNER_MAX_SUMS);
@@ -2186,6 +2188,10 @@
         name: plannerWallName(out, index),
         len: wall.len,
         area: wall.len * height,
+        value: out?.pogonazh ? (out.pogonazhAxis === "length" ? wall.len : height) : wall.len * height,
+        unit: out?.pogonazh ? "м" : "м²",
+        pogonazh: !!out?.pogonazh,
+        pogonazhAxis: out?.pogonazhAxis === "length" ? "length" : "height",
         on: !!out?.on,
         index,
       });
@@ -2209,7 +2215,7 @@
     const linked = linkedFromPorts(node.id, links || []);
     const ports = [];
     model.rows.concat(model.sums).forEach((row) => {
-      if (row.on || linked.has(row.id)) ports.push({ id: row.id, name: row.name, area: row.area, unit: "м²" });
+      if (row.on || linked.has(row.id)) ports.push({ id: row.id, name: row.name, value: row.value ?? row.area, unit: row.unit || "м²" });
     });
     if (node.heightOut || linked.has("height")) ports.push({ id: "height", name: "Высота стен", value: model.height, unit: "м" });
     return ports;
@@ -2752,7 +2758,13 @@
       if (el) el.textContent = text;
     };
     model.rows.forEach((row) => {
-      setVal(row.id, `${fmtShort(row.area)} м²`);
+      setVal(row.id, `${fmtShort(row.value ?? row.area)} ${row.unit || "м²"}`);
+      const pogonazh = document.querySelector(`#planner-side [data-planner-pogonazh="${cssEsc(row.id)}"]`);
+      if (pogonazh) pogonazh.checked = !!row.pogonazh;
+      const axis = document.querySelector(`#planner-side [data-planner-axis="${cssEsc(row.id)}"]`);
+      if (axis) axis.checked = row.pogonazhAxis === "length";
+      const axisWrap = document.querySelector(`#planner-side [data-planner-axis-wrap="${cssEsc(row.id)}"]`);
+      if (axisWrap) axisWrap.hidden = !row.pogonazh;
       const len = document.querySelector(`#planner-side [data-planner-len="${cssEsc(row.id)}"]`);
       if (len && document.activeElement !== len) len.value = plannerInput(row.len);
       const name = document.querySelector(`#planner-side [data-planner-name="${cssEsc(row.id)}"]`);
@@ -2829,7 +2841,15 @@
           ${onBox(row.id, row.on)}
           <input class="planner-name" data-planner-name="${esc(row.id)}" value="${esc(row.name)}" maxlength="48" aria-label="Имя стены" />
           <label class="planner-len">длина <input data-planner-len="${esc(row.id)}" value="${esc(plannerInput(row.len))}" inputmode="decimal" aria-label="Длина стены" /> м</label>
-          <b data-planner-val="${esc(row.id)}">${esc(fmtShort(row.area))} м²</b>
+          <b data-planner-val="${esc(row.id)}">${esc(fmtShort(row.value ?? row.area))} ${row.unit || "м²"}</b>
+          <div class="planner-wall-tools">
+            <label class="planner-on" title="Вместо площади выводить погонаж"><input type="checkbox" data-planner-pogonazh="${esc(row.id)}" ${row.pogonazh ? "checked" : ""} /> Погонаж</label>
+            <label class="planner-axis-switch" data-planner-axis-wrap="${esc(row.id)}" ${row.pogonazh ? "" : "hidden"}>
+              <span>Высота</span>
+              <input type="checkbox" role="switch" data-planner-axis="${esc(row.id)}" ${row.pogonazhAxis === "length" ? "checked" : ""} aria-label="Переключить на длину стены" />
+              <span>Длина</span>
+            </label>
+          </div>
         </div>`;
       })
       .join("");
@@ -3021,6 +3041,22 @@
     $("planner-side")?.addEventListener("input", (e) => {
       const node = plannerNode();
       if (!node) return;
+      const pogonazhId = e.target.dataset?.plannerPogonazh;
+      if (pogonazhId) {
+        const out = (node.outs || []).find((item) => item.id === pogonazhId && item.kind === "wall");
+        if (!out) return;
+        out.pogonazh = !!e.target.checked;
+        plannerCommit(false);
+        return;
+      }
+      const axisId = e.target.dataset?.plannerAxis;
+      if (axisId) {
+        const out = (node.outs || []).find((item) => item.id === axisId && item.kind === "wall");
+        if (!out) return;
+        out.pogonazhAxis = e.target.checked ? "length" : "height";
+        plannerCommit(false);
+        return;
+      }
       if (e.target.matches("[data-planner-height-on]")) {
         const linked = linkedFromPorts(node.id, activeBlueprint()?.links || []);
         if (linked.has("height")) {
