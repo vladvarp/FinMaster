@@ -4724,9 +4724,11 @@
       <div class="calc-node-sub">${esc(sub)}</div>
       <div class="calc-planner-preview">
         ${plannerThumb(node.points)}
-        <div class="calc-planner-preview-title">${esc(plannerName(node))}</div>
+        <div class="calc-planner-preview-info">
+          <div class="calc-planner-preview-title">${esc(plannerName(node))}</div>
+          <div class="calc-planner-preview-area">${esc(fmtShort(totalArea))} м²</div>
+        </div>
       </div>
-      <div class="calc-planner-total">Общая площадь: <b>${esc(fmtShort(totalArea))} м²</b></div>
       <div class="calc-ports">
         ${
           ports.length
