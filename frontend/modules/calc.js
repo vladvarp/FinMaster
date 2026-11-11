@@ -2122,6 +2122,7 @@
       ];
     } else node.points = points;
     node.height = plannerRound(plannerClamp(plannerNum(node.height, 2.7), 0.2, 30));
+    node.heightOut = !!node.heightOut;
     const plannerColor = String(node.color || "").trim().toLowerCase();
     node.color = /^#[0-9a-f]{6}$/.test(plannerColor) ? plannerColor : "#65a30d";
     const fresh = !Array.isArray(node.outs);
@@ -2210,7 +2211,7 @@
     model.rows.concat(model.sums).forEach((row) => {
       if (row.on || linked.has(row.id)) ports.push({ id: row.id, name: row.name, area: row.area, unit: "м²" });
     });
-    ports.push({ id: "height", name: "Высота стен", value: model.height, unit: "м" });
+    if (node.heightOut || linked.has("height")) ports.push({ id: "height", name: "Высота стен", value: model.height, unit: "м" });
     return ports;
   }
 
@@ -2779,6 +2780,12 @@
       el.disabled = linked.has(id);
       el.title = linked.has(id) ? "Сначала снимите связь на схеме" : "Вывести число на ноду";
     });
+    const heightOut = document.querySelector('#planner-side [data-planner-height-on]');
+    if (heightOut) {
+      heightOut.checked = !!(node.heightOut || linked.has("height"));
+      heightOut.disabled = linked.has("height");
+      heightOut.title = linked.has("height") ? "Сначала снимите связь на схеме" : "Вывести высоту стен на ноду";
+    }
     document.querySelectorAll("#planner-side [data-planner-row]").forEach((el) => {
       const wall = plannerSelWall(node);
       el.classList.toggle("is-sel", !!wall && el.dataset.plannerRow === wall.id);
@@ -2854,6 +2861,14 @@
     return `<div class="planner-block">
         <div class="planner-block-h">Площади <span data-planner-peri>периметр ${esc(fmtShort(model.peri))} м</span></div>
         ${rows}
+      </div>
+      <div class="planner-block">
+        <div class="planner-block-h">Параметры</div>
+        <div class="planner-metric">
+          <label class="planner-on" title="Вывести высоту стен на ноду"><input type="checkbox" data-planner-height-on ${node.heightOut ? "checked" : ""} /> На ноду</label>
+          <span class="planner-label">Высота стен</span>
+          <b>${esc(fmtShort(model.height))} м</b>
+        </div>
       </div>
       <div class="planner-block">
         <div class="planner-block-h">Сумма выбранных ${addSum}</div>
@@ -3006,6 +3021,16 @@
     $("planner-side")?.addEventListener("input", (e) => {
       const node = plannerNode();
       if (!node) return;
+      if (e.target.matches("[data-planner-height-on]")) {
+        const linked = linkedFromPorts(node.id, activeBlueprint()?.links || []);
+        if (linked.has("height")) {
+          e.target.checked = true;
+          return;
+        }
+        node.heightOut = !!e.target.checked;
+        plannerCommit(false);
+        return;
+      }
       const on = e.target.dataset?.plannerOn;
       if (on) {
         const out = (node.outs || []).find((item) => item.id === on);
@@ -3366,6 +3391,7 @@
       node.name = "Планировщик";
       node.color = GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
       node.height = 2.7;
+      node.heightOut = false;
       node.points = [
         { id: ids[0], x: 0, y: 0 },
         { id: ids[1], x: 4, y: 0 },
