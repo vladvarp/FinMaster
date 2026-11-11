@@ -3175,7 +3175,7 @@
         return;
       }
       const row = e.target.closest(".planner-metric[data-planner-row]");
-      if (!row || e.target.closest("button, .planner-on")) return;
+      if (!row || e.target.closest("button, .planner-on, .planner-axis-switch")) return;
       const id = row.dataset.plannerRow || "";
       if (!id.startsWith("w:")) return;
       plannerSelect({ kind: "wall", id }, false);
