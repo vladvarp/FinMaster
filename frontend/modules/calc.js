@@ -79,6 +79,7 @@
     filterMultiLock: false,
     filterMultiScroll: 0,
     orderWritePending: false,
+    planner: null,
   };
 
   function $(id) {
@@ -472,6 +473,7 @@
         src = `Заказ ${other?.number || "—"}`;
       } else if (owner.source.type === "filter") src = "Фильтр";
       else if (owner.source.type === "dashboard") src = "Дашборд";
+      else if (owner.source.type === "planner") src = "Планировщик";
       else if (owner.source.type === "scheme") src = "Схема";
       else src = owner.source.type || "нода";
     }
@@ -1012,6 +1014,10 @@
     return String(node?.name || "").trim() || "Результат";
   }
 
+  function plannerName(node) {
+    return String(node?.name || "").trim().slice(0, 48) || "Планировщик";
+  }
+
   function resultPriority(node) {
     const n = Number(node?.priority);
     return Number.isFinite(n) ? n : 9999;
@@ -1208,6 +1214,7 @@
         name: port.name,
       }));
     }
+    if (node.type === "planner") return plannerOutputs(node, links).map((port) => ({ id: port.id, name: port.name }));
     if (node.type === "order") {
       const found = order || api.findOrder(node.orderId);
       const lines = orderLines(found);
@@ -1511,6 +1518,8 @@
           const value = Number(stats[id]);
           setVal(nodeId, id, Number.isFinite(value) ? value : 0);
         });
+      } else if (node.type === "planner") {
+        plannerOutputs(node, links).forEach((port) => setVal(nodeId, port.id, port.area));
       } else if (node.type === "present") {
         presentPorts(node).forEach((port) => {
           const link = (incoming[nodeId] || []).find((item) => item.toPort === port.id);
@@ -1595,6 +1604,10 @@
     if (node.type === "scheme") return { w: 220, h: 100 };
     if (node.type === "result") return { w: 376, h: 120 };
     if (node.type === "filter" || node.type === "dashboard") return { w: 384, h: 420 };
+    if (node.type === "planner") {
+      const n = Array.isArray(node.outs) ? node.outs.filter((item) => item && item.on).length : 2;
+      return { w: 300, h: 96 + Math.max(1, n) * 28 };
+    }
     if (node.type === "present") return { w: 220, h: 160 };
     if (node.type === "group") return { w: Math.max(160, node.w || 320), h: Math.max(120, node.h || 220) };
     return { w: 188, h: 120 };
@@ -1768,6 +1781,7 @@
       scheme: "#eab308",
       filter: "#0ea5e9",
       dashboard: "#14b8a6",
+      planner: "#65a30d",
       present: "#8b5cf6",
       group: "#94a3b8",
       comment: "#d4a017",
@@ -1982,6 +1996,1138 @@
     return Number.isFinite(value) ? value : 0;
   }
 
+  const PLANNER_MAX_PTS = 24;
+  const PLANNER_MAX_SUMS = 8;
+
+  function plannerRound(n) {
+    return Math.round(Number(n) * 10000) / 10000;
+  }
+
+  function plannerNum(value, fallback) {
+    const n = typeof value === "number" ? value : Number(String(value ?? "").replace(",", ".").trim());
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function plannerClamp(n, lo, hi) {
+    return Math.max(lo, Math.min(hi, n));
+  }
+
+  function plannerDraft(text) {
+    const raw = String(text ?? "").trim().replace(",", ".");
+    if (!raw || raw === "-" || raw.endsWith(".")) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function plannerInput(n) {
+    const r = plannerRound(n);
+    if (!Number.isFinite(r)) return "";
+    if (Number.isInteger(r)) return String(r);
+    return String(r).replace(".", ",");
+  }
+
+  function plannerArea(points) {
+    let sum = 0;
+    for (let i = 0; i < points.length; i += 1) {
+      const a = points[i];
+      const b = points[(i + 1) % points.length];
+      sum += a.x * b.y - b.x * a.y;
+    }
+    return Math.abs(sum) / 2;
+  }
+
+  function plannerCentroid(points) {
+    let x = 0;
+    let y = 0;
+    let a = 0;
+    for (let i = 0; i < points.length; i += 1) {
+      const p = points[i];
+      const q = points[(i + 1) % points.length];
+      const cross = p.x * q.y - q.x * p.y;
+      a += cross;
+      x += (p.x + q.x) * cross;
+      y += (p.y + q.y) * cross;
+    }
+    if (Math.abs(a) < 1e-8) {
+      return {
+        x: points.reduce((s, p) => s + p.x, 0) / points.length,
+        y: points.reduce((s, p) => s + p.y, 0) / points.length,
+      };
+    }
+    return { x: x / (3 * a), y: y / (3 * a) };
+  }
+
+  function plannerWalls(node) {
+    const pts = node.points || [];
+    return pts.map((p, i) => {
+      const q = pts[(i + 1) % pts.length];
+      return { id: `w:${p.id}`, index: i, a: p, b: q, len: Math.hypot(q.x - p.x, q.y - p.y) };
+    });
+  }
+
+  function plannerAutoName(name) {
+    return /^Стена \d+$/.test(String(name || "").trim());
+  }
+
+  function plannerWallName(out, index) {
+    const name = String(out?.name || "").trim();
+    if (!name || plannerAutoName(name)) return `Стена ${index + 1}`;
+    return name;
+  }
+
+  function plannerRect(points) {
+    if (!points || points.length !== 4) return null;
+    const eps = 0.001;
+    for (let i = 0; i < 4; i += 1) {
+      const a = points[i];
+      const b = points[(i + 1) % 4];
+      const dx = Math.abs(b.x - a.x);
+      const dy = Math.abs(b.y - a.y);
+      if ((dx > eps && dy > eps) || (dx <= eps && dy <= eps)) return null;
+    }
+    const xs = points.map((p) => p.x);
+    const ys = points.map((p) => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    if (maxX - minX < 0.05 || maxY - minY < 0.05) return null;
+    return { w: maxX - minX, d: maxY - minY, minX, maxX, minY, maxY };
+  }
+
+  function ensurePlanner(node) {
+    if (!node || node.type !== "planner") return node;
+    if (!Array.isArray(node.points)) node.points = [];
+    const seen = new Set();
+    const points = [];
+    node.points.forEach((p) => {
+      if (!p || typeof p !== "object" || points.length >= PLANNER_MAX_PTS) return;
+      let id = String(p.id || "").trim();
+      if (!id || seen.has(id)) id = uid();
+      const x = plannerNum(p.x, NaN);
+      const y = plannerNum(p.y, NaN);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      seen.add(id);
+      p.id = id;
+      p.x = plannerRound(plannerClamp(x, -500, 500));
+      p.y = plannerRound(plannerClamp(y, -500, 500));
+      points.push(p);
+    });
+    if (points.length < 3) {
+      node.points = [
+        { id: uid(), x: 0, y: 0 },
+        { id: uid(), x: 4, y: 0 },
+        { id: uid(), x: 4, y: 3 },
+        { id: uid(), x: 0, y: 3 },
+      ];
+    } else node.points = points;
+    node.height = plannerRound(plannerClamp(plannerNum(node.height, 2.7), 0.2, 30));
+    const fresh = !Array.isArray(node.outs);
+    const prev = fresh ? [] : node.outs;
+    const byId = new Map(prev.filter((item) => item && item.id).map((item) => [String(item.id), item]));
+    const walls = plannerWalls(node);
+    const wallIds = new Set(walls.map((wall) => wall.id));
+    const floor = byId.get("floor");
+    const outs = [{ id: "floor", kind: "floor", name: "Пол", on: floor ? floor.on !== false : true }];
+    walls.forEach((wall) => {
+      const old = byId.get(wall.id);
+      const name = String(old?.name || "").trim();
+      outs.push({
+        id: wall.id,
+        kind: "wall",
+        name: name && !plannerAutoName(name) ? name.slice(0, 48) : "",
+        on: old ? !!old.on : false,
+      });
+    });
+    const sums = prev.filter((item) => item && item.kind === "sum").slice(0, PLANNER_MAX_SUMS);
+    if (fresh) {
+      sums.push({ id: uid(), kind: "sum", name: "Стены", on: true, parts: walls.map((wall) => wall.id) });
+    }
+    const used = new Set(outs.map((item) => item.id));
+    sums.forEach((item) => {
+      let id = String(item.id || "").trim();
+      if (!id || used.has(id)) id = uid();
+      used.add(id);
+      const parts = [];
+      const seenParts = new Set();
+      (Array.isArray(item.parts) ? item.parts : []).forEach((part) => {
+        const key = String(part || "");
+        if (seenParts.has(key) || (key !== "floor" && !wallIds.has(key))) return;
+        seenParts.add(key);
+        parts.push(key);
+      });
+      outs.push({
+        id,
+        kind: "sum",
+        name: String(item.name || "").trim().slice(0, 48) || "Сумма",
+        on: !!item.on,
+        parts,
+      });
+    });
+    node.outs = outs;
+    return node;
+  }
+
+  function plannerModel(node) {
+    ensurePlanner(node);
+    const walls = plannerWalls(node);
+    const floor = plannerArea(node.points);
+    const height = node.height;
+    const outById = Object.fromEntries((node.outs || []).map((item) => [item.id, item]));
+    const rows = [{ id: "floor", kind: "floor", name: "Пол", area: floor, on: !!outById.floor?.on }];
+    walls.forEach((wall, index) => {
+      const out = outById[wall.id];
+      rows.push({
+        id: wall.id,
+        kind: "wall",
+        name: plannerWallName(out, index),
+        len: wall.len,
+        area: wall.len * height,
+        on: !!out?.on,
+        index,
+      });
+    });
+    const areaOf = (id) => rows.find((row) => row.id === id)?.area || 0;
+    const sums = (node.outs || [])
+      .filter((item) => item.kind === "sum")
+      .map((item) => ({
+        id: item.id,
+        kind: "sum",
+        name: item.name || "Сумма",
+        on: !!item.on,
+        parts: item.parts || [],
+        area: (item.parts || []).reduce((sum, id) => sum + areaOf(id), 0),
+      }));
+    return { floor, height, walls, rows, sums, peri: walls.reduce((sum, wall) => sum + wall.len, 0) };
+  }
+
+  function plannerOutputs(node, links) {
+    const model = plannerModel(node);
+    const linked = linkedFromPorts(node.id, links || []);
+    const ports = [];
+    model.rows.concat(model.sums).forEach((row) => {
+      if (row.on || linked.has(row.id)) ports.push({ id: row.id, name: row.name, area: row.area });
+    });
+    return ports;
+  }
+
+  function plannerDropPorts(node, ids) {
+    const bp = activeBlueprint();
+    if (!bp || !ids?.length) return;
+    const drop = new Set(ids);
+    bp.links = (bp.links || []).filter((link) => !(link.from === node.id && drop.has(link.fromPort)));
+  }
+
+  function plannerSumNote(parts, wallCount) {
+    const floor = parts.includes("floor");
+    const walls = parts.filter((id) => String(id).startsWith("w:")).length;
+    const bits = [];
+    if (floor) bits.push("пол");
+    if (walls) bits.push(`${walls} из ${wallCount} стен`);
+    return bits.length ? bits.join(" + ") : "ничего не выбрано";
+  }
+
+  function plannerSetRect(node, w, d) {
+    const box = plannerRect(node.points);
+    if (!box) return false;
+    const width = plannerClamp(w, 0.05, 500);
+    const depth = plannerClamp(d, 0.05, 500);
+    node.points.forEach((p) => {
+      const onMaxX = Math.abs(p.x - box.maxX) < Math.abs(p.x - box.minX);
+      const onMaxY = Math.abs(p.y - box.maxY) < Math.abs(p.y - box.minY);
+      p.x = plannerRound(onMaxX ? box.minX + width : box.minX);
+      p.y = plannerRound(onMaxY ? box.minY + depth : box.minY);
+    });
+    return true;
+  }
+
+  function plannerMakeRect(node, w, d) {
+    const width = plannerRound(plannerClamp(plannerNum(w, 4), 0.05, 500));
+    const depth = plannerRound(plannerClamp(plannerNum(d, 3), 0.05, 500));
+    const origin = node.points[0] || { x: 0, y: 0 };
+    const keep = node.points.slice(0, 4);
+    while (keep.length < 4) keep.push({ id: uid(), x: 0, y: 0 });
+    const drop = node.points.slice(4).map((p) => `w:${p.id}`);
+    keep[0].x = plannerRound(origin.x);
+    keep[0].y = plannerRound(origin.y);
+    keep[1].x = plannerRound(origin.x + width);
+    keep[1].y = plannerRound(origin.y);
+    keep[2].x = plannerRound(origin.x + width);
+    keep[2].y = plannerRound(origin.y + depth);
+    keep[3].x = plannerRound(origin.x);
+    keep[3].y = plannerRound(origin.y + depth);
+    node.points = keep;
+    if (drop.length) {
+      const gone = new Set(drop);
+      node.outs = (node.outs || []).filter((item) => !gone.has(item.id));
+      (node.outs || []).forEach((item) => {
+        if (item.kind === "sum" && Array.isArray(item.parts)) item.parts = item.parts.filter((id) => !gone.has(id));
+      });
+      plannerDropPorts(node, drop);
+    }
+    ensurePlanner(node);
+  }
+
+  function plannerProject(wall, at) {
+    const dx = wall.b.x - wall.a.x;
+    const dy = wall.b.y - wall.a.y;
+    const l2 = dx * dx + dy * dy || 1;
+    let t = ((at.x - wall.a.x) * dx + (at.y - wall.a.y) * dy) / l2;
+    t = Math.max(0.08, Math.min(0.92, t));
+    return { x: plannerRound(wall.a.x + dx * t), y: plannerRound(wall.a.y + dy * t) };
+  }
+
+  function plannerInsertCorner(node, wallId, at) {
+    if (node.points.length >= PLANNER_MAX_PTS) return "";
+    const wall = plannerWalls(node).find((item) => item.id === wallId);
+    if (!wall) return "";
+    const spot = at ? plannerProject(wall, at) : plannerProject(wall, { x: (wall.a.x + wall.b.x) / 2, y: (wall.a.y + wall.b.y) / 2 });
+    const id = uid();
+    node.points.splice(wall.index + 1, 0, { id, x: spot.x, y: spot.y });
+    ensurePlanner(node);
+    return id;
+  }
+
+  function plannerDeleteCorner(node, pointId) {
+    if (!pointId || node.points.length <= 3) return false;
+    const wallId = `w:${pointId}`;
+    node.points = node.points.filter((p) => p.id !== pointId);
+    node.outs = (node.outs || []).filter((item) => item.id !== wallId);
+    (node.outs || []).forEach((item) => {
+      if (item.kind === "sum" && Array.isArray(item.parts)) item.parts = item.parts.filter((id) => id !== wallId);
+    });
+    plannerDropPorts(node, [wallId]);
+    ensurePlanner(node);
+    return true;
+  }
+
+  function plannerSetLength(node, wallId, len) {
+    const wall = plannerWalls(node).find((item) => item.id === wallId);
+    if (!wall) return;
+    const length = plannerClamp(len, 0.05, 500);
+    const dx = wall.b.x - wall.a.x;
+    const dy = wall.b.y - wall.a.y;
+    const cur = Math.hypot(dx, dy) || 1;
+    wall.b.x = plannerRound(plannerClamp(wall.a.x + (dx / cur) * length, -500, 500));
+    wall.b.y = plannerRound(plannerClamp(wall.a.y + (dy / cur) * length, -500, 500));
+  }
+
+  function plannerSnap(node, pointId, x, y, shift, origin) {
+    let nx = Math.round(x * 20) / 20;
+    let ny = Math.round(y * 20) / 20;
+    if (shift && origin) {
+      if (Math.abs(x - origin.x) >= Math.abs(y - origin.y)) ny = origin.y;
+      else nx = origin.x;
+    }
+    let bestX = null;
+    let bestY = null;
+    let bestDx = 0.12;
+    let bestDy = 0.12;
+    node.points.forEach((p) => {
+      if (p.id === pointId) return;
+      const dx = Math.abs(nx - p.x);
+      const dy = Math.abs(ny - p.y);
+      if (dx < bestDx) {
+        bestDx = dx;
+        bestX = p.x;
+      }
+      if (dy < bestDy) {
+        bestDy = dy;
+        bestY = p.y;
+      }
+    });
+    if (bestX != null) nx = bestX;
+    if (bestY != null) ny = bestY;
+    nx = plannerClamp(nx, -500, 500);
+    ny = plannerClamp(ny, -500, 500);
+    const i = node.points.findIndex((p) => p.id === pointId);
+    if (i < 0) return null;
+    const prev = node.points[(i - 1 + node.points.length) % node.points.length];
+    const next = node.points[(i + 1) % node.points.length];
+    if (Math.hypot(nx - prev.x, ny - prev.y) < 0.05 || Math.hypot(nx - next.x, ny - next.y) < 0.05) return null;
+    return { x: plannerRound(nx), y: plannerRound(ny) };
+  }
+
+  function plannerNode() {
+    const id = session.planner?.id;
+    if (!id) return null;
+    const node = (activeBlueprint()?.nodes || []).find((item) => item.id === id && item.type === "planner") || null;
+    if (!node) {
+      session.planner = null;
+      $("planner-modal")?.classList.remove("open");
+    }
+    return node;
+  }
+
+  function plannerSelWall(node) {
+    const sel = session.planner?.sel;
+    if (!node || !sel) return null;
+    const walls = plannerWalls(node);
+    if (sel.kind === "wall") return walls.find((wall) => wall.id === sel.id) || null;
+    if (sel.kind === "point") return walls.find((wall) => wall.id === `w:${sel.id}`) || null;
+    return null;
+  }
+
+  function plannerColors() {
+    const css = getComputedStyle(document.documentElement);
+    const pick = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
+    return {
+      ink: pick("--ink", "#0f172a"),
+      muted: pick("--muted", "#64748b"),
+      line: pick("--line", "#dbe3ec"),
+      card: pick("--card", "#fff"),
+      bg: pick("--bg-2", "#f7fafc"),
+    };
+  }
+
+  function plannerFitCanvas(canvas) {
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    if (w < 8 || h < 8) return null;
+    const dpr = window.devicePixelRatio || 1;
+    const bw = Math.max(1, Math.round(w * dpr));
+    const bh = Math.max(1, Math.round(h * dpr));
+    if (canvas.width !== bw || canvas.height !== bh) {
+      canvas.width = bw;
+      canvas.height = bh;
+    }
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, w, h };
+  }
+
+  function plannerView(canvas, points, lock) {
+    if (lock) return lock;
+    const pad = 36;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    points.forEach((p) => {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    });
+    const spanX = Math.max(0.5, maxX - minX);
+    const spanY = Math.max(0.5, maxY - minY);
+    const scale = Math.min((canvas.clientWidth - pad * 2) / spanX, (canvas.clientHeight - pad * 2) / spanY);
+    const ox = (canvas.clientWidth - spanX * scale) / 2 - minX * scale;
+    const oy = (canvas.clientHeight - spanY * scale) / 2 - minY * scale;
+    return {
+      scale,
+      to(p) {
+        return { x: ox + p.x * scale, y: oy + p.y * scale };
+      },
+      from(x, y) {
+        return { x: (x - ox) / scale, y: (y - oy) / scale };
+      },
+    };
+  }
+
+  function plannerDistSeg(px, py, ax, ay, bx, by) {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const l2 = dx * dx + dy * dy || 1;
+    let t = ((px - ax) * dx + (py - ay) * dy) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
+  }
+
+  function plannerRoundPath(ctx, x, y, w, h, r) {
+    if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, h, r);
+    else ctx.rect(x, y, w, h);
+  }
+
+  function plannerPill(ctx, text, x, y, colors) {
+    ctx.save();
+    ctx.font = "12px Segoe UI, sans-serif";
+    const w = ctx.measureText(text).width + 12;
+    const h = 18;
+    const left = x - w / 2;
+    const top = y - h / 2;
+    ctx.fillStyle = colors.card;
+    ctx.strokeStyle = colors.line;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    plannerRoundPath(ctx, left, top, w, h, 6);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = colors.ink;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, x, y + 0.5);
+    ctx.restore();
+  }
+
+  function plannerHit(canvas, node, clientX, clientY) {
+    const view = session.planner?.viewLock || plannerView(canvas, node.points);
+    const rect = canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    let pointId = "";
+    let best = 12;
+    node.points.forEach((p) => {
+      const s = view.to(p);
+      const d = Math.hypot(s.x - x, s.y - y);
+      if (d <= best) {
+        best = d;
+        pointId = p.id;
+      }
+    });
+    if (pointId) return { pointId, wallId: "", world: view.from(x, y) };
+    let wallId = "";
+    let bestW = 8;
+    plannerWalls(node).forEach((wall) => {
+      const a = view.to(wall.a);
+      const b = view.to(wall.b);
+      const d = plannerDistSeg(x, y, a.x, a.y, b.x, b.y);
+      if (d <= bestW) {
+        bestW = d;
+        wallId = wall.id;
+      }
+    });
+    return { pointId: "", wallId, world: view.from(x, y) };
+  }
+
+  function plannerDraw() {
+    const node = plannerNode();
+    const plan = $("planner-plan");
+    const unfold = $("planner-unfold");
+    if (!node || !plan || !unfold || !session.planner) return;
+    const colors = plannerColors();
+    const model = plannerModel(node);
+    const selWall = plannerSelWall(node);
+    const selPoint = session.planner.sel?.kind === "point" ? session.planner.sel.id : "";
+    const fitted = plannerFitCanvas(plan);
+    if (fitted) {
+      const { ctx, w, h } = fitted;
+      const view = plannerView(plan, node.points, session.planner.viewLock);
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = colors.bg;
+      ctx.fillRect(0, 0, w, h);
+      const step = view.scale >= 70 ? 0.5 : 1;
+      ctx.save();
+      ctx.beginPath();
+      ctx.strokeStyle = colors.line;
+      ctx.globalAlpha = 0.85;
+      ctx.lineWidth = 1;
+      const topLeft = view.from(0, 0);
+      const botRight = view.from(w, h);
+      const x0 = Math.floor(Math.min(topLeft.x, botRight.x) / step) * step;
+      const x1 = Math.ceil(Math.max(topLeft.x, botRight.x) / step) * step;
+      const y0 = Math.floor(Math.min(topLeft.y, botRight.y) / step) * step;
+      const y1 = Math.ceil(Math.max(topLeft.y, botRight.y) / step) * step;
+      for (let x = x0; x <= x1; x += step) {
+        const s = view.to({ x, y: 0 });
+        ctx.moveTo(s.x, 0);
+        ctx.lineTo(s.x, h);
+      }
+      for (let y = y0; y <= y1; y += step) {
+        const s = view.to({ x: 0, y });
+        ctx.moveTo(0, s.y);
+        ctx.lineTo(w, s.y);
+      }
+      ctx.stroke();
+      ctx.restore();
+      ctx.beginPath();
+      node.points.forEach((p, i) => {
+        const s = view.to(p);
+        if (i) ctx.lineTo(s.x, s.y);
+        else ctx.moveTo(s.x, s.y);
+      });
+      ctx.closePath();
+      ctx.fillStyle = "rgba(101, 163, 13, 0.16)";
+      ctx.fill();
+      const center = plannerCentroid(node.points);
+      const mid = view.to(center);
+      plannerWalls(node).forEach((wall) => {
+        const a = view.to(wall.a);
+        const b = view.to(wall.b);
+        const on = selWall && selWall.id === wall.id;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.strokeStyle = on ? "#65a30d" : "#3f6212";
+        ctx.lineWidth = on ? 3.5 : 2;
+        ctx.stroke();
+        if (Math.hypot(b.x - a.x, b.y - a.y) < 36) return;
+        let nx = -(wall.b.y - wall.a.y);
+        let ny = wall.b.x - wall.a.x;
+        const len = Math.hypot(nx, ny) || 1;
+        nx /= len;
+        ny /= len;
+        const mx = (wall.a.x + wall.b.x) / 2;
+        const my = (wall.a.y + wall.b.y) / 2;
+        if ((mx - center.x) * nx + (my - center.y) * ny < 0) {
+          nx = -nx;
+          ny = -ny;
+        }
+        const label = view.to({ x: mx, y: my });
+        plannerPill(ctx, `${fmtShort(wall.len)} м`, Math.max(28, Math.min(w - 28, label.x + nx * 18)), Math.max(14, Math.min(h - 14, label.y + ny * 18)), colors);
+      });
+      node.points.forEach((p) => {
+        const s = view.to(p);
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, p.id === selPoint ? 7 : 5.5, 0, Math.PI * 2);
+        ctx.fillStyle = colors.card;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = p.id === selPoint ? "#65a30d" : "#3f6212";
+        ctx.stroke();
+      });
+      ctx.fillStyle = colors.ink;
+      ctx.font = "700 14px Segoe UI, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`${fmtShort(model.floor)} м²`, mid.x, mid.y);
+    }
+    const strip = plannerFitCanvas(unfold);
+    session.planner.hits = [];
+    if (strip) {
+      const { ctx, w, h } = strip;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = colors.bg;
+      ctx.fillRect(0, 0, w, h);
+      const walls = model.walls;
+      const total = walls.reduce((sum, wall) => sum + wall.len, 0) || 1;
+      const gap = walls.length > 1 ? 8 : 0;
+      const scale = Math.min((w - 24 - gap * (walls.length - 1)) / total, (h - 46) / Math.max(0.2, model.height));
+      let x = 12;
+      const rh = model.height * scale;
+      const top = Math.max(22, (h - 18 - rh) / 2);
+      walls.forEach((wall, index) => {
+        const rw = Math.max(1, wall.len * scale);
+        const on = selWall && selWall.id === wall.id;
+        ctx.fillStyle = on ? "rgba(101, 163, 13, 0.28)" : "rgba(101, 163, 13, 0.12)";
+        ctx.strokeStyle = on ? "#65a30d" : "#4d7c0f";
+        ctx.lineWidth = on ? 2.5 : 1.25;
+        ctx.beginPath();
+        plannerRoundPath(ctx, x, top, rw, rh, 4);
+        ctx.fill();
+        ctx.stroke();
+        const row = model.rows[index + 1];
+        ctx.fillStyle = colors.ink;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = "700 12px Segoe UI, sans-serif";
+        if (rw >= 54) {
+          ctx.fillText(String(index + 1), x + rw / 2, top + Math.min(rh / 2, 16));
+          ctx.font = "11px Segoe UI, sans-serif";
+          ctx.fillStyle = colors.muted;
+          if (rh > 36) ctx.fillText(`${fmtShort(row?.area || 0)} м²`, x + rw / 2, top + rh / 2 + 12);
+        } else {
+          ctx.fillText(String(index + 1), x + rw / 2, top - 10);
+        }
+        session.planner.hits.push({ id: wall.id, x, y: top, w: rw, h: rh });
+        x += rw + gap;
+      });
+    }
+    plannerSyncFields(model);
+  }
+
+  function plannerSyncFields(model) {
+    const node = plannerNode();
+    if (!node || !model || !session.planner) return;
+    const linked = linkedFromPorts(node.id, activeBlueprint()?.links || []);
+    const setVal = (id, text) => {
+      const el = document.querySelector(`#planner-side [data-planner-val="${cssEsc(id)}"]`);
+      if (el) el.textContent = text;
+    };
+    const setNote = (id, text) => {
+      const el = document.querySelector(`#planner-side [data-planner-note="${cssEsc(id)}"]`);
+      if (el) el.textContent = text;
+    };
+    model.rows.forEach((row) => {
+      setVal(row.id, `${fmtShort(row.area)} м²`);
+      const len = document.querySelector(`#planner-side [data-planner-len="${cssEsc(row.id)}"]`);
+      if (len && document.activeElement !== len) len.value = plannerInput(row.len);
+      const name = document.querySelector(`#planner-side [data-planner-name="${cssEsc(row.id)}"]`);
+      if (name && document.activeElement !== name) name.value = row.name;
+    });
+    model.sums.forEach((row) => {
+      setVal(row.id, `${fmtShort(row.area)} м²`);
+      setNote(row.id, plannerSumNote(row.parts, model.walls.length));
+      const name = document.querySelector(`#planner-side [data-planner-sum-name="${cssEsc(row.id)}"]`);
+      if (name && document.activeElement !== name) name.value = row.name;
+    });
+    document.querySelectorAll("#planner-side .planner-part").forEach((label) => {
+      const row = model.rows.find((item) => item.id === label.querySelector("[data-part]")?.dataset.part);
+      if (!row) return;
+      const span = label.querySelector("span");
+      const em = label.querySelector("em");
+      if (span) span.textContent = row.name;
+      if (em) em.textContent = fmtShort(row.area);
+    });
+    document.querySelectorAll("#planner-side [data-planner-on]").forEach((el) => {
+      const id = el.dataset.plannerOn;
+      const row = model.rows.concat(model.sums).find((item) => item.id === id);
+      if (!row || document.activeElement === el) return;
+      el.checked = !!(row.on || linked.has(id));
+      el.disabled = linked.has(id);
+      el.title = linked.has(id) ? "Сначала снимите связь на схеме" : "Вывести число на ноду";
+    });
+    document.querySelectorAll("#planner-side [data-planner-row]").forEach((el) => {
+      const wall = plannerSelWall(node);
+      el.classList.toggle("is-sel", !!wall && el.dataset.plannerRow === wall.id);
+    });
+    const rect = plannerRect(node.points);
+    const width = $("planner-width");
+    const depth = $("planner-depth");
+    const height = $("planner-height");
+    if (rect && width && document.activeElement !== width) width.value = plannerInput(rect.w);
+    if (rect && depth && document.activeElement !== depth) depth.value = plannerInput(rect.d);
+    if (height && document.activeElement !== height) height.value = plannerInput(model.height);
+    const make = $("planner-make-rect");
+    if (make) make.hidden = !!rect;
+    if (width) width.title = rect ? "Ширина комнаты" : "Ширина прямоугольника, который заменит план";
+    if (depth) depth.title = rect ? "Глубина комнаты" : "Глубина прямоугольника, который заменит план";
+    const add = $("planner-add-corner");
+    const del = $("planner-del-corner");
+    if (add) add.disabled = !plannerSelWall(node) || node.points.length >= PLANNER_MAX_PTS;
+    if (del) del.disabled = session.planner.sel?.kind !== "point" || node.points.length <= 3;
+    const peri = document.querySelector("#planner-side [data-planner-peri]");
+    if (peri) peri.textContent = `периметр ${fmtShort(model.peri)} м`;
+  }
+
+  function plannerSideHtml(node) {
+    const model = plannerModel(node);
+    const linked = linkedFromPorts(node.id, activeBlueprint()?.links || []);
+    const onBox = (id, on) => {
+      const lock = linked.has(id);
+      return `<label class="planner-on" title="${lock ? "Сначала снимите связь на схеме" : "Вывести число на ноду"}"><input type="checkbox" data-planner-on="${esc(id)}" ${on || lock ? "checked" : ""} ${lock ? "disabled" : ""} /> На ноду</label>`;
+    };
+    const rows = model.rows
+      .map((row) => {
+        if (row.kind === "floor") {
+          return `<div class="planner-metric" data-planner-row="floor">
+            ${onBox(row.id, row.on)}
+            <span class="planner-label">Пол</span>
+            <b data-planner-val="floor">${esc(fmtShort(row.area))} м²</b>
+          </div>`;
+        }
+        return `<div class="planner-metric" data-planner-row="${esc(row.id)}">
+          ${onBox(row.id, row.on)}
+          <input class="planner-name" data-planner-name="${esc(row.id)}" value="${esc(row.name)}" maxlength="48" aria-label="Имя стены" />
+          <label class="planner-len">длина <input data-planner-len="${esc(row.id)}" value="${esc(plannerInput(row.len))}" inputmode="decimal" aria-label="Длина стены" /> м</label>
+          <b data-planner-val="${esc(row.id)}">${esc(fmtShort(row.area))} м²</b>
+        </div>`;
+      })
+      .join("");
+    const sums = model.sums
+      .map((sum) => {
+        const parts = model.rows
+          .map((row) => {
+            const checked = sum.parts.includes(row.id) ? "checked" : "";
+            return `<label class="planner-part"><input type="checkbox" data-planner-part="${esc(sum.id)}" data-part="${esc(row.id)}" ${checked} /> <span>${esc(row.name)}</span> <em>${esc(fmtShort(row.area))}</em></label>`;
+          })
+          .join("");
+        return `<div class="planner-sum" data-planner-row="${esc(sum.id)}">
+          <div class="planner-sum-h">
+            ${onBox(sum.id, sum.on)}
+            <input class="planner-name" data-planner-sum-name="${esc(sum.id)}" value="${esc(sum.name)}" maxlength="48" aria-label="Имя суммы" />
+            <b data-planner-val="${esc(sum.id)}">${esc(fmtShort(sum.area))} м²</b>
+            <button type="button" class="calc-x" data-planner-del-sum="${esc(sum.id)}" title="Удалить сумму">×</button>
+          </div>
+          <div class="planner-sum-tools">
+            <p data-planner-note="${esc(sum.id)}">${esc(plannerSumNote(sum.parts, model.walls.length))}</p>
+            <button type="button" data-planner-sum-walls="${esc(sum.id)}">Все стены</button>
+            <button type="button" data-planner-sum-clear="${esc(sum.id)}">Снять</button>
+          </div>
+          <div class="planner-parts">${parts}</div>
+        </div>`;
+      })
+      .join("");
+    const addSum = model.sums.length >= PLANNER_MAX_SUMS ? "" : `<button type="button" class="btn planner-add-sum" data-planner-add-sum>+ Сумма</button>`;
+    return `<div class="planner-block">
+        <div class="planner-block-h">Площади <span data-planner-peri>периметр ${esc(fmtShort(model.peri))} м</span></div>
+        ${rows}
+      </div>
+      <div class="planner-block">
+        <div class="planner-block-h">Сумма выбранных ${addSum}</div>
+        <p class="planner-lead">Отметьте пол и стены, которые нужно сложить. На ноду выйдет одно число.</p>
+        ${sums || `<div class="calc-empty">Сумм пока нет</div>`}
+      </div>`;
+  }
+
+  function plannerFill() {
+    const node = plannerNode();
+    const side = $("planner-side");
+    if (!node || !side) return;
+    const scroll = side.scrollTop;
+    side.innerHTML = plannerSideHtml(node);
+    side.scrollTop = scroll;
+    const rect = plannerRect(node.points);
+    const boxW = rect ? rect.w : Math.max(...node.points.map((p) => p.x)) - Math.min(...node.points.map((p) => p.x));
+    const boxD = rect ? rect.d : Math.max(...node.points.map((p) => p.y)) - Math.min(...node.points.map((p) => p.y));
+    const width = $("planner-width");
+    const depth = $("planner-depth");
+    const height = $("planner-height");
+    if (width && document.activeElement !== width) width.value = plannerInput(boxW || 4);
+    if (depth && document.activeElement !== depth) depth.value = plannerInput(boxD || 3);
+    if (height && document.activeElement !== height) height.value = plannerInput(node.height);
+    const title = $("planner-title");
+    if (title && document.activeElement !== title) title.value = plannerName(node);
+    plannerDraw();
+  }
+
+  function plannerCommit(rebuild) {
+    const node = plannerNode();
+    if (!node) return;
+    ensurePlanner(node);
+    dirty();
+    render();
+    if (!$("planner-modal")?.classList.contains("open")) return;
+    if (rebuild) plannerFill();
+    else plannerDraw();
+  }
+
+  function plannerSelect(sel, scroll) {
+    if (!session.planner) return;
+    session.planner.sel = sel;
+    plannerDraw();
+    if (!scroll || !sel) return;
+    const wallId = sel.kind === "wall" ? sel.id : `w:${sel.id}`;
+    document.querySelector(`#planner-side [data-planner-row="${cssEsc(wallId)}"]`)?.scrollIntoView({ block: "nearest" });
+  }
+
+  function ensurePlannerModal() {
+    if ($("planner-modal")) return;
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    modal.id = "planner-modal";
+    modal.innerHTML = `<div class="modal-card planner-modal" role="dialog" aria-label="Планировщик">
+      <div class="planner-head">
+        <input id="planner-title" class="planner-title" maxlength="48" spellcheck="false" aria-label="Имя планировщика" />
+        <label>Высота <input id="planner-height" inputmode="decimal" aria-label="Высота стен, метры" /> м</label>
+        <label>Ширина <input id="planner-width" inputmode="decimal" aria-label="Ширина, метры" /> м</label>
+        <label>Глубина <input id="planner-depth" inputmode="decimal" aria-label="Глубина, метры" /> м</label>
+        <button type="button" class="btn" id="planner-make-rect">Прямоугольник</button>
+        <button type="button" class="btn primary" id="planner-close">Готово</button>
+      </div>
+      <div class="planner-body">
+        <div class="planner-stage">
+          <div class="planner-cap">План пола</div>
+          <div class="planner-plan-wrap"><canvas id="planner-plan"></canvas></div>
+          <div class="planner-hint">
+            <span>Тяните угол. Клик по стене — длина справа. Двойной клик по стене добавляет угол. Shift держит линию прямой.</span>
+            <span class="planner-hint-btns">
+              <button type="button" class="btn" id="planner-add-corner">Добавить угол</button>
+              <button type="button" class="btn" id="planner-del-corner">Удалить угол</button>
+            </span>
+          </div>
+          <div class="planner-cap">Развертка стен</div>
+          <canvas id="planner-unfold"></canvas>
+        </div>
+        <div class="planner-side" id="planner-side"></div>
+      </div>
+    </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) closePlanner();
+    });
+    $("planner-close")?.addEventListener("click", () => closePlanner());
+    $("planner-title")?.addEventListener("input", (e) => {
+      const node = plannerNode();
+      if (!node || !session.planner) return;
+      node.name = String(e.target.value || "").trim().slice(0, 48);
+      session.planner.touched = true;
+      const card = document.querySelector(`[data-planner-title="${cssEsc(node.id)}"]`);
+      if (card) card.value = node.name || "Планировщик";
+    });
+    $("planner-title")?.addEventListener("change", (e) => {
+      const node = plannerNode();
+      if (!node) return;
+      node.name = plannerName(node);
+      e.target.value = node.name;
+      const card = document.querySelector(`[data-planner-title="${cssEsc(node.id)}"]`);
+      if (card) card.value = node.name;
+      if (session.planner) session.planner.touched = false;
+      plannerCommit(false);
+    });
+    $("planner-make-rect")?.addEventListener("click", () => plannerAskRect());
+    $("planner-add-corner")?.addEventListener("click", () => {
+      const node = plannerNode();
+      const wall = node && plannerSelWall(node);
+      if (!node || !wall) return;
+      const id = plannerInsertCorner(node, wall.id);
+      if (!id) return;
+      session.planner.sel = { kind: "point", id };
+      plannerCommit(true);
+    });
+    $("planner-del-corner")?.addEventListener("click", () => plannerDeleteSelected());
+    $("planner-height")?.addEventListener("input", (e) => {
+      const node = plannerNode();
+      const value = plannerDraft(e.target.value);
+      if (!node || value == null) return;
+      node.height = plannerRound(plannerClamp(value, 0.2, 30));
+      plannerCommit(false);
+    });
+    const liveSize = () => {
+      const node = plannerNode();
+      if (!node || !plannerRect(node.points)) return;
+      const w = plannerDraft($("planner-width")?.value);
+      const d = plannerDraft($("planner-depth")?.value);
+      if (w == null || d == null) return;
+      plannerSetRect(node, w, d);
+      plannerCommit(false);
+    };
+    $("planner-width")?.addEventListener("input", liveSize);
+    $("planner-depth")?.addEventListener("input", liveSize);
+    $("planner-side")?.addEventListener("input", (e) => {
+      const node = plannerNode();
+      if (!node) return;
+      const on = e.target.dataset?.plannerOn;
+      if (on) {
+        const out = (node.outs || []).find((item) => item.id === on);
+        const linked = linkedFromPorts(node.id, activeBlueprint()?.links || []);
+        if (!out || linked.has(on)) {
+          e.target.checked = true;
+          return;
+        }
+        out.on = !!e.target.checked;
+        plannerCommit(false);
+        return;
+      }
+      const nameId = e.target.dataset?.plannerName;
+      if (nameId) {
+        const out = (node.outs || []).find((item) => item.id === nameId);
+        if (!out) return;
+        const text = String(e.target.value || "").trim();
+        out.name = plannerAutoName(text) ? "" : text.slice(0, 48);
+        session.planner.touched = true;
+        return;
+      }
+      const sumName = e.target.dataset?.plannerSumName;
+      if (sumName) {
+        const out = (node.outs || []).find((item) => item.id === sumName);
+        if (!out) return;
+        out.name = String(e.target.value || "").trim().slice(0, 48) || "Сумма";
+        session.planner.touched = true;
+        return;
+      }
+      const lenId = e.target.dataset?.plannerLen;
+      if (lenId) {
+        const value = plannerDraft(e.target.value);
+        if (value == null) return;
+        plannerSetLength(node, lenId, value);
+        plannerCommit(false);
+        return;
+      }
+      const sumId = e.target.dataset?.plannerPart;
+      if (sumId) {
+        const out = (node.outs || []).find((item) => item.id === sumId && item.kind === "sum");
+        if (!out) return;
+        const part = e.target.dataset.part || "";
+        const parts = new Set(out.parts || []);
+        if (e.target.checked) parts.add(part);
+        else parts.delete(part);
+        const order = ["floor"].concat(plannerWalls(node).map((wall) => wall.id));
+        out.parts = order.filter((id) => parts.has(id));
+        plannerCommit(false);
+      }
+    });
+    $("planner-side")?.addEventListener("change", (e) => {
+      if (e.target.dataset?.plannerName || e.target.dataset?.plannerSumName) {
+        if (session.planner) session.planner.touched = false;
+        plannerCommit(false);
+      }
+    });
+    $("planner-side")?.addEventListener("click", (e) => {
+      const node = plannerNode();
+      if (!node || !session.planner) return;
+      const add = e.target.closest("[data-planner-add-sum]");
+      if (add) {
+        if ((node.outs || []).filter((item) => item.kind === "sum").length >= PLANNER_MAX_SUMS) return;
+        const names = new Set((node.outs || []).filter((item) => item.kind === "sum").map((item) => item.name));
+        let name = "Сумма";
+        let n = 2;
+        while (names.has(name)) {
+          name = `Сумма ${n}`;
+          n += 1;
+        }
+        node.outs.push({ id: uid(), kind: "sum", name, on: true, parts: [] });
+        plannerCommit(true);
+        return;
+      }
+      const del = e.target.closest("[data-planner-del-sum]");
+      if (del) {
+        const id = del.dataset.plannerDelSum;
+        node.outs = (node.outs || []).filter((item) => item.id !== id);
+        plannerDropPorts(node, [id]);
+        plannerCommit(true);
+        return;
+      }
+      const all = e.target.closest("[data-planner-sum-walls]");
+      if (all) {
+        const out = (node.outs || []).find((item) => item.id === all.dataset.plannerSumWalls);
+        if (!out) return;
+        const walls = plannerWalls(node).map((wall) => wall.id);
+        const floor = (out.parts || []).includes("floor") ? ["floor"] : [];
+        out.parts = floor.concat(walls);
+        plannerCommit(true);
+        return;
+      }
+      const clear = e.target.closest("[data-planner-sum-clear]");
+      if (clear) {
+        const out = (node.outs || []).find((item) => item.id === clear.dataset.plannerSumClear);
+        if (!out) return;
+        out.parts = [];
+        plannerCommit(true);
+        return;
+      }
+      const row = e.target.closest(".planner-metric[data-planner-row]");
+      if (!row || e.target.closest("button, .planner-on")) return;
+      const id = row.dataset.plannerRow || "";
+      if (!id.startsWith("w:")) return;
+      plannerSelect({ kind: "wall", id }, false);
+    });
+    $("planner-side")?.addEventListener("focusin", (e) => {
+      const row = e.target.closest(".planner-metric[data-planner-row]");
+      const id = row?.dataset.plannerRow || "";
+      if (!id.startsWith("w:")) return;
+      plannerSelect({ kind: "wall", id }, false);
+    });
+    const plan = $("planner-plan");
+    plan?.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      const node = plannerNode();
+      if (!node || !session.planner) return;
+      const hit = plannerHit(plan, node, e.clientX, e.clientY);
+      session.planner.viewLock = plannerView(plan, node.points);
+      if (hit.pointId) {
+        const point = node.points.find((p) => p.id === hit.pointId);
+        session.planner.drag = {
+          id: hit.pointId,
+          x: e.clientX,
+          y: e.clientY,
+          ox: point?.x || 0,
+          oy: point?.y || 0,
+          moved: false,
+        };
+        session.planner.sel = { kind: "point", id: hit.pointId };
+      } else if (hit.wallId) {
+        session.planner.drag = null;
+        session.planner.sel = { kind: "wall", id: hit.wallId };
+      } else session.planner.drag = null;
+      plan.setPointerCapture(e.pointerId);
+      plannerDraw();
+    });
+    plan?.addEventListener("pointermove", (e) => {
+      const node = plannerNode();
+      const drag = session.planner?.drag;
+      if (!node || !drag) {
+        const hit = node ? plannerHit(plan, node, e.clientX, e.clientY) : null;
+        if (plan) plan.style.cursor = hit?.pointId ? "grab" : hit?.wallId ? "pointer" : "default";
+        return;
+      }
+      if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) return;
+      drag.moved = true;
+      const view = session.planner.viewLock || plannerView(plan, node.points);
+      const rect = plan.getBoundingClientRect();
+      const world = view.from(e.clientX - rect.left, e.clientY - rect.top);
+      const next = plannerSnap(node, drag.id, world.x, world.y, e.shiftKey, { x: drag.ox, y: drag.oy });
+      if (!next) return;
+      const point = node.points.find((p) => p.id === drag.id);
+      if (!point) return;
+      point.x = next.x;
+      point.y = next.y;
+      plannerDraw();
+    });
+    const endDrag = () => {
+      const drag = session.planner?.drag;
+      if (!session.planner) return;
+      session.planner.drag = null;
+      session.planner.viewLock = null;
+      if (drag?.moved) plannerCommit(false);
+      else plannerDraw();
+    };
+    plan?.addEventListener("pointerup", endDrag);
+    plan?.addEventListener("pointercancel", endDrag);
+    plan?.addEventListener("dblclick", (e) => {
+      const node = plannerNode();
+      if (!node || node.points.length >= PLANNER_MAX_PTS) return;
+      const hit = plannerHit(plan, node, e.clientX, e.clientY);
+      if (!hit.wallId) return;
+      const id = plannerInsertCorner(node, hit.wallId, hit.world);
+      if (!id) return;
+      session.planner.sel = { kind: "point", id };
+      plannerCommit(true);
+    });
+    plan?.addEventListener("contextmenu", (e) => e.preventDefault());
+    unfoldHit(modal);
+    if (window.ResizeObserver) {
+      const stage = modal.querySelector(".planner-stage");
+      if (stage) new ResizeObserver(() => {
+        if (session.planner?.id && modal.classList.contains("open") && !session.planner.drag) plannerDraw();
+      }).observe(stage);
+    }
+  }
+
+  function unfoldHit(modal) {
+    const unfold = modal.querySelector("#planner-unfold");
+    unfold?.addEventListener("pointerdown", (e) => {
+      const node = plannerNode();
+      if (!node || !session.planner || e.button !== 0) return;
+      const rect = unfold.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const hit = (session.planner.hits || []).find((item) => x >= item.x && x <= item.x + item.w && y >= item.y && y <= item.y + item.h);
+      if (!hit) return;
+      plannerSelect({ kind: "wall", id: hit.id }, true);
+    });
+  }
+
+  function plannerDeleteSelected() {
+    const node = plannerNode();
+    const sel = session.planner?.sel;
+    if (!node || sel?.kind !== "point") return;
+    if (!plannerDeleteCorner(node, sel.id)) return;
+    session.planner.sel = null;
+    plannerCommit(true);
+  }
+
+  async function plannerAskRect() {
+    const node = plannerNode();
+    if (!node || plannerRect(node.points)) return;
+    const ok = api?.confirm
+      ? await api.confirm({
+          title: "Сделать прямоугольником?",
+          text: "Текущий план заменится прямоугольником с шириной и глубиной из полей. Лишние углы пропадут.",
+          ok: "Заменить",
+          danger: true,
+        })
+      : true;
+    if (!ok || !plannerNode()) return;
+    plannerMakeRect(node, plannerDraft($("planner-width")?.value) ?? 4, plannerDraft($("planner-depth")?.value) ?? 3);
+    if (session.planner) session.planner.sel = null;
+    plannerCommit(true);
+  }
+
+  function openPlanner(nodeId) {
+    const bp = activeBlueprint();
+    const node = bp?.nodes.find((item) => item.id === nodeId && item.type === "planner");
+    if (!node) return;
+    ensurePlannerModal();
+    ensurePlanner(node);
+    session.planner = { id: nodeId, sel: null, drag: null, viewLock: null, hits: [], touched: false };
+    session.selected = nodeId;
+    hidePortMenu();
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    $("planner-modal")?.classList.add("open");
+    requestAnimationFrame(() => plannerFill());
+  }
+
+  function closePlanner() {
+    const node = plannerNode();
+    if (node) node.name = plannerName(node);
+    const touched = !!session.planner?.touched;
+    session.planner = null;
+    $("planner-modal")?.classList.remove("open");
+    if (touched) dirty();
+    if (api?.view?.() === "calculator") render();
+  }
+
   function addNode(type, point, extra) {
     const bp = activeBlueprint();
     if (!bp) return;
@@ -2033,6 +3179,22 @@
       node.dateFrom = "";
       node.dateTo = "";
       node.openPorts = DASH_DEFAULT.slice();
+    }
+    if (type === "planner") {
+      const ids = [uid(), uid(), uid(), uid()];
+      node.name = "Планировщик";
+      node.height = 2.7;
+      node.points = [
+        { id: ids[0], x: 0, y: 0 },
+        { id: ids[1], x: 4, y: 0 },
+        { id: ids[2], x: 4, y: 3 },
+        { id: ids[3], x: 0, y: 3 },
+      ];
+      node.outs = [
+        { id: "floor", kind: "floor", name: "Пол", on: true },
+        ...ids.map((id) => ({ id: `w:${id}`, kind: "wall", name: "", on: false })),
+        { id: uid(), kind: "sum", name: "Стены", on: true, parts: ids.map((id) => `w:${id}`) },
+      ];
     }
     if (type === "present") {
       node.pageId = extra?.pageId || "";
@@ -2382,6 +3544,10 @@
     return String(order?.created_at || "").slice(0, 10);
   }
 
+  function calcToolButton(type, label, icon) {
+    return `<button type="button" class="btn calc-tool" data-add-node="${type}" draggable="true"><svg class="calc-tool-ico" viewBox="0 0 16 16" aria-hidden="true">${icon}</svg>${label}</button>`;
+  }
+
   function renderSide(bp) {
     const host = $("calc-side");
     if (!host) return;
@@ -2410,15 +3576,16 @@
       <details class="calc-fold" data-fold="nodes" ${foldOpen("nodes") ? "open" : ""}>
         <summary class="calc-tools-label">Ноды</summary>
         <div class="calc-tools">
-          <button type="button" class="btn calc-tool" data-add-node="math" draggable="true">Оператор</button>
-          <button type="button" class="btn calc-tool" data-add-node="formula" draggable="true">Формула</button>
-          <button type="button" class="btn calc-tool" data-add-node="percent" draggable="true">Процент</button>
-          <button type="button" class="btn calc-tool" data-add-node="const" draggable="true">Константа</button>
-          <button type="button" class="btn calc-tool" data-add-node="filter" draggable="true">Фильтр</button>
-          <button type="button" class="btn calc-tool" data-add-node="dashboard" draggable="true">Дашборд</button>
-          <button type="button" class="btn calc-tool" data-add-node="result" draggable="true">Результат</button>
-          <button type="button" class="btn calc-tool" data-add-node="group" draggable="true">Группа</button>
-          <button type="button" class="btn calc-tool" data-add-node="comment" draggable="true">Комментарий</button>
+          ${calcToolButton("math", "Оператор", `<path d="M8 3.2v9.6M3.2 8h9.6"/>`)}
+          ${calcToolButton("formula", "Формула", `<path d="M5.6 3.2c-1.7.3-2.4 1.3-2.4 2.3 0 1.5 1.1 2.1 2.3 2.3-1.5.5-2.5 1.5-2.5 3 0 1.4 1.1 2.2 2.6 2.2M9.1 4.4l3.8 7.2M9.4 8.2h3.2"/>`)}
+          ${calcToolButton("percent", "Процент", `<circle cx="5" cy="4.8" r="1.45" fill="currentColor" stroke="none"/><circle cx="11" cy="11.2" r="1.45" fill="currentColor" stroke="none"/><path d="M12.3 3.4 3.7 12.6"/>`)}
+          ${calcToolButton("const", "Константа", `<rect x="3" y="3" width="10" height="10" rx="2"/><path d="M8 5.4v5.2"/>`)}
+          ${calcToolButton("filter", "Фильтр", `<path d="M2.6 3.2h10.8L9.4 8.2v4.2l-2.8 1.2V8.2z"/>`)}
+          ${calcToolButton("dashboard", "Дашборд", `<path d="M3 13V8.4M8 13V3.6M13 13V6.4M2.2 13h11.6"/>`)}
+          ${calcToolButton("planner", "Планировщик", `<path d="M3 3.2h10v9.6H3zM3 7.4h4.2"/>`)}
+          ${calcToolButton("result", "Результат", `<path d="M2.6 5.2h6.4M2.6 10.8h6.4M10.2 8h3.4M11.6 6.2 13.8 8l-2.2 1.8"/>`)}
+          ${calcToolButton("group", "Группа", `<rect x="3" y="3" width="10" height="10" rx="1.5" stroke-dasharray="2.2 1.5"/>`)}
+          ${calcToolButton("comment", "Комментарий", `<path d="M3 2.8h6.6L13 6.2v7H3zM9.4 2.9V6h3.2M5 8.2h6M5 10.6h4"/>`)}
         </div>
       </details>
       <details class="calc-fold" data-fold="schemes" ${foldOpen("schemes") ? "open" : ""}>
@@ -3333,6 +4500,39 @@
     </article>`;
   }
 
+  function plannerNodeHtml(node, bp, graph) {
+    const model = plannerModel(node);
+    const ports = plannerOutputs(node, bp.links);
+    const sub = `пол ${fmtShort(model.floor)} м² · ${model.walls.length} стен · h ${fmtShort(model.height)} м`;
+    return `<article class="calc-node is-planner ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+      <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
+      <header class="calc-node-h">
+        <input class="calc-pname calc-planner-name" data-planner-title="${esc(node.id)}" value="${esc(plannerName(node))}" maxlength="48" spellcheck="false" title="Имя планировщика" aria-label="Имя планировщика" />
+        <button type="button" class="calc-text-btn" data-planner-edit="${esc(node.id)}" title="План пола и площади">Редактор</button>
+        <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
+      </header>
+      <div class="calc-node-sub">${esc(sub)}</div>
+      <div class="calc-ports">
+        ${
+          ports.length
+            ? ports
+                .map((port) => {
+                  const value = graph.values[`${node.id}:${port.id}`];
+                  const shown = value != null && Number.isFinite(value) ? value : port.area;
+                  const tip = `${port.name} · ${fmtShort(shown)} м²`;
+                  return `<div class="calc-row out">
+                    <span class="calc-row-name" title="${esc(tip)}">${esc(port.name)}</span>
+                    <b>${esc(fmtShort(shown))}</b>
+                    <i class="calc-port out" data-port="${esc(port.id)}" data-io="out" title="${esc(tip)}"></i>
+                  </div>`;
+                })
+                .join("")
+            : `<div class="calc-empty">Включите выходы в редакторе</div>`
+        }
+      </div>
+    </article>`;
+  }
+
   function dashboardNodeHtml(node, bp, graph) {
     const ports = nodeOutputs(node, null, bp.links).map((port) => port.id);
     return `<article class="calc-node is-dashboard ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
@@ -3468,7 +4668,7 @@
     const focusHost = host.contains(focus) || groups?.contains(focus) || groupUi?.contains(focus) ? focus : null;
     const keep = focusHost
       ? {
-          name: focus.dataset.inName || focus.dataset.outName || focus.dataset.outExpr || focus.dataset.resultName || focus.dataset.resultPrio || focus.dataset.constValue || focus.dataset.groupName || focus.dataset.filterField,
+          name: focus.dataset.inName || focus.dataset.outName || focus.dataset.outExpr || focus.dataset.resultName || focus.dataset.resultPrio || focus.dataset.constValue || focus.dataset.groupName || focus.dataset.plannerTitle || focus.dataset.filterField,
           start: focus.selectionStart,
           end: focus.selectionEnd,
           filterField: focus.dataset.filterField || "",
@@ -3501,6 +4701,7 @@
         if (node.type === "scheme") return schemeNodeHtml(node, graph);
         if (node.type === "filter") return filterNodeHtml(node, graph);
         if (node.type === "dashboard") return dashboardNodeHtml(node, bp, graph);
+        if (node.type === "planner") return plannerNodeHtml(node, bp, graph);
         if (node.type === "present") return presentNodeHtml(node, bp, graph);
         return orderNodeHtml(node, api.findOrder(node.orderId), graph, bp);
       })
@@ -3516,7 +4717,7 @@
     if (keep?.name || keep?.filterField) {
       const again = keep.filterField && keep.nodeId
         ? host.querySelector(`[data-node="${cssEsc(keep.nodeId)}"] [data-filter-field="${cssEsc(keep.filterField)}"]`)
-        : host.querySelector(`[data-in-name="${cssEsc(keep.name)}"], [data-out-name="${cssEsc(keep.name)}"], [data-out-expr="${cssEsc(keep.name)}"], [data-result-name="${cssEsc(keep.name)}"], [data-result-prio="${cssEsc(keep.name)}"], [data-const-value="${cssEsc(keep.name)}"]`) ||
+        : host.querySelector(`[data-in-name="${cssEsc(keep.name)}"], [data-out-name="${cssEsc(keep.name)}"], [data-out-expr="${cssEsc(keep.name)}"], [data-result-name="${cssEsc(keep.name)}"], [data-result-prio="${cssEsc(keep.name)}"], [data-const-value="${cssEsc(keep.name)}"], [data-planner-title="${cssEsc(keep.name)}"]`) ||
           groupUi?.querySelector(`[data-group-name="${cssEsc(keep.name)}"]`);
       if (again) {
         again.focus({ preventScroll: true });
@@ -3625,7 +4826,7 @@
       }
       return "order";
     }
-    if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme" || type === "group" || type === "filter" || type === "dashboard" || type === "present" || type === "comment") return type;
+    if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme" || type === "group" || type === "filter" || type === "dashboard" || type === "planner" || type === "present" || type === "comment") return type;
     return "order";
   }
 
@@ -4565,7 +5766,7 @@
     e.preventDefault();
     const at = worldPoint(bp, e.clientX, e.clientY);
     if (presentBlock) addPresentNode(presentPage, presentBlock, at);
-    else if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "comment" || kind === "filter" || kind === "dashboard") addNode(kind, at);
+    else if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "comment" || kind === "filter" || kind === "dashboard" || kind === "planner") addNode(kind, at);
     else if (blueprintId && blueprintId !== bp.id) addNode("scheme", at, { blueprintId });
     else if (orderId && api.findOrder(orderId)) addNode("order", at, { orderId });
   }
@@ -5028,6 +6229,13 @@
         showDashPortMenu(e.clientX, e.clientY, node.id);
         return;
       }
+      const plannerEdit = e.target.closest("[data-planner-edit]");
+      if (plannerEdit) {
+        e.preventDefault();
+        e.stopPropagation();
+        openPlanner(plannerEdit.dataset.plannerEdit || node.id);
+        return;
+      }
       const orderTypes = e.target.closest("[data-order-types]");
       if (orderTypes && node.type === "order") {
         showOrderTypeMenu(e.clientX, e.clientY, node.id);
@@ -5072,6 +6280,12 @@
       if (e.target.dataset?.commentText && node.type === "comment") {
         node.text = String(e.target.value || "").slice(0, 2000);
         dirty();
+        return;
+      }
+      if (e.target.dataset?.plannerTitle && node.type === "planner") {
+        node.name = String(e.target.value || "").trim().slice(0, 48);
+        const title = $("planner-title");
+        if (title && document.activeElement !== title) title.value = node.name || "Планировщик";
         return;
       }
       if ((e.target.dataset?.inName || e.target.dataset?.outName) && node.type === "formula") {
@@ -5157,6 +6371,14 @@
         e.target.value = node.name;
         dirty();
         render();
+        return;
+      }
+      if (e.target.dataset.plannerTitle && node.type === "planner") {
+        node.name = plannerName({ name: e.target.value });
+        e.target.value = node.name;
+        const title = $("planner-title");
+        if (title) title.value = node.name;
+        dirty();
         return;
       }
       if (e.target.dataset.resultPrio && node.type === "result") {
@@ -5286,6 +6508,27 @@
     });
     document.addEventListener("keydown", (e) => {
       if (api?.view?.() !== "calculator") return;
+      if (session.planner?.id) {
+        const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
+        if (e.key === "Escape") {
+          e.preventDefault();
+          closePlanner();
+          return;
+        }
+        if (!typing && (e.key === "Delete" || e.key === "Backspace") && session.planner.sel?.kind === "point") {
+          e.preventDefault();
+          plannerDeleteSelected();
+          return;
+        }
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === "KeyD") {
+          e.preventDefault();
+          return;
+        }
+        if (!typing && (e.key === "Delete" || e.key === "Backspace")) {
+          e.preventDefault();
+          return;
+        }
+      }
       if (e.key === "Escape") {
         hidePortMenu();
         session.resize = null;
@@ -5323,6 +6566,7 @@
       }
     });
     window.addEventListener("resize", () => {
+      if (session.planner?.id) plannerDraw();
       if (api?.view?.() === "calculator") {
         const bp = activeBlueprint();
         if (bp) {

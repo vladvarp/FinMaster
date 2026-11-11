@@ -243,7 +243,7 @@ def _line_series_ui(raw: Any) -> dict[str, Any]:
 
 
 CALC_OPS = ("+", "-", "*", "/")
-CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group", "filter", "dashboard", "present", "comment")
+CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group", "filter", "dashboard", "planner", "present", "comment")
 CALC_MAX_BLUEPRINTS = 24
 CALC_MAX_NODES = 120
 CALC_MAX_LINKS = 400
@@ -403,6 +403,106 @@ def _calc_ports(raw: Any, kind: str, defaults: list[dict[str, Any]]) -> list[dic
     return items or [dict(item) for item in defaults]
 
 
+def _float_in_range(value: Any, default: float, low: float, high: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if number != number or number == float("inf") or number == float("-inf"):
+        return default
+    return max(low, min(high, number))
+
+
+def _planner_custom_name(value: Any) -> str:
+    name = _clip_text(value, 48)
+    if len(name) > 6 and name.startswith("Стена ") and name[6:].isdigit():
+        return ""
+    return name
+
+
+def _planner_points(raw: Any) -> list[dict[str, Any]]:
+    points: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    if isinstance(raw, list):
+        for item in raw[:24]:
+            if not isinstance(item, dict):
+                continue
+            pid = _clip_text(item.get("id"), 40)
+            if not pid or pid in seen:
+                continue
+            seen.add(pid)
+            points.append(
+                {
+                    "id": pid,
+                    "x": round(_float_in_range(item.get("x"), 0.0, -500.0, 500.0), 4),
+                    "y": round(_float_in_range(item.get("y"), 0.0, -500.0, 500.0), 4),
+                }
+            )
+    if len(points) >= 3:
+        return points
+    return [
+        {"id": "a", "x": 0.0, "y": 0.0},
+        {"id": "b", "x": 4.0, "y": 0.0},
+        {"id": "c", "x": 4.0, "y": 3.0},
+        {"id": "d", "x": 0.0, "y": 3.0},
+    ]
+
+
+def _planner_outs(raw: Any, points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    wall_ids = [f"w:{point['id']}" for point in points]
+    allowed = set(wall_ids)
+    allowed.add("floor")
+    src = raw if isinstance(raw, list) else []
+    floor_on = True
+    wall_on: dict[str, bool] = {}
+    wall_name: dict[str, str] = {}
+    sums: list[dict[str, Any]] = []
+    for item in src[:40]:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "")
+        if kind == "floor":
+            floor_on = item.get("on") is not False
+        elif kind == "wall":
+            wid = _clip_text(item.get("id"), 48)
+            if wid not in allowed:
+                continue
+            wall_on[wid] = bool(item.get("on"))
+            wall_name[wid] = _planner_custom_name(item.get("name"))
+        elif kind == "sum":
+            sums.append(item)
+    outs: list[dict[str, Any]] = [{"id": "floor", "kind": "floor", "name": "Пол", "on": floor_on}]
+    for wid in wall_ids:
+        outs.append({"id": wid, "kind": "wall", "name": wall_name.get(wid, ""), "on": bool(wall_on.get(wid, False))})
+    seen_sum: set[str] = set()
+    for item in sums[:8]:
+        sid = _clip_text(item.get("id"), 40)
+        if not sid or sid in allowed or sid in seen_sum:
+            continue
+        seen_sum.add(sid)
+        parts: list[str] = []
+        seen_parts: set[str] = set()
+        raw_parts = item.get("parts") if isinstance(item.get("parts"), list) else []
+        for part in raw_parts[:32]:
+            key = _clip_text(part, 48)
+            if key not in allowed or key in seen_parts:
+                continue
+            seen_parts.add(key)
+            parts.append(key)
+        outs.append(
+            {
+                "id": sid,
+                "kind": "sum",
+                "name": _clip_text(item.get("name"), 48, "Сумма"),
+                "on": bool(item.get("on")),
+                "parts": parts,
+            }
+        )
+    if not src:
+        outs.append({"id": "walls", "kind": "sum", "name": "Стены", "on": True, "parts": wall_ids})
+    return outs
+
+
 def _calc_node(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
@@ -494,6 +594,11 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
     elif kind == "dashboard":
         node.update(_calc_filter_fields(raw))
         node["openPorts"] = _calc_dash_ports(raw.get("openPorts"))
+    elif kind == "planner":
+        node["name"] = _clip_text(raw.get("name"), 48, "Планировщик")
+        node["height"] = round(_float_in_range(raw.get("height"), 2.7, 0.2, 30.0), 4)
+        node["points"] = _planner_points(raw.get("points"))
+        node["outs"] = _planner_outs(raw.get("outs"), node["points"])
     elif kind == "present":
         node["pageId"] = _clip_text(raw.get("pageId"), 80)
         node["blockId"] = _clip_text(raw.get("blockId"), 80)

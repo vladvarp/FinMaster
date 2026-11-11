@@ -29,7 +29,8 @@
     .kind .calc-node.is-formula { width: 100% !important; }
     .kind .calc-node.is-result { min-width: 0; width: 280px; }
     .kind .calc-node.is-filter,
-    .kind .calc-node.is-dashboard { width: 100%; }
+    .kind .calc-node.is-dashboard,
+    .kind .calc-node.is-planner { width: 100%; }
     .group-box { position: relative; height: 168px; }
     .group-box .calc-node.is-group,
     .group-box .calc-group-chrome {
@@ -322,6 +323,23 @@
       </div>
     </article>
     <p>Те же срезы, кроме «Статус оплаты»: он есть только у фильтра. Сразу после создания пять выходов: заказы, количество, к оплате, оплачено и долг. Кнопка + или правый клик по выходу добавляет остальные метрики и снимает лишние, если выход не занят связью.</p>
+  </section>
+
+  <section class="kind">
+    <h2>Планировщик</h2>
+    <article class="calc-node is-planner">
+      <header class="calc-node-h">
+        <input class="calc-pname calc-planner-name" value="Санузел" maxlength="48" readonly tabindex="-1" title="Имя планировщика" aria-label="Имя планировщика" />
+        <button type="button" class="calc-text-btn" tabindex="-1">Редактор</button>
+      </header>
+      <div class="calc-node-sub">пол 12 м² · 4 стены · h 2,7 м</div>
+      <div class="calc-ports">
+        <div class="calc-row out"><span class="calc-row-name">Пол</span><b>12</b><i class="calc-port out" title="Пол · 12 м²"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Стена 1</span><b>10,8</b><i class="calc-port out" title="Стена 1 · 10,8 м²"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">3 стены</span><b>29,7</b><i class="calc-port out" title="3 стены · 29,7 м²"></i></div>
+      </div>
+    </article>
+    <p>Имя «Санузел» стоит в шапке ноды и то же имя — в шапке редактора. Кнопка «Редактор» открывает план. Комната 4×3 м, высота 2,7 м: пол 12 м². Стена 1 — 4×2,7 = 10,8 м², её включили отдельно. «3 стены» — сумма трёх стен из четырёх: 10,8 + 8,1 + 10,8 = 29,7 м². Четвёртая стена в эту сумму не входит и на ноду не выведена. Развёртка в редакторе строится сама.</p>
   </section>
 
   <section class="kind">
