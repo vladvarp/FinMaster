@@ -2581,7 +2581,7 @@
       plannerHideNudge();
       return;
     }
-    const view = plannerView(plan, node.points, session.planner.viewLock);
+    const view = plannerView(plan, viewPoints, session.planner.viewLock);
     const spot = view.to(world);
     el.hidden = false;
     el.style.left = `${spot.x}px`;
@@ -2832,9 +2832,12 @@
     const colors = plannerColors();
     const model = plannerModel(node);
     const renderedPlan = plannerOutputBlueprint(node);
-    const sourceWallIds = node.type === "planner" ? null : new Set((renderedPlan?.walls || []).map((wall) => wall.id));
-    const visibleWalls = sourceWallIds ? model.walls.filter((wall) => sourceWallIds.has(wall.id)) : model.walls;
-    const hasFloor = node.type === "planner" || !!renderedPlan?.floor;
+    const geometry = plannerEditorGeometry(node, node.type === "planner" ? null : (plannerInputBlueprint(node) || renderedPlan));
+    const viewPoints = geometry.points.length ? geometry.points : node.points;
+    const floorPoints = geometry.floorPoints || node.points;
+    const visibleWalls = geometry.walls;
+    const hasFloor = geometry.hasFloor;
+    const drawHeight = geometry.height || model.height;
     const selWall = plannerSelWall(node);
     const selPoint = session.planner.sel?.kind === "point" ? session.planner.sel.id : "";
     const fitted = plannerFitCanvas(plan);
@@ -2870,7 +2873,7 @@
       ctx.restore();
       if (hasFloor) {
         ctx.beginPath();
-        node.points.forEach((p, i) => {
+        floorPoints.forEach((p, i) => {
           const s = view.to(p);
           if (i) ctx.lineTo(s.x, s.y);
           else ctx.moveTo(s.x, s.y);
@@ -2890,7 +2893,7 @@
         ctx.lineWidth = 1.5;
         ctx.stroke();
       });
-      const center = plannerCentroid(node.points);
+      const center = plannerCentroid(floorPoints);
       const mid = view.to(center);
       visibleWalls.forEach((wall) => {
         const a = view.to(wall.a);
@@ -2917,7 +2920,7 @@
         const label = view.to({ x: mx, y: my });
         plannerPill(ctx, `${fmtShort(wall.len)} м`, Math.max(28, Math.min(w - 28, label.x + nx * 18)), Math.max(14, Math.min(h - 14, label.y + ny * 18)), colors);
       });
-      node.points.forEach((p) => {
+      if (node.type === "planner") node.points.forEach((p) => {
         const s = view.to(p);
         ctx.beginPath();
         ctx.arc(s.x, s.y, p.id === selPoint ? 7 : 5.5, 0, Math.PI * 2);
@@ -2943,9 +2946,9 @@
       const walls = visibleWalls;
       const total = walls.reduce((sum, wall) => sum + wall.len, 0) || 1;
       const gap = walls.length > 1 ? 8 : 0;
-      const scale = Math.min((w - 24 - gap * (walls.length - 1)) / total, (h - 46) / Math.max(0.2, model.height));
+      const scale = Math.min((w - 24 - gap * (walls.length - 1)) / total, (h - 46) / Math.max(0.2, drawHeight));
       let x = 12;
-      const rh = model.height * scale;
+      const rh = drawHeight * scale;
       const top = Math.max(22, (h - 18 - rh) / 2);
       walls.forEach((wall, index) => {
         const rw = Math.max(1, wall.len * scale);
