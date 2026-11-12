@@ -1079,6 +1079,7 @@
     ];
     if (node.type === "formula") return node.inputs || [];
     if (node.type === "present") return presentPorts(node);
+    if (node.type === "openings" || node.type === "electrics") return [{ id: "blueprint", name: "Чертёж" }];
     if (node.type === "order") {
       const order = api.findOrder(node.orderId);
       const linkedIn = usedInputPorts(node.id, links || []);
@@ -1215,6 +1216,7 @@
       }));
     }
     if (node.type === "planner") return plannerOutputs(node, links).map((port) => ({ id: port.id, name: port.name }));
+    if (node.type === "openings" || node.type === "electrics") return planToolOutputs(node, links);
     if (node.type === "order") {
       const found = order || api.findOrder(node.orderId);
       const lines = orderLines(found);
@@ -1342,7 +1344,7 @@
     });
 
     function setVal(nodeId, port, value) {
-      values[`${nodeId}:${port}`] = Number.isFinite(value) ? value : null;
+      values[`${nodeId}:${port}`] = value && typeof value === "object" ? value : (Number.isFinite(value) ? value : null);
     }
 
     const visiting = new Set();
@@ -1519,7 +1521,12 @@
           setVal(nodeId, id, Number.isFinite(value) ? value : 0);
         });
       } else if (node.type === "planner") {
-        plannerOutputs(node, links).forEach((port) => setVal(nodeId, port.id, port.value ?? port.area));
+        plannerOutputs(node, links).forEach((port) => setVal(nodeId, port.id, port.id === "blueprint" ? plannerBlueprint(node) : (port.value ?? port.area)));
+      } else if (node.type === "openings" || node.type === "electrics") {
+        const input = (incoming[nodeId] || []).find((link) => link.toPort === "blueprint"); let blueprint = null;
+        if (input) { walk(input.from); blueprint = values[`${input.from}:${input.fromPort}`]; }
+        const result = evaluatePlanTool(node, blueprint); setVal(nodeId, "blueprint", result.blueprint);
+        result.counts.forEach((item) => setVal(nodeId, item.id, item.value));
       } else if (node.type === "present") {
         presentPorts(node).forEach((port) => {
           const link = (incoming[nodeId] || []).find((item) => item.toPort === port.id);
@@ -1604,6 +1611,7 @@
     if (node.type === "scheme") return { w: 220, h: 100 };
     if (node.type === "result") return { w: 376, h: 120 };
     if (node.type === "filter" || node.type === "dashboard") return { w: 384, h: 420 };
+    if (node.type === "openings" || node.type === "electrics") return { w: 270, h: 260 };
     if (node.type === "planner") {
       const n = Array.isArray(node.outs) ? node.outs.filter((item) => item && item.on).length : 2;
       return { w: 300, h: 380 + Math.max(1, n) * 28 };
@@ -2215,6 +2223,13 @@
       });
     return { floor, height, walls, rows, sums, peri: walls.reduce((sum, wall) => sum + wall.len, 0) };
   }
+
+  function plannerBlueprint(node) {
+    ensurePlanner(node); const model=plannerModel(node);
+    return {schema:"finmaster.blueprint.v1",source:node.id,name:plannerName(node),floor:{points:node.points.map(p=>({x:p.x,y:p.y}))},ceiling:{points:node.points.map(p=>({x:p.x,y:p.y}))},height:model.height,walls:model.walls.map((w,i)=>({id:w.id,name:plannerWallName((node.outs||[]).find(x=>x.id===w.id),i),a:{x:w.a.x,y:w.a.y},b:{x:w.b.x,y:w.b.y},length:w.len,openings:[],electrical:[]})),annotations:{openings:[],sockets:[],lights:[]}};
+  }
+  function planToolOutputs(node,links){const linked=linkedFromPorts(node.id,links||[]),ports=[{id:"blueprint",name:"Изменённый чертёж"}],items=node.type==="openings"?(node.openings||[]):(node.devices||[]),groups=new Map();items.forEach(x=>{const k=String(x.kind||x.type||"other");groups.set(k,(groups.get(k)||0)+1);});groups.forEach((v,k)=>{const id=`count:${k}`;if(linked.has(id)||node.countPorts?.includes(id))ports.push({id,name:`Кол-во · ${k}`});});if(node.type==="electrics"){const frames=new Map();items.filter(x=>x.frame).forEach(x=>{const k=String(x.frame);frames.set(k,(frames.get(k)||0)+1);});frames.forEach((v,k)=>{const id=`frame:${k}`;if(linked.has(id)||node.countPorts?.includes(id))ports.push({id,name:`Рамки · ${k}`});});}return ports;}
+  function evaluatePlanTool(node,source){const blueprint=source?.schema==="finmaster.blueprint.v1"?JSON.parse(JSON.stringify(source)):null,opening=node.type==="openings",items=opening?(node.openings||[]):(node.devices||[]);if(blueprint){blueprint.annotations||={openings:[],sockets:[],lights:[]};items.forEach(x=>{const v={...x};if(opening)blueprint.annotations.openings.push(v);else if(v.category==="light")blueprint.annotations.lights.push(v);else blueprint.annotations.sockets.push(v);});blueprint.walls=(blueprint.walls||[]).map(w=>({...w,openings:blueprint.annotations.openings.filter(x=>x.wallId===w.id),electrical:blueprint.annotations.sockets.filter(x=>x.wallId===w.id)}));}const counts=[],groups=new Map();items.forEach(x=>{const k=String(x.kind||x.type||"other");groups.set(k,(groups.get(k)||0)+1);});groups.forEach((v,k)=>counts.push({id:`count:${k}`,value:v}));if(!opening){const frames=new Map();items.filter(x=>x.frame).forEach(x=>{const k=String(x.frame);frames.set(k,(frames.get(k)||0)+1);});frames.forEach((v,k)=>counts.push({id:`frame:${k}`,value:v}));}return{blueprint,counts};}
 
   function plannerOutputs(node, links) {
     const model = plannerModel(node);
@@ -3430,6 +3445,7 @@
       node.dateTo = "";
       node.openPorts = DASH_DEFAULT.slice();
     }
+    if (type === "openings" || type === "electrics") { node.name=type==="openings"?"Проёмы":"Электрика";node.color=type==="openings"?"#0ea5e9":"#f59e0b";node.countPorts=[];if(type==="openings")node.openings=[];else{node.devices=[];node.customTypes=[];node.customLights=[];} }
     if (type === "planner") {
       const ids = [uid(), uid(), uid(), uid()];
       node.name = "Планировщик";
@@ -3835,6 +3851,8 @@
           ${calcToolButton("filter", "Фильтр", `<path d="M2.6 3.2h10.8L9.4 8.2v4.2l-2.8 1.2V8.2z"/>`)}
           ${calcToolButton("dashboard", "Дашборд", `<path d="M3 13V8.4M8 13V3.6M13 13V6.4M2.2 13h11.6"/>`)}
           ${calcToolButton("planner", "Планировщик", `<path d="M3 3.2h10v9.6H3zM3 7.4h4.2"/>`)}
+          ${calcToolButton("openings", "Проёмы", `<path d="M3 13V3h10v10M6 13V7h4v6"/>`)}
+          ${calcToolButton("electrics", "Электрика", `<path d="M8 2v4M8 10v4M2 8h4M10 8h4"/>`)}
           ${calcToolButton("result", "Результат", `<path d="M2.6 5.2h6.4M2.6 10.8h6.4M10.2 8h3.4M11.6 6.2 13.8 8l-2.2 1.8"/>`)}
           ${calcToolButton("group", "Группа", `<rect x="3" y="3" width="10" height="10" rx="1.5" stroke-dasharray="2.2 1.5"/>`)}
           ${calcToolButton("comment", "Комментарий", `<path d="M3 2.8h6.6L13 6.2v7H3zM9.4 2.9V6h3.2M5 8.2h6M5 10.6h4"/>`)}
@@ -4821,6 +4839,9 @@
     </article>`;
   }
 
+  function planToolNodeHtml(node,bp,graph){const ports=planToolOutputs(node,bp.links),items=node.type==="openings"?(node.openings||[]):(node.devices||[]),title=node.type==="openings"?"Проёмы":"Электрика";return `<article class="calc-node is-plan-tool ${session.selected===node.id?"is-on":""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--plan-tool-color:${esc(node.color)}"><i class="calc-grip" data-drag-node="${esc(node.id)}"></i><header class="calc-node-h"><span>${title}</span><button type="button" class="calc-text-btn" data-plan-tool-edit="${esc(node.id)}">Редактор</button><button type="button" class="calc-x" data-del-node="${esc(node.id)}">×</button></header><div class="calc-node-sub">Элементов: ${items.length}</div><div class="calc-ports">${ports.map(p=>`<div class="calc-row out"><span class="calc-row-name">${esc(p.name)}</span><b>${p.id==="blueprint"?"Чертёж":items.filter(x=>`count:${String(x.kind||x.type||"other")}`===p.id).length}</b><i class="calc-port out" data-port="${esc(p.id)}" data-io="out"></i></div>`).join("")}</div></article>`;}
+  function openPlanToolEditor(nodeId){const node=activeBlueprint()?.nodes.find(x=>x.id===nodeId&&["openings","electrics"].includes(x.type));if(!node)return;const opening=node.type==="openings",items=opening?(node.openings||[]):(node.devices||[]),modal=document.createElement("div");modal.className="plan-tool-modal";modal.innerHTML=`<section class="plan-tool-dialog"><header><b>${opening?"Проёмы":"Электрика"}</b><button data-close>×</button></header><div class="plan-tool-content"><div class="plan-tool-items">${items.map((x,i)=>`<div class="plan-tool-item"><b>${esc(x.kind)}</b><span>${esc(x.wallId||"стена не указана")}</span><button data-remove="${i}">Удалить</button></div>`).join("")||"Элементы ещё не добавлены"}</div>${opening?`<label>Тип<select data-f="kind"><option>Окно</option><option>Дверь</option><option>Отверстие</option><option>Труба</option></select></label><label>Форма<select data-f="shape"><option value="rect">Прямоугольная</option><option value="circle">Круглая</option></select></label><label>Ширина, м<input data-f="width" type="number" value="0.9" step="0.01"></label><label>Высота, м<input data-f="height" type="number" value="2.1" step="0.01"></label><label>Диаметр трубы, мм<select data-f="diameter"><option>50</option><option>100</option><option>110</option><option>125</option><option>150</option><option>200</option></select></label>`:`<label>Тип<select data-f="kind"><option>Розетка</option><option>Выключатель</option><option>Двойной выключатель</option><option>Проходной выключатель</option><option>Интернет</option><option>ТВ</option><option>Световая точка</option></select></label><label>Рамка<input data-f="frame" placeholder="Например, 3 поста"></label><label>Ориентация<select data-f="orientation"><option value="horizontal">Горизонтальная</option><option value="vertical">Вертикальная</option></select></label>`}<label>ID стены<input data-f="wallId"></label><label>Положение вдоль стены 0–1<input data-f="t" type="number" value="0.5" min="0" max="1" step="0.01"></label><label>Высота от пола, м<input data-f="z" type="number" value="${opening?0:0.3}" min="0" step="0.01"></label><footer><button data-add>Добавить</button><button data-close>Готово</button></footer></div></section>`;document.body.appendChild(modal);const close=()=>modal.remove();modal.addEventListener("click",e=>{if(e.target===modal||e.target.closest("[data-close]")){close();return;}const del=e.target.closest("[data-remove]");if(del){items.splice(+del.dataset.remove,1);if(opening)node.openings=items;else node.devices=items;dirty();close();openPlanToolEditor(nodeId);return;}if(e.target.closest("[data-add]")){const v=k=>modal.querySelector(`[data-f="${k}"]`)?.value,x={id:uid(),kind:v("kind"),wallId:v("wallId")||"",t:plannerClamp(plannerNum(v("t"),.5),0,1),z:Math.max(0,plannerNum(v("z"),0))};if(opening)Object.assign(x,{shape:v("shape"),width:Math.max(.01,plannerNum(v("width"),.9)),height:Math.max(.01,plannerNum(v("height"),2.1)),diameter:plannerNum(v("diameter"),110)});else Object.assign(x,{frame:v("frame")||"",orientation:v("orientation"),category:v("kind")==="Световая точка"?"light":"socket"});items.push(x);if(opening)node.openings=items;else node.devices=items;node.countPorts=[...new Set(items.map(y=>`count:${y.kind}`))];dirty();close();render();}});}
+
   function dashboardNodeHtml(node, bp, graph) {
     const ports = nodeOutputs(node, null, bp.links).map((port) => port.id);
     return `<article class="calc-node is-dashboard ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
@@ -4990,6 +5011,7 @@
         if (node.type === "filter") return filterNodeHtml(node, graph);
         if (node.type === "dashboard") return dashboardNodeHtml(node, bp, graph);
         if (node.type === "planner") return plannerNodeHtml(node, bp, graph);
+        if (node.type === "openings" || node.type === "electrics") return planToolNodeHtml(node, bp, graph);
         if (node.type === "present") return presentNodeHtml(node, bp, graph);
         return orderNodeHtml(node, api.findOrder(node.orderId), graph, bp);
       })
@@ -6054,7 +6076,7 @@
     e.preventDefault();
     const at = worldPoint(bp, e.clientX, e.clientY);
     if (presentBlock) addPresentNode(presentPage, presentBlock, at);
-    else if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "comment" || kind === "filter" || kind === "dashboard" || kind === "planner") addNode(kind, at);
+    else if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "comment" || kind === "filter" || kind === "dashboard" || kind === "planner" || kind === "openings" || kind === "electrics") addNode(kind, at);
     else if (blueprintId && blueprintId !== bp.id) addNode("scheme", at, { blueprintId });
     else if (orderId && api.findOrder(orderId)) addNode("order", at, { orderId });
   }
@@ -6517,6 +6539,7 @@
         showDashPortMenu(e.clientX, e.clientY, node.id);
         return;
       }
+      const planEdit=e.target.closest("[data-plan-tool-edit]");if(planEdit){e.preventDefault();e.stopPropagation();openPlanToolEditor(planEdit.dataset.planToolEdit);return;}
       const plannerEdit = e.target.closest("[data-planner-edit]");
       if (plannerEdit) {
         e.preventDefault();
