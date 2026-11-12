@@ -3101,7 +3101,7 @@
   function plannerToolSideHtml(node) {
     const opening = node.type === "openings";
     const items = opening ? (node.openings || []) : (node.devices || []);
-    const walls = plannerWalls(node);
+    const walls = plannerEditorGeometry(node, plannerInputBlueprint(node) || plannerOutputBlueprint(node)).walls;
     const options = opening
       ? ["Окно", "Дверь", "Отверстие", "Труба"]
       : ["Розетка", "Выключатель", "Двойной выключатель", "Проходной выключатель", "Интернет", "ТВ", "Световая точка", "Люстра", "Спот", ...(node.customTypes || []), ...(node.customLights || [])];
