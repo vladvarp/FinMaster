@@ -2755,10 +2755,26 @@
     return { pointId: "", wallId, world: view.from(x, y) };
   }
 
+  function plannerInputBlueprint(node, graph) {
+    const bp = activeBlueprint();
+    if (!bp || !node) return null;
+    const link = (bp.links || []).find((item) => item.to === node.id && item.toPort === "blueprint");
+    if (!link) return null;
+    const values = graph || computeGraph(bp);
+    const value = values.values[`${link.from}:${link.fromPort}`];
+    return value?.schema === "finmaster.blueprint.v1" ? value : null;
+  }
+
   function plannerOutputBlueprint(node) {
     const bp = activeBlueprint();
     if (!bp || !node) return plannerBlueprint(node);
     const graph = computeGraph(bp);
+    if (node.type === "openings" || node.type === "electrics") {
+      const output = graph.values[`${node.id}:blueprint`];
+      return output?.schema === "finmaster.blueprint.v1"
+        ? output
+        : (plannerInputBlueprint(node, graph) || plannerBlueprint(node));
+    }
     let result = plannerBlueprint(node);
     (bp.nodes || []).forEach((candidate) => {
       if (candidate.type !== "openings" && candidate.type !== "electrics") return;
@@ -3049,7 +3065,45 @@
     if (peri) peri.textContent = `периметр ${fmtShort(model.peri)} м`;
   }
 
+  function plannerToolSideHtml(node) {
+    const opening = node.type === "openings";
+    const items = opening ? (node.openings || []) : (node.devices || []);
+    const walls = plannerWalls(node);
+    const options = opening
+      ? ["Окно", "Дверь", "Отверстие", "Труба"]
+      : ["Розетка", "Выключатель", "Двойной выключатель", "Проходной выключатель", "Интернет", "ТВ", "Световая точка", "Люстра", "Спот", ...(node.customTypes || []), ...(node.customLights || [])];
+    const typeOptions = options.map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join("");
+    const fields = opening
+      ? `<label class="planner-tool-field">Тип<select data-plan-tool-field="kind">${typeOptions}</select></label>
+         <label class="planner-tool-field">Форма<select data-plan-tool-field="shape"><option value="rect">Прямоугольная</option><option value="circle">Круглая</option></select></label>
+         <label class="planner-tool-field">Ширина, м<input data-plan-tool-field="width" type="number" min="0.01" step="0.01" value="0.9" /></label>
+         <label class="planner-tool-field">Высота, м<input data-plan-tool-field="height" type="number" min="0.01" step="0.01" value="2.1" /></label>
+         <label class="planner-tool-field">Диаметр, мм<select data-plan-tool-field="diameter"><option>50</option><option>100</option><option selected>110</option><option>125</option><option>150</option><option>200</option><option>250</option></select></label>`
+      : `<label class="planner-tool-field">Тип устройства<select data-plan-tool-field="kind">${typeOptions}</select></label>
+         <label class="planner-tool-field">Рамка / группа<input data-plan-tool-field="frame" maxlength="48" placeholder="Например, 3 поста" /></label>
+         <label class="planner-tool-field">Ориентация<select data-plan-tool-field="orientation"><option value="horizontal">Горизонтальная</option><option value="vertical">Вертикальная</option></select></label>
+         <label class="planner-tool-field">Новый тип<input data-plan-tool-field="customType" maxlength="48" placeholder="Название типа" /></label>
+         <label class="planner-tool-field">Категория<select data-plan-tool-field="customCategory"><option value="socket">Розетка / выключатель</option><option value="light">Световая точка</option></select></label>
+         <button type="button" class="btn small" data-plan-tool-add-custom>Добавить свой тип</button>`;
+    const itemRows = items.map((item, index) => {
+      const wall = walls.find((candidate) => candidate.id === item.wallId);
+      const surface = item.wallId ? (wall?.id || "Стена") : (item.plane === "ceiling" ? "Потолок" : item.plane === "floor" ? "Пол" : "Стена");
+      const size = opening
+        ? (item.shape === "circle" ? `Ø ${fmtShort(item.diameter || 110)} мм` : `${fmtShort(item.width || 0.9)} × ${fmtShort(item.height || 2.1)} м`)
+        : (item.frame ? `рамка «${item.frame}»` : item.category === "light" ? "освещение" : "устройство");
+      return `<div class="planner-tool-item"><span><b>${esc(item.kind || "Элемент")}</b><small>${esc(surface)} · ${esc(size)}</small></span><button type="button" class="calc-x" data-plan-tool-remove="${index}" title="Удалить">×</button></div>`;
+    }).join("");
+    return `<div class="planner-block planner-tool-block">
+      <div class="planner-block-h">${opening ? "Проёмы" : "Электрика"} <span>${items.length} шт.</span></div>
+      <p class="planner-lead">${opening ? "Выберите стену в нижней ленте и щёлкните по развёртке правой кнопкой мыши. Или задайте положение вручную." : "Выберите пол, потолок или стену в нижней ленте. Размещение выполняется правым щелчком по чертежу."}</p>
+      ${fields}
+      <button type="button" class="btn primary planner-tool-add" data-plan-tool-add>Добавить на выбранную поверхность</button>
+      <div class="planner-tool-list">${itemRows || '<div class="calc-empty">Элементы ещё не добавлены</div>'}</div>
+    </div>`;
+  }
+
   function plannerSideHtml(node) {
+    if (node.type === "openings" || node.type === "electrics") return plannerToolSideHtml(node);
     const model = plannerModel(node);
     const linked = linkedFromPorts(node.id, activeBlueprint()?.links || []);
     const onBox = (id, on) => {
