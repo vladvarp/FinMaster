@@ -4843,7 +4843,59 @@
   }
 
   function planToolNodeHtml(node,bp,graph){const ports=planToolOutputs(node,bp.links),inputs=nodeInputs(node,bp.links),items=node.type==="openings"?(node.openings||[]):(node.devices||[]),title=node.type==="openings"?"Проёмы":"Электрика";return `<article class="calc-node is-plan-tool ${session.selected===node.id?"is-on":""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--plan-tool-color:${esc(node.color)}"><i class="calc-grip" data-drag-node="${esc(node.id)}"></i><header class="calc-node-h"><span>${title}</span><button type="button" class="calc-text-btn" data-plan-tool-edit="${esc(node.id)}">Редактор</button><button type="button" class="calc-x" data-del-node="${esc(node.id)}">×</button></header><div class="calc-node-sub">Элементов: ${items.length}</div><div class="calc-ports">${inputs.map(p=>`<div class="calc-row in"><i class="calc-port in" data-port="${esc(p.id)}" data-io="in" title="${esc(p.name)}"></i><span>${esc(p.name)}</span></div>`).join("")}${ports.map(p=>`<div class="calc-row out"><span class="calc-row-name">${esc(p.name)}</span><b>${p.id==="blueprint"?"Чертёж":items.filter(x=>`count:${String(x.kind||x.type||"other")}`===p.id).length}</b><i class="calc-port out" data-port="${esc(p.id)}" data-io="out"></i></div>`).join("")}</div></article>`;}
-  function openPlanToolEditor(nodeId){const node=activeBlueprint()?.nodes.find(x=>x.id===nodeId&&["openings","electrics"].includes(x.type));if(!node)return;const opening=node.type==="openings",items=opening?(node.openings||[]):(node.devices||[]),modal=document.createElement("div");modal.className="plan-tool-modal";modal.innerHTML=`<section class="plan-tool-dialog"><header><b>${opening?"Проёмы":"Электрика"}</b><button data-close>×</button></header><div class="plan-tool-content"><div class="plan-tool-items">${items.map((x,i)=>`<div class="plan-tool-item"><b>${esc(x.kind)}</b><span>${esc(x.wallId||"стена не указана")}</span><button data-remove="${i}">Удалить</button></div>`).join("")||"Элементы ещё не добавлены"}</div>${opening?`<label>Тип<select data-f="kind"><option>Окно</option><option>Дверь</option><option>Отверстие</option><option>Труба</option></select></label><label>Форма<select data-f="shape"><option value="rect">Прямоугольная</option><option value="circle">Круглая</option></select></label><label>Ширина, м<input data-f="width" type="number" value="0.9" step="0.01"></label><label>Высота, м<input data-f="height" type="number" value="2.1" step="0.01"></label><label>Диаметр трубы, мм<select data-f="diameter"><option>50</option><option>100</option><option>110</option><option>125</option><option>150</option><option>200</option></select></label>`:`<label>Тип<select data-f="kind"><option>Розетка</option><option>Выключатель</option><option>Двойной выключатель</option><option>Проходной выключатель</option><option>Интернет</option><option>ТВ</option><option>Световая точка</option></select></label><label>Рамка<input data-f="frame" placeholder="Например, 3 поста"></label><label>Ориентация<select data-f="orientation"><option value="horizontal">Горизонтальная</option><option value="vertical">Вертикальная</option></select></label>`}<label>ID стены<input data-f="wallId"></label><label>Положение вдоль стены 0–1<input data-f="t" type="number" value="0.5" min="0" max="1" step="0.01"></label><label>Высота от пола, м<input data-f="z" type="number" value="${opening?0:0.3}" min="0" step="0.01"></label><footer><button data-add>Добавить</button><button data-close>Готово</button></footer></div></section>`;document.body.appendChild(modal);const close=()=>modal.remove();modal.addEventListener("click",e=>{if(e.target===modal||e.target.closest("[data-close]")){close();return;}const del=e.target.closest("[data-remove]");if(del){items.splice(+del.dataset.remove,1);if(opening)node.openings=items;else node.devices=items;dirty();close();openPlanToolEditor(nodeId);return;}if(e.target.closest("[data-add]")){const v=k=>modal.querySelector(`[data-f="${k}"]`)?.value,x={id:uid(),kind:v("kind"),wallId:v("wallId")||"",t:plannerClamp(plannerNum(v("t"),.5),0,1),z:Math.max(0,plannerNum(v("z"),0))};if(opening)Object.assign(x,{shape:v("shape"),width:Math.max(.01,plannerNum(v("width"),.9)),height:Math.max(.01,plannerNum(v("height"),2.1)),diameter:plannerNum(v("diameter"),110)});else Object.assign(x,{frame:v("frame")||"",orientation:v("orientation"),category:v("kind")==="Световая точка"?"light":"socket"});items.push(x);if(opening)node.openings=items;else node.devices=items;node.countPorts=[...new Set(items.map(y=>`count:${y.kind}`))];dirty();close();render();}});}
+  function openPlanToolEditor(nodeId) {
+    const bp=activeBlueprint(),node=bp?.nodes.find(x=>x.id===nodeId&&["openings","electrics"].includes(x.type));
+    if(!node)return;
+    const opening=node.type==="openings",items=opening?(node.openings||[]):(node.devices||[]);
+    const link=(bp.links||[]).find(x=>x.to===node.id&&x.toPort==="blueprint"),graph=computeGraph(bp),plan=link?graph.values[`${link.from}:${link.fromPort}`]:null;
+    const walls=Array.isArray(plan?.walls)?plan.walls:[];
+    const customOptions=(node.customTypes||[]).concat(node.customLights||[]).map(x=>`<option>${esc(x)}</option>`).join("");
+    const modal=document.createElement("div");modal.className="plan-tool-modal";
+    modal.innerHTML=`<section class="plan-tool-dialog" role="dialog" aria-modal="true">
+      <header><b>${opening?"Проёмы":"Электрика"}</b><button type="button" data-close>×</button></header>
+      <div class="plan-tool-content">
+        <div class="plan-tool-items">${items.map((x,i)=>`<div class="plan-tool-item"><b>${esc(x.kind)}</b><span>${esc(walls.find(w=>w.id===x.wallId)?.name||x.wallId||"стена не выбрана")} · ${esc(x.shape||x.category||"")}</span><button type="button" data-remove="${i}">Удалить</button></div>`).join("")||"Элементы ещё не добавлены"}</div>
+        ${opening?`<label>Тип<select data-f="kind"><option>Окно</option><option>Дверь</option><option>Отверстие</option><option>Труба</option></select></label>
+          <label>Форма<select data-f="shape"><option value="rect">Прямоугольная</option><option value="circle">Круглая</option></select></label>
+          <label>Ширина, м<input data-f="width" type="number" value="0.9" min="0.01" step="0.01"></label>
+          <label>Высота, м<input data-f="height" type="number" value="2.1" min="0.01" step="0.01"></label>
+          <label>Диаметр трубы, мм<select data-f="diameter"><option>50</option><option>100</option><option selected>110</option><option>125</option><option>150</option><option>200</option><option>250</option></select></label>`:
+          `<label>Тип<select data-f="kind"><option>Розетка</option><option>Выключатель</option><option>Двойной выключатель</option><option>Проходной выключатель</option><option>Интернет</option><option>ТВ</option><option>Световая точка</option>${customOptions}</select></label>
+          <label>Рамка / группа<input data-f="frame" placeholder="Например, 3 поста"></label>
+          <label>Ориентация<select data-f="orientation"><option value="horizontal">Горизонтальная</option><option value="vertical">Вертикальная</option></select></label>
+          <label>Новый пользовательский тип<input data-custom-type placeholder="Название типа"></label>
+          <label>Категория нового типа<select data-custom-category><option value="socket">Розетка / выключатель</option><option value="light">Световая точка</option></select></label>
+          <button type="button" data-add-custom>Добавить свой тип</button>`}
+        <label>Стена<select data-f="wallId"><option value="">Выбрать стену…</option>${walls.map(w=>`<option value="${esc(w.id)}">${esc(w.name||w.id)}</option>`).join("")}</select></label>
+        <label>Положение вдоль стены, 0–1<input data-f="t" type="number" value="0.5" min="0" max="1" step="0.01"></label>
+        <label>Высота от пола, м<input data-f="z" type="number" value="${opening?0:0.3}" min="0" step="0.01"></label>
+        <footer><button type="button" data-add>Добавить элемент</button><button type="button" data-close>Готово</button></footer>
+      </div></section>`;
+    document.body.appendChild(modal);
+    const close=()=>modal.remove();
+    modal.addEventListener("click",e=>{
+      if(e.target===modal||e.target.closest("[data-close]")){close();return;}
+      if(e.target.closest("[data-add-custom]")){
+        const name=String(modal.querySelector("[data-custom-type]")?.value||"").trim(),category=modal.querySelector("[data-custom-category]")?.value;
+        if(!name)return;
+        const key=category==="light"?"customLights":"customTypes";node[key]=[...new Set([...(node[key]||[]),name])];dirty();close();openPlanToolEditor(nodeId);return;
+      }
+      const del=e.target.closest("[data-remove]");
+      if(del){items.splice(Number(del.dataset.remove),1);if(opening)node.openings=items;else node.devices=items;node.countPorts=[...new Set(items.flatMap(x=>[`count:${x.kind}`,...(x.frame?[`frame:${x.frame}`]:[])]))];dirty();close();openPlanToolEditor(nodeId);return;}
+      if(!e.target.closest("[data-add]"))return;
+      const v=k=>modal.querySelector(`[data-f="${k}"]`)?.value;
+      const item={id:uid(),kind:v("kind"),wallId:v("wallId")||"",t:plannerClamp(plannerNum(v("t"),.5),0,1),z:Math.max(0,plannerNum(v("z"),0))};
+      if(opening){
+        item.shape=v("shape");item.width=Math.max(.01,plannerNum(v("width"),.9));item.height=Math.max(.01,plannerNum(v("height"),2.1));item.diameter=Math.max(1,plannerNum(v("diameter"),110));
+        if(item.shape==="rect"&&item.kind!=="Дверь"){const wall=walls.find(w=>w.id===item.wallId);if(wall&&item.width>=wall.length-.001)item.kind="Дверь";}
+      }else{
+        item.frame=String(v("frame")||"").trim();item.orientation=v("orientation");item.category=(node.customLights||[]).includes(item.kind)||item.kind==="Световая точка"?"light":"socket";
+      }
+      items.push(item);if(opening)node.openings=items;else node.devices=items;
+      node.countPorts=[...new Set(items.flatMap(x=>[`count:${x.kind}`,...(x.frame?[`frame:${x.frame}`]:[])]))];
+      dirty();close();render();
+    });
+  }
 
   function dashboardNodeHtml(node, bp, graph) {
     const ports = nodeOutputs(node, null, bp.links).map((port) => port.id);
