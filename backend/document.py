@@ -243,7 +243,7 @@ def _line_series_ui(raw: Any) -> dict[str, Any]:
 
 
 CALC_OPS = ("+", "-", "*", "/")
-CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group", "filter", "dashboard", "planner", "present", "comment")
+CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group", "filter", "dashboard", "planner", "openings", "electrics", "present", "comment")
 CALC_MAX_BLUEPRINTS = 24
 CALC_MAX_NODES = 120
 CALC_MAX_LINKS = 400
@@ -603,6 +603,24 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         node["color"] = color
         node["points"] = _planner_points(raw.get("points"))
         node["outs"] = _planner_outs(raw.get("outs"), node["points"])
+    elif kind in ("openings", "electrics"):
+        node["name"]=_clip_text(raw.get("name"),48,"Проёмы" if kind=="openings" else "Электрика")
+        node["color"]=str(raw.get("color") or ("#0ea5e9" if kind=="openings" else "#f59e0b"))[:7]
+        node["countPorts"]=[_clip_text(x,80) for x in (raw.get("countPorts") if isinstance(raw.get("countPorts"),list) else [])[:40]]
+        if kind=="openings":
+            clean=[]
+            for x in (raw.get("openings") if isinstance(raw.get("openings"),list) else [])[:500]:
+                if not isinstance(x,dict): continue
+                clean.append({"id":_clip_text(x.get("id"),40),"kind":_clip_text(x.get("kind"),32,"Отверстие"),"shape":x.get("shape") if x.get("shape") in ("rect","circle") else "rect","wallId":_clip_text(x.get("wallId"),48),"t":round(_float_in_range(x.get("t"),.5,0,1),4),"z":round(_float_in_range(x.get("z"),0,0,30),4),"width":round(_float_in_range(x.get("width"),.9,.01,50),4),"height":round(_float_in_range(x.get("height"),2.1,.01,30),4),"diameter":round(_float_in_range(x.get("diameter"),110,1,3000),2)})
+            node["openings"]=clean
+        else:
+            clean=[]
+            for x in (raw.get("devices") if isinstance(raw.get("devices"),list) else [])[:1000]:
+                if not isinstance(x,dict): continue
+                clean.append({"id":_clip_text(x.get("id"),40),"kind":_clip_text(x.get("kind"),48,"Розетка"),"category":x.get("category") if x.get("category") in ("socket","light") else "socket","wallId":_clip_text(x.get("wallId"),48),"t":round(_float_in_range(x.get("t"),.5,0,1),4),"z":round(_float_in_range(x.get("z"),.3,0,30),4),"frame":_clip_text(x.get("frame"),48),"orientation":x.get("orientation") if x.get("orientation") in ("horizontal","vertical") else "horizontal"})
+            node["devices"]=clean
+            node["customTypes"]=[_clip_text(x,48) for x in (raw.get("customTypes") if isinstance(raw.get("customTypes"),list) else [])[:100]]
+            node["customLights"]=[_clip_text(x,48) for x in (raw.get("customLights") if isinstance(raw.get("customLights"),list) else [])[:100]]
     elif kind == "present":
         node["pageId"] = _clip_text(raw.get("pageId"), 80)
         node["blockId"] = _clip_text(raw.get("blockId"), 80)
