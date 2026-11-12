@@ -2834,7 +2834,8 @@
       ctx.closePath();
       ctx.fillStyle = "rgba(101, 163, 13, 0.16)";
       ctx.fill();
-      (renderedPlan?.annotations?.lights || []).filter((item) => item.plane === "floor" && Number.isFinite(item.x) && Number.isFinite(item.y)).forEach((item) => {
+      const visiblePlane = session.planner.surface?.kind === "ceiling" ? "ceiling" : "floor";
+      (renderedPlan?.annotations?.lights || []).filter((item) => item.plane === visiblePlane && Number.isFinite(item.x) && Number.isFinite(item.y)).forEach((item) => {
         const point = view.to({ x: item.x, y: item.y });
         ctx.beginPath();
         ctx.arc(point.x, point.y, 7, 0, Math.PI * 2);
@@ -2894,7 +2895,8 @@
       ctx.clearRect(0, 0, w, h);
       ctx.fillStyle = colors.bg;
       ctx.fillRect(0, 0, w, h);
-      const walls = model.walls;
+      const sourceWallIds = node.type === "planner" ? null : new Set((renderedPlan?.walls || []).map((wall) => wall.id));
+      const walls = sourceWallIds ? model.walls.filter((wall) => sourceWallIds.has(wall.id)) : model.walls;
       const total = walls.reduce((sum, wall) => sum + wall.len, 0) || 1;
       const gap = walls.length > 1 ? 8 : 0;
       const scale = Math.min((w - 24 - gap * (walls.length - 1)) / total, (h - 46) / Math.max(0.2, model.height));
@@ -3602,6 +3604,7 @@
       if (e.button !== 0) return;
       const node = plannerNode();
       if (!node || !session.planner) return;
+      if (node.type !== "planner") return;
       const hit = plannerHit(plan, node, e.clientX, e.clientY);
       session.planner.viewLock = plannerView(plan, node.points);
       if (hit.pointId) {
@@ -3655,7 +3658,7 @@
     plan?.addEventListener("pointercancel", endDrag);
     plan?.addEventListener("dblclick", (e) => {
       const node = plannerNode();
-      if (!node || node.points.length >= PLANNER_MAX_PTS) return;
+      if (!node || node.type !== "planner" || node.points.length >= PLANNER_MAX_PTS) return;
       const hit = plannerHit(plan, node, e.clientX, e.clientY);
       if (!hit.wallId) return;
       const id = plannerInsertCorner(node, hit.wallId, hit.world);
@@ -3667,6 +3670,10 @@
       e.preventDefault();
       const node = plannerNode();
       if (!node || !session.planner) return;
+      if (node.type !== "planner") {
+        plannerPlaceFromPlan(e);
+        return;
+      }
       const hit = plannerHit(plan, node, e.clientX, e.clientY);
       if (!hit.pointId && !hit.wallId) {
         plannerHideNudge();
@@ -3737,6 +3744,55 @@
     });
   }
 
+  function plannerPlaceFromPlan(event) {
+    const node = plannerNode();
+    const surface = session.planner?.surface;
+    if (!node || !surface || !["openings", "electrics"].includes(node.type)) return false;
+    if (surface.kind === "wall") {
+      api?.toast?.("Для размещения на стене используйте нижнюю развёртку стен.");
+      return true;
+    }
+    if (node.type === "openings") {
+      api?.toast?.("Проёмы размещаются только на стенах.");
+      return true;
+    }
+    const canvas = $("planner-plan");
+    const rect = canvas?.getBoundingClientRect();
+    if (!canvas || !rect) return true;
+    const view = plannerView(canvas, node.points);
+    const world = view.from(event.clientX - rect.left, event.clientY - rect.top);
+    plannerAddToolItem(node, { x: world.x, y: world.y });
+    return true;
+  }
+
+  function plannerPlaceFromUnfold(event) {
+    const node = plannerNode();
+    const surface = session.planner?.surface;
+    if (!node || !surface || !["openings", "electrics"].includes(node.type)) return false;
+    if (surface.kind !== "wall") {
+      api?.toast?.("Выберите стену в нижней ленте поверхностей.");
+      return true;
+    }
+    const canvas = $("planner-unfold");
+    const rect = canvas?.getBoundingClientRect();
+    if (!canvas || !rect) return true;
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const hit = session.planner.hits.find((item) =>
+      item.id === surface.id && x >= item.x && x <= item.x + item.w && y >= item.y && y <= item.y + item.h
+    );
+    if (!hit) {
+      api?.toast?.("Щёлкните правой кнопкой по выбранной стене на развёртке.");
+      return true;
+    }
+    const wall = plannerWalls(node).find((item) => item.id === surface.id);
+    if (!wall) return true;
+    const t = plannerClamp((x - hit.x) / Math.max(1, hit.w), 0, 1);
+    const z = plannerClamp(((hit.y + hit.h - y) / Math.max(1, hit.h)) * node.height, 0, node.height);
+    plannerAddToolItem(node, { t, z });
+    return true;
+  }
+
   function plannerDeleteSelected() {
     const node = plannerNode();
     const sel = session.planner?.sel;
@@ -3769,7 +3825,7 @@
     if (!node) return;
     ensurePlannerModal();
     ensurePlanner(node);
-    session.planner = { id: nodeId, sel: null, drag: null, viewLock: null, hits: [], touched: false, nudge: null };
+    session.planner = { id: nodeId, sel: null, drag: null, viewLock: null, hits: [], touched: false, nudge: null, surface: node.type === "planner" ? null : { kind: "floor", id: "floor" } };
     plannerHideNudge();
     session.selected = nodeId;
     hidePortMenu();
