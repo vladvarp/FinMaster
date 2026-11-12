@@ -3118,6 +3118,8 @@
          <label class="planner-tool-field">Новый тип<input data-plan-tool-field="customType" maxlength="48" placeholder="Название типа" /></label>
          <label class="planner-tool-field">Категория<select data-plan-tool-field="customCategory"><option value="socket">Розетка / выключатель</option><option value="light">Световая точка</option></select></label>
          <button type="button" class="btn small" data-plan-tool-add-custom>Добавить свой тип</button>`;
+    const placementFields = `<label class="planner-tool-field">Положение вдоль стены, 0–1<input data-plan-tool-field="t" type="number" min="0" max="1" step="0.01" value="0.5" /></label>
+      <label class="planner-tool-field">Высота от пола, м<input data-plan-tool-field="z" type="number" min="0" step="0.01" value="${opening ? "0" : "0.3"}" /></label>`;
     const itemRows = items.map((item, index) => {
       const wall = walls.find((candidate) => candidate.id === item.wallId);
       const surface = item.wallId ? (wall?.id || "Стена") : (item.plane === "ceiling" ? "Потолок" : item.plane === "floor" ? "Пол" : "Стена");
@@ -3130,6 +3132,7 @@
       <div class="planner-block-h">${opening ? "Проёмы" : "Электрика"} <span>${items.length} шт.</span></div>
       <p class="planner-lead">${opening ? "Выберите стену в нижней ленте и щёлкните по развёртке правой кнопкой мыши. Или задайте положение вручную." : "Выберите пол, потолок или стену в нижней ленте. Размещение выполняется правым щелчком по чертежу."}</p>
       ${fields}
+      ${placementFields}
       <button type="button" class="btn primary planner-tool-add" data-plan-tool-add>Добавить на выбранную поверхность</button>
       <div class="planner-tool-list">${itemRows || '<div class="calc-empty">Элементы ещё не добавлены</div>'}</div>
     </div>`;
@@ -3264,8 +3267,8 @@
       id: uid(),
       kind,
       wallId: surface.kind === "wall" ? surface.id : "",
-      t: plannerClamp(plannerNum(placement.t, 0.5), 0, 1),
-      z: plannerClamp(plannerNum(placement.z, opening ? 0 : 0.3), 0, node.height || 2.7),
+      t: plannerClamp(plannerNum(placement.t, plannerNum(read("t"), 0.5)), 0, 1),
+      z: plannerClamp(plannerNum(placement.z, plannerNum(read("z"), opening ? 0 : 0.3)), 0, node.height || 2.7),
     };
     if (opening) {
       item.shape = read("shape") === "circle" ? "circle" : "rect";
@@ -3275,7 +3278,11 @@
       if (item.shape === "rect") {
         const geometry = plannerEditorGeometry(node, plannerInputBlueprint(node) || plannerOutputBlueprint(node));
         const wall = geometry.walls.find((candidate) => candidate.id === item.wallId);
-        if (wall && item.width >= wall.len - 0.001) item.kind = "Дверь";
+        if (wall) {
+          const left = item.t * wall.len - item.width / 2;
+          const right = left + item.width;
+          if (left <= 0.001 || right >= wall.len - 0.001) item.kind = "Дверь";
+        }
       }
       node.openings ||= [];
       node.openings.push(item);
