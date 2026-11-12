@@ -3934,8 +3934,6 @@
           ${calcToolButton("filter", "Фильтр", `<path d="M2.6 3.2h10.8L9.4 8.2v4.2l-2.8 1.2V8.2z"/>`)}
           ${calcToolButton("dashboard", "Дашборд", `<path d="M3 13V8.4M8 13V3.6M13 13V6.4M2.2 13h11.6"/>`)}
           ${calcToolButton("planner", "Планировщик", `<path d="M3 3.2h10v9.6H3zM3 7.4h4.2"/>`)}
-          ${calcToolButton("openings", "Проёмы", `<path d="M3 13V3h10v10M6 13V7h4v6"/>`)}
-          ${calcToolButton("electrics", "Электрика", `<path d="M8 2v4M8 10v4M2 8h4M10 8h4"/>`)}
           ${calcToolButton("result", "Результат", `<path d="M2.6 5.2h6.4M2.6 10.8h6.4M10.2 8h3.4M11.6 6.2 13.8 8l-2.2 1.8"/>`)}
           ${calcToolButton("group", "Группа", `<rect x="3" y="3" width="10" height="10" rx="1.5" stroke-dasharray="2.2 1.5"/>`)}
           ${calcToolButton("comment", "Комментарий", `<path d="M3 2.8h6.6L13 6.2v7H3zM9.4 2.9V6h3.2M5 8.2h6M5 10.6h4"/>`)}
@@ -4879,6 +4877,31 @@
     return `<svg class="calc-planner-thumb" viewBox="0 0 ${size} ${size}" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><path d="${d}"/></svg>`;
   }
 
+  function setPlanNodeMode(node, nextType) {
+    if (!node || !["planner", "openings", "electrics"].includes(nextType) || node.type === nextType) return false;
+    if (nextType === "planner") {
+      if (!Array.isArray(node.points) || node.points.length < 3) {
+        const ids = [uid(), uid(), uid(), uid()];
+        node.points = [{id:ids[0],x:0,y:0},{id:ids[1],x:4,y:0},{id:ids[2],x:4,y:3},{id:ids[3],x:0,y:3}];
+      }
+      if (!Array.isArray(node.outs) || !node.outs.length) node.outs = [{id:"floor",kind:"floor",name:"Пол",on:true}, ...node.points.map((p)=>({id:`w:${p.id}`,kind:"wall",name:"",on:false})), {id:uid(),kind:"sum",name:"Стены",on:true,parts:node.points.map((p)=>`w:${p.id}`)}];
+      if (!Number.isFinite(Number(node.height))) node.height = 2.7;
+      node.name = String(node.plannerName || "Планировщик");
+      node.color = node.plannerColor || GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
+    } else {
+      if (node.type === "planner") { node.plannerName = plannerName(node); node.plannerColor = node.color; }
+      if (nextType === "openings") {
+        node.name = "Проёмы"; node.color = "#0ea5e9"; node.countPorts ||= [];
+        node.parameters ||= [{id:"width",name:"Ширина"},{id:"height",name:"Высота"},{id:"diameter",name:"Диаметр"}]; node.openings ||= [];
+      } else {
+        node.name = "Электрика"; node.color = "#f59e0b"; node.countPorts ||= [];
+        node.parameters ||= [{id:"height",name:"Высота установки"}]; node.devices ||= []; node.customTypes ||= []; node.customLights ||= [];
+      }
+    }
+    node.type = nextType;
+    return true;
+  }
+
   function plannerNodeHtml(node, bp, graph) {
     const model = plannerModel(node);
     const ports = plannerOutputs(node, bp.links);
@@ -4887,6 +4910,7 @@
     return `<article class="calc-node is-planner ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(node.color || "#65a30d")}">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
+        <select class="calc-node-mode" data-plan-node-mode="${esc(node.id)}" aria-label="Тип ноды" title="Тип ноды"><option value="planner" selected>Планировщик</option><option value="openings">Проёмы</option><option value="electrics">Электрика</option></select>
         <input class="calc-pname calc-planner-name" data-planner-title="${esc(node.id)}" value="${esc(plannerName(node))}" maxlength="48" spellcheck="false" title="Имя планировщика" aria-label="Имя планировщика" />
         <input class="calc-planner-color" type="color" data-planner-color="${esc(node.id)}" value="${esc(node.color || "#65a30d")}" title="Цвет плана" aria-label="Цвет плана" />
         <button type="button" class="calc-text-btn" data-planner-edit="${esc(node.id)}" title="План пола и площади">Редактор</button>
@@ -4923,7 +4947,7 @@
     </article>`;
   }
 
-  function planToolNodeHtml(node,bp,graph){const ports=planToolOutputs(node,bp.links),inputs=nodeInputs(node,bp.links),items=node.type==="openings"?(node.openings||[]):(node.devices||[]),title=node.type==="openings"?"Проёмы":"Электрика";return `<article class="calc-node is-plan-tool ${session.selected===node.id?"is-on":""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--plan-tool-color:${esc(node.color)}"><i class="calc-grip" data-drag-node="${esc(node.id)}"></i><header class="calc-node-h"><span>${title}</span><button type="button" class="calc-text-btn" data-plan-tool-edit="${esc(node.id)}">Редактор</button><button type="button" class="calc-x" data-del-node="${esc(node.id)}">×</button></header><div class="calc-node-sub">Элементов: ${items.length}</div><div class="calc-ports">${inputs.map(p=>`<div class="calc-row in"><i class="calc-port in" data-port="${esc(p.id)}" data-io="in" title="${esc(p.name)}"></i><span>${esc(p.name)}</span></div>`).join("")}${ports.map(p=>`<div class="calc-row out"><span class="calc-row-name">${esc(p.name)}</span><b>${p.id==="blueprint"?"Чертёж":p.id.startsWith("frame:")?items.filter(x=>x.frame&&`frame:${x.frame}`===p.id).length:items.filter(x=>`count:${String(x.kind||x.type||"other")}`===p.id).length}</b><i class="calc-port out" data-port="${esc(p.id)}" data-io="out"></i></div>`).join("")}</div></article>`;}
+  function planToolNodeHtml(node,bp,graph){const ports=planToolOutputs(node,bp.links),inputs=nodeInputs(node,bp.links),items=node.type==="openings"?(node.openings||[]):(node.devices||[]);return `<article class="calc-node is-plan-tool ${session.selected===node.id?"is-on":""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--plan-tool-color:${esc(node.color)}"><i class="calc-grip" data-drag-node="${esc(node.id)}"></i><header class="calc-node-h"><select class="calc-node-mode" data-plan-node-mode="${esc(node.id)}" aria-label="Тип ноды" title="Тип ноды"><option value="planner">Планировщик</option><option value="openings"${node.type==="openings"?" selected":""}>Проёмы</option><option value="electrics"${node.type==="electrics"?" selected":""}>Электрика</option></select><button type="button" class="calc-text-btn" data-plan-tool-edit="${esc(node.id)}">Редактор</button><button type="button" class="calc-x" data-del-node="${esc(node.id)}">×</button></header><div class="calc-node-sub">Элементов: ${items.length}</div><div class="calc-ports">${inputs.map(p=>`<div class="calc-row in"><i class="calc-port in" data-port="${esc(p.id)}" data-io="in" title="${esc(p.name)}"></i><span>${esc(p.name)}</span></div>`).join("")}${ports.map(p=>`<div class="calc-row out"><span class="calc-row-name">${esc(p.name)}</span><b>${p.id==="blueprint"?"Чертёж":p.id.startsWith("frame:")?items.filter(x=>x.frame&&`frame:${x.frame}`===p.id).length:items.filter(x=>`count:${String(x.kind||x.type||"other")}`===p.id).length}</b><i class="calc-port out" data-port="${esc(p.id)}" data-io="out"></i></div>`).join("")}</div></article>`;}
   function openPlanToolEditor(nodeId) {
     const bp=activeBlueprint(),node=bp?.nodes.find(x=>x.id===nodeId&&["openings","electrics"].includes(x.type));
     if(!node)return;
@@ -6874,6 +6898,12 @@
       const bp = activeBlueprint();
       const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node) : null;
       if (!node) return;
+      if (e.target.dataset.planNodeMode) {
+        if (!setPlanNodeMode(node, String(e.target.value || "planner"))) return;
+        dirty();
+        render();
+        return;
+      }
       if (e.target.dataset.resultName && node.type === "result") {
         node.name = String(e.target.value || "").trim().slice(0, 48) || "Результат";
         e.target.value = node.name;
