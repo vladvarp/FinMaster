@@ -1617,11 +1617,12 @@
     if (node.type === "scheme") return { w: 220, h: 100 };
     if (node.type === "result") return { w: 376, h: 120 };
     if (node.type === "filter" || node.type === "dashboard") return { w: 384, h: 420 };
-    if (node.type === "openings" || node.type === "electrics") return { w: 270, h: 260 };
-    if (node.type === "planner") {
-      const n = Array.isArray(node.outs) ? node.outs.filter((item) => item && item.on).length : 2;
-      const groups = Array.isArray(node.groups) ? node.groups.length : 0;
-      return { w: 350, h: 380 + Math.max(1, n + groups) * 28 };
+    if (node.type === "planner" || node.type === "openings" || node.type === "electrics") {
+      const n = node.type === "planner"
+        ? (Array.isArray(node.outs) ? node.outs.filter((item) => item && item.on).length : 2)
+        : planToolOutputs(node, []).length + nodeInputs(node, []).length;
+      const groups = node.type === "planner" && Array.isArray(node.groups) ? node.groups.length : 0;
+      return { w: 350, h: 340 + Math.max(1, n + groups) * 28 };
     }
     if (node.type === "present") return { w: 220, h: 160 };
     if (node.type === "group") return { w: Math.max(160, node.w || 320), h: Math.max(120, node.h || 220) };
@@ -2910,29 +2911,14 @@
       walls.forEach((wall, index) => {
         const rw = Math.max(1, wall.len * scale);
         const on = selWall && selWall.id === wall.id;
-        const renderedWall = (renderedPlan?.walls || []).find((item) => item.id === wall.id);
-        const solidCells = Array.isArray(renderedWall?.solidCells) ? renderedWall.solidCells : null;
         ctx.save();
         ctx.fillStyle = on ? "rgba(101, 163, 13, 0.32)" : "rgba(101, 163, 13, 0.16)";
         ctx.strokeStyle = on ? "#65a30d" : "#4d7c0f";
         ctx.lineWidth = on ? 2.5 : 1.25;
-        if (solidCells) {
-          // Рисуем только сохранившиеся участки стены: области проёмов остаются прозрачными.
-          solidCells.forEach((cell) => {
-            const cellX = x + Number(cell.x || 0) * scale;
-            const cellY = top + rh - (Number(cell.z || 0) + Number(cell.height || 0)) * scale;
-            const cellW = Math.max(0, Number(cell.width || 0) * scale);
-            const cellH = Math.max(0, Number(cell.height || 0) * scale);
-            if (cellW > 0 && cellH > 0) ctx.fillRect(cellX, cellY, cellW, cellH);
-          });
-          // Контур стены оставляем цельным, чтобы сохранялась читаемость развёртки.
-          ctx.strokeRect(x, top, rw, rh);
-        } else {
-          ctx.beginPath();
-          plannerRoundPath(ctx, x, top, rw, rh, 4);
-          ctx.fill();
-          ctx.stroke();
-        }
+        ctx.beginPath();
+        plannerRoundPath(ctx, x, top, rw, rh, 4);
+        ctx.fill();
+        ctx.stroke();
         const wallOpenings = (renderedPlan?.annotations?.openings || []).filter((item) => item.wallId === wall.id);
         wallOpenings.forEach((item) => {
           const isCircle = item.shape === "circle";
@@ -2952,7 +2938,6 @@
           ctx.strokeStyle = item.kind === "Дверь" ? "#b45309" : "#dc2626";
           ctx.lineWidth = 1.5;
           if (isCircle) {
-            // Центр и радиус совпадают с алгоритмом построения solidCells.
             const cx = x + (left + diameter / 2) * scale;
             const cy = top + rh - (bottom + diameter / 2) * scale;
             ctx.beginPath();
