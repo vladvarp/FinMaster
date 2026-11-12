@@ -2631,6 +2631,19 @@
     return { pointId: "", wallId, world: view.from(x, y) };
   }
 
+  function plannerOutputBlueprint(node) {
+    const bp = activeBlueprint();
+    if (!bp || !node) return plannerBlueprint(node);
+    const graph = computeGraph(bp);
+    let result = plannerBlueprint(node);
+    (bp.nodes || []).forEach((candidate) => {
+      if (candidate.type !== "openings" && candidate.type !== "electrics") return;
+      const value = graph.values[`${candidate.id}:blueprint`];
+      if (value?.schema === "finmaster.blueprint.v1" && value.source === node.id) result = value;
+    });
+    return result;
+  }
+
   function plannerDraw() {
     const node = plannerNode();
     const plan = $("planner-plan");
@@ -2638,6 +2651,7 @@
     if (!node || !plan || !unfold || !session.planner) return;
     const colors = plannerColors();
     const model = plannerModel(node);
+    const renderedPlan = plannerOutputBlueprint(node);
     const selWall = plannerSelWall(node);
     const selPoint = session.planner.sel?.kind === "point" ? session.planner.sel.id : "";
     const fitted = plannerFitCanvas(plan);
@@ -2680,6 +2694,16 @@
       ctx.closePath();
       ctx.fillStyle = "rgba(101, 163, 13, 0.16)";
       ctx.fill();
+      (renderedPlan?.annotations?.lights || []).filter((item) => item.plane === "floor" && Number.isFinite(item.x) && Number.isFinite(item.y)).forEach((item) => {
+        const point = view.to({ x: item.x, y: item.y });
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 7, 0, Math.PI * 2);
+        ctx.fillStyle = "#f59e0b";
+        ctx.fill();
+        ctx.strokeStyle = "#92400e";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      });
       const center = plannerCentroid(node.points);
       const mid = view.to(center);
       plannerWalls(node).forEach((wall) => {
@@ -2747,6 +2771,36 @@
         plannerRoundPath(ctx, x, top, rw, rh, 4);
         ctx.fill();
         ctx.stroke();
+        const wallOpenings = (renderedPlan?.annotations?.openings || []).filter((item) => item.wallId === wall.id);
+        wallOpenings.forEach((item) => {
+          const diameter = Math.max(0.01, (Number(item.diameter) || 110) / 1000);
+          const openingWidth = item.shape === "circle" ? diameter : Math.max(0.01, Number(item.width) || 0.9);
+          const openingHeight = item.shape === "circle" ? diameter : Math.max(0.01, Number(item.height) || 2.1);
+          const ox = x + plannerClamp(Number(item.t) || 0.5, 0, 1) * wall.len * scale - openingWidth * scale / 2;
+          const oy = top + rh - (Math.max(0, Number(item.z) || 0) + openingHeight) * scale;
+          ctx.save();
+          ctx.fillStyle = colors.card;
+          ctx.strokeStyle = item.kind === "Дверь" ? "#b45309" : "#dc2626";
+          ctx.lineWidth = 1.5;
+          if (item.shape === "circle") {
+            ctx.beginPath();
+            ctx.ellipse(ox + openingWidth * scale / 2, oy + openingHeight * scale / 2, openingWidth * scale / 2, openingHeight * scale / 2, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            ctx.fillRect(ox, oy, openingWidth * scale, openingHeight * scale);
+            ctx.strokeRect(ox, oy, openingWidth * scale, openingHeight * scale);
+          }
+          ctx.restore();
+        });
+        (renderedPlan?.annotations?.sockets || []).filter((item) => item.wallId === wall.id).forEach((item) => {
+          const px = x + plannerClamp(Number(item.t) || 0.5, 0, 1) * wall.len * scale;
+          const py = top + rh - Math.max(0, Number(item.z) || 0) * scale;
+          ctx.beginPath();
+          ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+          ctx.fillStyle = "#2563eb";
+          ctx.fill();
+        });
         const row = model.rows[index + 1];
         ctx.fillStyle = colors.ink;
         ctx.textAlign = "center";
