@@ -1079,7 +1079,7 @@
     ];
     if (node.type === "formula") return node.inputs || [];
     if (node.type === "present") return presentPorts(node);
-    if (node.type === "openings" || node.type === "electrics") return [{ id: "blueprint", name: "Чертёж" }, ...(node.parameters || [])];
+    if (node.type === "openings" || node.type === "electrics") return [{ id: "blueprint", name: "Чертёж", dataType: "drawing" }, ...(node.parameters || []).map((port) => ({ ...port, dataType: "number" }))];
     if (node.type === "order") {
       const order = api.findOrder(node.orderId);
       const linkedIn = usedInputPorts(node.id, links || []);
@@ -1215,7 +1215,7 @@
         name: port.name,
       }));
     }
-    if (node.type === "planner") return plannerOutputs(node, links).map((port) => ({ id: port.id, name: port.name }));
+    if (node.type === "planner") return plannerOutputs(node, links);
     if (node.type === "openings" || node.type === "electrics") return planToolOutputs(node, links);
     if (node.type === "order") {
       const found = order || api.findOrder(node.orderId);
@@ -1288,6 +1288,10 @@
       return ports;
     }
     return [];
+  }
+
+  function portDataType(port) {
+    return String(port?.dataType || "number");
   }
 
   function formulaFieldErrors(node) {
@@ -2107,7 +2111,7 @@
   }
 
   function ensurePlanner(node) {
-    if (!node || node.type !== "planner") return node;
+    if (!node || !["planner", "openings", "electrics"].includes(node.type)) return node;
     if (!Array.isArray(node.points)) node.points = [];
     const seen = new Set();
     const points = [];
@@ -2255,18 +2259,112 @@
     blueprint.annotations.lights = blueprint.annotations.lights.filter((item) => item.plane === "floor" ? parts.has("floor") : item.plane === "ceiling" ? parts.has("ceiling") : wallIds.has(item.wallId));
     return blueprint;
   }
-  function planToolOutputs(node,links){const linked=linkedFromPorts(node.id,links||[]),ports=[{id:"blueprint",name:"Изменённый чертёж"}],items=node.type==="openings"?(node.openings||[]):(node.devices||[]),groups=new Map();items.forEach(x=>{const k=String(x.kind||x.type||"other");groups.set(k,(groups.get(k)||0)+1);});groups.forEach((v,k)=>{const id=`count:${k}`;if(linked.has(id)||node.countPorts?.includes(id))ports.push({id,name:`Кол-во · ${k}`});});if(node.type==="electrics"){const frames=new Map();items.filter(x=>x.frame).forEach(x=>{const k=String(x.frame);frames.set(k,(frames.get(k)||0)+1);});frames.forEach((v,k)=>{const id=`frame:${k}`;if(linked.has(id)||node.countPorts?.includes(id))ports.push({id,name:`Рамки · ${k}`});});}return ports;}
-  function evaluatePlanTool(node,source,overrides={}){const blueprint=source?.schema==="finmaster.blueprint.v1"?JSON.parse(JSON.stringify(source)):null,opening=node.type==="openings",items=(opening?(node.openings||[]):(node.devices||[])).map(x=>({...x}));items.forEach(x=>{if(opening){if(Number.isFinite(overrides.width))x.width=overrides.width;if(Number.isFinite(overrides.height))x.height=overrides.height;if(Number.isFinite(overrides.diameter))x.diameter=overrides.diameter;const wall=(source?.walls||[]).find(w=>w.id===x.wallId);if(wall&&x.shape==="rect"){const left=(x.t||.5)*wall.length-(x.width||.9)/2,right=left+(x.width||.9);if(left<=.001||right>=wall.length-.001)x.kind="Дверь";}}else if(Number.isFinite(overrides.height))x.z=overrides.height;});if(blueprint){blueprint.annotations||={openings:[],sockets:[],lights:[]};items.forEach(x=>{const v={...x};if(opening)blueprint.annotations.openings.push(v);else if(v.category==="light")blueprint.annotations.lights.push(v);else blueprint.annotations.sockets.push(v);});blueprint.walls=(blueprint.walls||[]).map(w=>{const holes=blueprint.annotations.openings.filter(x=>x.wallId===w.id);const xs=[0,w.length],zs=[0,blueprint.height];holes.forEach(h=>{const d=h.shape==="circle"?(h.diameter?h.diameter/1000:(h.width||0.11)):(h.width||.9),left=plannerClamp((h.t||.5)*w.length-d/2,0,w.length),right=plannerClamp(left+d,0,w.length),bottom=plannerClamp(h.z||0,0,blueprint.height),top=plannerClamp(bottom+(h.shape==="circle"?d:(h.height||2.1)),0,blueprint.height);xs.push(left,right);zs.push(bottom,top);if(h.shape==="circle"){for(let step=1;step<48;step++){xs.push(left+d*step/48);zs.push(bottom+d*step/48);}}});const ux=[...new Set(xs.map(v=>plannerRound(v)))].sort((a,b)=>a-b),uz=[...new Set(zs.map(v=>plannerRound(v)))].sort((a,b)=>a-b),solid=[];for(let xi=0;xi<ux.length-1;xi++)for(let zi=0;zi<uz.length-1;zi++){const cx=(ux[xi]+ux[xi+1])/2,cz=(uz[zi]+uz[zi+1])/2,cut=holes.some(h=>{const d=h.shape==="circle"?(h.diameter?h.diameter/1000:(h.width||0.11)):(h.width||.9),left=plannerClamp((h.t||.5)*w.length-d/2,0,w.length),bottom=plannerClamp(h.z||0,0,blueprint.height);if(h.shape==="circle")return Math.hypot(cx-(left+d/2),cz-(bottom+d/2))<d/2;return cx>=left&&cx<=left+d&&cz>=bottom&&cz<=bottom+(h.height||2.1);});if(!cut)solid.push({x:ux[xi],z:uz[zi],width:ux[xi+1]-ux[xi],height:uz[zi+1]-uz[zi]});}return{...w,openings:holes,electrical:blueprint.annotations.sockets.filter(x=>x.wallId===w.id),solidCells:solid};});}const counts=[],groups=new Map();items.forEach(x=>{const k=String(x.kind||x.type||"other");groups.set(k,(groups.get(k)||0)+1);});groups.forEach((v,k)=>counts.push({id:`count:${k}`,value:v}));if(!opening){const frames=new Map();items.filter(x=>x.frame).forEach(x=>{const k=String(x.frame);if(!frames.has(k))frames.set(k,new Set());const position=x.wallId?`${x.wallId}:${plannerRound(x.t||0)}:${plannerRound(x.z||0)}`:`${x.plane||"surface"}:${plannerRound(x.x||0)}:${plannerRound(x.y||0)}`;frames.get(k).add(position);});frames.forEach((v,k)=>counts.push({id:`frame:${k}`,value:v.size}));}return{blueprint,counts};}
+  function planToolOutputs(node, links) {
+    const linked = linkedFromPorts(node.id, links || []);
+    const ports = [{ id: "blueprint", name: "Изменённый чертёж", dataType: "drawing" }];
+    const items = node.type === "openings" ? (node.openings || []) : (node.devices || []);
+    const counts = new Map();
+    items.forEach((item) => {
+      const key = String(item.kind || item.type || "other");
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    counts.forEach((count, kind) => {
+      const id = `count:${kind}`;
+      if (linked.has(id) || node.countPorts?.includes(id)) {
+        ports.push({ id, name: `Кол-во · ${kind}`, value: count, dataType: "number" });
+      }
+    });
+    if (node.type === "electrics") {
+      const frames = new Map();
+      items.filter((item) => item.frame).forEach((item) => {
+        const key = String(item.frame);
+        if (!frames.has(key)) frames.set(key, new Set());
+        const position = item.wallId
+          ? `${item.wallId}:${plannerRound(item.t || 0)}:${plannerRound(item.z || 0)}`
+          : `${item.plane || "surface"}:${plannerRound(item.x || 0)}:${plannerRound(item.y || 0)}`;
+        frames.get(key).add(position);
+      });
+      frames.forEach((positions, name) => {
+        const id = `frame:${name}`;
+        if (linked.has(id) || node.countPorts?.includes(id)) {
+          ports.push({ id, name: `Рамки · ${name}`, value: positions.size, dataType: "number" });
+        }
+      });
+    }
+    return ports;
+  }
+
+  function evaluatePlanTool(node, source, overrides = {}) {
+    const blueprint = source?.schema === "finmaster.blueprint.v1" ? JSON.parse(JSON.stringify(source)) : null;
+    const opening = node.type === "openings";
+    const items = (opening ? (node.openings || []) : (node.devices || [])).map((item) => ({ ...item }));
+
+    items.forEach((item) => {
+      if (opening) {
+        if (Number.isFinite(overrides.width)) item.width = overrides.width;
+        if (Number.isFinite(overrides.height)) item.height = overrides.height;
+        if (Number.isFinite(overrides.diameter)) item.diameter = overrides.diameter;
+        const wall = (source?.walls || []).find((candidate) => candidate.id === item.wallId);
+        if (wall && item.shape === "rect") {
+          const left = (item.t || 0.5) * wall.length - (item.width || 0.9) / 2;
+          const right = left + (item.width || 0.9);
+          if (left <= 0.001 || right >= wall.length - 0.001) item.kind = "Дверь";
+        }
+      } else if (Number.isFinite(overrides.height)) {
+        item.z = overrides.height;
+      }
+    });
+
+    if (blueprint) {
+      blueprint.annotations ||= { openings: [], sockets: [], lights: [] };
+      blueprint.annotations.openings ||= [];
+      blueprint.annotations.sockets ||= [];
+      blueprint.annotations.lights ||= [];
+      items.forEach((item) => {
+        const copy = { ...item };
+        if (opening) blueprint.annotations.openings.push(copy);
+        else if (copy.category === "light") blueprint.annotations.lights.push(copy);
+        else blueprint.annotations.sockets.push(copy);
+      });
+      blueprint.walls = (blueprint.walls || []).map((wall) => ({
+        ...wall,
+        openings: blueprint.annotations.openings.filter((item) => item.wallId === wall.id),
+        electrical: blueprint.annotations.sockets.filter((item) => item.wallId === wall.id),
+      }));
+    }
+
+    const counts = new Map();
+    items.forEach((item) => {
+      const kind = String(item.kind || item.type || "other");
+      counts.set(kind, (counts.get(kind) || 0) + 1);
+    });
+    const outputs = [...counts].map(([kind, value]) => ({ id: `count:${kind}`, value }));
+
+    if (!opening) {
+      const frames = new Map();
+      items.filter((item) => item.frame).forEach((item) => {
+        const name = String(item.frame);
+        if (!frames.has(name)) frames.set(name, new Set());
+        const position = item.wallId
+          ? `${item.wallId}:${plannerRound(item.t || 0)}:${plannerRound(item.z || 0)}`
+          : `${item.plane || "surface"}:${plannerRound(item.x || 0)}:${plannerRound(item.y || 0)}`;
+        frames.get(name).add(position);
+      });
+      frames.forEach((positions, name) => outputs.push({ id: `frame:${name}`, value: positions.size }));
+    }
+
+    return { blueprint, counts: outputs };
+  }
 
   function plannerOutputs(node, links) {
     const model = plannerModel(node);
     const linked = linkedFromPorts(node.id, links || []);
-    const ports = [{ id: "blueprint", name: "Чертёж", blueprint: true }];
-    (node.groups || []).forEach((group) => ports.push({ id: `group:${group.id}`, name: group.name, blueprint: true, group }));
+    const ports = [{ id: "blueprint", name: "Чертёж", blueprint: true, dataType: "drawing" }];
+    (node.groups || []).forEach((group) => ports.push({ id: `group:${group.id}`, name: group.name, blueprint: true, dataType: "drawing", group }));
     model.rows.concat(model.sums).forEach((row) => {
-      if (row.on || linked.has(row.id)) ports.push({ id: row.id, name: row.name, value: row.value ?? row.area, unit: row.unit || "м²" });
+      if (row.on || linked.has(row.id)) ports.push({ id: row.id, name: row.name, value: row.value ?? row.area, unit: row.unit || "м²", dataType: "number" });
     });
-    if (node.heightOut || linked.has("height")) ports.push({ id: "height", name: "Высота стен", value: model.height, unit: "м" });
+    if (node.heightOut || linked.has("height")) ports.push({ id: "height", name: "Высота стен", value: model.height, unit: "м", dataType: "number" });
     return ports;
   }
 
@@ -2518,7 +2616,7 @@
   function plannerNode() {
     const id = session.planner?.id;
     if (!id) return null;
-    const node = (activeBlueprint()?.nodes || []).find((item) => item.id === id && item.type === "planner") || null;
+    const node = (activeBlueprint()?.nodes || []).find((item) => item.id === id && ["planner", "openings", "electrics"].includes(item.type)) || null;
     if (!node) {
       session.planner = null;
       $("planner-modal")?.classList.remove("open");
@@ -3522,7 +3620,7 @@
 
   function openPlanner(nodeId) {
     const bp = activeBlueprint();
-    const node = bp?.nodes.find((item) => item.id === nodeId && item.type === "planner");
+    const node = bp?.nodes.find((item) => item.id === nodeId && ["planner", "openings", "electrics"].includes(item.type));
     if (!node) return;
     ensurePlannerModal();
     ensurePlanner(node);
