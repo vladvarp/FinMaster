@@ -607,6 +607,7 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         node["name"]=_clip_text(raw.get("name"),48,"Проёмы" if kind=="openings" else "Электрика")
         node["color"]=str(raw.get("color") or ("#0ea5e9" if kind=="openings" else "#f59e0b"))[:7]
         node["countPorts"]=[_clip_text(x,80) for x in (raw.get("countPorts") if isinstance(raw.get("countPorts"),list) else [])[:40]]
+        node["parameters"]=[{"id":_clip_text(x.get("id"),32),"name":_clip_text(x.get("name"),48)} for x in (raw.get("parameters") if isinstance(raw.get("parameters"),list) else [])[:12] if isinstance(x,dict) and _clip_text(x.get("id"),32)]
         if kind=="openings":
             clean=[]
             for x in (raw.get("openings") if isinstance(raw.get("openings"),list) else [])[:500]:
