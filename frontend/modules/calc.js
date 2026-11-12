@@ -2581,7 +2581,7 @@
       plannerHideNudge();
       return;
     }
-    const view = plannerView(plan, viewPoints, session.planner.viewLock);
+    const view = plannerView(plan, node.points, session.planner.viewLock);
     const spot = view.to(world);
     el.hidden = false;
     el.style.left = `${spot.x}px`;
@@ -2843,7 +2843,7 @@
     const fitted = plannerFitCanvas(plan);
     if (fitted) {
       const { ctx, w, h } = fitted;
-      const view = plannerView(plan, node.points, session.planner.viewLock);
+      const view = plannerView(plan, viewPoints, session.planner.viewLock);
       ctx.clearRect(0, 0, w, h);
       ctx.fillStyle = colors.bg;
       ctx.fillRect(0, 0, w, h);
@@ -2893,7 +2893,7 @@
         ctx.lineWidth = 1.5;
         ctx.stroke();
       });
-      const center = plannerCentroid(floorPoints);
+      const center = plannerCentroid(hasFloor ? floorPoints : viewPoints);
       const mid = view.to(center);
       visibleWalls.forEach((wall) => {
         const a = view.to(wall.a);
@@ -2934,7 +2934,7 @@
       ctx.font = "700 14px Segoe UI, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      if (hasFloor) ctx.fillText(`${fmtShort(model.floor)} м²`, mid.x, mid.y);
+      if (hasFloor) ctx.fillText(`${fmtShort(plannerArea(floorPoints))} м²`, mid.x, mid.y);
     }
     const strip = plannerFitCanvas(unfold);
     session.planner.hits = [];
@@ -3841,7 +3841,8 @@
     const canvas = $("planner-plan");
     const rect = canvas?.getBoundingClientRect();
     if (!canvas || !rect) return true;
-    const view = plannerView(canvas, node.points);
+    const geometry = plannerEditorGeometry(node, plannerInputBlueprint(node) || plannerOutputBlueprint(node));
+    const view = plannerView(canvas, geometry.points);
     const world = view.from(event.clientX - rect.left, event.clientY - rect.top);
     plannerAddToolItem(node, { x: world.x, y: world.y });
     return true;
@@ -3867,10 +3868,11 @@
       api?.toast?.("Щёлкните правой кнопкой по выбранной стене на развёртке.");
       return true;
     }
-    const wall = plannerWalls(node).find((item) => item.id === surface.id);
+    const geometry = plannerEditorGeometry(node, plannerInputBlueprint(node) || plannerOutputBlueprint(node));
+    const wall = geometry.walls.find((item) => item.id === surface.id);
     if (!wall) return true;
     const t = plannerClamp((x - hit.x) / Math.max(1, hit.w), 0, 1);
-    const z = plannerClamp(((hit.y + hit.h - y) / Math.max(1, hit.h)) * node.height, 0, node.height);
+    const z = plannerClamp(((hit.y + hit.h - y) / Math.max(1, hit.h)) * geometry.height, 0, geometry.height);
     plannerAddToolItem(node, { t, z });
     return true;
   }
