@@ -4957,7 +4957,7 @@
       if (!Array.isArray(node.outs) || !node.outs.length) node.outs = [{id:"floor",kind:"floor",name:"Пол",on:true}, ...node.points.map((p)=>({id:`w:${p.id}`,kind:"wall",name:"",on:false})), {id:uid(),kind:"sum",name:"Стены",on:true,parts:node.points.map((p)=>`w:${p.id}`)}];
       if (!Number.isFinite(Number(node.height))) node.height = 2.7;
       node.name = String(node.plannerName || "Планировщик");
-      node.color = node.plannerColor || GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
+      node.color = node.plannerColor || "#65a30d";
     } else {
       if (node.type === "planner") { node.plannerName = plannerName(node); node.plannerColor = node.color; }
       if (nextType === "openings") {
