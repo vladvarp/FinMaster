@@ -1616,7 +1616,7 @@
     if (node.type === "openings" || node.type === "electrics") return { w: 270, h: 260 };
     if (node.type === "planner") {
       const n = Array.isArray(node.outs) ? node.outs.filter((item) => item && item.on).length : 2;
-      return { w: 300, h: 380 + Math.max(1, n) * 28 };
+      return { w: 350, h: 380 + Math.max(1, n) * 28 };
     }
     if (node.type === "present") return { w: 220, h: 160 };
     if (node.type === "group") return { w: Math.max(160, node.w || 320), h: Math.max(120, node.h || 220) };
