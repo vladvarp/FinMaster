@@ -3373,8 +3373,50 @@
     modal.addEventListener("click", (e) => {
       if (e.target === modal) closePlanner();
     });
+    $("planner-filmstrip")?.addEventListener("click", (e) => {
+      const button = e.target.closest("[data-planner-surface-kind]");
+      const node = plannerNode();
+      if (!button || !node || !session.planner) return;
+      session.planner.surface = {
+        kind: button.dataset.plannerSurfaceKind,
+        id: button.dataset.plannerSurfaceId,
+      };
+      session.planner.sel = session.planner.surface.kind === "wall"
+        ? { kind: "wall", id: session.planner.surface.id }
+        : null;
+      plannerRenderFilmstrip(node);
+      plannerDraw();
+    });
     const plannerSide = $("planner-side");
     plannerSide?.addEventListener("click", (e) => {
+      const node = plannerNode();
+      if (!node) return;
+      if (e.target.closest("[data-plan-tool-add]")) {
+        plannerAddToolItem(node);
+        return;
+      }
+      const removeToolItem = e.target.closest("[data-plan-tool-remove]");
+      if (removeToolItem && ["openings", "electrics"].includes(node.type)) {
+        const items = node.type === "openings" ? (node.openings || []) : (node.devices || []);
+        items.splice(Number(removeToolItem.dataset.planToolRemove), 1);
+        if (node.type === "openings") node.openings = items;
+        else node.devices = items;
+        node.countPorts = [...new Set(items.flatMap((item) => [
+          `count:${item.kind}`,
+          ...(item.frame ? [`frame:${item.frame}`] : []),
+        ]))];
+        plannerCommit(true);
+        return;
+      }
+      if (e.target.closest("[data-plan-tool-add-custom]")) {
+        const name = String(plannerSide.querySelector('[data-plan-tool-field="customType"]')?.value || "").trim().slice(0, 48);
+        const category = plannerSide.querySelector('[data-plan-tool-field="customCategory"]')?.value;
+        if (!name) return;
+        const key = category === "light" ? "customLights" : "customTypes";
+        node[key] = [...new Set([...(node[key] || []), name])];
+        plannerCommit(true);
+        return;
+      }
       const add = e.target.closest("[data-planner-add-group]");
       const remove = e.target.closest("[data-planner-del-group]");
       const node = plannerNode();
@@ -3740,7 +3782,17 @@
       const y = e.clientY - rect.top;
       const hit = (session.planner.hits || []).find((item) => x >= item.x && x <= item.x + item.w && y >= item.y && y <= item.y + item.h);
       if (!hit) return;
+      if (node.type !== "planner") {
+        session.planner.surface = { kind: "wall", id: hit.id };
+        plannerRenderFilmstrip(node);
+      }
       plannerSelect({ kind: "wall", id: hit.id }, true);
+    });
+    unfold?.addEventListener("contextmenu", (e) => {
+      const node = plannerNode();
+      if (!node || node.type === "planner") return;
+      e.preventDefault();
+      plannerPlaceFromUnfold(e);
     });
   }
 
