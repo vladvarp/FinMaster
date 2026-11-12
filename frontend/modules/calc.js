@@ -5379,9 +5379,14 @@
     const ports = toolMode ? planToolOutputs(node, bp.links) : plannerOutputs(node, bp.links);
     const inputs = toolMode ? nodeInputs(node, bp.links) : [];
     const items = node.type === "openings" ? (node.openings || []) : (node.devices || []);
-    const totalArea = model.floor;
+    const blueprint = toolMode
+      ? (graph.values[`${node.id}:blueprint`] || plannerInputBlueprint(node, graph) || plannerBlueprint(node))
+      : null;
+    const geometry = plannerEditorGeometry(node, blueprint);
+    const totalArea = geometry.hasFloor ? plannerArea(geometry.floorPoints || geometry.points) : null;
+    const previewPoints = geometry.hasFloor ? (geometry.floorPoints || geometry.points) : [];
     const sub = toolMode
-      ? `Элементов: ${items.length} · вход: чертёж`
+      ? `Элементов: ${items.length} · ${geometry.walls.length} стен во входном чертеже`
       : `пол ${fmtShort(model.floor)} м² · ${model.walls.length} стен · h ${fmtShort(model.height)} м`;
     const inputHtml = inputs.map((port) => `<div class="calc-row in">
       <i class="calc-port in" data-port="${esc(port.id)}" data-port-type="${esc(portDataType(port))}" data-io="in" title="${esc(port.name)}"></i>
@@ -5416,10 +5421,10 @@
       </header>
       <div class="calc-node-sub">${esc(sub)}</div>
       <div class="calc-planner-preview">
-        ${plannerThumb(node.points)}
+        ${previewPoints.length >= 3 ? plannerThumb(previewPoints) : ""}
         <div class="calc-planner-preview-info">
           <div class="calc-planner-preview-title">${esc(plannerName(node))}</div>
-          <div class="calc-planner-preview-area">${esc(fmtShort(totalArea))} м²</div>
+          <div class="calc-planner-preview-area">${totalArea == null ? "Чертёж" : `${esc(fmtShort(totalArea))} м²`}</div>
         </div>
       </div>
       <div class="calc-ports">
