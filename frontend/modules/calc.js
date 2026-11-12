@@ -4887,7 +4887,7 @@
       if(activePlane==="floor"||activePlane==="ceiling"){
         if(opening)return;
         const pts=plan?.[activePlane]?.points||plan?.floor?.points||[];
-        if(pts.length){const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys),scale=Math.min((w-100)/Math.max(.1,maxX-minX),(h-100)/Math.max(.1,maxY-minY));ctx.beginPath();pts.forEach((p,i)=>{const x=50+(p.x-minX)*scale,y=50+(p.y-minY)*scale;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.fillStyle="#d1fae5";ctx.fill();ctx.strokeStyle="#0f766e";ctx.lineWidth=5;ctx.stroke();}
+        if(pts.length){const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys),scale=Math.min((w-100)/Math.max(.1,maxX-minX),(h-100)/Math.max(.1,maxY-minY));ctx.beginPath();pts.forEach((p,i)=>{const x=50+(p.x-minX)*scale,y=50+(p.y-minY)*scale;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.fillStyle="#d1fae5";ctx.fill();ctx.strokeStyle="#0f766e";ctx.lineWidth=5;ctx.stroke();items.filter(d=>d.plane===activePlane&&Number.isFinite(d.x)&&Number.isFinite(d.y)).forEach(d=>{const x=50+(d.x-minX)*scale,y=50+(d.y-minY)*scale;ctx.beginPath();ctx.arc(x,y,10,0,Math.PI*2);ctx.fillStyle="#2563eb";ctx.fill();ctx.strokeStyle="#fff";ctx.lineWidth=2;ctx.stroke();});}
       }else if(wall){
         const pad=55,scale=(w-pad*2)/Math.max(.1,wall.length),height=plan?.height||2.7,yscale=(h-pad*2)/Math.max(.1,height);
         ctx.fillStyle="#e2e8f0";ctx.fillRect(pad,pad,w-pad*2,h-pad*2);ctx.strokeStyle="#475569";ctx.lineWidth=3;ctx.strokeRect(pad,pad,w-pad*2,h-pad*2);
