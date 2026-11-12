@@ -4862,7 +4862,7 @@
           <label>Ширина, м<input data-f="width" type="number" value="0.9" min="0.01" step="0.01"></label>
           <label>Высота, м<input data-f="height" type="number" value="2.1" min="0.01" step="0.01"></label>
           <label>Диаметр трубы, мм<select data-f="diameter"><option>50</option><option>100</option><option selected>110</option><option>125</option><option>150</option><option>200</option><option>250</option></select></label>`:
-          `<label>Тип<select data-f="kind"><option>Розетка</option><option>Выключатель</option><option>Двойной выключатель</option><option>Проходной выключатель</option><option>Интернет</option><option>ТВ</option><option>Световая точка</option>${customOptions}</select></label>
+          `<label>Тип<select data-f="kind"><option>Розетка</option><option>Выключатель</option><option>Двойной выключатель</option><option>Проходной выключатель</option><option>Интернет</option><option>ТВ</option><option>Световая точка</option><option>Люстра</option><option>Спот</option>${customOptions}</select></label>
           <label>Рамка / группа<input data-f="frame" placeholder="Например, 3 поста"></label>
           <label>Ориентация<select data-f="orientation"><option value="horizontal">Горизонтальная</option><option value="vertical">Вертикальная</option></select></label>
           <label>Новый пользовательский тип<input data-custom-type placeholder="Название типа"></label>
@@ -4886,6 +4886,7 @@
       const wall=walls.find(x=>x.id===activeWallId);
       if(activePlane==="floor"||activePlane==="ceiling"){
         if(opening)return;
+        const selectedKind=v("kind")||"Световая точка";if(!(node.customLights||[]).includes(selectedKind)&&!["Световая точка","Люстра","Спот"].includes(selectedKind))return;
         const pts=plan?.[activePlane]?.points||plan?.floor?.points||[];
         if(pts.length){const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys),scale=Math.min((w-100)/Math.max(.1,maxX-minX),(h-100)/Math.max(.1,maxY-minY));ctx.beginPath();pts.forEach((p,i)=>{const x=50+(p.x-minX)*scale,y=50+(p.y-minY)*scale;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.fillStyle="#d1fae5";ctx.fill();ctx.strokeStyle="#0f766e";ctx.lineWidth=5;ctx.stroke();const surfaceDevices=items.filter(d=>d.plane===activePlane&&Number.isFinite(d.x)&&Number.isFinite(d.y)),surfaceGroups=new Map();surfaceDevices.forEach(d=>{const key=d.frame?`frame:${d.frame}:${d.wallId}:${plannerRound(d.t||0)}:${plannerRound(d.z||0)}`:`single:${d.id}`;if(!surfaceGroups.has(key))surfaceGroups.set(key,[]);surfaceGroups.get(key).push(d);});surfaceGroups.forEach(group=>{const first=group[0],cx=50+(first.x-minX)*scale,cy=50+(first.y-minY)*scale,vertical=first.orientation==="vertical",unit=20,gap=3,fw=vertical?unit:group.length*unit+(group.length-1)*gap,fh=vertical?group.length*unit+(group.length-1)*gap:unit;ctx.fillStyle="#fff";ctx.strokeStyle="#2563eb";ctx.lineWidth=2;ctx.fillRect(cx-fw/2,cy-fh/2,fw,fh);ctx.strokeRect(cx-fw/2,cy-fh/2,fw,fh);group.forEach((d,i)=>{const dx=vertical?cx:cx-fw/2+unit/2+i*(unit+gap),dy=vertical?cy-fh/2+unit/2+i*(unit+gap):cy;ctx.beginPath();ctx.arc(dx,dy,4,0,Math.PI*2);ctx.fillStyle="#f59e0b";ctx.fill();});});}
       }else if(wall){
@@ -4908,12 +4909,12 @@
       if(activePlane==="floor"||activePlane==="ceiling"){
         const pts=plan?.[activePlane]?.points||plan?.floor?.points||[];if(!pts.length)return;
         const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y),scale=Math.min((preview.width-100)/Math.max(.1,Math.max(...xs)-Math.min(...xs)),(preview.height-100)/Math.max(.1,Math.max(...ys)-Math.min(...ys)));node.devices||=[];
-        node.devices.push({id:uid(),kind:v("kind")||"Световая точка",category:"light",plane:activePlane,x:Math.min(...xs)+(px-50)/scale,y:Math.min(...ys)+(py-50)/scale,z:0,frame:String(v("frame")||"").trim(),orientation:v("orientation")||"horizontal"});
+        node.devices.push({id:uid(),kind:selectedKind,category:"light",plane:activePlane,x:Math.min(...xs)+(px-50)/scale,y:Math.min(...ys)+(py-50)/scale,z:0,frame:String(v("frame")||"").trim(),orientation:v("orientation")||"horizontal"});
       }else{
         const wall=walls.find(x=>x.id===activeWallId);if(!wall)return;
         const item={id:uid(),kind:v("kind"),wallId:wall.id,t:plannerClamp(rx,0,1),z:Math.max(0,(1-ry)*(plan?.height||2.7))};
         if(opening){item.shape=v("shape");item.width=Math.max(.01,plannerNum(v("width"),.9));item.height=Math.max(.01,plannerNum(v("height"),2.1));item.diameter=Math.max(1,plannerNum(v("diameter"),110));node.openings.push(item);}
-        else{item.category=(node.customLights||[]).includes(item.kind)||item.kind==="Световая точка"?"light":"socket";item.frame=String(v("frame")||"").trim();item.orientation=v("orientation")||"horizontal";node.devices.push(item);}
+        else{item.category=(node.customLights||[]).includes(item.kind)||["Световая точка","Люстра","Спот"].includes(item.kind)?"light":"socket";item.frame=String(v("frame")||"").trim();item.orientation=v("orientation")||"horizontal";node.devices.push(item);}
       }
       const target=opening?node.openings:node.devices;node.countPorts=[...new Set(target.flatMap(x=>["count:"+x.kind,...(x.frame?["frame:"+x.frame]:[])]))];dirty();close();render();openPlanToolEditor(nodeId);
     });
