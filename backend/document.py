@@ -618,7 +618,7 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
             clean=[]
             for x in (raw.get("devices") if isinstance(raw.get("devices"),list) else [])[:1000]:
                 if not isinstance(x,dict): continue
-                clean.append({"id":_clip_text(x.get("id"),40),"kind":_clip_text(x.get("kind"),48,"Розетка"),"category":x.get("category") if x.get("category") in ("socket","light") else "socket","wallId":_clip_text(x.get("wallId"),48),"t":round(_float_in_range(x.get("t"),.5,0,1),4),"z":round(_float_in_range(x.get("z"),.3,0,30),4),"frame":_clip_text(x.get("frame"),48),"orientation":x.get("orientation") if x.get("orientation") in ("horizontal","vertical") else "horizontal"})
+                clean.append({"id":_clip_text(x.get("id"),40),"kind":_clip_text(x.get("kind"),48,"Розетка"),"category":x.get("category") if x.get("category") in ("socket","light") else "socket","wallId":_clip_text(x.get("wallId"),48),"t":round(_float_in_range(x.get("t"),.5,0,1),4),"z":round(_float_in_range(x.get("z"),.3,0,30),4),"frame":_clip_text(x.get("frame"),48),"orientation":x.get("orientation") if x.get("orientation") in ("horizontal","vertical") else "horizontal","plane":x.get("plane") if x.get("plane") in ("wall","floor","ceiling") else "wall","x":round(_float_in_range(x.get("x"),0,-10000,10000),4),"y":round(_float_in_range(x.get("y"),0,-10000,10000),4)})
             node["devices"]=clean
             node["customTypes"]=[_clip_text(x,48) for x in (raw.get("customTypes") if isinstance(raw.get("customTypes"),list) else [])[:100]]
             node["customLights"]=[_clip_text(x,48) for x in (raw.get("customLights") if isinstance(raw.get("customLights"),list) else [])[:100]]
