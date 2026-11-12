@@ -3029,7 +3029,7 @@
         <div class="planner-block-h">Группы чертежей <button type="button" class="btn small" data-planner-add-group ${node.groups.length >= 24 ? "disabled" : ""}>+ Группа</button></div>
         <p class="planner-lead">Каждая группа создаёт отдельный выход чертежа. Отметьте, какие поверхности в неё входят.</p>
         ${(node.groups || []).map((group) => {
-          const choices = [{id:"floor",name:"Пол"},{id:"ceiling",name:"Потолок"},...model.walls.map((wall)=>({id:wall.id,name:wall.name}))];
+          const choices = [{id:"floor",name:"Пол"},{id:"ceiling",name:"Потолок"},...model.walls.map((wall,index)=>({id:wall.id,name:plannerWallName((node.outs||[]).find((item)=>item.id===wall.id),index)}))];
           return `<div class="planner-blueprint-group" data-planner-group="${esc(group.id)}"><div class="planner-blueprint-group-head"><input class="planner-name" data-planner-group-name="${esc(group.id)}" value="${esc(group.name)}" maxlength="48" aria-label="Название группы чертежа" /><button type="button" class="calc-x" data-planner-del-group="${esc(group.id)}" title="Удалить группу">×</button></div><div class="planner-blueprint-parts">${choices.map((choice)=>`<label><input type="checkbox" data-planner-group-part="${esc(group.id)}" data-part="${esc(choice.id)}" ${group.parts.includes(choice.id)?"checked":""} /><span>${esc(choice.name)}</span></label>`).join("")}</div></div>`;
         }).join("") || `<div class="calc-empty">Группы ещё не созданы</div>`}
       </div>`;
@@ -3153,6 +3153,7 @@
       dirty();
     });
     plannerSide?.addEventListener("change", (e) => {
+      if (e.target.dataset.plannerGroupName) { plannerCommit(true); return; }
       if (!e.target.dataset.plannerGroupPart) return;
       const node = plannerNode();
       const group = node?.groups.find((item) => item.id === e.target.dataset.plannerGroupPart);
