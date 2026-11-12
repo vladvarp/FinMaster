@@ -3883,6 +3883,18 @@
         }
       }
     });
+
+    const beforeTyped = (bp.links || []).length;
+    bp.links = (bp.links || []).filter((link) => {
+      const src = (bp.nodes || []).find((node) => node.id === link.from);
+      const dst = (bp.nodes || []).find((node) => node.id === link.to);
+      if (!src || !dst) return false;
+      const output = nodeOutputs(src, src.type === "order" ? api.findOrder(src.orderId) : null, bp.links)
+        .find((port) => port.id === link.fromPort);
+      const input = nodeInputs(dst, bp.links).find((port) => port.id === link.toPort);
+      return !!output && !!input && portDataType(output) === portDataType(input);
+    });
+    if (bp.links.length !== beforeTyped) changed = true;
     return changed;
   }
 
@@ -3892,11 +3904,17 @@
     const src = bp.nodes.find((node) => node.id === from);
     const dst = bp.nodes.find((node) => node.id === to);
     if (!src || !dst) return false;
-    const srcIds = nodeOutputs(src, api.findOrder(src.orderId), bp.links).map((port) => port.id);
-    const fromHit = matchPortId(fromPort, srcIds);
+    const sourcePorts = nodeOutputs(src, src.type === "order" ? api.findOrder(src.orderId) : null, bp.links);
+    const fromHit = matchPortId(fromPort, sourcePorts.map((port) => port.id));
     if (!fromHit) return false;
     const port = resolveToPort(dst, toPort, bp.links);
     if (!port) return false;
+    const sourceMeta = sourcePorts.find((item) => item.id === fromHit);
+    const targetMeta = nodeInputs(dst, bp.links).find((item) => item.id === port);
+    if (!sourceMeta || !targetMeta || portDataType(sourceMeta) !== portDataType(targetMeta)) {
+      api?.toast?.("Несовместимые порты: чертёж подключается только к входу «Чертёж», числа — к числовым входам.");
+      return false;
+    }
     if (dst.type === "present" && dst.blockId) {
       const owner = presentOwner(dst.blockId, port, bp.id);
       if (owner) {
