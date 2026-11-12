@@ -7542,53 +7542,6 @@
         return false;
       }
     },
-    reportData() {
-      try {
-        const bp = activeBlueprint();
-        if (!bp) return [];
-        const graph = computeGraph(bp);
-        const nodes = bp.nodes || [];
-        const links = bp.links || [];
-        return nodes.filter((node) => node.type === "planner").map((planner) => {
-          const result = plannerBlueprint(planner);
-          const reachable = new Set();
-          const queue = [planner.id];
-          while (queue.length) {
-            const sourceId = queue.shift();
-            links.forEach((link) => {
-              if (link.from !== sourceId || (link.fromPort !== "blueprint" && !String(link.fromPort || "").startsWith("group:")) || link.toPort !== "blueprint") return;
-              const target = nodes.find((item) => item.id === link.to);
-              if (!target || (target.type !== "openings" && target.type !== "electrics") || reachable.has(target.id)) return;
-              reachable.add(target.id);
-              queue.push(target.id);
-            });
-          }
-          const merged = { openings: new Map(), sockets: new Map(), lights: new Map() };
-          reachable.forEach((nodeId) => {
-            const value = graph.values[nodeId + ":blueprint"];
-            if (value?.schema !== "finmaster.blueprint.v1" || value.source !== planner.id) return;
-            const annotations = value.annotations || {};
-            ["openings", "sockets", "lights"].forEach((key) => {
-              (annotations[key] || []).forEach((item, index) => {
-                const identity = String(item.id || JSON.stringify(item) || index);
-                merged[key].set(identity, { ...item });
-              });
-            });
-          });
-          return {
-            name: result.name || plannerName(planner),
-            height: result.height || 0,
-            walls: (result.walls || []).map((wall) => ({ id: wall.id, name: wall.name || wall.id, length: wall.length || 0 })),
-            openings: [...merged.openings.values()],
-            sockets: [...merged.sockets.values()],
-            lights: [...merged.lights.values()],
-          };
-        });
-      } catch (err) {
-        console.warn("calc reportData", err);
-        return [];
-      }
-    },
     pruneOrderLinks(orderId, lineId) {
       return pruneOrderCalcLinks(orderId, lineId);
     },
