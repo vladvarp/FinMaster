@@ -2764,13 +2764,29 @@
       walls.forEach((wall, index) => {
         const rw = Math.max(1, wall.len * scale);
         const on = selWall && selWall.id === wall.id;
-        ctx.fillStyle = on ? "rgba(101, 163, 13, 0.28)" : "rgba(101, 163, 13, 0.12)";
+        const renderedWall = (renderedPlan?.walls || []).find((item) => item.id === wall.id);
+        const solidCells = Array.isArray(renderedWall?.solidCells) ? renderedWall.solidCells : null;
+        ctx.save();
+        ctx.fillStyle = on ? "rgba(101, 163, 13, 0.32)" : "rgba(101, 163, 13, 0.16)";
         ctx.strokeStyle = on ? "#65a30d" : "#4d7c0f";
         ctx.lineWidth = on ? 2.5 : 1.25;
-        ctx.beginPath();
-        plannerRoundPath(ctx, x, top, rw, rh, 4);
-        ctx.fill();
-        ctx.stroke();
+        if (solidCells) {
+          // Рисуем только сохранившиеся участки стены: области проёмов остаются прозрачными.
+          solidCells.forEach((cell) => {
+            const cellX = x + Number(cell.x || 0) * scale;
+            const cellY = top + rh - (Number(cell.z || 0) + Number(cell.height || 0)) * scale;
+            const cellW = Math.max(0, Number(cell.width || 0) * scale);
+            const cellH = Math.max(0, Number(cell.height || 0) * scale);
+            if (cellW > 0 && cellH > 0) ctx.fillRect(cellX, cellY, cellW, cellH);
+          });
+          // Контур стены оставляем цельным, чтобы сохранялась читаемость развёртки.
+          ctx.strokeRect(x, top, rw, rh);
+        } else {
+          ctx.beginPath();
+          plannerRoundPath(ctx, x, top, rw, rh, 4);
+          ctx.fill();
+          ctx.stroke();
+        }
         const wallOpenings = (renderedPlan?.annotations?.openings || []).filter((item) => item.wallId === wall.id);
         wallOpenings.forEach((item) => {
           const diameter = Math.max(0.01, (Number(item.diameter) || 110) / 1000);
@@ -2779,20 +2795,18 @@
           const ox = x + plannerClamp(Number(item.t) || 0.5, 0, 1) * wall.len * scale - openingWidth * scale / 2;
           const oy = top + rh - (Math.max(0, Number(item.z) || 0) + openingHeight) * scale;
           ctx.save();
-          ctx.fillStyle = colors.card;
           ctx.strokeStyle = item.kind === "Дверь" ? "#b45309" : "#dc2626";
           ctx.lineWidth = 1.5;
           if (item.shape === "circle") {
             ctx.beginPath();
             ctx.ellipse(ox + openingWidth * scale / 2, oy + openingHeight * scale / 2, openingWidth * scale / 2, openingHeight * scale / 2, 0, 0, Math.PI * 2);
-            ctx.fill();
             ctx.stroke();
           } else {
-            ctx.fillRect(ox, oy, openingWidth * scale, openingHeight * scale);
             ctx.strokeRect(ox, oy, openingWidth * scale, openingHeight * scale);
           }
           ctx.restore();
         });
+        ctx.restore();
         (renderedPlan?.annotations?.sockets || []).filter((item) => item.wallId === wall.id).forEach((item) => {
           const px = x + plannerClamp(Number(item.t) || 0.5, 0, 1) * wall.len * scale;
           const py = top + rh - Math.max(0, Number(item.z) || 0) * scale;
