@@ -632,9 +632,9 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
     elif kind in ("openings", "electrics"):
         # Preserve planner geometry when the same node is switched between modes.
         node["plannerName"] = _clip_text(raw.get("plannerName"), 48, "Планировщик")
-        planner_color = str(raw.get("plannerColor") or "#65a30e").strip().lower()
+        planner_color = str(raw.get("plannerColor") or "#65a30d").strip().lower()
         if not (len(planner_color) == 7 and planner_color.startswith("#") and all(ch in "0123456789abcdef" for ch in planner_color[1:])):
-            planner_color = "#65a30e"
+            planner_color = "#65a30d"
         node["plannerColor"] = planner_color
         node["height"] = round(_float_in_range(raw.get("height"), 2.7, 0.1, 100.0), 4)
         node["heightOut"] = bool(raw.get("heightOut"))
