@@ -2628,7 +2628,8 @@
   function plannerSelWall(node) {
     const sel = session.planner?.sel;
     if (!node || !sel) return null;
-    const walls = plannerWalls(node);
+    const geometry = plannerEditorGeometry(node, node.type === "planner" ? null : plannerOutputBlueprint(node));
+    const walls = geometry.walls;
     if (sel.kind === "wall") return walls.find((wall) => wall.id === sel.id) || null;
     if (sel.kind === "point") return walls.find((wall) => wall.id === `w:${sel.id}`) || null;
     return null;
@@ -2754,6 +2755,44 @@
       }
     });
     return { pointId: "", wallId, world: view.from(x, y) };
+  }
+
+  function plannerEditorGeometry(node, blueprint) {
+    if (!node || node.type === "planner" || !blueprint) {
+      const model = plannerModel(node);
+      return {
+        points: node?.points || [],
+        floorPoints: node?.points || [],
+        walls: model.walls,
+        height: model.height,
+        hasFloor: true,
+      };
+    }
+    const walls = (blueprint.walls || []).map((wall) => {
+      const a = wall.a || { x: 0, y: 0 };
+      const b = wall.b || { x: 0, y: 0 };
+      return {
+        id: wall.id,
+        name: wall.name || wall.id,
+        a,
+        b,
+        len: Number(wall.length) || Math.hypot(Number(b.x) - Number(a.x), Number(b.y) - Number(a.y)),
+      };
+    });
+    const floorPoints = Array.isArray(blueprint.floor?.points) ? blueprint.floor.points : null;
+    const pointMap = new Map();
+    walls.forEach((wall) => [wall.a, wall.b].forEach((point) => {
+      const key = `${Number(point.x).toFixed(4)}:${Number(point.y).toFixed(4)}`;
+      if (!pointMap.has(key)) pointMap.set(key, { x: Number(point.x) || 0, y: Number(point.y) || 0 });
+    }));
+    const points = floorPoints?.length ? floorPoints : [...pointMap.values()];
+    return {
+      points: points.length ? points : (node.points || []),
+      floorPoints,
+      walls,
+      height: Number(blueprint.height) || node.height || 2.7,
+      hasFloor: !!blueprint.floor,
+    };
   }
 
   function plannerInputBlueprint(node, graph) {
@@ -3231,7 +3270,8 @@
       item.height = Math.max(0.01, plannerNum(read("height"), 2.1));
       item.diameter = Math.max(1, plannerNum(read("diameter"), 110));
       if (item.shape === "rect") {
-        const wall = plannerWalls(node).find((candidate) => candidate.id === item.wallId);
+        const geometry = plannerEditorGeometry(node, plannerInputBlueprint(node) || plannerOutputBlueprint(node));
+        const wall = geometry.walls.find((candidate) => candidate.id === item.wallId);
         if (wall && item.width >= wall.len - 0.001) item.kind = "Дверь";
       }
       node.openings ||= [];
