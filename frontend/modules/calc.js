@@ -7132,6 +7132,33 @@
         return false;
       }
     },
+    reportData() {
+      try {
+        const bp = activeBlueprint();
+        if (!bp) return [];
+        const graph = computeGraph(bp);
+        return (bp.nodes || []).filter((node) => node.type === "planner").map((planner) => {
+          let result = plannerBlueprint(planner);
+          (bp.nodes || []).forEach((candidate) => {
+            if (candidate.type !== "openings" && candidate.type !== "electrics") return;
+            const value = graph.values[\u0060${candidate.id}:blueprint\u0060];
+            if (value?.schema === "finmaster.blueprint.v1" && value.source === planner.id) result = value;
+          });
+          const annotations = result.annotations || {};
+          return {
+            name: result.name || plannerName(planner),
+            height: result.height || 0,
+            walls: (result.walls || []).map((wall) => ({ id: wall.id, name: wall.name || wall.id, length: wall.length || 0 })),
+            openings: (annotations.openings || []).map((item) => ({ ...item })),
+            sockets: (annotations.sockets || []).map((item) => ({ ...item })),
+            lights: (annotations.lights || []).map((item) => ({ ...item })),
+          };
+        });
+      } catch (err) {
+        console.warn("calc reportData", err);
+        return [];
+      }
+    },
     pruneOrderLinks(orderId, lineId) {
       return pruneOrderCalcLinks(orderId, lineId);
     },
