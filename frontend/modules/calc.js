@@ -6969,7 +6969,14 @@
       const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node) : null;
       if (!node) return;
       if (e.target.dataset.planNodeMode) {
-        if (!setPlanNodeMode(node, String(e.target.value || "planner"))) return;
+        const nextType = String(e.target.value || "planner");
+        if (!setPlanNodeMode(node, nextType)) return;
+        const allowedInputs = nextType === "planner" ? new Set() : new Set(["blueprint", ...(nextType === "openings" ? ["width", "height", "diameter"] : ["height"])]);
+        bp.links = (bp.links || []).filter((link) => {
+          if (link.from === node.id && link.fromPort !== "blueprint") return false;
+          if (link.to === node.id && !allowedInputs.has(link.toPort)) return false;
+          return true;
+        });
         dirty();
         render();
         return;
