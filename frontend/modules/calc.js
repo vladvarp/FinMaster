@@ -3187,6 +3187,89 @@
       </div>`;
   }
 
+  function plannerToolSurfaces(node) {
+    const blueprint = plannerInputBlueprint(node) || plannerBlueprint(node);
+    const surfaces = [];
+    if (blueprint?.floor) surfaces.push({ kind: "floor", id: "floor", name: "Пол" });
+    if (blueprint?.ceiling) surfaces.push({ kind: "ceiling", id: "ceiling", name: "Потолок" });
+    const sourceWalls = Array.isArray(blueprint?.walls) ? blueprint.walls : [];
+    sourceWalls.forEach((wall, index) => {
+      surfaces.push({ kind: "wall", id: wall.id, name: wall.name || `Стена ${index + 1}` });
+    });
+    return surfaces;
+  }
+
+  function plannerRenderFilmstrip(node) {
+    const host = $("planner-filmstrip");
+    if (!host || !session.planner) return;
+    const enabled = node.type === "openings" || node.type === "electrics";
+    host.hidden = !enabled;
+    if (!enabled) {
+      host.innerHTML = "";
+      return;
+    }
+    const surfaces = plannerToolSurfaces(node);
+    if (!surfaces.some((surface) => surface.kind === session.planner.surface?.kind && surface.id === session.planner.surface?.id)) {
+      session.planner.surface = surfaces[0] ? { kind: surfaces[0].kind, id: surfaces[0].id } : null;
+    }
+    host.innerHTML = surfaces.length
+      ? surfaces.map((surface) => `<button type="button" class="${surface.kind === session.planner.surface?.kind && surface.id === session.planner.surface?.id ? "is-active" : ""}" data-planner-surface-kind="${esc(surface.kind)}" data-planner-surface-id="${esc(surface.id)}">${esc(surface.name)}</button>`).join("")
+      : '<span class="planner-filmstrip-empty">Нет доступных поверхностей во входном чертеже</span>';
+  }
+
+  function plannerAddToolItem(node, placement = {}) {
+    if (!node || !["openings", "electrics"].includes(node.type)) return false;
+    const opening = node.type === "openings";
+    const surface = session.planner?.surface;
+    if (!surface || (opening && surface.kind !== "wall")) {
+      api?.toast?.("Проёмы размещаются на стенах. Выберите стену в нижней ленте.");
+      return false;
+    }
+    const read = (key) => document.querySelector(`#planner-side [data-plan-tool-field="${key}"]`)?.value;
+    const kind = String(read("kind") || (opening ? "Окно" : "Розетка"));
+    const item = {
+      id: uid(),
+      kind,
+      wallId: surface.kind === "wall" ? surface.id : "",
+      t: plannerClamp(plannerNum(placement.t, 0.5), 0, 1),
+      z: plannerClamp(plannerNum(placement.z, opening ? 0 : 0.3), 0, node.height || 2.7),
+    };
+    if (opening) {
+      item.shape = read("shape") === "circle" ? "circle" : "rect";
+      item.width = Math.max(0.01, plannerNum(read("width"), 0.9));
+      item.height = Math.max(0.01, plannerNum(read("height"), 2.1));
+      item.diameter = Math.max(1, plannerNum(read("diameter"), 110));
+      if (item.shape === "rect") {
+        const wall = plannerWalls(node).find((candidate) => candidate.id === item.wallId);
+        if (wall && item.width >= wall.len - 0.001) item.kind = "Дверь";
+      }
+      node.openings ||= [];
+      node.openings.push(item);
+    } else {
+      item.category = (node.customLights || []).includes(kind) || ["Световая точка", "Люстра", "Спот"].includes(kind)
+        ? "light"
+        : "socket";
+      item.frame = String(read("frame") || "").trim().slice(0, 48);
+      item.orientation = read("orientation") === "vertical" ? "vertical" : "horizontal";
+      item.plane = surface.kind;
+      if (surface.kind === "floor" || surface.kind === "ceiling") {
+        const center = plannerCentroid(node.points);
+        item.x = plannerNum(placement.x, center.x);
+        item.y = plannerNum(placement.y, center.y);
+        item.z = 0;
+      }
+      node.devices ||= [];
+      node.devices.push(item);
+    }
+    const items = opening ? node.openings : node.devices;
+    node.countPorts = [...new Set(items.flatMap((entry) => [
+      `count:${entry.kind}`,
+      ...(entry.frame ? [`frame:${entry.frame}`] : []),
+    ]))];
+    plannerCommit(true);
+    return true;
+  }
+
   function plannerFill() {
     const node = plannerNode();
     const side = $("planner-side");
@@ -3194,6 +3277,9 @@
     const scroll = side.scrollTop;
     side.innerHTML = plannerSideHtml(node);
     side.scrollTop = scroll;
+    const toolMode = node.type === "openings" || node.type === "electrics";
+    document.querySelector("#planner-modal .planner-modal")?.classList.toggle("is-plan-tool", toolMode);
+    plannerRenderFilmstrip(node);
     const rect = plannerRect(node.points);
     const boxW = rect ? rect.w : Math.max(...node.points.map((p) => p.x)) - Math.min(...node.points.map((p) => p.x));
     const boxD = rect ? rect.d : Math.max(...node.points.map((p) => p.y)) - Math.min(...node.points.map((p) => p.y));
@@ -3205,6 +3291,10 @@
     if (height && document.activeElement !== height) height.value = plannerInput(node.height);
     const title = $("planner-title");
     if (title && document.activeElement !== title) title.value = plannerName(node);
+    ["planner-height", "planner-width", "planner-depth", "planner-make-rect", "planner-add-corner", "planner-del-corner"].forEach((id) => {
+      const control = $(id);
+      if (control) control.disabled = toolMode;
+    });
     plannerDraw();
   }
 
@@ -3272,6 +3362,7 @@
           </div>
           <div class="planner-cap">Развертка стен</div>
           <canvas id="planner-unfold"></canvas>
+          <div class="planner-filmstrip" id="planner-filmstrip" hidden></div>
         </div>
         <div class="planner-side" id="planner-side"></div>
       </div>
