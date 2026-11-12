@@ -1521,7 +1521,7 @@
           setVal(nodeId, id, Number.isFinite(value) ? value : 0);
         });
       } else if (node.type === "planner") {
-        plannerOutputs(node, links).forEach((port) => setVal(nodeId, port.id, port.id === "blueprint" ? plannerBlueprint(node) : (port.value ?? port.area)));
+        plannerOutputs(node, links).forEach((port) => setVal(nodeId, port.id, port.blueprint ? (port.group ? plannerGroupBlueprint(node, port.group) : plannerBlueprint(node)) : (port.value ?? port.area)));
       } else if (node.type === "openings" || node.type === "electrics") {
         const input = (incoming[nodeId] || []).find((link) => link.toPort === "blueprint"); let blueprint = null;
         if (input) { walk(input.from); blueprint = values[`${input.from}:${input.fromPort}`]; }
@@ -1616,7 +1616,8 @@
     if (node.type === "openings" || node.type === "electrics") return { w: 270, h: 260 };
     if (node.type === "planner") {
       const n = Array.isArray(node.outs) ? node.outs.filter((item) => item && item.on).length : 2;
-      return { w: 350, h: 380 + Math.max(1, n) * 28 };
+      const groups = Array.isArray(node.groups) ? node.groups.length : 0;
+      return { w: 350, h: 380 + Math.max(1, n + groups) * 28 };
     }
     if (node.type === "present") return { w: 220, h: 160 };
     if (node.type === "group") return { w: Math.max(160, node.w || 320), h: Math.max(120, node.h || 220) };
@@ -2180,6 +2181,16 @@
       });
     });
     node.outs = outs;
+    const groupIds = new Set();
+    const allowedParts = new Set(["floor", "ceiling", ...wallIds]);
+    node.groups = (Array.isArray(node.groups) ? node.groups : []).slice(0, 24).map((group) => {
+      if (!group || typeof group !== "object") return null;
+      let id = String(group.id || "").trim();
+      if (!id || groupIds.has(id)) id = uid();
+      groupIds.add(id);
+      const parts = [...new Set((Array.isArray(group.parts) ? group.parts : []).map(String).filter((part) => allowedParts.has(part)))];
+      return { id, name: String(group.name || "").trim().slice(0, 48) || "Группа", parts };
+    }).filter(Boolean);
     return node;
   }
 
@@ -2230,6 +2241,20 @@
     ensurePlanner(node); const model=plannerModel(node);
     return {schema:"finmaster.blueprint.v1",source:node.id,name:plannerName(node),floor:{points:node.points.map(p=>({x:p.x,y:p.y}))},ceiling:{points:node.points.map(p=>({x:p.x,y:p.y}))},height:model.height,walls:model.walls.map((w,i)=>({id:w.id,name:plannerWallName((node.outs||[]).find(x=>x.id===w.id),i),a:{x:w.a.x,y:w.a.y},b:{x:w.b.x,y:w.b.y},length:w.len,openings:[],electrical:[]})),annotations:{openings:[],sockets:[],lights:[]}};
   }
+  function plannerGroupBlueprint(node, group) {
+    const blueprint = plannerBlueprint(node);
+    const parts = new Set(group?.parts || []);
+    const wallIds = new Set([...parts].filter((part) => String(part).startsWith("w:")));
+    blueprint.name = `${blueprint.name} · ${group?.name || "Группа"}`;
+    blueprint.group = { id: String(group?.id || ""), name: String(group?.name || "Группа") };
+    blueprint.floor = parts.has("floor") ? blueprint.floor : null;
+    blueprint.ceiling = parts.has("ceiling") ? blueprint.ceiling : null;
+    blueprint.walls = blueprint.walls.filter((wall) => wallIds.has(wall.id));
+    blueprint.annotations.openings = blueprint.annotations.openings.filter((item) => wallIds.has(item.wallId));
+    blueprint.annotations.sockets = blueprint.annotations.sockets.filter((item) => wallIds.has(item.wallId));
+    blueprint.annotations.lights = blueprint.annotations.lights.filter((item) => item.plane === "floor" ? parts.has("floor") : item.plane === "ceiling" ? parts.has("ceiling") : wallIds.has(item.wallId));
+    return blueprint;
+  }
   function planToolOutputs(node,links){const linked=linkedFromPorts(node.id,links||[]),ports=[{id:"blueprint",name:"Изменённый чертёж"}],items=node.type==="openings"?(node.openings||[]):(node.devices||[]),groups=new Map();items.forEach(x=>{const k=String(x.kind||x.type||"other");groups.set(k,(groups.get(k)||0)+1);});groups.forEach((v,k)=>{const id=`count:${k}`;if(linked.has(id)||node.countPorts?.includes(id))ports.push({id,name:`Кол-во · ${k}`});});if(node.type==="electrics"){const frames=new Map();items.filter(x=>x.frame).forEach(x=>{const k=String(x.frame);frames.set(k,(frames.get(k)||0)+1);});frames.forEach((v,k)=>{const id=`frame:${k}`;if(linked.has(id)||node.countPorts?.includes(id))ports.push({id,name:`Рамки · ${k}`});});}return ports;}
   function evaluatePlanTool(node,source,overrides={}){const blueprint=source?.schema==="finmaster.blueprint.v1"?JSON.parse(JSON.stringify(source)):null,opening=node.type==="openings",items=(opening?(node.openings||[]):(node.devices||[])).map(x=>({...x}));items.forEach(x=>{if(opening){if(Number.isFinite(overrides.width))x.width=overrides.width;if(Number.isFinite(overrides.height))x.height=overrides.height;if(Number.isFinite(overrides.diameter))x.diameter=overrides.diameter;const wall=(source?.walls||[]).find(w=>w.id===x.wallId);if(wall&&x.shape==="rect"){const left=(x.t||.5)*wall.length-(x.width||.9)/2,right=left+(x.width||.9);if(left<=.001||right>=wall.length-.001)x.kind="Дверь";}}else if(Number.isFinite(overrides.height))x.z=overrides.height;});if(blueprint){blueprint.annotations||={openings:[],sockets:[],lights:[]};items.forEach(x=>{const v={...x};if(opening)blueprint.annotations.openings.push(v);else if(v.category==="light")blueprint.annotations.lights.push(v);else blueprint.annotations.sockets.push(v);});blueprint.walls=(blueprint.walls||[]).map(w=>{const holes=blueprint.annotations.openings.filter(x=>x.wallId===w.id);const xs=[0,w.length],zs=[0,blueprint.height];holes.forEach(h=>{const d=h.shape==="circle"?(h.diameter?h.diameter/1000:(h.width||0.11)):(h.width||.9),left=plannerClamp((h.t||.5)*w.length-d/2,0,w.length),right=plannerClamp(left+d,0,w.length),bottom=plannerClamp(h.z||0,0,blueprint.height),top=plannerClamp(bottom+(h.shape==="circle"?d:(h.height||2.1)),0,blueprint.height);xs.push(left,right);zs.push(bottom,top);if(h.shape==="circle"){for(let step=1;step<48;step++){xs.push(left+d*step/48);zs.push(bottom+d*step/48);}}});const ux=[...new Set(xs.map(v=>plannerRound(v)))].sort((a,b)=>a-b),uz=[...new Set(zs.map(v=>plannerRound(v)))].sort((a,b)=>a-b),solid=[];for(let xi=0;xi<ux.length-1;xi++)for(let zi=0;zi<uz.length-1;zi++){const cx=(ux[xi]+ux[xi+1])/2,cz=(uz[zi]+uz[zi+1])/2,cut=holes.some(h=>{const d=h.shape==="circle"?(h.diameter?h.diameter/1000:(h.width||0.11)):(h.width||.9),left=plannerClamp((h.t||.5)*w.length-d/2,0,w.length),bottom=plannerClamp(h.z||0,0,blueprint.height);if(h.shape==="circle")return Math.hypot(cx-(left+d/2),cz-(bottom+d/2))<d/2;return cx>=left&&cx<=left+d&&cz>=bottom&&cz<=bottom+(h.height||2.1);});if(!cut)solid.push({x:ux[xi],z:uz[zi],width:ux[xi+1]-ux[xi],height:uz[zi+1]-uz[zi]});}return{...w,openings:holes,electrical:blueprint.annotations.sockets.filter(x=>x.wallId===w.id),solidCells:solid};});}const counts=[],groups=new Map();items.forEach(x=>{const k=String(x.kind||x.type||"other");groups.set(k,(groups.get(k)||0)+1);});groups.forEach((v,k)=>counts.push({id:`count:${k}`,value:v}));if(!opening){const frames=new Map();items.filter(x=>x.frame).forEach(x=>{const k=String(x.frame);if(!frames.has(k))frames.set(k,new Set());const position=x.wallId?`${x.wallId}:${plannerRound(x.t||0)}:${plannerRound(x.z||0)}`:`${x.plane||"surface"}:${plannerRound(x.x||0)}:${plannerRound(x.y||0)}`;frames.get(k).add(position);});frames.forEach((v,k)=>counts.push({id:`frame:${k}`,value:v.size}));}return{blueprint,counts};}
 
@@ -2237,6 +2262,7 @@
     const model = plannerModel(node);
     const linked = linkedFromPorts(node.id, links || []);
     const ports = [{ id: "blueprint", name: "Чертёж", blueprint: true }];
+    (node.groups || []).forEach((group) => ports.push({ id: `group:${group.id}`, name: group.name, blueprint: true, group }));
     model.rows.concat(model.sums).forEach((row) => {
       if (row.on || linked.has(row.id)) ports.push({ id: row.id, name: row.name, value: row.value ?? row.area, unit: row.unit || "м²" });
     });
@@ -2998,6 +3024,14 @@
         <div class="planner-block-h">Сумма выбранных ${addSum}</div>
         <p class="planner-lead">Отметьте пол и стены, которые нужно сложить. На ноду выйдет одно число.</p>
         ${sums || `<div class="calc-empty">Сумм пока нет</div>`}
+      </div>
+      <div class="planner-block planner-blueprint-groups">
+        <div class="planner-block-h">Группы чертежей <button type="button" class="btn small" data-planner-add-group ${node.groups.length >= 24 ? "disabled" : ""}>+ Группа</button></div>
+        <p class="planner-lead">Каждая группа создаёт отдельный выход чертежа. Отметьте, какие поверхности в неё входят.</p>
+        ${(node.groups || []).map((group) => {
+          const choices = [{id:"floor",name:"Пол"},{id:"ceiling",name:"Потолок"},...model.walls.map((wall)=>({id:wall.id,name:wall.name}))];
+          return `<div class="planner-blueprint-group" data-planner-group="${esc(group.id)}"><div class="planner-blueprint-group-head"><input class="planner-name" data-planner-group-name="${esc(group.id)}" value="${esc(group.name)}" maxlength="48" aria-label="Название группы чертежа" /><button type="button" class="calc-x" data-planner-del-group="${esc(group.id)}" title="Удалить группу">×</button></div><div class="planner-blueprint-parts">${choices.map((choice)=>`<label><input type="checkbox" data-planner-group-part="${esc(group.id)}" data-part="${esc(choice.id)}" ${group.parts.includes(choice.id)?"checked":""} /><span>${esc(choice.name)}</span></label>`).join("")}</div></div>`;
+        }).join("") || `<div class="calc-empty">Группы ещё не созданы</div>`}
       </div>`;
   }
 
@@ -3093,6 +3127,41 @@
     document.body.appendChild(modal);
     modal.addEventListener("click", (e) => {
       if (e.target === modal) closePlanner();
+    });
+    const plannerSide = $("planner-side");
+    plannerSide?.addEventListener("click", (e) => {
+      const add = e.target.closest("[data-planner-add-group]");
+      const remove = e.target.closest("[data-planner-del-group]");
+      const node = plannerNode();
+      if (!node) return;
+      if (add && node.groups.length < 24) {
+        node.groups.push({ id: uid(), name: `Группа ${node.groups.length + 1}`, parts: [] });
+        plannerCommit(true);
+      } else if (remove) {
+        const id = remove.dataset.plannerDelGroup;
+        node.groups = node.groups.filter((group) => group.id !== id);
+        plannerDropPorts(node, [`group:${id}`]);
+        plannerCommit(true);
+      }
+    });
+    plannerSide?.addEventListener("input", (e) => {
+      if (!e.target.dataset.plannerGroupName) return;
+      const node = plannerNode();
+      const group = node?.groups.find((item) => item.id === e.target.dataset.plannerGroupName);
+      if (!group) return;
+      group.name = String(e.target.value || "").trim().slice(0, 48) || "Группа";
+      dirty();
+    });
+    plannerSide?.addEventListener("change", (e) => {
+      if (!e.target.dataset.plannerGroupPart) return;
+      const node = plannerNode();
+      const group = node?.groups.find((item) => item.id === e.target.dataset.plannerGroupPart);
+      if (!group) return;
+      const part = e.target.dataset.part;
+      const parts = new Set(group.parts || []);
+      if (e.target.checked) parts.add(part); else parts.delete(part);
+      group.parts = [...parts];
+      plannerCommit(true);
     });
     $("planner-close")?.addEventListener("click", () => closePlanner());
     $("planner-title")?.addEventListener("input", (e) => {
@@ -4930,7 +4999,7 @@
             ? ports
                 .map((port) => {
                   const value = graph.values[`${node.id}:${port.id}`];
-                  const blueprintPort = port.id === "blueprint";
+                  const blueprintPort = !!port.blueprint;
                   const shown = blueprintPort ? "Чертёж" : (value != null && Number.isFinite(value) ? value : (port.value ?? port.area));
                   const unit = port.unit || "м²";
                   const tip = blueprintPort ? "Передать геометрию плана следующей ноде" : `${port.name} · ${fmtShort(shown)} ${unit}`;
