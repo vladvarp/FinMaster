@@ -18,7 +18,6 @@
     zebra: true,
     grid: false,
     bold: true,
-    includeCalculator: false,
   };
   const PDF_FONTS = {
     segoe: '"Segoe UI", sans-serif',
@@ -338,56 +337,6 @@
       }
     });
 
-    if (o.includeCalculator) {
-      const plans = window.FinCalc?.reportData?.() || [];
-      plans.forEach((plan, planIndex) => {
-        pageTitle = `Чертёж · ${String(plan.name || "План").trim()}`;
-        let y = newPage(String(planIndex + 1), `${planIndex + 1} из ${plans.length}`);
-        const wallNames = new Map((plan.walls || []).map((wall) => [wall.id, wall.name || wall.id]));
-        const mm = (value) => Number(value || 0).toLocaleString("ru-RU", { maximumFractionDigits: 0 });
-        const meters = (value) => Number(value || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
-        text(M, y + 6 * f, `Высота стен: ${meters(plan.height)} м · Стен: ${(plan.walls || []).length}`, metaFont, theme.meta);
-        y += 20 * f;
-        const reportTable = (label, columns, rows) => {
-          if (y + 30 * f > bottom) y = newPage(String(planIndex + 1), `${planIndex + 1} из ${plans.length} · продолжение`);
-          text(M, y + 7 * f, label, font(700, 10 * f), theme.accent);
-          y += 16 * f;
-          if (!rows.length) {
-            text(M, y + 6 * f, "Нет данных", font(400, 8.5 * f), theme.note);
-            y += 16 * f;
-            return;
-          }
-          const table = tablePlan(columns.map((label) => ({ label, num: false })), rows, []);
-          y = drawTable(table, y, rows, null, `${plan.name} · продолжение`, label);
-          y += 8 * f;
-        };
-        reportTable("Стены", ["Стена", "Длина, м"], (plan.walls || []).map((wall) => [
-          String(wall.name || wall.id || "—"), meters(wall.length)
-        ]));
-        reportTable("Проёмы", ["Стена", "Тип", "Форма", "Размер", "Высота, м"], (plan.openings || []).map((item) => {
-          const shape = item.shape === "circle" ? "Круг" : "Прямоугольник";
-          const size = item.shape === "circle"
-            ? `Ø ${mm(item.diameter || Number(item.width || 0) * 1000)} мм`
-            : `${meters(item.width)} × ${meters(item.height)} м`;
-          return [
-            String(wallNames.get(item.wallId) || item.wallId || "—"),
-            String(item.kind || item.type || "Проём"),
-            shape,
-            size,
-            meters(item.z),
-          ];
-        }));
-        const deviceRows = [...(plan.sockets || []), ...(plan.lights || [])].map((item) => [
-          item.wallId ? String(wallNames.get(item.wallId) || item.wallId) : String(item.plane === "ceiling" ? "Потолок" : item.plane === "floor" ? "Пол" : "—"),
-          String(item.category === "light" ? "Свет" : "Электрика"),
-          String(item.kind || item.type || "Устройство"),
-          String(item.frame || "Без рамки"),
-          String(item.orientation === "vertical" ? "Вертикальная" : item.frame ? "Горизонтальная" : "—"),
-        ]);
-        reportTable("Электрика и освещение", ["Место", "Категория", "Тип", "Рамка", "Ориентация"], deviceRows);
-      });
-    }
-
     if (o.grand && blocks.length > 1 && !hideTotals) {
       const grand = shareGrandData(blocks);
       const gcols = shareGrandCols(fields, grand);
@@ -563,15 +512,6 @@
       return;
     }
     pdfOpts = loadPdfOpts();
-    const calculatorToggle = $("pdf-include-calculator");
-    if (calculatorToggle && !calculatorToggle.dataset.bound) {
-      calculatorToggle.dataset.bound = "1";
-      calculatorToggle.addEventListener("change", () => {
-        pdfOpts.includeCalculator = calculatorToggle.checked;
-        savePdfOpts();
-        schedulePdfPreview();
-      });
-    }
     syncPdfTools();
     $("pdf-modal").classList.add("open");
     const wrap = $("pdf-preview-wrap");
