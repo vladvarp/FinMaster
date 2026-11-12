@@ -636,6 +636,7 @@ html[data-theme="dark"] .calc-mini-toggle {
 .calc-node.is-dashboard,
 .calc-node.is-planner {
   z-index: 2;
+  width: 350px;
 }
 .calc-node.is-scheme { width: 220px; }
 .calc-node.is-formula { width: 360px; min-width: 280px; }
