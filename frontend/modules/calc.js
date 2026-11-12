@@ -5342,17 +5342,44 @@
   }
 
   function plannerNodeHtml(node, bp, graph) {
+    const toolMode = node.type === "openings" || node.type === "electrics";
     const model = plannerModel(node);
-    const ports = plannerOutputs(node, bp.links);
+    const ports = toolMode ? planToolOutputs(node, bp.links) : plannerOutputs(node, bp.links);
+    const inputs = toolMode ? nodeInputs(node, bp.links) : [];
+    const items = node.type === "openings" ? (node.openings || []) : (node.devices || []);
     const totalArea = model.floor;
-    const sub = `пол ${fmtShort(model.floor)} м² · ${model.walls.length} стен · h ${fmtShort(model.height)} м`;
-    return `<article class="calc-node is-planner ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(node.color || "#65a30d")}">
+    const sub = toolMode
+      ? `Элементов: ${items.length} · вход: чертёж`
+      : `пол ${fmtShort(model.floor)} м² · ${model.walls.length} стен · h ${fmtShort(model.height)} м`;
+    const inputHtml = inputs.map((port) => `<div class="calc-row in">
+      <i class="calc-port in" data-port="${esc(port.id)}" data-port-type="${esc(portDataType(port))}" data-io="in" title="${esc(port.name)}"></i>
+      <span>${esc(port.name)}</span>
+    </div>`).join("");
+    const outputHtml = ports.map((port) => {
+      const value = graph.values[`${node.id}:${port.id}`];
+      const drawing = portDataType(port) === "drawing";
+      const shown = value != null && Number.isFinite(value) ? value : (port.value ?? port.area);
+      const unit = port.unit || "м²";
+      const tip = drawing ? "Передать чертёж следующей ноде обработки" : `${port.name} · ${fmtShort(shown)} ${unit}`;
+      return `<div class="calc-row out">
+        <span class="calc-row-name" title="${esc(tip)}">${esc(port.name)}</span>
+        <b>${drawing ? "Чертёж" : `${esc(fmtShort(shown))} <small>${esc(unit)}</small>`}</b>
+        <i class="calc-port out" data-port="${esc(port.id)}" data-port-type="${esc(portDataType(port))}" data-io="out" title="${esc(tip)}"></i>
+      </div>`;
+    }).join("");
+    return `<article class="calc-node is-planner ${toolMode ? "is-plan-tool" : ""} ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(node.color || "#65a30d")}">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
-        <select class="calc-node-mode" data-plan-node-mode="${esc(node.id)}" aria-label="Тип ноды" title="Тип ноды"><option value="planner" selected>Планировщик</option><option value="openings">Проёмы</option><option value="electrics">Электрика</option></select>
-        <input class="calc-pname calc-planner-name" data-planner-title="${esc(node.id)}" value="${esc(plannerName(node))}" maxlength="48" spellcheck="false" title="Имя планировщика" aria-label="Имя планировщика" />
-        <input class="calc-planner-color" type="color" data-planner-color="${esc(node.id)}" value="${esc(node.color || "#65a30d")}" title="Цвет плана" aria-label="Цвет плана" />
-        <button type="button" class="calc-text-btn" data-planner-edit="${esc(node.id)}" title="План пола и площади">Редактор</button>
+        <select class="calc-node-mode" data-plan-node-mode="${esc(node.id)}" aria-label="Тип ноды" title="Тип ноды">
+          <option value="planner" ${node.type === "planner" ? "selected" : ""}>Планировщик</option>
+          <option value="openings" ${node.type === "openings" ? "selected" : ""}>Проёмы</option>
+          <option value="electrics" ${node.type === "electrics" ? "selected" : ""}>Электрика</option>
+        </select>
+        ${toolMode
+          ? `<span class="calc-planner-mode-name">${esc(plannerName(node))}</span>`
+          : `<input class="calc-pname calc-planner-name" data-planner-title="${esc(node.id)}" value="${esc(plannerName(node))}" maxlength="48" spellcheck="false" title="Имя планировщика" aria-label="Имя планировщика" />`}
+        ${toolMode ? "" : `<input class="calc-planner-color" type="color" data-planner-color="${esc(node.id)}" value="${esc(node.color || "#65a30d")}" title="Цвет плана" aria-label="Цвет плана" />`}
+        <button type="button" class="calc-text-btn" data-planner-edit="${esc(node.id)}" title="Открыть редактор чертежа">Редактор</button>
         <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
       </header>
       <div class="calc-node-sub">${esc(sub)}</div>
@@ -5364,128 +5391,10 @@
         </div>
       </div>
       <div class="calc-ports">
-        ${
-          ports.length
-            ? ports
-                .map((port) => {
-                  const value = graph.values[`${node.id}:${port.id}`];
-                  const blueprintPort = !!port.blueprint;
-                  const shown = blueprintPort ? "Чертёж" : (value != null && Number.isFinite(value) ? value : (port.value ?? port.area));
-                  const unit = port.unit || "м²";
-                  const tip = blueprintPort ? "Передать геометрию плана следующей ноде" : `${port.name} · ${fmtShort(shown)} ${unit}`;
-                  return `<div class="calc-row out">
-                    <span class="calc-row-name" title="${esc(tip)}">${esc(port.name)}</span>
-                    <b>${blueprintPort ? "JSON" : `${esc(fmtShort(shown))} <small>${esc(unit)}</small>`}</b>
-                    <i class="calc-port out" data-port="${esc(port.id)}" data-io="out" title="${esc(tip)}"></i>
-                  </div>`;
-                })
-                .join("")
-            : `<div class="calc-empty">Включите выходы в редакторе</div>`
-        }
+        ${inputHtml}
+        ${outputHtml || (!inputs.length ? '<div class="calc-empty">Включите выходы в редакторе</div>' : "")}
       </div>
     </article>`;
-  }
-
-  function planToolNodeHtml(node,bp,graph){const ports=planToolOutputs(node,bp.links),inputs=nodeInputs(node,bp.links),items=node.type==="openings"?(node.openings||[]):(node.devices||[]);return `<article class="calc-node is-plan-tool ${session.selected===node.id?"is-on":""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--plan-tool-color:${esc(node.color)}"><i class="calc-grip" data-drag-node="${esc(node.id)}"></i><header class="calc-node-h"><select class="calc-node-mode" data-plan-node-mode="${esc(node.id)}" aria-label="Тип ноды" title="Тип ноды"><option value="planner">Планировщик</option><option value="openings"${node.type==="openings"?" selected":""}>Проёмы</option><option value="electrics"${node.type==="electrics"?" selected":""}>Электрика</option></select><button type="button" class="calc-text-btn" data-plan-tool-edit="${esc(node.id)}">Редактор</button><button type="button" class="calc-x" data-del-node="${esc(node.id)}">×</button></header><div class="calc-node-sub">Элементов: ${items.length}</div><div class="calc-ports">${inputs.map(p=>`<div class="calc-row in"><i class="calc-port in" data-port="${esc(p.id)}" data-io="in" title="${esc(p.name)}"></i><span>${esc(p.name)}</span></div>`).join("")}${ports.map(p=>`<div class="calc-row out"><span class="calc-row-name">${esc(p.name)}</span><b>${p.id==="blueprint"?"Чертёж":p.id.startsWith("frame:")?items.filter(x=>x.frame&&`frame:${x.frame}`===p.id).length:items.filter(x=>`count:${String(x.kind||x.type||"other")}`===p.id).length}</b><i class="calc-port out" data-port="${esc(p.id)}" data-io="out"></i></div>`).join("")}</div></article>`;}
-  function openPlanToolEditor(nodeId) {
-    const bp=activeBlueprint(),node=bp?.nodes.find(x=>x.id===nodeId&&["openings","electrics"].includes(x.type));
-    if(!node)return;
-    const opening=node.type==="openings",items=opening?(node.openings||[]):(node.devices||[]);if(opening)node.openings||=[];else node.devices||=[];
-    const link=(bp.links||[]).find(x=>x.to===node.id&&x.toPort==="blueprint"),graph=computeGraph(bp),plan=link?graph.values[`${link.from}:${link.fromPort}`]:null;
-    const walls=Array.isArray(plan?.walls)?plan.walls:[];
-    const customOptions=(node.customTypes||[]).concat(node.customLights||[]).map(x=>`<option>${esc(x)}</option>`).join("");
-    const modal=document.createElement("div");modal.className="plan-tool-modal";
-    modal.innerHTML=`<section class="plan-tool-dialog" role="dialog" aria-modal="true">
-      <header><b>${opening?"Проёмы":"Электрика"}</b><button type="button" data-close>×</button></header>
-      <div class="plan-tool-content">
-        <div class="plan-tool-film" data-filmstrip><button type="button" class="is-active" data-plane="floor">Пол</button><button type="button" data-plane="ceiling">Потолок</button>${walls.map((w,i)=>`<button type="button" data-wall="${esc(w.id)}">Стена ${i+1}<small>${esc(w.name||"")}</small></button>`).join("")}</div>
-        <div class="plan-tool-preview-wrap"><canvas class="plan-tool-preview" width="900" height="420"></canvas><small>Выберите элемент и нажмите ПКМ в нужной точке для размещения</small></div>
-        <div class="plan-tool-items">${items.map((x,i)=>`<div class="plan-tool-item"><b>${esc(x.kind)}</b><span>${esc(x.plane==="floor"?"Пол":x.plane==="ceiling"?"Потолок":walls.find(w=>w.id===x.wallId)?.name||x.wallId||"стена не выбрана")} · ${esc(x.shape||x.category||"")}</span><button type="button" data-remove="${i}">Удалить</button></div>`).join("")||"Элементы ещё не добавлены"}</div>
-        ${opening?`<label>Тип<select data-f="kind"><option>Окно</option><option>Дверь</option><option>Отверстие</option><option>Труба</option></select></label>
-          <label>Форма<select data-f="shape"><option value="rect">Прямоугольная</option><option value="circle">Круглая</option></select></label>
-          <label>Ширина, м<input data-f="width" type="number" value="0.9" min="0.01" step="0.01"></label>
-          <label>Высота, м<input data-f="height" type="number" value="2.1" min="0.01" step="0.01"></label>
-          <label>Диаметр трубы, мм<select data-f="diameter"><option>50</option><option>100</option><option selected>110</option><option>125</option><option>150</option><option>200</option><option>250</option></select></label>`:
-          `<label>Тип<select data-f="kind"><option>Розетка</option><option>Выключатель</option><option>Двойной выключатель</option><option>Проходной выключатель</option><option>Интернет</option><option>ТВ</option><option>Световая точка</option><option>Люстра</option><option>Спот</option>${customOptions}</select></label>
-          <label>Рамка / группа<input data-f="frame" placeholder="Например, 3 поста"></label>
-          <label>Ориентация<select data-f="orientation"><option value="horizontal">Горизонтальная</option><option value="vertical">Вертикальная</option></select></label>
-          <label>Новый пользовательский тип<input data-custom-type placeholder="Название типа"></label>
-          <label>Категория нового типа<select data-custom-category><option value="socket">Розетка / выключатель</option><option value="light">Световая точка</option></select></label>
-          <button type="button" data-add-custom>Добавить свой тип</button>`}
-        <label>Стена<select data-f="wallId"><option value="">Выбрать стену…</option>${walls.map(w=>`<option value="${esc(w.id)}">${esc(w.name||w.id)}</option>`).join("")}</select></label>
-        <label>Положение вдоль стены, 0–1<input data-f="t" type="number" value="0.5" min="0" max="1" step="0.01"></label>
-        <label>Высота от пола, м<input data-f="z" type="number" value="${opening?0:0.3}" min="0" step="0.01"></label>
-        <footer><button type="button" data-add>Добавить элемент</button><button type="button" data-close>Готово</button></footer>
-      </div></section>`;
-    document.body.appendChild(modal);
-    let activePlane="floor",activeWallId=walls[0]?.id||"";
-    const preview=modal.querySelector(".plan-tool-preview");
-    const drawPreview=()=>{
-      if(!preview)return;
-      const ctx=preview.getContext("2d"),w=preview.width,h=preview.height;
-      ctx.clearRect(0,0,w,h);ctx.fillStyle="#f8fafc";ctx.fillRect(0,0,w,h);
-      ctx.strokeStyle="#cbd5e1";ctx.lineWidth=1;
-      for(let x=0;x<w;x+=30){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}
-      for(let y=0;y<h;y+=30){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
-      const wall=walls.find(x=>x.id===activeWallId);
-      if(activePlane==="floor"||activePlane==="ceiling"){
-        if(opening)return;
-        const selectedKind=v("kind")||"Световая точка";if(!(node.customLights||[]).includes(selectedKind)&&!["Световая точка","Люстра","Спот"].includes(selectedKind))return;
-        const pts=plan?.[activePlane]?.points||plan?.floor?.points||[];
-        if(pts.length){const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys),scale=Math.min((w-100)/Math.max(.1,maxX-minX),(h-100)/Math.max(.1,maxY-minY));ctx.beginPath();pts.forEach((p,i)=>{const x=50+(p.x-minX)*scale,y=50+(p.y-minY)*scale;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.fillStyle="#d1fae5";ctx.fill();ctx.strokeStyle="#0f766e";ctx.lineWidth=5;ctx.stroke();const surfaceDevices=items.filter(d=>d.plane===activePlane&&Number.isFinite(d.x)&&Number.isFinite(d.y)),surfaceGroups=new Map();surfaceDevices.forEach(d=>{const key=d.frame?`frame:${d.frame}:${d.wallId}:${plannerRound(d.t||0)}:${plannerRound(d.z||0)}`:`single:${d.id}`;if(!surfaceGroups.has(key))surfaceGroups.set(key,[]);surfaceGroups.get(key).push(d);});surfaceGroups.forEach(group=>{const first=group[0],cx=50+(first.x-minX)*scale,cy=50+(first.y-minY)*scale,vertical=first.orientation==="vertical",unit=20,gap=3,fw=vertical?unit:group.length*unit+(group.length-1)*gap,fh=vertical?group.length*unit+(group.length-1)*gap:unit;ctx.fillStyle="#fff";ctx.strokeStyle="#2563eb";ctx.lineWidth=2;ctx.fillRect(cx-fw/2,cy-fh/2,fw,fh);ctx.strokeRect(cx-fw/2,cy-fh/2,fw,fh);group.forEach((d,i)=>{const dx=vertical?cx:cx-fw/2+unit/2+i*(unit+gap),dy=vertical?cy-fh/2+unit/2+i*(unit+gap):cy;ctx.beginPath();ctx.arc(dx,dy,4,0,Math.PI*2);ctx.fillStyle="#f59e0b";ctx.fill();});});}
-      }else if(wall){
-        const pad=55,scale=(w-pad*2)/Math.max(.1,wall.length),height=plan?.height||2.7,yscale=(h-pad*2)/Math.max(.1,height);
-        ctx.fillStyle="#e2e8f0";ctx.fillRect(pad,pad,w-pad*2,h-pad*2);ctx.strokeStyle="#475569";ctx.lineWidth=3;ctx.strokeRect(pad,pad,w-pad*2,h-pad*2);
-        [...(wall.openings||[]),...(opening?items.filter(o=>o.wallId===wall.id):[])].forEach(o=>{const circle=o.shape==="circle",diameter=(o.diameter||110)/1000,ww=(circle?diameter:(o.width||.9))*scale,hh=(circle?diameter:(o.height||2.1))*yscale,x=pad+(o.t||.5)*wall.length*scale-ww/2,y=h-pad-(o.z||0)*yscale-hh;ctx.fillStyle="#fff";ctx.strokeStyle=o.kind==="Дверь"?"#b45309":"#dc2626";ctx.lineWidth=2;if(circle){ctx.beginPath();ctx.ellipse(x+ww/2,y+hh/2,ww/2,hh/2,0,0,Math.PI*2);ctx.fill();ctx.stroke();}else{ctx.fillRect(x,y,ww,hh);ctx.strokeRect(x,y,ww,hh);if(o.kind==="Дверь"){ctx.beginPath();ctx.moveTo(x,y+hh);ctx.lineTo(x+ww,y+hh);ctx.strokeStyle="#b45309";ctx.lineWidth=3;ctx.stroke();}}});
-        const wallDevices=[...(wall.electrical||[]),...(!opening?items.filter(d=>d.wallId===wall.id):[])];const frameGroups=new Map();wallDevices.forEach(d=>{const key=d.frame?`frame:${d.frame}:${d.plane}:${plannerRound(d.x||0)}:${plannerRound(d.y||0)}`:`single:${d.id}`;if(!frameGroups.has(key))frameGroups.set(key,[]);frameGroups.get(key).push(d);});frameGroups.forEach(group=>{const first=group[0],cx=pad+(first.t||.5)*wall.length*scale,cy=h-pad-(first.z||.3)*yscale,vertical=first.orientation==="vertical",unit=20,gap=3,count=group.length,fw=vertical?unit:count*unit+(count-1)*gap,fh=vertical?count*unit+(count-1)*gap:unit;ctx.fillStyle="#fff";ctx.strokeStyle="#2563eb";ctx.lineWidth=2;ctx.fillRect(cx-fw/2,cy-fh/2,fw,fh);ctx.strokeRect(cx-fw/2,cy-fh/2,fw,fh);group.forEach((d,i)=>{const dx=vertical?cx:cx-fw/2+unit/2+i*(unit+gap),dy=vertical?cy-fh/2+unit/2+i*(unit+gap):cy;ctx.beginPath();ctx.arc(dx,dy,4,0,Math.PI*2);ctx.fillStyle=d.category==="light"?"#f59e0b":"#2563eb";ctx.fill();});});
-        ctx.fillStyle="#0f172a";ctx.font="bold 18px sans-serif";ctx.fillText(wall.name||"Стена",pad,30);
-      }
-    };
-    modal.querySelector("[data-filmstrip]")?.addEventListener("click",e=>{
-      const b=e.target.closest("button");if(!b)return;
-      modal.querySelectorAll("[data-filmstrip] button").forEach(x=>x.classList.toggle("is-active",x===b));
-      activePlane=b.dataset.plane||"wall";activeWallId=b.dataset.wall||activeWallId;drawPreview();
-    });
-    preview?.addEventListener("contextmenu",e=>{
-      e.preventDefault();
-      const v=k=>modal.querySelector('[data-f="'+k+'"]')?.value;
-      const rect=preview.getBoundingClientRect(),px=(e.clientX-rect.left)*preview.width/rect.width,py=(e.clientY-rect.top)*preview.height/rect.height,rx=plannerClamp((px-55)/(preview.width-110),0,1),ry=plannerClamp((py-55)/(preview.height-110),0,1);
-      if(activePlane==="floor"||activePlane==="ceiling"){
-        const pts=plan?.[activePlane]?.points||plan?.floor?.points||[];if(!pts.length)return;
-        const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y),scale=Math.min((preview.width-100)/Math.max(.1,Math.max(...xs)-Math.min(...xs)),(preview.height-100)/Math.max(.1,Math.max(...ys)-Math.min(...ys)));node.devices||=[];
-        node.devices.push({id:uid(),kind:selectedKind,category:"light",plane:activePlane,x:Math.min(...xs)+(px-50)/scale,y:Math.min(...ys)+(py-50)/scale,z:0,frame:String(v("frame")||"").trim(),orientation:v("orientation")||"horizontal"});
-      }else{
-        const wall=walls.find(x=>x.id===activeWallId);if(!wall)return;
-        const item={id:uid(),kind:v("kind"),wallId:wall.id,t:plannerClamp(rx,0,1),z:Math.max(0,(1-ry)*(plan?.height||2.7))};
-        if(opening){item.shape=v("shape");item.width=Math.max(.01,plannerNum(v("width"),.9));item.height=Math.max(.01,plannerNum(v("height"),2.1));item.diameter=Math.max(1,plannerNum(v("diameter"),110));node.openings.push(item);}
-        else{item.category=(node.customLights||[]).includes(item.kind)||["Световая точка","Люстра","Спот"].includes(item.kind)?"light":"socket";item.frame=String(v("frame")||"").trim();item.orientation=v("orientation")||"horizontal";node.devices.push(item);}
-      }
-      const target=opening?node.openings:node.devices;node.countPorts=[...new Set(target.flatMap(x=>["count:"+x.kind,...(x.frame?["frame:"+x.frame]:[])]))];dirty();close();render();openPlanToolEditor(nodeId);
-    });
-    drawPreview();
-    const close=()=>modal.remove();
-    modal.addEventListener("click",e=>{
-      if(e.target===modal||e.target.closest("[data-close]")){close();return;}
-      if(e.target.closest("[data-add-custom]")){
-        const name=String(modal.querySelector("[data-custom-type]")?.value||"").trim(),category=modal.querySelector("[data-custom-category]")?.value;
-        if(!name)return;
-        const key=category==="light"?"customLights":"customTypes";node[key]=[...new Set([...(node[key]||[]),name])];dirty();close();openPlanToolEditor(nodeId);return;
-      }
-      const del=e.target.closest("[data-remove]");
-      if(del){items.splice(Number(del.dataset.remove),1);if(opening)node.openings=items;else node.devices=items;node.countPorts=[...new Set(items.flatMap(x=>[`count:${x.kind}`,...(x.frame?[`frame:${x.frame}`]:[])]))];dirty();close();openPlanToolEditor(nodeId);return;}
-      if(!e.target.closest("[data-add]"))return;
-      const v=k=>modal.querySelector(`[data-f="${k}"]`)?.value;
-      const item={id:uid(),kind:v("kind"),wallId:v("wallId")||"",t:plannerClamp(plannerNum(v("t"),.5),0,1),z:Math.max(0,plannerNum(v("z"),0))};
-      if(opening){
-        item.shape=v("shape");item.width=Math.max(.01,plannerNum(v("width"),.9));item.height=Math.max(.01,plannerNum(v("height"),2.1));item.diameter=Math.max(1,plannerNum(v("diameter"),110));
-        if(item.shape==="rect"&&item.kind!=="Дверь"){const wall=walls.find(w=>w.id===item.wallId);if(wall&&item.width>=wall.length-.001)item.kind="Дверь";}
-      }else{
-        item.frame=String(v("frame")||"").trim();item.orientation=v("orientation");item.category=(node.customLights||[]).includes(item.kind)||item.kind==="Световая точка"?"light":"socket";
-      }
-      items.push(item);if(opening)node.openings=items;else node.devices=items;
-      node.countPorts=[...new Set(items.flatMap(x=>[`count:${x.kind}`,...(x.frame?[`frame:${x.frame}`]:[])]))];
-      dirty();close();render();
-    });
   }
 
   function dashboardNodeHtml(node, bp, graph) {
@@ -5656,8 +5565,7 @@
         if (node.type === "scheme") return schemeNodeHtml(node, graph);
         if (node.type === "filter") return filterNodeHtml(node, graph);
         if (node.type === "dashboard") return dashboardNodeHtml(node, bp, graph);
-        if (node.type === "planner") return plannerNodeHtml(node, bp, graph);
-        if (node.type === "openings" || node.type === "electrics") return planToolNodeHtml(node, bp, graph);
+        if (node.type === "planner" || node.type === "openings" || node.type === "electrics") return plannerNodeHtml(node, bp, graph);
         if (node.type === "present") return presentNodeHtml(node, bp, graph);
         return orderNodeHtml(node, api.findOrder(node.orderId), graph, bp);
       })
@@ -7185,7 +7093,6 @@
         showDashPortMenu(e.clientX, e.clientY, node.id);
         return;
       }
-      const planEdit=e.target.closest("[data-plan-tool-edit]");if(planEdit){e.preventDefault();e.stopPropagation();openPlanToolEditor(planEdit.dataset.planToolEdit);return;}
       const plannerEdit = e.target.closest("[data-planner-edit]");
       if (plannerEdit) {
         e.preventDefault();
