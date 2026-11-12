@@ -7141,7 +7141,7 @@
           let result = plannerBlueprint(planner);
           (bp.nodes || []).forEach((candidate) => {
             if (candidate.type !== "openings" && candidate.type !== "electrics") return;
-            const value = graph.values[\u0060${candidate.id}:blueprint\u0060];
+            const value = graph.values[candidate.id + ":blueprint"];
             if (value?.schema === "finmaster.blueprint.v1" && value.source === planner.id) result = value;
           });
           const annotations = result.annotations || {};
