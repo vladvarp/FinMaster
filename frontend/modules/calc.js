@@ -4854,6 +4854,8 @@
     modal.innerHTML=`<section class="plan-tool-dialog" role="dialog" aria-modal="true">
       <header><b>${opening?"Проёмы":"Электрика"}</b><button type="button" data-close>×</button></header>
       <div class="plan-tool-content">
+        <div class="plan-tool-film" data-filmstrip><button type="button" class="is-active" data-plane="floor">Пол</button><button type="button" data-plane="ceiling">Потолок</button>${walls.map((w,i)=>`<button type="button" data-wall="${esc(w.id)}">Стена ${i+1}<small>${esc(w.name||"")}</small></button>`).join("")}</div>
+        <div class="plan-tool-preview-wrap"><canvas class="plan-tool-preview" width="900" height="420"></canvas><small>Выберите элемент и нажмите ПКМ в нужной точке для размещения</small></div>
         <div class="plan-tool-items">${items.map((x,i)=>`<div class="plan-tool-item"><b>${esc(x.kind)}</b><span>${esc(walls.find(w=>w.id===x.wallId)?.name||x.wallId||"стена не выбрана")} · ${esc(x.shape||x.category||"")}</span><button type="button" data-remove="${i}">Удалить</button></div>`).join("")||"Элементы ещё не добавлены"}</div>
         ${opening?`<label>Тип<select data-f="kind"><option>Окно</option><option>Дверь</option><option>Отверстие</option><option>Труба</option></select></label>
           <label>Форма<select data-f="shape"><option value="rect">Прямоугольная</option><option value="circle">Круглая</option></select></label>
@@ -4872,6 +4874,49 @@
         <footer><button type="button" data-add>Добавить элемент</button><button type="button" data-close>Готово</button></footer>
       </div></section>`;
     document.body.appendChild(modal);
+    let activePlane="floor",activeWallId=walls[0]?.id||"";
+    const preview=modal.querySelector(".plan-tool-preview");
+    const drawPreview=()=>{
+      if(!preview)return;
+      const ctx=preview.getContext("2d"),w=preview.width,h=preview.height;
+      ctx.clearRect(0,0,w,h);ctx.fillStyle="#f8fafc";ctx.fillRect(0,0,w,h);
+      ctx.strokeStyle="#cbd5e1";ctx.lineWidth=1;
+      for(let x=0;x<w;x+=30){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}
+      for(let y=0;y<h;y+=30){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+      const wall=walls.find(x=>x.id===activeWallId);
+      if(activePlane==="floor"||activePlane==="ceiling"){
+        const pts=plan?.[activePlane]?.points||plan?.floor?.points||[];
+        if(pts.length){const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys),scale=Math.min((w-100)/Math.max(.1,maxX-minX),(h-100)/Math.max(.1,maxY-minY));ctx.beginPath();pts.forEach((p,i)=>{const x=50+(p.x-minX)*scale,y=50+(p.y-minY)*scale;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.fillStyle="#d1fae5";ctx.fill();ctx.strokeStyle="#0f766e";ctx.lineWidth=5;ctx.stroke();}
+      }else if(wall){
+        const pad=55,scale=(w-pad*2)/Math.max(.1,wall.length),height=plan?.height||2.7,yscale=(h-pad*2)/Math.max(.1,height);
+        ctx.fillStyle="#e2e8f0";ctx.fillRect(pad,pad,w-pad*2,h-pad*2);ctx.strokeStyle="#475569";ctx.lineWidth=3;ctx.strokeRect(pad,pad,w-pad*2,h-pad*2);
+        (wall.openings||[]).forEach(o=>{const ww=(o.width||.9)*scale,hh=(o.height||2.1)*yscale,x=pad+(o.t||.5)*wall.length*scale-ww/2,y=h-pad-(o.z||0)*yscale-hh;ctx.clearRect(x,y,ww,hh);ctx.fillStyle="#fff";ctx.fillRect(x,y,ww,hh);ctx.strokeStyle="#dc2626";ctx.lineWidth=2;ctx.strokeRect(x,y,ww,hh);});
+        (wall.electrical||[]).forEach(d=>{const x=pad+(d.t||.5)*wall.length*scale,y=h-pad-(d.z||.3)*yscale;ctx.beginPath();ctx.arc(x,y,9,0,Math.PI*2);ctx.fillStyle="#2563eb";ctx.fill();});
+        ctx.fillStyle="#0f172a";ctx.font="bold 18px sans-serif";ctx.fillText(wall.name||"Стена",pad,30);
+      }
+    };
+    modal.querySelector("[data-filmstrip]")?.addEventListener("click",e=>{
+      const b=e.target.closest("button");if(!b)return;
+      modal.querySelectorAll("[data-filmstrip] button").forEach(x=>x.classList.toggle("is-active",x===b));
+      activePlane=b.dataset.plane||"wall";activeWallId=b.dataset.wall||activeWallId;drawPreview();
+    });
+    preview?.addEventListener("contextmenu",e=>{
+      e.preventDefault();
+      const v=k=>modal.querySelector('[data-f="'+k+'"]')?.value;
+      const rect=preview.getBoundingClientRect(),rx=(e.clientX-rect.left)/rect.width,ry=(e.clientY-rect.top)/rect.height;
+      if(activePlane==="floor"||activePlane==="ceiling"){
+        const pts=plan?.[activePlane]?.points||plan?.floor?.points||[];if(!pts.length)return;
+        const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);node.devices||=[];
+        node.devices.push({id:uid(),kind:v("kind")||"Световая точка",category:"light",plane:activePlane,x:Math.min(...xs)+rx*(Math.max(...xs)-Math.min(...xs)),y:Math.min(...ys)+ry*(Math.max(...ys)-Math.min(...ys)),z:0,frame:String(v("frame")||"").trim(),orientation:v("orientation")||"horizontal"});
+      }else{
+        const wall=walls.find(x=>x.id===activeWallId);if(!wall)return;
+        const item={id:uid(),kind:v("kind"),wallId:wall.id,t:plannerClamp(rx,0,1),z:Math.max(0,(1-ry)*(plan?.height||2.7))};
+        if(opening){item.shape=v("shape");item.width=Math.max(.01,plannerNum(v("width"),.9));item.height=Math.max(.01,plannerNum(v("height"),2.1));item.diameter=Math.max(1,plannerNum(v("diameter"),110));node.openings.push(item);}
+        else{item.category=(node.customLights||[]).includes(item.kind)||item.kind==="Световая точка"?"light":"socket";item.frame=String(v("frame")||"").trim();item.orientation=v("orientation")||"horizontal";node.devices.push(item);}
+      }
+      const target=opening?node.openings:node.devices;node.countPorts=[...new Set(target.flatMap(x=>["count:"+x.kind,...(x.frame?["frame:"+x.frame]:[])]))];dirty();close();render();openPlanToolEditor(nodeId);
+    });
+    drawPreview();
     const close=()=>modal.remove();
     modal.addEventListener("click",e=>{
       if(e.target===modal||e.target.closest("[data-close]")){close();return;}
