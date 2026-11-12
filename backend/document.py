@@ -604,6 +604,16 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         node["points"] = _planner_points(raw.get("points"))
         node["outs"] = _planner_outs(raw.get("outs"), node["points"])
     elif kind in ("openings", "electrics"):
+        # Preserve planner geometry when the same node is switched between modes.
+        node["plannerName"] = _clip_text(raw.get("plannerName"), 48, "Планировщик")
+        planner_color = str(raw.get("plannerColor") or "#65a30e").strip().lower()
+        if not (len(planner_color) == 7 and planner_color.startswith("#") and all(ch in "0123456789abcdef" for ch in planner_color[1:])):
+            planner_color = "#65a30e"
+        node["plannerColor"] = planner_color
+        node["height"] = round(_float_in_range(raw.get("height"), 2.7, 0.1, 100.0), 4)
+        node["heightOut"] = bool(raw.get("heightOut"))
+        node["points"] = _planner_points(raw.get("points"))
+        node["outs"] = _planner_outs(raw.get("outs"), node["points"])
         node["name"]=_clip_text(raw.get("name"),48,"Проёмы" if kind=="openings" else "Электрика")
         node["color"]=str(raw.get("color") or ("#0ea5e9" if kind=="openings" else "#f59e0b"))[:7]
         node["countPorts"]=[_clip_text(x,80) for x in (raw.get("countPorts") if isinstance(raw.get("countPorts"),list) else [])[:40]]
