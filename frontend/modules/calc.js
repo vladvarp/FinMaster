@@ -4846,7 +4846,7 @@
   function openPlanToolEditor(nodeId) {
     const bp=activeBlueprint(),node=bp?.nodes.find(x=>x.id===nodeId&&["openings","electrics"].includes(x.type));
     if(!node)return;
-    const opening=node.type==="openings",items=opening?(node.openings||[]):(node.devices||[]);
+    const opening=node.type==="openings",items=opening?(node.openings||[]):(node.devices||[]);if(opening)node.openings||=[];else node.devices||=[];
     const link=(bp.links||[]).find(x=>x.to===node.id&&x.toPort==="blueprint"),graph=computeGraph(bp),plan=link?graph.values[`${link.from}:${link.fromPort}`]:null;
     const walls=Array.isArray(plan?.walls)?plan.walls:[];
     const customOptions=(node.customTypes||[]).concat(node.customLights||[]).map(x=>`<option>${esc(x)}</option>`).join("");
@@ -4904,11 +4904,11 @@
     preview?.addEventListener("contextmenu",e=>{
       e.preventDefault();
       const v=k=>modal.querySelector('[data-f="'+k+'"]')?.value;
-      const rect=preview.getBoundingClientRect(),rx=(e.clientX-rect.left)/rect.width,ry=(e.clientY-rect.top)/rect.height;
+      const rect=preview.getBoundingClientRect(),px=(e.clientX-rect.left)*preview.width/rect.width,py=(e.clientY-rect.top)*preview.height/rect.height,rx=plannerClamp((px-55)/(preview.width-110),0,1),ry=plannerClamp((py-55)/(preview.height-110),0,1);
       if(activePlane==="floor"||activePlane==="ceiling"){
         const pts=plan?.[activePlane]?.points||plan?.floor?.points||[];if(!pts.length)return;
-        const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);node.devices||=[];
-        node.devices.push({id:uid(),kind:v("kind")||"Световая точка",category:"light",plane:activePlane,x:Math.min(...xs)+rx*(Math.max(...xs)-Math.min(...xs)),y:Math.min(...ys)+ry*(Math.max(...ys)-Math.min(...ys)),z:0,frame:String(v("frame")||"").trim(),orientation:v("orientation")||"horizontal"});
+        const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y),scale=Math.min((preview.width-100)/Math.max(.1,Math.max(...xs)-Math.min(...xs)),(preview.height-100)/Math.max(.1,Math.max(...ys)-Math.min(...ys)));node.devices||=[];
+        node.devices.push({id:uid(),kind:v("kind")||"Световая точка",category:"light",plane:activePlane,x:Math.min(...xs)+(px-50)/scale,y:Math.min(...ys)+(py-50)/scale,z:0,frame:String(v("frame")||"").trim(),orientation:v("orientation")||"horizontal"});
       }else{
         const wall=walls.find(x=>x.id===activeWallId);if(!wall)return;
         const item={id:uid(),kind:v("kind"),wallId:wall.id,t:plannerClamp(rx,0,1),z:Math.max(0,(1-ry)*(plan?.height||2.7))};
