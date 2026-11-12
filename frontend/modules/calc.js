@@ -2792,6 +2792,9 @@
     const colors = plannerColors();
     const model = plannerModel(node);
     const renderedPlan = plannerOutputBlueprint(node);
+    const sourceWallIds = node.type === "planner" ? null : new Set((renderedPlan?.walls || []).map((wall) => wall.id));
+    const visibleWalls = sourceWallIds ? model.walls.filter((wall) => sourceWallIds.has(wall.id)) : model.walls;
+    const hasFloor = node.type === "planner" || !!renderedPlan?.floor;
     const selWall = plannerSelWall(node);
     const selPoint = session.planner.sel?.kind === "point" ? session.planner.sel.id : "";
     const fitted = plannerFitCanvas(plan);
@@ -2825,17 +2828,19 @@
       }
       ctx.stroke();
       ctx.restore();
-      ctx.beginPath();
-      node.points.forEach((p, i) => {
-        const s = view.to(p);
-        if (i) ctx.lineTo(s.x, s.y);
-        else ctx.moveTo(s.x, s.y);
-      });
-      ctx.closePath();
-      ctx.fillStyle = "rgba(101, 163, 13, 0.16)";
-      ctx.fill();
+      if (hasFloor) {
+        ctx.beginPath();
+        node.points.forEach((p, i) => {
+          const s = view.to(p);
+          if (i) ctx.lineTo(s.x, s.y);
+          else ctx.moveTo(s.x, s.y);
+        });
+        ctx.closePath();
+        ctx.fillStyle = "rgba(101, 163, 13, 0.16)";
+        ctx.fill();
+      }
       const visiblePlane = session.planner.surface?.kind === "ceiling" ? "ceiling" : "floor";
-      (renderedPlan?.annotations?.lights || []).filter((item) => item.plane === visiblePlane && Number.isFinite(item.x) && Number.isFinite(item.y)).forEach((item) => {
+      (hasFloor ? (renderedPlan?.annotations?.lights || []) : []).filter((item) => item.plane === visiblePlane && Number.isFinite(item.x) && Number.isFinite(item.y)).forEach((item) => {
         const point = view.to({ x: item.x, y: item.y });
         ctx.beginPath();
         ctx.arc(point.x, point.y, 7, 0, Math.PI * 2);
@@ -2847,7 +2852,7 @@
       });
       const center = plannerCentroid(node.points);
       const mid = view.to(center);
-      plannerWalls(node).forEach((wall) => {
+      visibleWalls.forEach((wall) => {
         const a = view.to(wall.a);
         const b = view.to(wall.b);
         const on = selWall && selWall.id === wall.id;
@@ -2886,7 +2891,7 @@
       ctx.font = "700 14px Segoe UI, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(`${fmtShort(model.floor)} м²`, mid.x, mid.y);
+      if (hasFloor) ctx.fillText(`${fmtShort(model.floor)} м²`, mid.x, mid.y);
     }
     const strip = plannerFitCanvas(unfold);
     session.planner.hits = [];
@@ -2895,8 +2900,7 @@
       ctx.clearRect(0, 0, w, h);
       ctx.fillStyle = colors.bg;
       ctx.fillRect(0, 0, w, h);
-      const sourceWallIds = node.type === "planner" ? null : new Set((renderedPlan?.walls || []).map((wall) => wall.id));
-      const walls = sourceWallIds ? model.walls.filter((wall) => sourceWallIds.has(wall.id)) : model.walls;
+      const walls = visibleWalls;
       const total = walls.reduce((sum, wall) => sum + wall.len, 0) || 1;
       const gap = walls.length > 1 ? 8 : 0;
       const scale = Math.min((w - 24 - gap * (walls.length - 1)) / total, (h - 46) / Math.max(0.2, model.height));
@@ -2970,7 +2974,7 @@
           ctx.fillStyle = "#2563eb";
           ctx.fill();
         });
-        const row = model.rows[index + 1];
+        const row = model.rows.find((item) => item.id === wall.id);
         ctx.fillStyle = colors.ink;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
