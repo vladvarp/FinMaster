@@ -1856,7 +1856,7 @@ html[data-theme="dark"] .calc-order.is-used small { color: #5eead4; }
 .planner-filmstrip{display:flex;align-items:center;gap:6px;min-height:34px;overflow-x:auto;padding:4px 1px 7px;scrollbar-width:thin}
 .planner-filmstrip[hidden]{display:none!important}
 .planner-filmstrip button{flex:0 0 auto;max-width:150px;padding:7px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg-2);color:var(--ink);font-size:12px;font-weight:650;white-space:nowrap;cursor:pointer}
-.planner-filmstrip button.is-active{border-color:var(--accent-2);background:color-mix(in srgb,var(--accent-2) 14%,var(--card));color:var(--accent)}
+.planner-filmstrip button.is-active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
 .planner-filmstrip-empty{color:var(--muted);font-size:12px;padding:4px}
 .planner-tool-block{display:grid;gap:8px}
 .planner-tool-block .planner-lead{margin:0}
