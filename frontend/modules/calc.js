@@ -7164,21 +7164,41 @@
         const bp = activeBlueprint();
         if (!bp) return [];
         const graph = computeGraph(bp);
-        return (bp.nodes || []).filter((node) => node.type === "planner").map((planner) => {
-          let result = plannerBlueprint(planner);
-          (bp.nodes || []).forEach((candidate) => {
-            if (candidate.type !== "openings" && candidate.type !== "electrics") return;
-            const value = graph.values[candidate.id + ":blueprint"];
-            if (value?.schema === "finmaster.blueprint.v1" && value.source === planner.id) result = value;
+        const nodes = bp.nodes || [];
+        const links = bp.links || [];
+        return nodes.filter((node) => node.type === "planner").map((planner) => {
+          const result = plannerBlueprint(planner);
+          const reachable = new Set();
+          const queue = [planner.id];
+          while (queue.length) {
+            const sourceId = queue.shift();
+            links.forEach((link) => {
+              if (link.from !== sourceId || link.fromPort !== "blueprint" || link.toPort !== "blueprint") return;
+              const target = nodes.find((item) => item.id === link.to);
+              if (!target || (target.type !== "openings" && target.type !== "electrics") || reachable.has(target.id)) return;
+              reachable.add(target.id);
+              queue.push(target.id);
+            });
+          }
+          const merged = { openings: new Map(), sockets: new Map(), lights: new Map() };
+          reachable.forEach((nodeId) => {
+            const value = graph.values[nodeId + ":blueprint"];
+            if (value?.schema !== "finmaster.blueprint.v1" || value.source !== planner.id) return;
+            const annotations = value.annotations || {};
+            ["openings", "sockets", "lights"].forEach((key) => {
+              (annotations[key] || []).forEach((item, index) => {
+                const identity = String(item.id || JSON.stringify(item) || index);
+                merged[key].set(identity, { ...item });
+              });
+            });
           });
-          const annotations = result.annotations || {};
           return {
             name: result.name || plannerName(planner),
             height: result.height || 0,
             walls: (result.walls || []).map((wall) => ({ id: wall.id, name: wall.name || wall.id, length: wall.length || 0 })),
-            openings: (annotations.openings || []).map((item) => ({ ...item })),
-            sockets: (annotations.sockets || []).map((item) => ({ ...item })),
-            lights: (annotations.lights || []).map((item) => ({ ...item })),
+            openings: [...merged.openings.values()],
+            sockets: [...merged.sockets.values()],
+            lights: [...merged.lights.values()],
           };
         });
       } catch (err) {
