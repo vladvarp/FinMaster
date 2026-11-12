@@ -2968,9 +2968,9 @@
           const openingWidth = isCircle ? diameter : Math.max(0.01, Number(item.width) || 0.9);
           const openingHeight = isCircle ? diameter : Math.max(0.01, Number(item.height) || 2.1);
           const left = plannerClamp((plannerClamp(Number(item.t) || 0.5, 0, 1) * wall.len) - openingWidth / 2, 0, wall.len);
-          const bottom = plannerClamp(Number(item.z) || 0, 0, model.height);
+          const bottom = plannerClamp(Number(item.z) || 0, 0, drawHeight);
           const right = plannerClamp(left + openingWidth, 0, wall.len);
-          const ceiling = plannerClamp(bottom + openingHeight, 0, model.height);
+          const ceiling = plannerClamp(bottom + openingHeight, 0, drawHeight);
           const ox = x + left * scale;
           const oy = top + rh - ceiling * scale;
           ctx.save();
@@ -3010,7 +3010,7 @@
           ctx.fillText(String(index + 1), x + rw / 2, top + Math.min(rh / 2, 16));
           ctx.font = "11px Segoe UI, sans-serif";
           ctx.fillStyle = colors.muted;
-          if (rh > 36) ctx.fillText(`${fmtShort(row?.area || 0)} м²`, x + rw / 2, top + rh / 2 + 12);
+          if (rh > 36) ctx.fillText(`${fmtShort(node.type === "planner" ? (row?.area || 0) : wall.len * drawHeight)} м²`, x + rw / 2, top + rh / 2 + 12);
         } else {
           ctx.fillText(String(index + 1), x + rw / 2, top - 10);
         }
@@ -3122,7 +3122,7 @@
       <label class="planner-tool-field">Высота от пола, м<input data-plan-tool-field="z" type="number" min="0" step="0.01" value="${opening ? "0" : "0.3"}" /></label>`;
     const itemRows = items.map((item, index) => {
       const wall = walls.find((candidate) => candidate.id === item.wallId);
-      const surface = item.wallId ? (wall?.id || "Стена") : (item.plane === "ceiling" ? "Потолок" : item.plane === "floor" ? "Пол" : "Стена");
+      const surface = item.wallId ? (wall?.name || wall?.id || "Стена") : (item.plane === "ceiling" ? "Потолок" : item.plane === "floor" ? "Пол" : "Стена");
       const size = opening
         ? (item.shape === "circle" ? `Ø ${fmtShort(item.diameter || 110)} мм` : `${fmtShort(item.width || 0.9)} × ${fmtShort(item.height || 2.1)} м`)
         : (item.frame ? `рамка «${item.frame}»` : item.category === "light" ? "освещение" : "устройство");
@@ -3268,7 +3268,7 @@
       kind,
       wallId: surface.kind === "wall" ? surface.id : "",
       t: plannerClamp(plannerNum(placement.t, plannerNum(read("t"), 0.5)), 0, 1),
-      z: plannerClamp(plannerNum(placement.z, plannerNum(read("z"), opening ? 0 : 0.3)), 0, node.height || 2.7),
+      z: plannerClamp(plannerNum(placement.z, plannerNum(read("z"), opening ? 0 : 0.3)), 0, plannerEditorGeometry(node, plannerInputBlueprint(node) || plannerOutputBlueprint(node)).height || 2.7),
     };
     if (opening) {
       item.shape = read("shape") === "circle" ? "circle" : "rect";
