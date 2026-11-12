@@ -2789,20 +2789,33 @@
         }
         const wallOpenings = (renderedPlan?.annotations?.openings || []).filter((item) => item.wallId === wall.id);
         wallOpenings.forEach((item) => {
-          const diameter = Math.max(0.01, (Number(item.diameter) || 110) / 1000);
-          const openingWidth = item.shape === "circle" ? diameter : Math.max(0.01, Number(item.width) || 0.9);
-          const openingHeight = item.shape === "circle" ? diameter : Math.max(0.01, Number(item.height) || 2.1);
-          const ox = x + plannerClamp(Number(item.t) || 0.5, 0, 1) * wall.len * scale - openingWidth * scale / 2;
-          const oy = top + rh - (Math.max(0, Number(item.z) || 0) + openingHeight) * scale;
+          const isCircle = item.shape === "circle";
+          const diameter = Math.max(0.01, item.diameter ? Number(item.diameter) / 1000 : (Number(item.width) || 0.11));
+          const openingWidth = isCircle ? diameter : Math.max(0.01, Number(item.width) || 0.9);
+          const openingHeight = isCircle ? diameter : Math.max(0.01, Number(item.height) || 2.1);
+          const left = plannerClamp((plannerClamp(Number(item.t) || 0.5, 0, 1) * wall.len) - openingWidth / 2, 0, wall.len);
+          const bottom = plannerClamp(Number(item.z) || 0, 0, model.height);
+          const right = plannerClamp(left + openingWidth, 0, wall.len);
+          const ceiling = plannerClamp(bottom + openingHeight, 0, model.height);
+          const ox = x + left * scale;
+          const oy = top + rh - ceiling * scale;
           ctx.save();
+          ctx.beginPath();
+          ctx.rect(x, top, rw, rh);
+          ctx.clip();
           ctx.strokeStyle = item.kind === "Дверь" ? "#b45309" : "#dc2626";
           ctx.lineWidth = 1.5;
-          if (item.shape === "circle") {
+          if (isCircle) {
+            // Центр и радиус совпадают с алгоритмом построения solidCells.
+            const cx = x + (left + diameter / 2) * scale;
+            const cy = top + rh - (bottom + diameter / 2) * scale;
             ctx.beginPath();
-            ctx.ellipse(ox + openingWidth * scale / 2, oy + openingHeight * scale / 2, openingWidth * scale / 2, openingHeight * scale / 2, 0, 0, Math.PI * 2);
+            ctx.ellipse(cx, cy, diameter * scale / 2, diameter * scale / 2, 0, 0, Math.PI * 2);
             ctx.stroke();
           } else {
-            ctx.strokeRect(ox, oy, openingWidth * scale, openingHeight * scale);
+            const clippedWidth = Math.max(0, right - left);
+            const clippedHeight = Math.max(0, ceiling - bottom);
+            if (clippedWidth > 0 && clippedHeight > 0) ctx.strokeRect(ox, oy, clippedWidth * scale, clippedHeight * scale);
           }
           ctx.restore();
         });
