@@ -503,6 +503,31 @@ def _planner_outs(raw: Any, points: list[dict[str, Any]]) -> list[dict[str, Any]
     return outs
 
 
+def _planner_groups(raw: Any, points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    allowed = {"floor", "ceiling", *[f"w:{point['id']}" for point in points]}
+    groups: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    source = raw if isinstance(raw, list) else []
+    for item in source[:24]:
+        if not isinstance(item, dict):
+            continue
+        group_id = _clip_text(item.get("id"), 40)
+        if not group_id or group_id in seen_ids:
+            continue
+        seen_ids.add(group_id)
+        parts: list[str] = []
+        seen_parts: set[str] = set()
+        raw_parts = item.get("parts") if isinstance(item.get("parts"), list) else []
+        for part in raw_parts[:26]:
+            key = _clip_text(part, 48)
+            if key not in allowed or key in seen_parts:
+                continue
+            seen_parts.add(key)
+            parts.append(key)
+        groups.append({"id": group_id, "name": _clip_text(item.get("name"), 48, "Группа"), "parts": parts})
+    return groups
+
+
 def _calc_node(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
@@ -603,6 +628,7 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         node["color"] = color
         node["points"] = _planner_points(raw.get("points"))
         node["outs"] = _planner_outs(raw.get("outs"), node["points"])
+        node["groups"] = _planner_groups(raw.get("groups"), node["points"])
     elif kind in ("openings", "electrics"):
         # Preserve planner geometry when the same node is switched between modes.
         node["plannerName"] = _clip_text(raw.get("plannerName"), 48, "Планировщик")
@@ -614,6 +640,7 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         node["heightOut"] = bool(raw.get("heightOut"))
         node["points"] = _planner_points(raw.get("points"))
         node["outs"] = _planner_outs(raw.get("outs"), node["points"])
+        node["groups"] = _planner_groups(raw.get("groups"), node["points"])
         node["name"]=_clip_text(raw.get("name"),48,"Проёмы" if kind=="openings" else "Электрика")
         node["color"]=str(raw.get("color") or ("#0ea5e9" if kind=="openings" else "#f59e0b"))[:7]
         node["countPorts"]=[_clip_text(x,80) for x in (raw.get("countPorts") if isinstance(raw.get("countPorts"),list) else [])[:40]]
