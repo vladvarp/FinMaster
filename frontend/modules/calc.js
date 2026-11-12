@@ -7273,7 +7273,7 @@
           while (queue.length) {
             const sourceId = queue.shift();
             links.forEach((link) => {
-              if (link.from !== sourceId || link.fromPort !== "blueprint" || link.toPort !== "blueprint") return;
+              if (link.from !== sourceId || (link.fromPort !== "blueprint" && !String(link.fromPort || "").startsWith("group:")) || link.toPort !== "blueprint") return;
               const target = nodes.find((item) => item.id === link.to);
               if (!target || (target.type !== "openings" && target.type !== "electrics") || reachable.has(target.id)) return;
               reachable.add(target.id);
