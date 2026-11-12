@@ -2993,12 +2993,16 @@
           ctx.restore();
         });
         ctx.restore();
-        (renderedPlan?.annotations?.sockets || []).filter((item) => item.wallId === wall.id).forEach((item) => {
+        const wallDevices = [
+          ...(renderedPlan?.annotations?.sockets || []).map((item) => ({ ...item, _tone: "#2563eb" })),
+          ...(renderedPlan?.annotations?.lights || []).filter((item) => item.wallId).map((item) => ({ ...item, _tone: "#d97706" })),
+        ];
+        wallDevices.filter((item) => item.wallId === wall.id).forEach((item) => {
           const px = x + plannerClamp(Number(item.t) || 0.5, 0, 1) * wall.len * scale;
           const py = top + rh - Math.max(0, Number(item.z) || 0) * scale;
           ctx.beginPath();
           ctx.arc(px, py, 3.5, 0, Math.PI * 2);
-          ctx.fillStyle = "#2563eb";
+          ctx.fillStyle = item._tone;
           ctx.fill();
         });
         const row = model.rows.find((item) => item.id === wall.id);
@@ -3321,6 +3325,11 @@
     const toolMode = node.type === "openings" || node.type === "electrics";
     document.querySelector("#planner-modal .planner-modal")?.classList.toggle("is-plan-tool", toolMode);
     plannerRenderFilmstrip(node);
+    const caps = document.querySelectorAll("#planner-modal .planner-cap");
+    if (toolMode && caps[0]) {
+      const kind = session.planner.surface?.kind;
+      caps[0].textContent = kind === "ceiling" ? "План потолка" : kind === "wall" ? "План помещения" : "План пола";
+    } else if (caps[0]) caps[0].textContent = "План пола";
     const rect = plannerRect(node.points);
     const boxW = rect ? rect.w : Math.max(...node.points.map((p) => p.x)) - Math.min(...node.points.map((p) => p.x));
     const boxD = rect ? rect.d : Math.max(...node.points.map((p) => p.y)) - Math.min(...node.points.map((p) => p.y));
@@ -3424,6 +3433,8 @@
         ? { kind: "wall", id: session.planner.surface.id }
         : null;
       plannerRenderFilmstrip(node);
+      const cap = document.querySelector("#planner-modal .planner-cap");
+      if (cap) cap.textContent = session.planner.surface.kind === "ceiling" ? "План потолка" : session.planner.surface.kind === "wall" ? "План помещения" : "План пола";
       plannerDraw();
     });
     const plannerSide = $("planner-side");
