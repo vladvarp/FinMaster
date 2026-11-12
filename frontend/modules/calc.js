@@ -3408,8 +3408,6 @@
       }
       const add = e.target.closest("[data-planner-add-group]");
       const remove = e.target.closest("[data-planner-del-group]");
-      const node = plannerNode();
-      if (!node) return;
       if (add && node.groups.length < 24) {
         node.groups.push({ id: uid(), name: `Группа ${node.groups.length + 1}`, parts: [] });
         plannerCommit(true);
