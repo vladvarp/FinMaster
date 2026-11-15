@@ -5011,7 +5011,7 @@
             const fallback = holeLabel(hole, index);
             return `<label class="planner-part"><input type="checkbox" data-own="${esc(own.id)}" data-own-hole="${esc(hole.id)}" ${(own.holes || []).includes(hole.id) ? "checked" : ""} /> <span data-own-title="${esc(hole.id)}">${esc(hole.name || fallback)}</span></label>`;
           }).join("");
-          return `<div class="planner-block-h">${esc(group.name)}</div>${items}`;
+          return `<div class="planner-own-group-title">${esc(group.name)}</div>${items}`;
         }).join("");
         return `<div class="planner-metric"><input class="planner-name" data-own-name="${esc(own.id)}" value="${esc(own.name || "Свой")}" maxlength="48" aria-label="Имя своего счётчика" /><button type="button" class="calc-mini" data-own-del="${esc(own.id)}" title="Удалить">×</button>${toggles || `<div class="calc-empty">Нет карточек для подсчёта</div>`}</div>`;
       }).join("");
