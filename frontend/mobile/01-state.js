@@ -8,7 +8,7 @@
   const LS_CID = "finmaster.remote.cid";
   const LS_SNAP = "finmaster.mobile.snapshot";
   let moneyFmt = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const qtyFmt = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+  const qtyFmt = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
   function moneyDecimals(doc) {
     const n = Number((doc || state.doc)?.money_decimals);

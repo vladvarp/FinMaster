@@ -2836,7 +2836,7 @@
                   const label = lt.expense ? `${line.order_type || "—"} · ${kindLabel(lt.kind)}` : line.order_type || "—";
                   const rowCls = [lt.expense ? "is-expense" : "", isFrozenLine(line) ? "is-frozen" : ""].filter(Boolean).join(" ");
                   return `<tr class="${rowCls}"><td>${esc(label)}</td><td>${esc(line.product || "—")}</td>
-                  <td class="num">${esc(`${qtyValue(line)} ${line.unit || ""}`.trim())}</td>
+                  <td class="num">${esc(`${qtyText(qtyValue(line))} ${line.unit || ""}`.trim())}</td>
                   <td class="num">${esc(money(numExpr(line, "price_expr", "price")))}</td>
                   <td class="num">${lt.expense ? `−${esc(money(lt.cost))}` : esc(money(lt.after))}</td>
                   <td class="num">${lt.unpaid > 0.005 ? esc(money(lt.unpaid)) : "—"}</td>
@@ -2909,8 +2909,7 @@
   }
 
   function formatQty(n) {
-    const r = round2(n);
-    return Number.isInteger(r) ? String(r) : String(r);
+    return qtyText(n);
   }
 
   function isFormula(expr) {
@@ -2930,7 +2929,8 @@
   function shownExpr(line, exprKey) {
     const expr = exprRaw(line, exprKey);
     const v = evalExpr(expr);
-    if (isFormula(expr) && Number.isFinite(v)) return formatQty(v);
+    const tail = /\.\d{3,}/.test(String(expr).replaceAll(",", "."));
+    if (Number.isFinite(v) && (isFormula(expr) || tail)) return formatQty(v);
     return expr;
   }
 
@@ -4231,7 +4231,7 @@
             ({ order, line, totals }) => `<tr class="${totals.expense ? "is-expense" : ""}">
             <td>${esc(order.number)}</td><td>${esc(order.customer)}</td><td>${esc(order.name)}</td>
             <td>${esc(line.order_type)}</td><td>${esc(line.product)}</td>
-            <td class="num">${esc(qtyValue(line))} ${esc(line.unit)}</td>
+            <td class="num">${esc(qtyText(qtyValue(line)))} ${esc(line.unit)}</td>
             <td class="num">${totals.expense ? `−${esc(money(totals.cost))}` : esc(money(totals.after))}</td>
             <td class="num">${totals.expense ? "—" : esc(money(totals.paid))}</td>
             <td class="num">${totals.expense ? "—" : esc(money(totals.unpaid))}</td>

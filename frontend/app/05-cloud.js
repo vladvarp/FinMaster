@@ -548,7 +548,7 @@
       ${node.status ? `<div class="cloud-detail-row"><span>Статус</span><b>${esc(node.status)}</b></div>` : ""}
       ${node.cost > 0.005 && !expenseNode && node.value > 0.005 ? `<div class="cloud-detail-row"><span>Расход</span><b>${esc(money(-node.cost))}</b></div>` : ""}
       ${node.type ? `<div class="cloud-detail-row"><span>Тип</span><b>${esc(node.type)}</b></div>` : ""}
-      ${node.quantity != null ? `<div class="cloud-detail-row"><span>Количество</span><b>${esc(String(node.quantity))} ${esc(node.unit || "")}</b></div>` : ""}
+      ${node.quantity != null ? `<div class="cloud-detail-row"><span>Количество</span><b>${esc(qtyText(node.quantity))} ${esc(node.unit || "")}</b></div>` : ""}
       ${node.orderDate ? `<div class="cloud-detail-row"><span>Дата заказа</span><b>${esc(cashDateText(parseDay(node.orderDate)))}</b></div>` : ""}
       <div class="cloud-detail-actions">${actions}</div>
     </div>`;

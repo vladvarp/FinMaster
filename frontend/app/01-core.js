@@ -1846,7 +1846,15 @@
   }
 
   function round2(n) {
-    return Math.round((Number(n) || 0) * 100) / 100;
+    const v = Number(n);
+    if (!Number.isFinite(v)) return 0;
+    return Number(v.toFixed(2));
+  }
+
+  function qtyText(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "0";
+    return v.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
   }
 
   function evalExpr(raw) {
@@ -1866,7 +1874,7 @@
   }
 
   function qtyValue(line) {
-    return numExpr(line, "qty_expr", "quantity");
+    return round2(numExpr(line, "qty_expr", "quantity"));
   }
 
   function numExpr(line, exprKey, numKey) {

@@ -31,7 +31,10 @@
     return Number.isFinite(n) ? n : 0;
   }
 
-  const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const round2 = (n) => {
+    const v = Number(n);
+    return Number.isFinite(v) ? Number(v.toFixed(2)) : 0;
+  };
   const EXPR_MIRROR = {
     qty_expr: "quantity",
     price_expr: "price",
@@ -61,8 +64,9 @@
   }
 
   function formatExprResult(n) {
-    const r = round2(n);
-    return Number.isInteger(r) ? String(r) : String(r);
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "0";
+    return v.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
   }
 
   function exprRaw(line, field) {
@@ -75,7 +79,8 @@
   function shownExprValue(line, field) {
     const expr = exprRaw(line, field);
     const v = evalExpr(expr);
-    if (isFormula(expr) && Number.isFinite(v)) return formatExprResult(v);
+    const tail = /\.\d{3,}/.test(String(expr).replaceAll(",", "."));
+    if (Number.isFinite(v) && (isFormula(expr) || tail)) return formatExprResult(v);
     return expr;
   }
 

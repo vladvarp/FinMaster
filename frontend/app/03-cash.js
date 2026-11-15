@@ -603,7 +603,7 @@
         return `<tr data-cash-line="${esc(it.line.id)}" data-cash-order="${esc(it.order.id)}" data-cash-customer="${esc(it.customer)}">
           <td><button type="button" class="link-btn" data-cash-act="customer">${esc(it.customer)}</button></td>
           <td>${esc(it.order.number || "—")}${it.order.name ? `<small class="cash-sub">${esc(it.order.name)}</small>` : ""}</td>
-          <td>${esc(it.line.product || "без продукта")}<small class="cash-sub">${esc(qtyValue(it.line))} ${esc(it.line.unit || "")}</small></td>
+          <td>${esc(it.line.product || "без продукта")}<small class="cash-sub">${esc(qtyText(qtyValue(it.line)))} ${esc(it.line.unit || "")}</small></td>
           <td class="num">${esc(money(it.amount))}</td>
           <td>${esc(cashDateText(it.due))}</td>
           <td><span class="pill" style="background:${bucket?.color || "#64748b"}">${esc(cashFactLateText(it, data.terms))}</span></td>
@@ -793,7 +793,7 @@
         return `<tr data-cash-line="${esc(it.line.id)}" data-cash-order="${esc(it.order.id)}" data-cash-customer="${esc(it.customer)}">
           <td><button type="button" class="link-btn" data-cash-act="customer">${esc(it.customer)}</button></td>
           <td>${esc(it.order.number || "—")}${it.order.name ? `<small class="cash-sub">${esc(it.order.name)}</small>` : ""}</td>
-          <td>${esc(it.line.product || "без продукта")}<small class="cash-sub">${esc(qtyValue(it.line))} ${esc(it.line.unit || "")}</small></td>
+          <td>${esc(it.line.product || "без продукта")}<small class="cash-sub">${esc(qtyText(qtyValue(it.line)))} ${esc(it.line.unit || "")}</small></td>
           <td class="num">${esc(money(it.amount))}<small class="cash-sub">из ${esc(money(it.totals.after))}</small></td>
           <td title="${esc(dueHint)}">${esc(cashDateText(it.due))}</td>
           <td><span class="pill" style="background:${bucket?.color || "#64748b"}">${esc(overdueText)}</span></td>
@@ -875,7 +875,7 @@
       const dueText = due ? ` · срок оплаты ${cashDateText(due)}${worst > 0 ? `, просрочка ${worst} ${daysWord(worst)}` : ""}` : "";
       out.push("", `Заказ ${order.number || ""}${order.name ? ` «${order.name}»` : ""} — остаток ${money(sum)}${dueText}`);
       lines.forEach((it) => {
-        out.push(`  • ${it.line.product || "позиция"} — ${qtyValue(it.line)} ${it.line.unit || ""}: ${money(it.amount)}`.replace(/\s+:/, ":"));
+        out.push(`  • ${it.line.product || "позиция"} — ${qtyText(qtyValue(it.line))} ${it.line.unit || ""}: ${money(it.amount)}`.replace(/\s+:/, ":"));
       });
     });
     out.push("", `Итого к оплате: ${money(total)}`);

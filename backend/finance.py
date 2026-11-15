@@ -164,7 +164,7 @@ def line_totals(
     types: dict[str, str] | None = None,
     order: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    qty = num_expr(line, "qty_expr", "quantity")
+    qty = round2(num_expr(line, "qty_expr", "quantity"))
     price = max(0.0, num_expr(line, "price_expr", "price"))
     kind = line_kind(line, types)
     if kind:

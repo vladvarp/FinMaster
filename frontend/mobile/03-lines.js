@@ -74,7 +74,7 @@
   }
 
   function lineTotals(line, order) {
-    const qty = numExpr(line, "qty_expr", "quantity");
+    const qty = round2(numExpr(line, "qty_expr", "quantity"));
     const price = Math.max(0, numExpr(line, "price_expr", "price"));
     const kind = typeKind(line.order_type);
     if (kind) {
@@ -140,7 +140,7 @@
 
   function qtyText(line) {
     const t = lineTotals(line);
-    const q = Math.round(t.qty * 1000) / 1000;
+    const q = round2(t.qty);
     return `${qtyFmt.format(q)} ${line.unit || ""}`.trim();
   }
 

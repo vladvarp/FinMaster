@@ -435,9 +435,7 @@
 
   function formatCalcNumber(value) {
     if (!Number.isFinite(value)) return "";
-    const rounded = Math.round(value * 1e6) / 1e6;
-    if (Number.isInteger(rounded)) return String(rounded);
-    return String(rounded).replace(/\.?0+$/, "");
+    return value.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
   }
 
   /** Владелец входа поля заказа (по всем схемам). */
@@ -1390,11 +1388,12 @@
             const prev = line[exprKey] != null ? String(line[exprKey]).trim() : "";
             if (prev === next) return;
             line[exprKey] = next;
-            if (parsed.field === "qty") line.quantity = Number(raw) || 0;
-            if (parsed.field === "price") line.price = Number(raw) || 0;
-            if (parsed.field === "discount") line.discount = Number(raw) || 0;
-            if (parsed.field === "paid") line.paid = Number(raw) || 0;
-            if (parsed.field === "percent") line.tax_percent = Number(raw) || 0;
+            const stored = Number(next) || 0;
+            if (parsed.field === "qty") line.quantity = stored;
+            if (parsed.field === "price") line.price = stored;
+            if (parsed.field === "discount") line.discount = stored;
+            if (parsed.field === "paid") line.paid = stored;
+            if (parsed.field === "percent") line.tax_percent = stored;
             session.orderWritePending = true;
           });
 
