@@ -4168,6 +4168,7 @@
       });
       return {
         height: layout.height,
+        color: markHex(layout.color || node.color, "#65a30d"),
         points: layout.points.map((p) => ({ id: p.id, x: p.x, y: p.y })),
         wallNames,
         openings: [],
@@ -4180,6 +4181,7 @@
       const holes = node.holes.map((hole) => resolveHole(hole, base, node, values));
       return {
         height: base.height,
+        color: base.color,
         points: base.points.map((p) => ({ id: p.id, x: p.x, y: p.y })),
         wallNames: base.wallNames,
         openings: (base.openings || []).concat(holes),
@@ -4306,43 +4308,37 @@
     return Math.max(0, plannerRound(area));
   }
 
-  function markToneInputs(node) {
-    const tones = markTones(node);
-    const swatch = `linear-gradient(90deg, ${tones.floor} 0 34%, ${tones.ceiling} 34% 67%, ${tones.wall} 67% 100%)`;
-    const row = (key, title) => `<label class="calc-tone-row"><span>${title}</span><input type="color" data-mark-tone="${key}" data-node-tone="${esc(node.id)}" value="${esc(tones[key])}" aria-label="${title}" /></label>`;
-    return `<span class="calc-tone"><button type="button" class="calc-tone-btn" data-tone-open="${esc(node.id)}" title="Цвета: пол, потолок, стены" aria-label="Цвета" style="background:${swatch}"></button><div class="calc-tone-pop" hidden>${[["floor", "Пол"], ["ceiling", "Потолок"], ["wall", "Стены"]].map(([key, title]) => row(key, title)).join("")}</div></span>`;
+  function markToneInputs() {
+    return "";
   }
 
-  function applyMarkTone(node, nodeEl, key, value) {
-    const tones = markTones(node);
-    if (tones[key] == null) return;
-    tones[key] = markHex(value, tones[key]);
-    node.color = node.type === "openings" ? tones.wall : tones.floor;
-    if (nodeEl) {
-      nodeEl.style.setProperty("--mark-floor", tones.floor);
-      nodeEl.style.setProperty("--mark-ceiling", tones.ceiling);
-      nodeEl.style.setProperty("--mark-wall", tones.wall);
-      nodeEl.style.setProperty("--planner-color", node.color);
-      const btn = nodeEl.querySelector(".calc-tone-btn");
-      if (btn) btn.style.background = `linear-gradient(90deg, ${tones.floor} 0 34%, ${tones.ceiling} 34% 67%, ${tones.wall} 67% 100%)`;
+  function markRotateHue(value, shift) {
+    const hex = markHex(value, "#65a30d");
+    const r = parseInt(hex.slice(1, 3), 16) / 255;
+    const g = parseInt(hex.slice(3, 5), 16) / 255;
+    const b = parseInt(hex.slice(5, 7), 16) / 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const delta = max - min;
+    let h = 0;
+    if (delta) {
+      if (max === r) h = 60 * (((g - b) / delta) % 6);
+      else if (max === g) h = 60 * ((b - r) / delta + 2);
+      else h = 60 * ((r - g) / delta + 4);
     }
-    if (session.mark?.id === node.id) markDraw();
-    dirty();
+    h = (h + shift + 360) % 360;
+    const l = (max + min) / 2;
+    const sat = delta ? delta / (1 - Math.abs(2 * l - 1)) : 0;
+    const c = (1 - Math.abs(2 * l - 1)) * sat;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l - c / 2;
+    const rgb = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+    return "#" + rgb.map((v) => Math.round((v + m) * 255).toString(16).padStart(2, "0")).join("");
   }
 
-  function markTones(node) {
-    const rand = () => GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
-    if (!node.tones || typeof node.tones !== "object") {
-      const base = markHex(node.color, rand());
-      node.tones = node.type === "openings"
-        ? { floor: "#0284c7", ceiling: "#eab308", wall: base }
-        : { floor: base, ceiling: rand(), wall: rand() };
-    }
-    node.tones.floor = markHex(node.tones.floor, "#0284c7");
-    node.tones.ceiling = markHex(node.tones.ceiling, "#eab308");
-    node.tones.wall = markHex(node.tones.wall, "#94a3b8");
-    node.color = node.type === "openings" ? node.tones.wall : node.tones.floor;
-    return node.tones;
+  function markTones(node, plannerColor) {
+    const floor = markHex(plannerColor, "#65a30d");
+    return { floor, ceiling: markRotateHue(floor, 120), wall: markRotateHue(floor, 240) };
   }
 
   function ensureOpenings(node) {
@@ -4377,7 +4373,6 @@
     if (!node.outOn || typeof node.outOn !== "object") {
       node.outOn = { "count:pick": true, "count:door": true, "count:window": true, "count:pipe": true, "count:hatch": true };
     }
-    markTones(node);
     node.name = String(node.name || "").trim().slice(0, 48) || "Проёмы";
     return node;
   }
@@ -4417,7 +4412,6 @@
     });
     node.fixtures = list;
     if (!node.outOn || typeof node.outOn !== "object") node.outOn = {};
-    markTones(node);
     node.name = String(node.name || "").trim().slice(0, 48) || "Электрика";
     return node;
   }
@@ -4701,7 +4695,7 @@
     const outputs = openingOutputs(node, bp, graph.values, bp.links);
     const sub = plan ? `${plannerWalls(plan).length} стен · ${(outPlan?.openings || []).length} проёмов` : "нет чертежа";
     const binds = inputs.filter((port) => port.id !== PLAN_PORT);
-    const tones = markTones(node);
+    const tones = markTones(node, plan?.color);
     return `<article class="calc-node is-openings ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(tones.floor)};--mark-floor:${esc(tones.floor)};--mark-ceiling:${esc(tones.ceiling)};--mark-wall:${esc(tones.wall)}">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
@@ -4740,7 +4734,7 @@
     const frames = node.fixtures.filter((item) => item.kind !== "light").length;
     const sub = plan ? `${sockets} шт. · ${frames} рамок` : "нет чертежа";
     const linked = (bp.links || []).some((link) => link.to === node.id && link.toPort === PLAN_PORT);
-    const tones = markTones(node);
+    const tones = markTones(node, plan?.color);
     return `<article class="calc-node is-electrics ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(tones.floor)};--mark-floor:${esc(tones.floor)};--mark-ceiling:${esc(tones.ceiling)};--mark-wall:${esc(tones.wall)}">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
@@ -4749,7 +4743,7 @@
         <button type="button" class="calc-text-btn" data-mark-edit="${esc(node.id)}" title="Розетки и свет">Редактор</button>
         <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
       </header>
-      ${plan ? `<div class="calc-film calc-film-top">${filmStrip(plan, node.id, "", plan?.openings || [], node.fixtures, markTones(node))}</div>` : ""}
+      ${plan ? `<div class="calc-film calc-film-top">${filmStrip(plan, node.id, "", plan?.openings || [], node.fixtures, markTones(node, plan?.color))}</div>` : ""}
       <div class="calc-node-sub">${esc(sub)}</div>
       <div class="calc-ports">
         <div class="calc-row in">
@@ -5128,7 +5122,7 @@
     if (film) {
       const holes = ctx.node.type === "openings" ? ctx.full?.openings || [] : ctx.base?.openings || [];
       const fixtures = ctx.node.type === "electrics" ? ctx.node.fixtures : [];
-      film.innerHTML = ctx.base ? filmStrip(ctx.base, "", surface, holes, fixtures, markTones(ctx.node)) : `<div class="calc-empty">Нет чертежа</div>`;
+      film.innerHTML = ctx.base ? filmStrip(ctx.base, "", surface, holes, fixtures, markTones(ctx.node, ctx.base.color)) : `<div class="calc-empty">Нет чертежа</div>`;
     }
     let locate = $("mark-locate");
     const wrap = $("mark-canvas")?.parentElement;
@@ -5248,6 +5242,7 @@
       return;
     }
     const surface = session.mark.surface;
+    const tones = markTones(ctx.node, ctx.base.color);
     if (view.kind === "plan") {
       g.beginPath();
       ctx.base.points.forEach((p, index) => {
@@ -5256,7 +5251,6 @@
         else g.moveTo(spot.x, spot.y);
       });
       g.closePath();
-      const tones = markTones(ctx.node);
       g.fillStyle = surface === "ceiling" ? tones.ceiling : tones.floor;
       g.globalAlpha = 0.22;
       g.fill();
@@ -5267,11 +5261,11 @@
     } else {
       const a = view.toAlong(0, 0);
       const b = view.toAlong(view.wall.len, view.height);
-      g.fillStyle = markTones(ctx.node).wall;
+      g.fillStyle = tones.wall;
       g.globalAlpha = 0.34;
       g.fillRect(a.x, b.y, b.x - a.x, a.y - b.y);
       g.globalAlpha = 1;
-      g.strokeStyle = markTones(ctx.node).wall;
+      g.strokeStyle = tones.wall;
       g.lineWidth = 2;
       g.strokeRect(a.x, b.y, b.x - a.x, a.y - b.y);
     }
@@ -9703,15 +9697,6 @@
       }, 1400);
     });
     root.addEventListener("click", (e) => {
-      const toneBtn = e.target.closest("[data-tone-open]");
-      if (toneBtn) {
-        const pop = toneBtn.parentElement?.querySelector(".calc-tone-pop");
-        const willOpen = !!pop?.hidden;
-        root.querySelectorAll(".calc-tone-pop").forEach((el) => { el.hidden = true; });
-        if (pop && willOpen) pop.hidden = false;
-        return;
-      }
-      if (!e.target.closest(".calc-tone-pop")) root.querySelectorAll(".calc-tone-pop").forEach((el) => { el.hidden = true; });
       const clearMulti = e.target.closest("[data-filter-multi-clear]");
       if (clearMulti) {
         e.preventDefault();
@@ -9836,13 +9821,6 @@
       }
     });
     root.addEventListener("input", (e) => {
-      if (e.target.dataset?.markTone) {
-        const nodeEl = e.target.closest(".calc-node");
-        const bp = activeBlueprint();
-        const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node) : null;
-        if (node && (node.type === "openings" || node.type === "electrics")) applyMarkTone(node, nodeEl, e.target.dataset.markTone, e.target.value);
-        return;
-      }
       if (e.target.dataset?.plannerColor) {
         const nodeEl = e.target.closest("[data-node]");
         const bp = activeBlueprint();
@@ -10035,10 +10013,6 @@
         const title = $("mark-title");
         if (title && session.mark?.id === node.id) title.value = node.name;
         dirty();
-        return;
-      }
-      if (e.target.dataset.markTone && (node.type === "openings" || node.type === "electrics")) {
-        applyMarkTone(node, nodeEl, e.target.dataset.markTone, e.target.value);
         return;
       }
       if (e.target.dataset.plannerColor && node.type === "planner") {
