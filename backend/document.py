@@ -448,14 +448,17 @@ def _planner_points(raw: Any) -> list[dict[str, Any]]:
     ]
 
 
-def _planner_outs(raw: Any, points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _planner_outs(
+    raw: Any,
+    points: list[dict[str, Any]],
+    floor_id: str = "floor",
+) -> list[dict[str, Any]]:
     wall_ids = [f"w:{point['id']}" for point in points]
     allowed = set(wall_ids)
-    allowed.add("floor")
+    allowed.add(floor_id)
     src = raw if isinstance(raw, list) else []
     floor_on = True
-    wall_on: dict[str, bool] = {}
-    wall_name: dict[str, str] = {}
+    wall_data: dict[str, dict[str, Any]] = {}
     sums: list[dict[str, Any]] = []
     for item in src[:40]:
         if not isinstance(item, dict):
@@ -467,13 +470,26 @@ def _planner_outs(raw: Any, points: list[dict[str, Any]]) -> list[dict[str, Any]
             wid = _clip_text(item.get("id"), 48)
             if wid not in allowed:
                 continue
-            wall_on[wid] = bool(item.get("on"))
-            wall_name[wid] = _planner_custom_name(item.get("name"))
+            axis = "length" if item.get("pogonazhAxis") == "length" else "height"
+            wall_data[wid] = {
+                "name": _planner_custom_name(item.get("name")),
+                "on": bool(item.get("on")),
+                "pogonazh": bool(item.get("pogonazh")),
+                "pogonazhAxis": axis,
+            }
         elif kind == "sum":
             sums.append(item)
-    outs: list[dict[str, Any]] = [{"id": "floor", "kind": "floor", "name": "Пол", "on": floor_on}]
+    outs: list[dict[str, Any]] = [{"id": floor_id, "kind": "floor", "name": "Пол", "on": floor_on}]
     for wid in wall_ids:
-        outs.append({"id": wid, "kind": "wall", "name": wall_name.get(wid, ""), "on": bool(wall_on.get(wid, False))})
+        data = wall_data.get(wid, {})
+        outs.append({
+            "id": wid,
+            "kind": "wall",
+            "name": data.get("name", ""),
+            "on": bool(data.get("on", False)),
+            "pogonazh": bool(data.get("pogonazh", False)),
+            "pogonazhAxis": data.get("pogonazhAxis", "height"),
+        })
     seen_sum: set[str] = set()
     for item in sums[:8]:
         sid = _clip_text(item.get("id"), 40)
@@ -485,22 +501,44 @@ def _planner_outs(raw: Any, points: list[dict[str, Any]]) -> list[dict[str, Any]
         raw_parts = item.get("parts") if isinstance(item.get("parts"), list) else []
         for part in raw_parts[:32]:
             key = _clip_text(part, 48)
+            if key == "floor":
+                key = floor_id
             if key not in allowed or key in seen_parts:
                 continue
             seen_parts.add(key)
             parts.append(key)
-        outs.append(
-            {
-                "id": sid,
-                "kind": "sum",
-                "name": _clip_text(item.get("name"), 48, "Сумма"),
-                "on": bool(item.get("on")),
-                "parts": parts,
-            }
-        )
+        outs.append({
+            "id": sid,
+            "kind": "sum",
+            "name": _clip_text(item.get("name"), 48, "Сумма"),
+            "on": bool(item.get("on")),
+            "parts": parts,
+        })
     if not src:
         outs.append({"id": "walls", "kind": "sum", "name": "Стены", "on": True, "parts": wall_ids})
     return outs
+
+
+def _calc_planner_layout(raw: Any, index: int) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    layout_id = _clip_text(raw.get("id"), 80)
+    if not layout_id:
+        return None
+    legacy = bool(raw.get("legacy"))
+    points = _planner_points(raw.get("points"))
+    floor_id = "floor" if legacy else f"floor:{layout_id}"
+    color = _hex_color(raw.get("color"), "#65a30d")
+    return {
+        "id": layout_id,
+        "legacy": legacy,
+        "name": _clip_text(raw.get("name"), 48, f"Планировка {index + 1}"),
+        "color": color,
+        "points": points,
+        "outs": _planner_outs(raw.get("outs"), points, floor_id),
+        "height": round(_float_in_range(raw.get("height"), 2.7, 0.2, 30.0), 4),
+        "heightOut": bool(raw.get("heightOut")),
+    }
 
 
 def _calc_out_on(raw: Any) -> dict[str, bool]:
@@ -791,6 +829,21 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         node["color"] = color
         node["points"] = _planner_points(raw.get("points"))
         node["outs"] = _planner_outs(raw.get("outs"), node["points"])
+        node["heightOut"] = bool(raw.get("heightOut"))
+        layouts_raw = raw.get("layouts")
+        layouts: list[dict[str, Any]] = []
+        seen_layouts: set[str] = set()
+        if isinstance(layouts_raw, list):
+            for index, item in enumerate(layouts_raw[:12]):
+                layout = _calc_planner_layout(item, index)
+                if not layout or layout["id"] in seen_layouts:
+                    continue
+                seen_layouts.add(layout["id"])
+                layouts.append(layout)
+        if layouts:
+            node["layouts"] = layouts
+            active_layout = _clip_text(raw.get("layoutId"), 80)
+            node["layoutId"] = active_layout if active_layout in seen_layouts else layouts[0]["id"]
     elif kind in ("openings", "electrics"):
         fallback = _hex_color(raw.get("color"), "#65a30d")
         tones = _calc_tones(raw.get("tones"), fallback)
