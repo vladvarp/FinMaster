@@ -3152,6 +3152,12 @@
     const title = $("planner-title");
     const layout = plannerActive(node);
     if (title && document.activeElement !== title) title.value = layout?.name || "Планировка 1";
+    const picker = $("planner-layout-pick");
+    if (picker) {
+      const options = (node.layouts || []).map((item) => `<option value="${esc(item.id)}" ${item.id === node.layoutId ? "selected" : ""}>${esc(item.name)}</option>`).join("");
+      picker.innerHTML = `${options}<option value="__new">＋ Создать планировку</option>`;
+      picker.disabled = false;
+    }
     const paste = $("planner-paste");
     if (paste) paste.hidden = !plannerClip;
     plannerDraw();
@@ -3344,6 +3350,7 @@
     modal.id = "planner-modal";
     modal.innerHTML = `<div class="modal-card planner-modal" role="dialog" aria-label="Планировщик">
       <div class="planner-head">
+        <select id="planner-layout-pick" class="calc-plan-pick planner-layout-pick" aria-label="Выбор планировки" title="Выбрать или создать планировку"></select>
         <input id="planner-title" class="planner-title" maxlength="48" spellcheck="false" aria-label="Имя планировки" />
         <label>Высота <input id="planner-height" inputmode="decimal" aria-label="Высота стен, метры" /> м</label>
         <label>Ширина <input id="planner-width" inputmode="decimal" aria-label="Ширина, метры" /> м</label>
@@ -7882,10 +7889,7 @@
     const model = plannerModel(node);
     const ports = plannerOutputs(node, bp.links);
     const sub = `пол ${fmtShort(model.floor)} м² · ${model.walls.length} стен · h ${fmtShort(model.height)} м`;
-    const pick = `<select class="calc-plan-pick" data-planner-pick="${esc(node.id)}" aria-label="Планировка" title="Планировка">
-      <option value="__new">Создать</option>
-      ${node.layouts.map((layout) => `<option value="${esc(layout.id)}" ${layout.id === node.layoutId ? "selected" : ""}>${esc(layout.name)}</option>`).join("")}
-    </select>`;
+
     const film = node.layouts.map((layout) => `<button type="button" class="calc-film-card ${layout.id === node.layoutId ? "is-on" : ""}" data-planner-layout="${esc(layout.id)}" data-planner-edit="${esc(node.id)}" title="${esc(layout.name)}"><span class="calc-film-name">${esc(layout.name)}</span>${plannerThumb(layout.points, true, layout.color)}</button>`).join("");
     const groups = node.layouts.map((layout) => {
       const rows = ports.filter((port) => port.layoutId === layout.id);
@@ -7895,7 +7899,6 @@
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <input class="calc-pname calc-planner-name" data-planner-title="${esc(node.id)}" value="${esc(plannerName(node))}" maxlength="48" spellcheck="false" title="Имя планировщика" aria-label="Имя планировщика" />
-        ${pick}
         <input class="calc-planner-color" type="color" data-planner-color="${esc(node.id)}" value="${esc(node.color || "#65a30d")}" title="Цвет текущей планировки" aria-label="Цвет текущей планировки" />
         <button type="button" class="calc-text-btn" data-planner-edit="${esc(node.id)}" title="План пола и площади">Редактор</button>
         <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
@@ -9795,7 +9798,9 @@
     root.addEventListener("change", (e) => {
       const nodeEl = e.target.closest(".calc-node, .calc-group-chrome");
       const bp = activeBlueprint();
-      const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node) : null;
+      const plannerPick = e.target.matches?.("[data-planner-pick]") ? e.target : null;
+      const plannerId = plannerPick?.dataset.plannerPick || "";
+      const node = bp ? bp.nodes.find((item) => item.id === (plannerId || nodeEl?.dataset.node)) : null;
       if (!node) return;
       if (e.target.dataset.resultName && node.type === "result") {
         node.name = String(e.target.value || "").trim().slice(0, 48) || "Результат";
@@ -9810,13 +9815,20 @@
         dirty();
         return;
       }
-      if (e.target.dataset.plannerPick && node.type === "planner") {
-        const value = e.target.value;
-        if (value === "__new") plannerAddLayout(node);
-        else plannerUseLayout(node, value);
-        if (session.planner) session.planner.sel = null;
-        if ($("planner-modal")?.classList.contains("open") && session.planner?.id === node.id) plannerCommit(true);
-        else {
+      if (plannerPick && node.type === "planner") {
+        const value = plannerPick.value;
+        if (value === "__new") {
+          const created = plannerAddLayout(node);
+          if (!created) {
+            plannerPick.value = node.layoutId;
+            api?.toast?.("Достигнут лимит планировок");
+            return;
+          }
+        } else plannerUseLayout(node, value);
+        if (session.planner?.id === node.id) {
+          session.planner.sel = null;
+          plannerCommit(true);
+        } else {
           dirty();
           render();
         }
