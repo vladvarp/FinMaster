@@ -845,11 +845,7 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
             active_layout = _clip_text(raw.get("layoutId"), 80)
             node["layoutId"] = active_layout if active_layout in seen_layouts else layouts[0]["id"]
     elif kind in ("openings", "electrics"):
-        fallback = _hex_color(raw.get("color"), "#65a30d")
-        tones = _calc_tones(raw.get("tones"), fallback)
         node["name"] = _clip_text(raw.get("name"), 48, "Проёмы" if kind == "openings" else "Электрика")
-        node["tones"] = tones
-        node["color"] = tones["wall"] if kind == "openings" else tones["floor"]
         node["outOn"] = _calc_out_on(raw.get("outOn"))
         view = _clip_text(raw.get("view"), 80)
         if view:
