@@ -3152,11 +3152,11 @@
     const title = $("planner-title");
     const layout = plannerActive(node);
     if (title && document.activeElement !== title) title.value = layout?.name || "Планировка 1";
-    const picker = $("planner-layout-pick");
-    if (picker) {
-      const options = (node.layouts || []).map((item) => `<option value="${esc(item.id)}" ${item.id === node.layoutId ? "selected" : ""}>${esc(item.name)}</option>`).join("");
-      picker.innerHTML = `${options}<option value="__new">＋ Создать планировку</option>`;
-      picker.disabled = false;
+    const picker = $("planner-layout-trigger");
+    const menu = $("planner-layout-menu");
+    if (picker && menu) {
+      picker.textContent = layout?.name || "Планировка";
+      menu.innerHTML = `${(node.layouts || []).map((item) => `<button type="button" class="planner-layout-option ${item.id === node.layoutId ? "is-active" : ""}" role="menuitem" data-planner-layout-choice="${esc(item.id)}">${esc(item.name)}</button>`).join("")}<div class="planner-layout-menu-sep"></div><button type="button" class="planner-layout-option is-create" role="menuitem" data-planner-layout-choice="__new">＋ Создать планировку</button>`;
     }
     const paste = $("planner-paste");
     if (paste) paste.hidden = !plannerClip;
@@ -3350,7 +3350,10 @@
     modal.id = "planner-modal";
     modal.innerHTML = `<div class="modal-card planner-modal" role="dialog" aria-label="Планировщик">
       <div class="planner-head">
-        <select id="planner-layout-pick" class="calc-plan-pick planner-layout-pick" aria-label="Выбор планировки" title="Выбрать или создать планировку"></select>
+        <div class="planner-layout-control" id="planner-layout-control">
+          <button type="button" class="planner-layout-trigger" id="planner-layout-trigger" aria-haspopup="true" aria-expanded="false">Планировка</button>
+          <div class="planner-layout-menu" id="planner-layout-menu" role="menu" hidden></div>
+        </div>
         <input id="planner-title" class="planner-title" maxlength="48" spellcheck="false" aria-label="Имя планировки" />
         <label>Высота <input id="planner-height" inputmode="decimal" aria-label="Высота стен, метры" /> м</label>
         <label>Ширина <input id="planner-width" inputmode="decimal" aria-label="Ширина, метры" /> м</label>
@@ -3405,19 +3408,37 @@
       if (e.target === modal) closePlanner();
     });
     $("planner-close")?.addEventListener("click", () => closePlanner());
-    $("planner-layout-pick")?.addEventListener("change", (e) => {
+    $("planner-layout-trigger")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const menu = $("planner-layout-menu");
+      if (!menu) return;
+      const opening = menu.hidden;
+      menu.hidden = !opening;
+      $("planner-layout-trigger")?.setAttribute("aria-expanded", String(opening));
+    });
+    $("planner-layout-menu")?.addEventListener("click", (e) => {
+      const option = e.target.closest("[data-planner-layout-choice]");
+      if (!option) return;
       const node = plannerNode();
       if (!node) return;
-      if (e.target.value === "__new") {
+      const value = option.dataset.plannerLayoutChoice;
+      if (value === "__new") {
         const created = plannerAddLayout(node);
         if (!created) {
-          e.target.value = node.layoutId;
           api?.toast?.("Достигнут лимит планировок");
           return;
         }
-      } else plannerUseLayout(node, e.target.value);
+      } else plannerUseLayout(node, value);
+      $("planner-layout-menu").hidden = true;
+      $("planner-layout-trigger")?.setAttribute("aria-expanded", "false");
       if (session.planner) session.planner.sel = null;
       plannerCommit(true);
+    });
+    $("planner-modal")?.addEventListener("click", (e) => {
+      if (e.target.closest("#planner-layout-control")) return;
+      const menu = $("planner-layout-menu");
+      if (menu) menu.hidden = true;
+      $("planner-layout-trigger")?.setAttribute("aria-expanded", "false");
     });
     $("planner-title")?.addEventListener("input", (e) => {
       const node = plannerNode();
