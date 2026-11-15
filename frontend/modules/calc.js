@@ -8891,6 +8891,30 @@
       $("calc-board").setPointerCapture(e.pointerId);
       return;
     }
+    const plannerCard = e.target.closest(".calc-film-card[data-planner-layout]");
+    if (plannerCard) {
+      const nodeEl = plannerCard.closest(".calc-node");
+      const nodeId = nodeEl?.dataset.node;
+      const planner = bp.nodes.find((item) => item.id === nodeId && item.type === "planner");
+      if (planner) {
+        const changed = plannerUseLayout(planner, plannerCard.dataset.plannerLayout);
+        session.selected = planner.id;
+        session.selectedLink = "";
+        nodeEl.querySelectorAll(".calc-film-card[data-planner-layout]").forEach((card) => {
+          card.classList.toggle("is-on", card === plannerCard);
+        });
+        nodeEl.querySelectorAll(".calc-node").forEach((el) => el.classList.remove("is-on"));
+        nodeEl.classList.add("is-on");
+        const colorInput = nodeEl.querySelector("[data-planner-color]");
+        if (colorInput) colorInput.value = planner.color || "#65a30d";
+        nodeEl.style.setProperty("--planner-color", planner.color || "#65a30d");
+        drawWires(bp, computeGraph(bp));
+        if (changed) dirty();
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     const port = e.target.closest(".calc-port");
     const node = e.target.closest(".calc-node, .calc-group-chrome");
     const drag = e.target.closest("[data-drag-node]");
@@ -9760,13 +9784,22 @@
         const nodeEl = e.target.closest("[data-node]");
         const bp = activeBlueprint();
         const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node) : null;
-        if (node?.type === "planner" || node?.type === "openings" || node?.type === "electrics") {
+        if (node?.type === "planner") {
+          node.color = String(e.target.value || "#65a30d").toLowerCase();
+          const layout = plannerActive(node);
+          if (layout) layout.color = node.color;
+          nodeEl.style.setProperty("--planner-color", node.color);
+          const card = nodeEl.querySelector(`.calc-film-card[data-planner-layout="${cssEsc(node.layoutId)}"]`);
+          const thumb = card?.querySelector(".calc-planner-thumb");
+          if (thumb) thumb.style.setProperty("--film-tone", node.color);
+          const path = thumb?.querySelector("path");
+          if (path) path.style.stroke = node.color;
+          dirty();
+        } else if (node?.type === "openings" || node?.type === "electrics") {
           node.color = String(e.target.value || "#65a30d").toLowerCase();
           nodeEl.style.setProperty("--planner-color", node.color);
           const path = nodeEl.querySelector(".calc-planner-thumb path");
-          if (path) {
-            path.style.stroke = node.color;
-          }
+          if (path) path.style.stroke = node.color;
         }
         return;
       }
