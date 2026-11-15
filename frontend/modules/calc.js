@@ -9836,7 +9836,7 @@
           nodeEl.style.setProperty("--planner-color", node.color);
           const card = nodeEl.querySelector(`.calc-film-card[data-planner-layout="${cssEsc(node.layoutId)}"]`);
           const thumb = card?.querySelector(".calc-planner-thumb");
-          if (thumb) thumb.style.setProperty("--planner-color", node.color);
+          if (thumb) thumb.style.setProperty("--film-tone", node.color);
 
           // Распространяем цвет по всей цепочке чертежей, а не только по прямым связям с планировщиком.
           // Обновление выполняется без render(), чтобы не закрывать системный выбор цвета.
