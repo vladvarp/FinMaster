@@ -14,6 +14,9 @@
 <body>
   <div class="modal-card planner-modal" role="dialog" aria-label="Проёмы">
     <div class="planner-head">
+      <div class="planner-layout-control">
+        <button type="button" class="planner-layout-trigger" tabindex="-1">Кухня</button>
+      </div>
       <input class="planner-title" value="Проёмы" maxlength="48" readonly tabindex="-1" aria-label="Имя" />
       <button type="button" class="btn" tabindex="-1">Сброс</button>
       <button type="button" class="btn primary" tabindex="-1">Готово</button>
@@ -21,8 +24,15 @@
     <div class="planner-body">
       <div class="planner-stage">
         <div class="planner-cap">Стена 1</div>
-        <div class="planner-plan-wrap"><canvas id="mark-canvas"></canvas></div>
+        <div class="planner-plan-wrap">
+          <canvas id="mark-canvas"></canvas>
+          <div class="planner-clip">
+            <button type="button" class="planner-clip-btn" tabindex="-1" title="Вставить" aria-label="Вставить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h8v2h2a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2V5z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 5.5h6V7H9z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button>
+            <button type="button" class="planner-clip-btn" tabindex="-1" title="Копировать" aria-label="Копировать"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 15V5.5A1.5 1.5 0 0 1 6.5 4H16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+          </div>
+        </div>
         <div class="planner-hint"><span>Правый клик: прямоугольник, круг или диаметр. У пола прямоугольник становится дверью.</span></div>
+        <div class="calc-film-label">Кухня</div>
         <div class="mark-film">
           <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Пол</span><svg class="calc-film-thumb" style="--film-tone:#0ea5e9" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 10H56V36H8Z"/></svg></button>
           <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Потолок</span><svg class="calc-film-thumb is-ceiling" style="--film-tone:#e90ea5" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 10H56V36H8Z"/></svg></button>
@@ -60,10 +70,10 @@
           <div class="planner-block-h">На ноду</div>
           <div class="planner-parts">
             <label class="planner-part"><input type="checkbox" checked tabindex="-1" /> <span>Стена 1</span> <em>6,4 м²</em></label>
-            <label class="planner-part"><input type="checkbox" checked tabindex="-1" /> <span>Проёмы</span> <em>3</em></label>
-            <label class="planner-part"><input type="checkbox" checked tabindex="-1" /> <span>Двери</span> <em>1</em></label>
-            <label class="planner-part"><input type="checkbox" checked tabindex="-1" /> <span>Окна</span> <em>1</em></label>
-            <label class="planner-part"><input type="checkbox" checked tabindex="-1" /> <span>Трубы</span> <em>1</em></label>
+            <label class="planner-part"><input type="checkbox" tabindex="-1" /> <span>Проёмы</span> <em>3</em></label>
+            <label class="planner-part"><input type="checkbox" tabindex="-1" /> <span>Двери</span> <em>1</em></label>
+            <label class="planner-part"><input type="checkbox" tabindex="-1" /> <span>Окна</span> <em>1</em></label>
+            <label class="planner-part"><input type="checkbox" tabindex="-1" /> <span>Трубы</span> <em>1</em></label>
           </div>
         </div>
       </div>

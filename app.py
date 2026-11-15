@@ -604,12 +604,13 @@ def favicon_svg():
     return send_from_directory(FRONTEND, "favicon.svg", mimetype="image/svg+xml")
 
 
-# app.js, mobile.js и стили — папки с частями 01-, 02-. Браузер получает прежние адреса.
+# app.js, mobile.js, calc.js и стили — папки с частями 01-, 02-. Браузер получает прежние адреса.
 # Части остаются одной областью видимости, без import.
-# Модули в frontend/modules — уже целые файлы, адреса те же.
+# Остальные модули в frontend/modules — целые файлы, адреса те же.
 _SOURCE_BUNDLES = {
     "app.js": ("app", "js"),
     "mobile.js": ("mobile", "js"),
+    "calc.js": ("modules/calc", "js"),
     "styles.css": ("app/styles", "css"),
     "mobile.css": ("mobile/styles", "css"),
 }
@@ -617,7 +618,6 @@ _SOURCE_BUNDLES = {
 _MODULE_FILES = (
     "charts.js",
     "cloud.js",
-    "calc.js",
     "presentation.js",
     "pdf.js",
     "vault.js",
@@ -678,7 +678,7 @@ def _bundle_bytes(folder: str, ext: str) -> bytes | None:
 @app.get("/vault.js")
 @app.get("/datepicker.js")
 def bundled_source():
-    """Модули отдаёт готовым файлом. app, mobile и стили склеивает по префиксу 01-, 02-."""
+    """Модули отдаёт готовым файлом. app, mobile, calc и стили склеивает по префиксу 01-, 02-."""
     filename = request.path.rsplit("/", 1)[-1]
     if filename in _MODULE_FILES:
         return _no_cache(send_from_directory(os.path.join(FRONTEND, "modules"), filename))

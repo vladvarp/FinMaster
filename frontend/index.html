@@ -595,7 +595,11 @@
               <div class="calc-board-tools">
                 <button type="button" class="calc-refresh" id="calc-refresh" title="Пересчитать схему">↻</button>
                 <button type="button" class="calc-present-btn" id="calc-present-btn" title="Блоки презентации" aria-pressed="false">▣</button>
-                <button type="button" class="calc-chain-move" id="calc-chain-move" title="Тянуть цепочку входов" aria-pressed="false">⛓</button>
+                <button type="button" class="calc-chain-move" id="calc-chain-move" data-chain="off" title="Выключен" aria-pressed="false" aria-label="Тянуть цепочку">
+                  <svg class="calc-chain-ico calc-chain-off" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9.2 14.8 7.2 16.8a3.2 3.2 0 0 1-4.5-4.5l2-2M14.8 9.2 16.8 7.2a3.2 3.2 0 0 1 4.5 4.5l-2 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M5 19 19 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                  <svg class="calc-chain-ico calc-chain-in" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="3" cy="12" r="1.6" fill="currentColor"/><circle cx="7.6" cy="12" r="1.6" fill="currentColor"/><path d="M9.4 12h3.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M11.4 9.2 15 12l-3.6 2.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="15.6" y="6.5" width="6.4" height="11" rx="1.6" stroke="currentColor" stroke-width="1.8"/></svg>
+                  <svg class="calc-chain-ico calc-chain-out" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="6.5" width="6.4" height="11" rx="1.6" stroke="currentColor" stroke-width="1.8"/><path d="M9 9.2 12.6 12 9 14.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M11.4 12h3.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="16.4" cy="12" r="1.6" fill="currentColor"/><circle cx="21" cy="12" r="1.6" fill="currentColor"/></svg>
+                </button>
                 <button type="button" class="calc-prune" id="calc-prune" title="Убрать ноды без связей">∅</button>
               </div>
               <input id="calc-bp-name" class="calc-bp-name" maxlength="48" spellcheck="false" title="Название схемы" />

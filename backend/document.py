@@ -541,6 +541,74 @@ def _calc_planner_layout(raw: Any, index: int) -> dict[str, Any] | None:
     }
 
 
+def _calc_feeds(raw: Any) -> list[dict[str, Any]]:
+    feeds: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or len(feeds) >= 8:
+            continue
+        feed_id = _clip_text(item.get("id"), 80)
+        if not feed_id:
+            continue
+        port = _clip_text(item.get("port"), 80)
+        if not port:
+            port = "plan" if feed_id == "main" else f"plan:{feed_id}"
+        if port in seen:
+            continue
+        seen.add(port)
+        feeds.append({"id": feed_id, "port": port})
+    return feeds
+
+
+def _calc_commons(raw: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    outs = 0
+    seps = 0
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        row_id = _clip_text(item.get("id"), 80)
+        if not row_id or row_id in seen:
+            continue
+        if item.get("kind") == "sep":
+            if seps >= 8:
+                continue
+            seen.add(row_id)
+            seps += 1
+            rows.append({"id": row_id, "kind": "sep"})
+            continue
+        if outs >= 20:
+            continue
+        seen.add(row_id)
+        outs += 1
+        terms: list[dict[str, Any]] = []
+        for term in item.get("terms") if isinstance(item.get("terms"), list) else []:
+            if not isinstance(term, dict) or len(terms) >= 12:
+                continue
+            op = term.get("op") if term.get("op") in ("+", "-", "*", "/") else "+"
+            if term.get("kind") == "num":
+                try:
+                    num = float(term.get("num"))
+                except (TypeError, ValueError):
+                    num = 0.0
+                if num != num:
+                    num = 0.0
+                terms.append({"op": op, "kind": "num", "num": round(max(-1_000_000.0, min(1_000_000.0, num)), 4)})
+            else:
+                port = _clip_text(term.get("port"), 80)
+                if port:
+                    terms.append({"op": op, "kind": "ref", "port": port})
+        rows.append({
+            "id": row_id,
+            "kind": "out",
+            "name": _clip_text(item.get("name"), 48, "Итог"),
+            "on": item.get("on") is not False,
+            "terms": terms,
+        })
+    return rows
+
+
 def _calc_out_on(raw: Any) -> dict[str, bool]:
     if not isinstance(raw, dict):
         return {}
@@ -592,6 +660,7 @@ def _calc_holes(raw: Any) -> list[dict[str, Any]]:
                 "bind": {"w": bool(bind.get("w")), "h": bool(bind.get("h")), "d": bool(bind.get("d"))},
                 "picked": item.get("picked") is not False,
                 "name": _clip_text(item.get("name"), 48),
+                "feed": _clip_text(item.get("feed"), 80),
             }
         )
     return holes
@@ -656,6 +725,7 @@ def _calc_fixtures(raw: Any) -> list[dict[str, Any]]:
                 "lw": round(_float_in_range(item.get("lw"), 0.6, 0.05, 8.0), 4),
                 "ll": round(_float_in_range(item.get("ll"), 1.2, 0.05, 12.0), 4),
                 "angle": round(_float_in_range(item.get("angle"), 90.0 if item.get("orient") == "v" else 0.0, -360.0, 360.0), 2) % 360,
+                "feed": _clip_text(item.get("feed"), 80),
             }
         )
     return fixtures
@@ -844,8 +914,13 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
             node["layouts"] = layouts
             active_layout = _clip_text(raw.get("layoutId"), 80)
             node["layoutId"] = active_layout if active_layout in seen_layouts else layouts[0]["id"]
+        commons = _calc_commons(raw.get("commons"))
+        if commons:
+            node["commons"] = commons
     elif kind in ("openings", "electrics"):
         node["name"] = _clip_text(raw.get("name"), 48, "Проёмы" if kind == "openings" else "Электрика")
+        if raw.get("filmsOff") is True:
+            node["filmsOff"] = True
         node["outOn"] = _calc_out_on(raw.get("outOn"))
         view = _clip_text(raw.get("view"), 80)
         if view:
@@ -865,6 +940,12 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
                     node["counterNames"] = counter_names
         else:
             node["fixtures"] = _calc_fixtures(raw.get("fixtures"))
+        feeds = _calc_feeds(raw.get("feeds"))
+        if feeds:
+            node["feeds"] = feeds
+        commons = _calc_commons(raw.get("commons"))
+        if commons:
+            node["commons"] = commons
     elif kind == "present":
         node["pageId"] = _clip_text(raw.get("pageId"), 80)
         node["blockId"] = _clip_text(raw.get("blockId"), 80)

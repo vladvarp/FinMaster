@@ -18,6 +18,9 @@
 <body>
   <div class="modal-card planner-modal" role="dialog" aria-label="Электрика">
     <div class="planner-head">
+      <div class="planner-layout-control">
+        <button type="button" class="planner-layout-trigger" tabindex="-1">Кухня</button>
+      </div>
       <input class="planner-title" value="Электрика" maxlength="48" readonly tabindex="-1" aria-label="Имя" />
       <button type="button" class="btn" tabindex="-1">Сброс</button>
       <button type="button" class="btn primary" tabindex="-1">Готово</button>
@@ -27,6 +30,10 @@
         <div class="planner-cap">Стена 1</div>
         <div class="planner-plan-wrap">
           <canvas id="mark-canvas"></canvas>
+          <div class="planner-clip">
+            <button type="button" class="planner-clip-btn" tabindex="-1" title="Вставить" aria-label="Вставить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h8v2h2a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2V5z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 5.5h6V7H9z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button>
+            <button type="button" class="planner-clip-btn" tabindex="-1" title="Копировать" aria-label="Копировать"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 15V5.5A1.5 1.5 0 0 1 6.5 4H16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+          </div>
           <div class="faq-menu">
             <b>Ориентация</b>
             <button type="button" tabindex="-1">Горизонтально</button>
@@ -45,6 +52,7 @@
           </div>
         </div>
         <div class="planner-hint"><span>Правый клик ставит выбранную розетку в эту точку. Рамка собирает несколько типов.</span></div>
+        <div class="calc-film-label">Кухня</div>
         <div class="mark-film">
           <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Пол</span><svg class="calc-film-thumb" style="--film-tone:#a78bfa" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 10H56V36H8Z"/></svg></button>
           <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Потолок</span><svg class="calc-film-thumb is-ceiling" style="--film-tone:#facc15" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 10H56V36H8Z"/><circle cx="32" cy="23" r="3"/></svg></button>

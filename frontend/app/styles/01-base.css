@@ -1906,7 +1906,8 @@ html[data-theme="dark"] .line-menu { background: #1b2538; border-color: var(--li
   padding: 24px;
 }
 .modal.open { display: grid; }
-#close-modal { z-index: 1000000; }
+#close-modal.open,
+#new-modal.open { z-index: 1000000 !important; }
 .modal-card {
   width: min(460px, 100%);
   background: #fff;

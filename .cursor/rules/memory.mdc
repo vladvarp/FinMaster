@@ -33,6 +33,6 @@ alwaysApply: true
 
 ## Модули
 
-- `frontend/modules` — один файл на модуль: `calc.js`, `charts.js`, `cloud.js`, `datepicker.js`, `pdf.js`, `presentation.js`, `vault.js`.
-- Не режь их снова на `01-`, `02-`. Адреса в браузере те же: `/calc.js` и остальные.
-- `frontend/app`, `frontend/mobile` и стили по-прежнему части с префиксом `01-`. Сервер склеивает их и снимает `/* bundle-seam */`.
+- `frontend/modules` — один файл на модуль: `charts.js`, `cloud.js`, `datepicker.js`, `pdf.js`, `presentation.js`, `vault.js`.
+- Калькулятор разрезан внутри модулей: `frontend/modules/calc/01-` … `05-`. Адрес в браузере прежний: `/calc.js`. Остальные модули не резать.
+- `frontend/app`, `frontend/mobile`, `frontend/modules/calc` и стили — части с префиксом `01-`. Сервер склеивает их и снимает `/* bundle-seam */`.

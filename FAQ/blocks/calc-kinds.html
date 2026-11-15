@@ -356,48 +356,67 @@
 
   <section class="kind" data-kind="openings">
     <h2>Проёмы</h2>
-    <article class="calc-node is-openings">
+    <article class="calc-node is-openings" style="--planner-color:#0ea5e9;--mark-floor:#0ea5e9;--mark-ceiling:#e90ea5;--mark-wall:#a5e90e">
       <header class="calc-node-h">
         <input class="calc-pname calc-planner-name" value="Проёмы" maxlength="48" readonly tabindex="-1" aria-label="Имя проёмов" />
+        <button type="button" class="calc-films-toggle" tabindex="-1" title="Скрыть ленты" aria-label="Скрыть ленты" aria-pressed="true">
+          <svg class="is-show" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/><rect x="9" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/><rect x="16" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/></svg>
+          <svg class="is-hide" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/><rect x="9" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/><rect x="16" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/><path d="M4 20 20 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
         <button type="button" class="calc-text-btn" tabindex="-1">Редактор</button>
       </header>
-      <div class="calc-film calc-film-top">
-        <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Пол</span><svg class="calc-film-thumb" style="--film-tone:#0ea5e9" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 8H56V38H8Z"/></svg></button>
-        <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Потолок</span><svg class="calc-film-thumb is-ceiling" style="--film-tone:#faa78b" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 8H56V38H8Z"/></svg></button>
-        <button type="button" class="calc-film-card is-on" tabindex="-1"><span class="calc-film-name">Стена 1</span><svg class="calc-film-thumb is-wall" style="--film-tone:#8bfaa7" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/><rect x="14" y="16" width="10" height="22"/></svg></button>
-      </div>
       <div class="calc-node-sub">4 стены · 3 проёма</div>
       <div class="calc-ports">
-        <div class="calc-row in"><i class="calc-port in" data-signal="plan" title="Чертёж"></i><span>Чертёж</span><b class="calc-plan-tag">план</b></div>
-        <div class="calc-row in"><i class="calc-port in" title="Труба 1 · диаметр, мм"></i><span>Труба 1 · диаметр, мм</span><b>110</b></div>
-        <div class="calc-row out"><span class="calc-row-name">Чертёж</span><b class="calc-plan-tag">план</b><i class="calc-port out" data-signal="plan" title="Чертёж"></i></div>
-        <div class="calc-row out"><span class="calc-row-name">Стена 1</span><b>6,4 <small>м²</small></b><i class="calc-port out" title="Стена 1"></i></div>
-        <div class="calc-row out"><span class="calc-row-name">Двери</span><b>1 <small>шт</small></b><i class="calc-port out" title="Двери"></i></div>
+        <div class="calc-plan-group" style="--planner-color:#0ea5e9">
+          <div class="calc-film-label">Кухня</div>
+          <div class="calc-film calc-film-top">
+            <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Пол</span><svg class="calc-film-thumb" style="--film-tone:#0ea5e9" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 8H56V38H8Z"/></svg></button>
+            <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Потолок</span><svg class="calc-film-thumb is-ceiling" style="--film-tone:#e90ea5" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 8H56V38H8Z"/></svg></button>
+            <button type="button" class="calc-film-card is-on" tabindex="-1"><span class="calc-film-name">Стена 1</span><svg class="calc-film-thumb is-wall" style="--film-tone:#a5e90e" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/><rect x="14" y="16" width="10" height="22"/></svg></button>
+          </div>
+          <div class="calc-row in"><i class="calc-port in" data-signal="plan" title="Чертёж"></i><span>Чертёж</span><b class="calc-plan-tag">Кухня</b></div>
+          <div class="calc-row in"><i class="calc-port in" title="Труба 1 · диаметр, мм"></i><span>Труба 1 · диаметр, мм</span><b>110</b></div>
+          <div class="calc-row out"><span class="calc-row-name">Чертёж</span><b class="calc-plan-tag">Кухня</b><i class="calc-port out" data-signal="plan" title="Чертёж"></i></div>
+          <div class="calc-row out"><span class="calc-row-name">Стена 1</span><b>6,4 <small>м²</small></b><i class="calc-port out" title="Стена 1"></i></div>
+        </div>
+        <div class="calc-sec">Общий вывод</div>
+        <div class="calc-row out"><span class="calc-row-name">Двери и окна</span><b>3 <small>шт</small></b><i class="calc-port out" title="Двери и окна"></i></div>
+        <div class="calc-common-rule"></div>
+        <div class="calc-row out"><span class="calc-row-name">Итог</span><b>7 <small>шт</small></b><i class="calc-port out" title="Итог"></i></div>
       </div>
     </article>
-    <p>Вход «Чертёж» принимает план. Диаметр трубы пришёл с константы: 110 мм. Выход «Чертёж» — стены уже с вырезами. Плёнка сверху: имя кадра над миниатюрой, клик открывает пол, потолок или стену. Цвет пола наследуется от подключённой планировки; потолок и стены получают оттенки со сдвигом по цветовому кругу на 120° и 240° соответственно.</p>
+    <p>Вход «Чертёж» принимает план. Занятый вход открывает снизу следующий. Над плёнкой — имя планировки, под ней вход и выходы этого чертежа. Кнопка в шапке прячет все ленты. Диаметр трубы пришёл с константы: 110 мм. Выход «Чертёж» — стены уже с вырезами. Внизу, под «Общий вывод», свои итоги, между ними линия из редактора. Встроенные счётчики на карточке выключены, пока их не включат. Цвет пола наследуется от подключённой планировки; потолок и стены получают оттенки со сдвигом по цветовому кругу на 120° и 240° соответственно.</p>
   </section>
 
   <section class="kind" data-kind="electrics">
     <h2>Электрика</h2>
-    <article class="calc-node is-electrics">
+    <article class="calc-node is-electrics" style="--planner-color:#a78bfa;--mark-floor:#a78bfa;--mark-ceiling:#0ee9a0;--mark-wall:#e90e58">
       <header class="calc-node-h">
         <input class="calc-pname calc-planner-name" value="Электрика" maxlength="48" readonly tabindex="-1" aria-label="Имя электрики" />
+        <button type="button" class="calc-films-toggle" tabindex="-1" title="Скрыть ленты" aria-label="Скрыть ленты" aria-pressed="true">
+          <svg class="is-show" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/><rect x="9" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/><rect x="16" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/></svg>
+          <svg class="is-hide" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/><rect x="9" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/><rect x="16" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/><path d="M4 20 20 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
         <button type="button" class="calc-text-btn" tabindex="-1">Редактор</button>
       </header>
-      <div class="calc-film calc-film-top">
-        <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Пол</span><svg class="calc-film-thumb" style="--film-tone:#a78bfa" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 8H56V38H8Z"/></svg></button>
-        <button type="button" class="calc-film-card is-on" tabindex="-1"><span class="calc-film-name">Потолок</span><svg class="calc-film-thumb is-ceiling" style="--film-tone:#0ee9a0" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 8H56V38H8Z"/></svg></button>
-        <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Стена 1</span><svg class="calc-film-thumb is-wall" style="--film-tone:#e90e58" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/><rect x="22" y="20" width="16" height="8"/></svg></button>
-      </div>
       <div class="calc-node-sub">4 шт. · 2 рамки</div>
       <div class="calc-ports">
-        <div class="calc-row in"><i class="calc-port in" data-signal="plan" title="Чертёж"></i><span>Чертёж</span><b class="calc-plan-tag">план</b></div>
-        <div class="calc-row out"><span class="calc-row-name">Выключатель</span><b>1 <small>шт</small></b><i class="calc-port out" title="Выключатель"></i></div>
-        <div class="calc-row out"><span class="calc-row-name">Рамка · горизонталь · В–Р–И</span><b>1 <small>шт</small></b><i class="calc-port out" title="Рамка"></i></div>
+        <div class="calc-plan-group" style="--planner-color:#a78bfa">
+          <div class="calc-film-label">Кухня</div>
+          <div class="calc-film calc-film-top">
+            <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Пол</span><svg class="calc-film-thumb" style="--film-tone:#a78bfa" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 8H56V38H8Z"/></svg></button>
+            <button type="button" class="calc-film-card is-on" tabindex="-1"><span class="calc-film-name">Потолок</span><svg class="calc-film-thumb is-ceiling" style="--film-tone:#0ee9a0" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 8H56V38H8Z"/></svg></button>
+            <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Стена 1</span><svg class="calc-film-thumb is-wall" style="--film-tone:#e90e58" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/><rect x="22" y="20" width="16" height="8"/></svg></button>
+          </div>
+          <div class="calc-row in"><i class="calc-port in" data-signal="plan" title="Чертёж"></i><span>Чертёж</span><b class="calc-plan-tag">Кухня</b></div>
+          <div class="calc-row out"><span class="calc-row-name">Выключатель</span><b>1 <small>шт</small></b><i class="calc-port out" title="Выключатель"></i></div>
+          <div class="calc-row out"><span class="calc-row-name">Рамка · 3</span><b>1 <small>шт</small></b><i class="calc-port out" title="Рамка"></i></div>
+        </div>
+        <div class="calc-sec">Общий вывод</div>
+        <div class="calc-row out"><span class="calc-row-name">Итог</span><b>2 <small>шт</small></b><i class="calc-port out" title="Итог"></i></div>
       </div>
     </article>
-    <p>Чертёж можно взять у планировщика или у проёмов. Счётчики — типы розеток и типы рамок. Плёнка сверху переключает пол, потолок и стены. Цвета наследуются от планировщика: пол — исходный цвет, потолок — сдвиг оттенка на 120°, стены — на 240°.</p>
+    <p>Чертёж можно взять у планировщика или у проёмов. Занятый вход открывает снизу следующий. Над плёнкой — имя планировки, под ней вход и счётчики этого чертежа. Кнопка в шапке прячет все ленты. Внизу — «Общий вывод». Цвета наследуются от планировщика: пол — исходный цвет, потолок — сдвиг оттенка на 120°, стены — на 240°.</p>
   </section>
 
   <section class="kind" data-kind="group">
