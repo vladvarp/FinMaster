@@ -43,7 +43,7 @@
   </style>
 </head>
 <body>
-  <section class="kind">
+  <section class="kind" data-kind="order">
     <h2>Заказ</h2>
     <article class="calc-node is-order">
       <header class="calc-node-h">
@@ -72,7 +72,7 @@
     <p>Карточка заказа из отчёта. У каждой позиции свой выход: доход бирюзовый, налог янтарный, затрата розовый, замороженная строка серая. «Итого» — сумма позиций, здесь 18 000 + 9 000 = 27 000. Кнопка Σ добавляет выход на сумму всех позиций одного типа. Правый клик по выходу открывает доп. поля этой строки. С заказа можно провести сколько угодно линий.</p>
   </section>
 
-  <section class="kind">
+  <section class="kind" data-kind="const">
     <h2>Константа</h2>
     <article class="calc-node is-const">
       <header class="calc-node-h"><span>Константа</span></header>
@@ -88,7 +88,7 @@
     <p>Своё число, которого нет в заказе. На стенде это монтаж, 1 500. Под числом комментарий до 500 символов: в сумму он не входит, только подпись. Выход один и равен числу.</p>
   </section>
 
-  <section class="kind">
+  <section class="kind" data-kind="math">
     <h2>Оператор</h2>
     <article class="calc-node is-math">
       <header class="calc-node-h"><span>Оператор</span></header>
@@ -123,7 +123,7 @@
     <p>Четыре действия: + − × ÷. Входов сначала два, максимум двадцать: следующий пустой появляется, когда занят последний. Пустой вход в расчёт не берётся, поэтому третья строка здесь ничего не прибавляет: 27 000 + 1 500 = 28 500. Если пусты все входы, на экране ноль. Деление на ноль оставляет прочерк.</p>
   </section>
 
-  <section class="kind">
+  <section class="kind" data-kind="result">
     <h2>Результат</h2>
     <article class="calc-node is-result">
       <header class="calc-node-h">
@@ -149,7 +149,7 @@
     <p>Ничего не считает: показывает число, которое пришло по линии, и отдаёт его дальше. Имя и приоритет задают, как этот выход встанет на ноде «Схема» в другом блюпринте. Меньшее число приоритета — выше. Глаз прячет результат из той ноды, сама карточка на поле остаётся.</p>
   </section>
 
-  <section class="kind">
+  <section class="kind" data-kind="formula">
     <h2>Формула</h2>
     <article class="calc-node is-formula">
       <header class="calc-node-h"><span>Формула</span></header>
@@ -188,7 +188,7 @@
     <p>Буквы только A…Z, без повторов. Сюда пришли те же числа, что на первом стенде: A = 27 000, B = 1 500. Выходы считаются сверху вниз, поэтому нижняя строка уже видит C и удваивает её: 57 000. Пока профиль не сохранён, список сверху неактивен. Ошибка в букве или в выражении красит ноду и обводит это поле.</p>
   </section>
 
-  <section class="kind">
+  <section class="kind" data-kind="percent">
     <h2>Процент</h2>
     <article class="calc-node is-percent">
       <header class="calc-node-h"><span>Процент</span></header>
@@ -211,7 +211,7 @@
     <p>Два входа и ничего больше. Выход всегда число × % / 100. Итог кухни 27 000 и константа 10 дают 2 700. Пустой вход считается нулём, поэтому без линии на экране будет 0. Смету эта нода не меняет: у неё своя линия.</p>
   </section>
 
-  <section class="kind">
+  <section class="kind" data-kind="filter">
     <h2>Фильтр</h2>
     <article class="calc-node is-filter">
       <header class="calc-node-h"><span>Фильтр</span></header>
@@ -270,7 +270,7 @@
     <p>Входов нет. Срез на самой карточке: заказчик, заказ, период, оплата заказа, статус оплаты, тип, продукт и статус. «С» и «По» появляются, когда период — «Диапазон». «Статус оплаты» делит количество позиции на оплаченные и неоплаченные единицы. На стенде период «Этот месяц» и одна кухня: две позиции, количество 2, к оплате 27 000, оплачено 10 000, долг 17 000, расходы 0, чистыми 27 000. Если пунктов выбрано больше одного, справа появляется × и сбрасывает выбор.</p>
   </section>
 
-  <section class="kind">
+  <section class="kind" data-kind="dashboard">
     <h2>Дашборд</h2>
     <article class="calc-node is-dashboard">
       <header class="calc-node-h">
@@ -325,7 +325,7 @@
     <p>Те же срезы, кроме «Статус оплаты»: он есть только у фильтра. Сразу после создания пять выходов: заказы, количество, к оплате, оплачено и долг. Кнопка + или правый клик по выходу добавляет остальные метрики и снимает лишние, если выход не занят связью.</p>
   </section>
 
-  <section class="kind">
+  <section class="kind" data-kind="planner">
     <h2>Планировщик</h2>
     <article class="calc-node is-planner">
       <header class="calc-node-h">
@@ -342,15 +342,64 @@
         </div>
       </div>
       <div class="calc-ports">
+        <div class="calc-row out"><span class="calc-row-name">Чертёж</span><b class="calc-plan-tag">план</b><i class="calc-port out" data-signal="plan" title="Чертёж"></i></div>
         <div class="calc-row out"><span class="calc-row-name">Пол</span><b>12 <small>м²</small></b><i class="calc-port out" title="Пол · 12 м²"></i></div>
         <div class="calc-row out"><span class="calc-row-name">Стена 1</span><b>10,8 <small>м²</small></b><i class="calc-port out" title="Стена 1 · 10,8 м²"></i></div>
         <div class="calc-row out"><span class="calc-row-name">3 стены</span><b>29,7 <small>м²</small></b><i class="calc-port out" title="3 стены · 29,7 м²"></i></div>
       </div>
     </article>
-    <p>Имя плана показано поверх миниатюры, под ней — общая площадь пола и всех стен. Цвет назначается случайно при создании; его можно поменять палитрой в шапке ноды. Выход «Высота стен» отдаёт высоту в метрах. В примере комната 4×3 м, высота 2,7 м: пол 12 м², стены суммарно 37,8 м², общая площадь — 49,8 м². Стена 1 — 4×2,7 = 10,8 м², её включили отдельно. Для каждой стены можно включить «Погонаж»: вместо площади будет выводиться высота стены в метрах; тумблер рядом переключает значение на длину стены. По умолчанию выбрана высота. «3 стены» — сумма трёх стен из четырёх: 29,7 м². Высота стен появляется среди выходов только при включённой галочке «На ноду» в разделе «Параметры». Развёртка в редакторе строится сама.</p>
+    <p>Имя плана показано поверх миниатюры, под ней — общая площадь пола и всех стен. Цвет назначается случайно при создании; его можно поменять палитрой в шапке ноды. Выход «Чертёж» всегда первый и уходит только в проёмы или электрику. Выход «Высота стен» отдаёт высоту в метрах. В примере комната 4×3 м, высота 2,7 м: пол 12 м², стены суммарно 37,8 м², общая площадь — 49,8 м². Стена 1 — 4×2,7 = 10,8 м², её включили отдельно. Для каждой стены можно включить «Погонаж»: вместо площади будет выводиться высота стены в метрах; тумблер рядом переключает значение на длину стены. По умолчанию выбрана высота. «3 стены» — сумма трёх стен из четырёх: 29,7 м². Высота стен появляется среди выходов только при включённой галочке «На ноду» в разделе «Параметры». Развёртка в редакторе строится сама.</p>
   </section>
 
-  <section class="kind">
+  <section class="kind" data-kind="openings">
+    <h2>Проёмы</h2>
+    <article class="calc-node is-openings">
+      <header class="calc-node-h">
+        <input class="calc-pname calc-planner-name" value="Проёмы" maxlength="48" readonly tabindex="-1" aria-label="Имя проёмов" />
+        <button type="button" class="calc-tone-btn" tabindex="-1" title="Цвета" aria-label="Цвета" style="background:linear-gradient(90deg,#0ea5e9 0 34%,#eab308 34% 67%,#94a3b8 67% 100%)"></button>
+        <button type="button" class="calc-text-btn" tabindex="-1">Редактор</button>
+      </header>
+      <div class="calc-film calc-film-top">
+        <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Пол</span><svg class="calc-film-thumb" style="--film-tone:#0ea5e9" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 8H56V38H8Z"/></svg></button>
+        <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Потолок</span><svg class="calc-film-thumb is-ceiling" style="--film-tone:#eab308" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 8H56V38H8Z"/></svg></button>
+        <button type="button" class="calc-film-card is-on" tabindex="-1"><span class="calc-film-name">Стена 1</span><svg class="calc-film-thumb is-wall" style="--film-tone:#94a3b8" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/><rect x="14" y="16" width="10" height="22"/></svg></button>
+      </div>
+      <div class="calc-node-sub">4 стены · 3 проёма</div>
+      <div class="calc-ports">
+        <div class="calc-row in"><i class="calc-port in" data-signal="plan" title="Чертёж"></i><span>Чертёж</span><b class="calc-plan-tag">план</b></div>
+        <div class="calc-row in"><i class="calc-port in" title="Труба 1 · диаметр, мм"></i><span>Труба 1 · диаметр, мм</span><b>110</b></div>
+        <div class="calc-row out"><span class="calc-row-name">Чертёж</span><b class="calc-plan-tag">план</b><i class="calc-port out" data-signal="plan" title="Чертёж"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Стена 1</span><b>6,4 <small>м²</small></b><i class="calc-port out" title="Стена 1"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Двери</span><b>1 <small>шт</small></b><i class="calc-port out" title="Двери"></i></div>
+      </div>
+    </article>
+    <p>Вход «Чертёж» принимает план. Диаметр трубы пришёл с константы: 110 мм. Выход «Чертёж» — стены уже с вырезами. Плёнка сверху: имя кадра над миниатюрой, клик открывает пол, потолок или стену.</p>
+  </section>
+
+  <section class="kind" data-kind="electrics">
+    <h2>Электрика</h2>
+    <article class="calc-node is-electrics">
+      <header class="calc-node-h">
+        <input class="calc-pname calc-planner-name" value="Электрика" maxlength="48" readonly tabindex="-1" aria-label="Имя электрики" />
+        <button type="button" class="calc-tone-btn" tabindex="-1" title="Цвета" aria-label="Цвета" style="background:linear-gradient(90deg,#a78bfa 0 34%,#facc15 34% 67%,#38bdf8 67% 100%)"></button>
+        <button type="button" class="calc-text-btn" tabindex="-1">Редактор</button>
+      </header>
+      <div class="calc-film calc-film-top">
+        <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Пол</span><svg class="calc-film-thumb" style="--film-tone:#a78bfa" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 8H56V38H8Z"/></svg></button>
+        <button type="button" class="calc-film-card is-on" tabindex="-1"><span class="calc-film-name">Потолок</span><svg class="calc-film-thumb is-ceiling" style="--film-tone:#facc15" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 8H56V38H8Z"/></svg></button>
+        <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Стена 1</span><svg class="calc-film-thumb is-wall" style="--film-tone:#38bdf8" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/><rect x="22" y="20" width="16" height="8"/></svg></button>
+      </div>
+      <div class="calc-node-sub">4 шт. · 2 рамки</div>
+      <div class="calc-ports">
+        <div class="calc-row in"><i class="calc-port in" data-signal="plan" title="Чертёж"></i><span>Чертёж</span><b class="calc-plan-tag">план</b></div>
+        <div class="calc-row out"><span class="calc-row-name">Выключатель</span><b>1 <small>шт</small></b><i class="calc-port out" title="Выключатель"></i></div>
+        <div class="calc-row out"><span class="calc-row-name">Рамка · горизонталь · В–Р–И</span><b>1 <small>шт</small></b><i class="calc-port out" title="Рамка"></i></div>
+      </div>
+    </article>
+    <p>Чертёж можно взять у планировщика или у проёмов. Счётчики — типы розеток и типы рамок. Плёнка сверху переключает пол, потолок и стены.</p>
+  </section>
+
+  <section class="kind" data-kind="group">
     <h2>Группа</h2>
     <div class="group-box">
       <article class="calc-node is-group" style="--group-color:#14b8a6"></article>
@@ -365,7 +414,7 @@
     <p>Рамка, не расчёт. Портов нет, число сквозь неё не идёт. Имя и цвет только чтобы собрать кусок схемы глазами. Ноды внутри едут вместе с рамкой. Кнопка ∅ группу не удаляет.</p>
   </section>
 
-  <section class="kind">
+  <section class="kind" data-kind="comment">
     <h2>Комментарий</h2>
     <article class="calc-node is-comment">
       <header class="calc-node-h"><span>Комментарий</span></header>
@@ -374,7 +423,7 @@
     <p>Записка на поле. Портов нет, в сумму не входит. Кнопка ∅ её не удаляет: иначе текст без линий пропал бы при первой же чистке.</p>
   </section>
 
-  <section class="kind">
+  <section class="kind" data-kind="scheme">
     <h2>Схема</h2>
     <article class="calc-node is-scheme">
       <header class="calc-node-h"><span>Смета кухни</span></header>
@@ -389,7 +438,7 @@
     <p>Это другая схема, поставленная сюда одной карточкой. Выходы — её видимые результаты, по приоритету: меньшее число выше. Глаз на результате прячет этот выход. Своих входов у ноды нет. Схема не может включить сама себя: такая карточка помечается ошибкой.</p>
   </section>
 
-  <section class="kind">
+  <section class="kind" data-kind="present">
     <h2>Презентация</h2>
     <article class="calc-node is-present">
       <header class="calc-node-h">
@@ -406,6 +455,15 @@
     </article>
     <p>Карточка блока со страницы презентации. Входы — порты этого блока: у метрики один, «Значение». Число по линии попадает на холст. Один и тот же вход блока во всём отчёте занимает только одна линия: чужой порт серый, правый клик его освобождает. Заголовок, заметка и отступ сюда не ставятся — у них нет портов.</p>
   </section>
+  <script>
+    const part = new URLSearchParams(location.search).get("part");
+    if (part) {
+      document.querySelectorAll("section.kind").forEach((el) => {
+        if (el.dataset.kind !== part) el.remove();
+      });
+      document.querySelectorAll("section.kind h2").forEach((el) => el.remove());
+    }
+  </script>
   <script src="chrome.js"></script>
   <script src="fit.js"></script>
 </body>
