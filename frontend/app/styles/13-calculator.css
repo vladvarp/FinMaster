@@ -877,34 +877,6 @@ html[data-theme="dark"] .calc-mini-toggle {
   box-sizing: border-box;
   overflow: hidden;
 }
-.calc-tone { position: relative; flex: 0 0 auto; }
-.calc-tone-btn {
-  display: block;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  cursor: pointer;
-}
-.calc-tone-pop {
-  position: absolute;
-  top: 28px;
-  right: 0;
-  z-index: 8;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 148px;
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--card);
-  box-shadow: var(--shadow);
-}
-.calc-tone-pop[hidden] { display: none !important; }
-.calc-tone-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 700; color: var(--ink); }
-.calc-tone-row input[type="color"] { width: 32px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: transparent; cursor: pointer; }
 .calc-node.is-openings .calc-port,
 .calc-node.is-electrics .calc-port { margin-left: 0; margin-right: 0; }
 .calc-node.is-openings .calc-port.out,
