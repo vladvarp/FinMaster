@@ -3405,6 +3405,20 @@
       if (e.target === modal) closePlanner();
     });
     $("planner-close")?.addEventListener("click", () => closePlanner());
+    $("planner-layout-pick")?.addEventListener("change", (e) => {
+      const node = plannerNode();
+      if (!node) return;
+      if (e.target.value === "__new") {
+        const created = plannerAddLayout(node);
+        if (!created) {
+          e.target.value = node.layoutId;
+          api?.toast?.("Достигнут лимит планировок");
+          return;
+        }
+      } else plannerUseLayout(node, e.target.value);
+      if (session.planner) session.planner.sel = null;
+      plannerCommit(true);
+    });
     $("planner-title")?.addEventListener("input", (e) => {
       const node = plannerNode();
       const layout = node && plannerActive(node);
