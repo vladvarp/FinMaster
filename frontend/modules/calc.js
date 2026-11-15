@@ -6299,8 +6299,10 @@
         if (!own) return;
         if (!Array.isArray(own.holes)) own.holes = [];
         const groupKey = ownGroupToggle.dataset.ownGroupKey;
+        const ctx = markContext();
+        if (!ctx?.base || !ctx.graph) return;
         const groupIds = node.holes.filter((hole) => {
-          const live = resolveHole(hole, base, node, graph.values);
+          const live = resolveHole(hole, ctx.base, node, ctx.graph.values);
           const key = live.surface === "wall" ? `wall:${live.wallId}` : live.surface;
           return key === groupKey;
         }).map((hole) => hole.id);
