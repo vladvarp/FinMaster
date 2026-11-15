@@ -243,7 +243,7 @@ def _line_series_ui(raw: Any) -> dict[str, Any]:
 
 
 CALC_OPS = ("+", "-", "*", "/")
-CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group", "filter", "dashboard", "planner", "present", "comment")
+CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group", "filter", "dashboard", "planner", "openings", "electrics", "present", "comment")
 CALC_MAX_BLUEPRINTS = 24
 CALC_MAX_NODES = 120
 CALC_MAX_LINKS = 400
@@ -503,6 +503,194 @@ def _planner_outs(raw: Any, points: list[dict[str, Any]]) -> list[dict[str, Any]
     return outs
 
 
+def _calc_out_on(raw: Any) -> dict[str, bool]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, bool] = {}
+    for key, value in raw.items():
+        name = _clip_text(key, 80)
+        if not name or len(out) >= 160:
+            continue
+        out[name] = bool(value)
+    return out
+
+
+def _calc_tones(raw: Any, fallback: str) -> dict[str, str]:
+    src = raw if isinstance(raw, dict) else {}
+    return {
+        "floor": _hex_color(src.get("floor"), "#0284c7"),
+        "ceiling": _hex_color(src.get("ceiling"), "#eab308"),
+        "wall": _hex_color(src.get("wall"), fallback or "#94a3b8"),
+    }
+
+
+def _calc_holes(raw: Any) -> list[dict[str, Any]]:
+    holes: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or len(holes) >= 80:
+            continue
+        hole_id = _clip_text(item.get("id"), 80)
+        if not hole_id or hole_id in seen:
+            continue
+        seen.add(hole_id)
+        surface = str(item.get("surface") or "wall")
+        if surface not in ("wall", "floor", "ceiling"):
+            surface = "wall"
+        bind = item.get("bind") if isinstance(item.get("bind"), dict) else {}
+        holes.append(
+            {
+                "id": hole_id,
+                "surface": surface,
+                "wallId": _clip_text(item.get("wallId"), 80),
+                "along": round(_float_in_range(item.get("along"), 0.4, -500.0, 500.0), 4),
+                "rise": round(_float_in_range(item.get("rise"), 0.0, -500.0, 500.0), 4),
+                "x": round(_float_in_range(item.get("x"), 0.0, -500.0, 500.0), 4),
+                "y": round(_float_in_range(item.get("y"), 0.0, -500.0, 500.0), 4),
+                "w": round(_float_in_range(item.get("w"), 0.9, 0.05, 500.0), 4),
+                "h": round(_float_in_range(item.get("h"), 2.1, 0.05, 30.0), 4),
+                "d": round(_float_in_range(item.get("d"), 0.11, 0.005, 5.0), 4),
+                "shape": "circle" if item.get("shape") == "circle" else "rect",
+                "bind": {"w": bool(bind.get("w")), "h": bool(bind.get("h")), "d": bool(bind.get("d"))},
+                "picked": item.get("picked") is not False,
+                "name": _clip_text(item.get("name"), 48),
+            }
+        )
+    return holes
+
+
+def _calc_owns(raw: Any) -> list[dict[str, Any]]:
+    owns: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or len(owns) >= 24:
+            continue
+        own_id = _clip_text(item.get("id"), 80)
+        if not own_id or own_id in seen:
+            continue
+        seen.add(own_id)
+        holes: list[str] = []
+        seen_h: set[str] = set()
+        for hole in item.get("holes") if isinstance(item.get("holes"), list) else []:
+            hole_id = _clip_text(hole, 80)
+            if not hole_id or hole_id in seen_h or len(holes) >= 80:
+                continue
+            seen_h.add(hole_id)
+            holes.append(hole_id)
+        owns.append({"id": own_id, "name": _clip_text(item.get("name"), 48, "Свой"), "holes": holes})
+    return owns
+
+
+def _calc_fixtures(raw: Any) -> list[dict[str, Any]]:
+    fixtures: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or len(fixtures) >= 120:
+            continue
+        fix_id = _clip_text(item.get("id"), 80)
+        if not fix_id or fix_id in seen:
+            continue
+        seen.add(fix_id)
+        surface = str(item.get("surface") or "wall")
+        if surface not in ("wall", "floor", "ceiling"):
+            surface = "wall"
+        cells: list[str] = []
+        for cell in item.get("cells") if isinstance(item.get("cells"), list) else ["socket"]:
+            key = _clip_text(cell, 80)
+            if key and len(cells) < 6:
+                cells.append(key)
+        if not cells:
+            cells.append("socket")
+        fixtures.append(
+            {
+                "id": fix_id,
+                "kind": "light" if item.get("kind") == "light" else "socket",
+                "surface": surface,
+                "wallId": _clip_text(item.get("wallId"), 80),
+                "along": round(_float_in_range(item.get("along"), 0.5, -500.0, 500.0), 4),
+                "rise": round(_float_in_range(item.get("rise"), 0.3, -500.0, 500.0), 4),
+                "x": round(_float_in_range(item.get("x"), 0.0, -500.0, 500.0), 4),
+                "y": round(_float_in_range(item.get("y"), 0.0, -500.0, 500.0), 4),
+                "orient": "v" if item.get("orient") == "v" else "h",
+                "cells": cells,
+                "light": _clip_text(item.get("light"), 80, "chandelier"),
+                "name": _clip_text(item.get("name"), 48),
+                "lw": round(_float_in_range(item.get("lw"), 0.6, 0.05, 8.0), 4),
+                "ll": round(_float_in_range(item.get("ll"), 1.2, 0.05, 12.0), 4),
+                "angle": round(_float_in_range(item.get("angle"), 90.0 if item.get("orient") == "v" else 0.0, -360.0, 360.0), 2) % 360,
+            }
+        )
+    return fixtures
+
+
+def _calc_labels(raw: Any) -> dict[str, str]:
+    allowed = {
+        "door", "doors", "window", "windows", "pipe", "pipes", "hatch", "hatches", "pick", "frame",
+        "socket:socket", "socket:switch", "socket:switch2", "socket:pass", "socket:lan", "socket:tv",
+        "light:chandelier", "light:spot", "light:rect", "light:line",
+    }
+    if not isinstance(raw, dict):
+        return {}
+    labels: dict[str, str] = {}
+    for key, value in raw.items():
+        name = _clip_text(key, 40)
+        text = _clip_text(value, 32)
+        if name not in allowed or not text:
+            continue
+        labels[name] = text
+    return labels
+
+
+def _calc_socket_types(raw: Any) -> list[dict[str, Any]]:
+    types: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or len(types) >= 40:
+            continue
+        type_id = _clip_text(item.get("id"), 80)
+        name = _clip_text(item.get("name"), 32)
+        letters = _clip_text(item.get("letters"), 3)
+        if not type_id or not name or not letters or type_id in seen:
+            continue
+        seen.add(type_id)
+        types.append(
+            {
+                "id": type_id,
+                "name": name,
+                "letters": letters,
+                "color": _hex_color(item.get("color"), "#a78bfa"),
+                "size": _int_in_range(item.get("size"), 80, 20, 400),
+            }
+        )
+    return types
+
+
+def _calc_light_types(raw: Any) -> list[dict[str, Any]]:
+    types: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or len(types) >= 40:
+            continue
+        type_id = _clip_text(item.get("id"), 80)
+        name = _clip_text(item.get("name"), 32)
+        if not type_id or not name or type_id in seen:
+            continue
+        seen.add(type_id)
+        shape = str(item.get("shape") or "circle")
+        if shape not in ("circle", "square", "diamond", "rect", "line"):
+            shape = "circle"
+        types.append(
+            {
+                "id": type_id,
+                "name": name,
+                "shape": shape,
+                "color": _hex_color(item.get("color"), "#facc15"),
+                "size": _int_in_range(item.get("size"), 120, 20, 800),
+            }
+        )
+    return types
+
+
 def _calc_node(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
@@ -603,6 +791,21 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         node["color"] = color
         node["points"] = _planner_points(raw.get("points"))
         node["outs"] = _planner_outs(raw.get("outs"), node["points"])
+    elif kind in ("openings", "electrics"):
+        fallback = _hex_color(raw.get("color"), "#65a30d")
+        tones = _calc_tones(raw.get("tones"), fallback)
+        node["name"] = _clip_text(raw.get("name"), 48, "Проёмы" if kind == "openings" else "Электрика")
+        node["tones"] = tones
+        node["color"] = tones["wall"] if kind == "openings" else tones["floor"]
+        node["outOn"] = _calc_out_on(raw.get("outOn"))
+        view = _clip_text(raw.get("view"), 80)
+        if view:
+            node["view"] = view
+        if kind == "openings":
+            node["holes"] = _calc_holes(raw.get("holes"))
+            node["owns"] = _calc_owns(raw.get("owns"))
+        else:
+            node["fixtures"] = _calc_fixtures(raw.get("fixtures"))
     elif kind == "present":
         node["pageId"] = _clip_text(raw.get("pageId"), 80)
         node["blockId"] = _clip_text(raw.get("blockId"), 80)
@@ -762,7 +965,35 @@ def _calculator_ui(raw: Any) -> dict[str, Any]:
         "schemes": False if folds_raw.get("schemes") is False else True,
         "orders": False if folds_raw.get("orders") is False else True,
     }
-    return {"active": active, "blueprints": blueprints, "folds": folds}
+    data = {"active": active, "blueprints": blueprints, "folds": folds}
+    labels = _calc_labels(raw.get("labels"))
+    sockets = _calc_socket_types(raw.get("socketTypes"))
+    lights = _calc_light_types(raw.get("lightTypes"))
+    hidden = _calc_type_off(raw.get("typeOff"))
+    if labels:
+        data["labels"] = labels
+    if sockets:
+        data["socketTypes"] = sockets
+    if lights:
+        data["lightTypes"] = lights
+    if hidden:
+        data["typeOff"] = hidden
+    return data
+
+
+def _calc_type_off(raw: Any) -> list[str]:
+    allowed = {
+        "socket:socket", "socket:switch", "socket:switch2", "socket:pass", "socket:lan", "socket:tv",
+        "light:chandelier", "light:spot", "light:rect", "light:line",
+    }
+    if not isinstance(raw, list):
+        return []
+    hidden: list[str] = []
+    for item in raw:
+        key = _clip_text(item, 40)
+        if key in allowed and key not in hidden:
+            hidden.append(key)
+    return hidden
 
 
 def _snap10(value: int) -> int:

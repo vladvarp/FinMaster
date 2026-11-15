@@ -474,6 +474,8 @@
       } else if (owner.source.type === "filter") src = "Фильтр";
       else if (owner.source.type === "dashboard") src = "Дашборд";
       else if (owner.source.type === "planner") src = "Планировщик";
+      else if (owner.source.type === "openings") src = "Проёмы";
+      else if (owner.source.type === "electrics") src = "Электрика";
       else if (owner.source.type === "scheme") src = "Схема";
       else src = owner.source.type || "нода";
     }
@@ -1079,6 +1081,8 @@
     ];
     if (node.type === "formula") return node.inputs || [];
     if (node.type === "present") return presentPorts(node);
+    if (node.type === "openings") return openingInputs(node);
+    if (node.type === "electrics") return [{ id: "plan", name: "Чертёж", signal: "plan" }];
     if (node.type === "order") {
       const order = api.findOrder(node.orderId);
       const linkedIn = usedInputPorts(node.id, links || []);
@@ -1214,7 +1218,9 @@
         name: port.name,
       }));
     }
-    if (node.type === "planner") return plannerOutputs(node, links).map((port) => ({ id: port.id, name: port.name }));
+    if (node.type === "planner") return plannerOutputs(node, links).map((port) => ({ id: port.id, name: port.name, signal: port.signal || "" }));
+    if (node.type === "openings") return openingOutputs(node, activeBlueprint(), null, links);
+    if (node.type === "electrics") return electricOutputs(node, activeBlueprint(), null, links);
     if (node.type === "order") {
       const found = order || api.findOrder(node.orderId);
       const lines = orderLines(found);
@@ -1519,7 +1525,27 @@
           setVal(nodeId, id, Number.isFinite(value) ? value : 0);
         });
       } else if (node.type === "planner") {
-        plannerOutputs(node, links).forEach((port) => setVal(nodeId, port.id, port.value ?? port.area));
+        plannerOutputs(node, links).forEach((port) => {
+          if (port.signal === "plan") return;
+          setVal(nodeId, port.id, port.value ?? port.area);
+        });
+      } else if (node.type === "openings") {
+        openingInputs(node).forEach((port) => {
+          if (port.signal === "plan") return;
+          const link = (incoming[nodeId] || []).find((item) => item.toPort === port.id);
+          let value = null;
+          if (link) {
+            const found = values[`${link.from}:${link.fromPort}`];
+            if (found != null && Number.isFinite(found)) value = found;
+          }
+          setVal(nodeId, port.id, value);
+        });
+        openingOutputs(node, bp, values, links).forEach((port) => {
+          if (port.signal === "plan") return;
+          setVal(nodeId, port.id, port.value);
+        });
+      } else if (node.type === "electrics") {
+        electricOutputs(node, bp, values, links).forEach((port) => setVal(nodeId, port.id, port.value));
       } else if (node.type === "present") {
         presentPorts(node).forEach((port) => {
           const link = (incoming[nodeId] || []).find((item) => item.toPort === port.id);
@@ -1606,8 +1632,9 @@
     if (node.type === "filter" || node.type === "dashboard") return { w: 384, h: 420 };
     if (node.type === "planner") {
       const n = Array.isArray(node.outs) ? node.outs.filter((item) => item && item.on).length : 2;
-      return { w: 300, h: 380 + Math.max(1, n) * 28 };
+      return { w: 300, h: 420 + Math.max(1, n) * 28 };
     }
+    if (node.type === "openings" || node.type === "electrics") return { w: 300, h: 460 };
     if (node.type === "present") return { w: 220, h: 160 };
     if (node.type === "group") return { w: Math.max(160, node.w || 320), h: Math.max(120, node.h || 220) };
     return { w: 188, h: 120 };
@@ -2219,7 +2246,7 @@
   function plannerOutputs(node, links) {
     const model = plannerModel(node);
     const linked = linkedFromPorts(node.id, links || []);
-    const ports = [];
+    const ports = [{ id: "plan", name: "Чертёж", signal: "plan" }];
     model.rows.concat(model.sums).forEach((row) => {
       if (row.on || linked.has(row.id)) ports.push({ id: row.id, name: row.name, value: row.value ?? row.area, unit: row.unit || "м²" });
     });
@@ -2520,8 +2547,7 @@
     return { ctx, w, h };
   }
 
-  function plannerView(canvas, points, lock) {
-    if (lock) return lock;
+  function plannerFit(canvas, points) {
     const pad = 36;
     let minX = Infinity;
     let minY = Infinity;
@@ -2536,8 +2562,33 @@
     const spanX = Math.max(0.5, maxX - minX);
     const spanY = Math.max(0.5, maxY - minY);
     const scale = Math.min((canvas.clientWidth - pad * 2) / spanX, (canvas.clientHeight - pad * 2) / spanY);
-    const ox = (canvas.clientWidth - spanX * scale) / 2 - minX * scale;
-    const oy = (canvas.clientHeight - spanY * scale) / 2 - minY * scale;
+    return {
+      scale,
+      ox: (canvas.clientWidth - spanX * scale) / 2 - minX * scale,
+      oy: (canvas.clientHeight - spanY * scale) / 2 - minY * scale,
+      minX,
+      minY,
+      spanX,
+      spanY,
+    };
+  }
+
+  function plannerCam() {
+    if (!session.planner) return { k: 1, x: 0, y: 0 };
+    if (!session.planner.cam) session.planner.cam = { k: 1, x: 0, y: 0 };
+    return session.planner.cam;
+  }
+
+  function plannerView(canvas, points, lock) {
+    if (lock) return lock;
+    const fit = plannerFit(canvas, points);
+    const cam = session.planner?.cam || { k: 1, x: 0, y: 0 };
+    const k = cam.k || 1;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const scale = fit.scale * k;
+    const ox = (fit.ox - w / 2) * k + w / 2 + (cam.x || 0);
+    const oy = (fit.oy - h / 2) * k + h / 2 + (cam.y || 0);
     return {
       scale,
       to(p) {
@@ -2749,6 +2800,64 @@
     }
     plannerSyncFields(model);
     plannerPlaceNudge();
+    plannerMini();
+  }
+
+  function plannerMini() {
+    const canvas = $("planner-minimap");
+    const wrap = $("planner-mini-wrap");
+    const plan = $("planner-plan");
+    const node = plannerNode();
+    if (!canvas || !plan || !node || !session.planner) return;
+    wrap?.classList.toggle("is-hidden", !!session.planner.miniHidden);
+    if (session.planner.miniHidden) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cssW = 200;
+    const cssH = 128;
+    if (canvas.width !== Math.round(cssW * dpr)) {
+      canvas.width = Math.round(cssW * dpr);
+      canvas.height = Math.round(cssH * dpr);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const dark = document.documentElement.getAttribute("data-theme") === "dark";
+    ctx.clearRect(0, 0, cssW, cssH);
+    ctx.fillStyle = dark ? "#0b1220" : "#eef3f8";
+    ctx.fillRect(0, 0, cssW, cssH);
+    const fit = plannerFit(plan, node.points);
+    const inset = 10;
+    const scale = Math.min((cssW - inset * 2) / fit.spanX, (cssH - inset * 2) / fit.spanY);
+    const ox = (cssW - fit.spanX * scale) / 2 - fit.minX * scale;
+    const oy = (cssH - fit.spanY * scale) / 2 - fit.minY * scale;
+    session.planner.mini = { scale, ox, oy, w: cssW, h: cssH };
+    ctx.beginPath();
+    node.points.forEach((p, i) => {
+      const x = ox + p.x * scale;
+      const y = oy + p.y * scale;
+      if (i) ctx.lineTo(x, y);
+      else ctx.moveTo(x, y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = node.color || "#65a30d";
+    ctx.globalAlpha = 0.28;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = node.color || "#65a30d";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    const view = plannerView(plan, node.points);
+    const a = view.from(0, 0);
+    const b = view.from(plan.clientWidth, plan.clientHeight);
+    const vx = ox + Math.min(a.x, b.x) * scale;
+    const vy = oy + Math.min(a.y, b.y) * scale;
+    const vw = Math.abs(b.x - a.x) * scale;
+    const vh = Math.abs(b.y - a.y) * scale;
+    ctx.strokeStyle = "#14b8a6";
+    ctx.lineWidth = 1.4;
+    ctx.strokeRect(vx, vy, Math.max(8, vw), Math.max(8, vh));
+    ctx.fillStyle = "rgba(20, 184, 166, 0.12)";
+    ctx.fillRect(vx, vy, Math.max(8, vw), Math.max(8, vh));
   }
 
   function plannerSyncFields(model) {
@@ -2963,6 +3072,10 @@
           <div class="planner-cap">План пола</div>
           <div class="planner-plan-wrap">
             <canvas id="planner-plan"></canvas>
+            <div class="calc-mini-wrap planner-mini" id="planner-mini-wrap">
+              <canvas id="planner-minimap" class="calc-minimap" width="200" height="128" aria-label="Карта плана"></canvas>
+              <button type="button" class="calc-mini-toggle" id="planner-mini-toggle" title="Скрыть карту" aria-label="Показать или скрыть карту"><svg class="calc-mini-eye-on" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/></svg><svg class="calc-mini-eye-off" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 3l18 18M10.6 10.7a2.8 2.8 0 0 0 3.7 3.7M6.2 6.3C4.1 7.8 2.5 12 2.5 12s3.5 7 9.5 7c1.2 0 2.3-.2 3.3-.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+            </div>
             <div id="planner-nudge" class="planner-nudge" hidden>
               <button type="button" class="planner-nudge-dir" data-dir="nw" aria-label="Вверх-влево"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
               <button type="button" class="planner-nudge-dir" data-dir="n" aria-label="Вверх"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
@@ -3187,11 +3300,71 @@
       plannerSelect({ kind: "wall", id }, false);
     });
     const plan = $("planner-plan");
+    $("planner-mini-toggle")?.addEventListener("click", () => {
+      if (!session.planner) return;
+      session.planner.miniHidden = !session.planner.miniHidden;
+      plannerMini();
+    });
+    $("planner-minimap")?.addEventListener("pointerdown", (e) => {
+      const node = plannerNode();
+      const map = session.planner?.mini;
+      const mini = $("planner-minimap");
+      if (!node || !map || !mini || !session.planner) return;
+      const place = (ev) => {
+        const rect = mini.getBoundingClientRect();
+        const sx = ((ev.clientX - rect.left) / rect.width) * map.w;
+        const sy = ((ev.clientY - rect.top) / rect.height) * map.h;
+        const worldX = (sx - map.ox) / map.scale;
+        const worldY = (sy - map.oy) / map.scale;
+        const plan = $("planner-plan");
+        const fit = plannerFit(plan, node.points);
+        const cam = plannerCam();
+        const k = cam.k || 1;
+        const w = plan.clientWidth;
+        const h = plan.clientHeight;
+        cam.x = w / 2 - worldX * fit.scale * k - ((fit.ox - w / 2) * k + w / 2);
+        cam.y = h / 2 - worldY * fit.scale * k - ((fit.oy - h / 2) * k + h / 2);
+        plannerDraw();
+      };
+      place(e);
+      mini.setPointerCapture(e.pointerId);
+      const move = (ev) => place(ev);
+      const up = () => {
+        mini.removeEventListener("pointermove", move);
+        mini.removeEventListener("pointerup", up);
+      };
+      mini.addEventListener("pointermove", move);
+      mini.addEventListener("pointerup", up);
+    });
+    plan?.addEventListener("wheel", (e) => {
+      const node = plannerNode();
+      if (!node || !session.planner) return;
+      e.preventDefault();
+      const cam = plannerCam();
+      const rect = plan.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const world = plannerView(plan, node.points).from(sx, sy);
+      cam.k = Math.max(0.2, Math.min(12, cam.k * (e.deltaY > 0 ? 1 / 1.12 : 1.12)));
+      const fit = plannerFit(plan, node.points);
+      const k = cam.k;
+      cam.x = sx - ((fit.ox - rect.width / 2) * k + rect.width / 2) - world.x * fit.scale * k;
+      cam.y = sy - ((fit.oy - rect.height / 2) * k + rect.height / 2) - world.y * fit.scale * k;
+      plannerDraw();
+    }, { passive: false });
     plan?.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0) return;
+      if (e.button !== 0 && e.button !== 1) return;
       const node = plannerNode();
       if (!node || !session.planner) return;
       const hit = plannerHit(plan, node, e.clientX, e.clientY);
+      const cam = plannerCam();
+      if (e.button === 1 || (!hit.pointId && !hit.wallId)) {
+        session.planner.viewLock = null;
+        session.planner.drag = { pan: true, x: e.clientX, y: e.clientY, ox: cam.x, oy: cam.y };
+        plan.setPointerCapture(e.pointerId);
+        return;
+      }
+      if (e.button !== 0) return;
       session.planner.viewLock = plannerView(plan, node.points);
       if (hit.pointId) {
         const point = node.points.find((p) => p.id === hit.pointId);
@@ -3214,6 +3387,13 @@
     plan?.addEventListener("pointermove", (e) => {
       const node = plannerNode();
       const drag = session.planner?.drag;
+      if (drag?.pan && session.planner) {
+        const cam = plannerCam();
+        cam.x = drag.ox + (e.clientX - drag.x);
+        cam.y = drag.oy + (e.clientY - drag.y);
+        plannerDraw();
+        return;
+      }
       if (!node || !drag) {
         const hit = node ? plannerHit(plan, node, e.clientX, e.clientY) : null;
         if (plan) plan.style.cursor = hit?.pointId ? "grab" : hit?.wallId ? "pointer" : "default";
@@ -3237,7 +3417,8 @@
       if (!session.planner) return;
       session.planner.drag = null;
       session.planner.viewLock = null;
-      if (drag?.moved) plannerCommit(false);
+      if (drag?.pan) plannerDraw();
+      else if (drag?.moved) plannerCommit(false);
       else plannerDraw();
     };
     plan?.addEventListener("pointerup", endDrag);
@@ -3378,6 +3559,2574 @@
     if (api?.view?.() === "calculator") render();
   }
 
+  const PLAN_PORT = "plan";
+  const PIPE_MM = [16, 20, 25, 32, 40, 50, 63, 75, 90, 110, 125, 160];
+  const SOCKET_BUILTIN = [
+    { id: "socket", name: "Розетка", letters: "Р", color: "#f59e0b", size: 80 },
+    { id: "switch", name: "Выключатель", letters: "В", color: "#38bdf8", size: 80 },
+    { id: "switch2", name: "Двойной выключатель", letters: "ДВ", color: "#22d3ee", size: 80 },
+    { id: "pass", name: "Проходной выключатель", letters: "ПВ", color: "#818cf8", size: 80 },
+    { id: "lan", name: "Интернет", letters: "И", color: "#34d399", size: 80 },
+    { id: "tv", name: "ТВ", letters: "ТВ", color: "#fb7185", size: 80 },
+  ];
+  const LIGHT_BUILTIN = [
+    { id: "chandelier", name: "Люстра", shape: "diamond", color: "#facc15", size: 180 },
+    { id: "spot", name: "Спот", shape: "circle", color: "#fde68a", size: 60 },
+    { id: "rect", name: "Прямоугольник", shape: "rect", color: "#fde68a", size: 120 },
+    { id: "line", name: "Линейный", shape: "line", color: "#fef08a", size: 40 },
+  ];
+
+  function portSignal(node, portId) {
+    if (portId !== PLAN_PORT || !node) return "num";
+    if (node.type === "planner" || node.type === "openings") return "plan";
+    if (node.type === "electrics") return "plan";
+    return "num";
+  }
+
+  function markHex(value, fallback) {
+    const color = String(value || "").trim().toLowerCase();
+    return /^#[0-9a-f]{6}$/.test(color) ? color : fallback;
+  }
+
+  function markLetters(value) {
+    return String(value || "").trim().slice(0, 3);
+  }
+
+  function customTypeList(kind) {
+    const calc = ensureState();
+    const key = kind === "light" ? "lightTypes" : "socketTypes";
+    if (!calc) return [];
+    if (!Array.isArray(calc[key])) calc[key] = [];
+    const list = [];
+    calc[key].forEach((raw) => {
+      if (!raw || typeof raw !== "object" || list.length >= 40) return;
+      let id = String(raw.id || "").trim();
+      if (!id || list.some((item) => item.id === id)) id = `c-${uid()}`;
+      const name = String(raw.name || "").trim().slice(0, 32);
+      if (!name) return;
+      if (kind === "light") {
+        const shape = ["square", "diamond", "rect", "line"].includes(raw.shape) ? raw.shape : "circle";
+        list.push({
+          id,
+          name,
+          shape,
+          color: markHex(raw.color, "#facc15"),
+          size: Math.round(plannerClamp(plannerNum(raw.size, 120), 20, 800)),
+        });
+        return;
+      }
+      const letters = markLetters(raw.letters);
+      if (!letters) return;
+      list.push({
+        id,
+        name,
+        letters,
+        color: markHex(raw.color, "#a78bfa"),
+        size: Math.round(plannerClamp(plannerNum(raw.size, 80), 20, 400)),
+      });
+    });
+    calc[key] = list;
+    return list;
+  }
+
+  function markLabels() {
+    const calc = ensureState();
+    if (!calc) return {};
+    if (!calc.labels || typeof calc.labels !== "object") calc.labels = {};
+    return calc.labels;
+  }
+
+  function markLabel(key, fallback) {
+    const value = String(markLabels()[key] || "").trim();
+    return value || fallback;
+  }
+
+  function cardNameInput(id, kind, current, fallback) {
+    return `<input class="mark-inline-name" data-card-name="${esc(id)}" data-card-kind="${kind}" data-label-fallback="${esc(fallback)}" maxlength="48" value="${esc(current || fallback)}" aria-label="Имя карточки" />`;
+  }
+
+  function typeOff() {
+    const calc = ensureState();
+    if (!calc) return [];
+    if (!Array.isArray(calc.typeOff)) calc.typeOff = [];
+    const allowed = new Set([
+      ...SOCKET_BUILTIN.map((type) => `socket:${type.id}`),
+      ...LIGHT_BUILTIN.map((type) => `light:${type.id}`),
+    ]);
+    calc.typeOff = calc.typeOff.filter((key, index) => allowed.has(key) && calc.typeOff.indexOf(key) === index).slice(0, 20);
+    return calc.typeOff;
+  }
+
+  function presetCatalog(kind) {
+    const builtins = kind === "light" ? LIGHT_BUILTIN : SOCKET_BUILTIN;
+    const prefix = kind === "light" ? "light:" : "socket:";
+    const off = new Set(typeOff());
+    const stored = customTypeList(kind);
+    const builtinIds = new Set(builtins.map((item) => item.id));
+    const seeded = stored.some((item) => builtinIds.has(item.id));
+    const out = [];
+    const addBuiltin = (item) => {
+      if (off.has(prefix + item.id) || out.some((row) => row.id === item.id)) return;
+      out.push({ ...item, name: markLabel(prefix + item.id, item.name) });
+    };
+    if (seeded) {
+      stored.forEach((item) => {
+        if (off.has(prefix + item.id)) return;
+        const builtin = builtins.find((row) => row.id === item.id);
+        out.push(builtin ? { ...builtin, ...item, name: item.name || markLabel(prefix + item.id, builtin.name) } : item);
+      });
+      builtins.forEach(addBuiltin);
+    } else {
+      builtins.forEach(addBuiltin);
+      stored.forEach((item) => {
+        if (!builtinIds.has(item.id)) out.push(item);
+      });
+    }
+    return out;
+  }
+
+  function savePresetList(kind, list) {
+    const calc = ensureState();
+    if (!calc) return;
+    const key = kind === "light" ? "lightTypes" : "socketTypes";
+    calc[key] = list.slice(0, 40).map((item) => (
+      kind === "light"
+        ? {
+          id: item.id,
+          name: String(item.name || "").trim().slice(0, 32),
+          shape: ["square", "diamond", "rect", "line", "circle"].includes(item.shape) ? item.shape : "circle",
+          color: markHex(item.color, "#facc15"),
+          size: Math.round(plannerClamp(plannerNum(item.size, 120), 20, 800)),
+        }
+        : {
+          id: item.id,
+          name: String(item.name || "").trim().slice(0, 32),
+          letters: markLetters(item.letters),
+          color: markHex(item.color, "#a78bfa"),
+          size: Math.round(plannerClamp(plannerNum(item.size, 80), 20, 400)),
+        }
+    )).filter((item) => item.id && item.name && (kind === "light" || item.letters));
+  }
+
+  function patchPreset(kind, id, patch) {
+    const list = presetCatalog(kind).map((item) => (item.id === id ? { ...item, ...patch } : item));
+    savePresetList(kind, list);
+  }
+
+  function movePreset(kind, id, targetId, before) {
+    const list = presetCatalog(kind);
+    const from = list.findIndex((item) => item.id === id);
+    if (from < 0 || id === targetId) return;
+    const [item] = list.splice(from, 1);
+    let to = list.findIndex((row) => row.id === targetId);
+    if (to < 0) to = list.length;
+    else if (!before) to += 1;
+    list.splice(to, 0, item);
+    savePresetList(kind, list);
+  }
+
+  function socketCatalog() {
+    return presetCatalog("socket");
+  }
+
+  function lightCatalog() {
+    return presetCatalog("light");
+  }
+
+  function socketById(id) {
+    return socketCatalog().find((item) => item.id === id) || SOCKET_BUILTIN.find((item) => item.id === id) || null;
+  }
+
+  function lightById(id) {
+    return lightCatalog().find((item) => item.id === id) || LIGHT_BUILTIN.find((item) => item.id === id) || null;
+  }
+
+  function dropPreset(kind, id) {
+    const calc = ensureState();
+    if (!calc || !id) return;
+    const key = kind === "light" ? "lightTypes" : "socketTypes";
+    calc[key] = (calc[key] || []).filter((item) => item && item.id !== id);
+    const builtins = kind === "light" ? LIGHT_BUILTIN : SOCKET_BUILTIN;
+    if (builtins.some((item) => item.id === id)) {
+      const mark = `${kind}:${id}`;
+      if (!typeOff().includes(mark)) calc.typeOff.push(mark);
+    }
+  }
+
+  function blueprintOf(node) {
+    const calc = ensureState();
+    return (calc?.blueprints || []).find((bp) => (bp.nodes || []).some((item) => item.id === node?.id)) || activeBlueprint();
+  }
+
+  function planWallName(plan, wall, index) {
+    return plan?.wallNames?.[wall.id] || `Стена ${index + 1}`;
+  }
+
+  function emitPlan(node, bp, stack, values) {
+    if (!node || !bp) return null;
+    const chain = stack || [];
+    if (chain.includes(node.id)) return null;
+    const next = chain.concat(node.id);
+    if (node.type === "planner") {
+      ensurePlanner(node);
+      const walls = plannerWalls(node);
+      const wallNames = {};
+      walls.forEach((wall, index) => {
+        const out = (node.outs || []).find((item) => item.id === wall.id);
+        wallNames[wall.id] = plannerWallName(out, index);
+      });
+      return {
+        height: node.height,
+        points: node.points.map((p) => ({ id: p.id, x: p.x, y: p.y })),
+        wallNames,
+        openings: [],
+      };
+    }
+    if (node.type === "openings") {
+      ensureOpenings(node);
+      const base = upstreamPlan(node, bp, next, values);
+      if (!base) return null;
+      const holes = node.holes.map((hole) => resolveHole(hole, base, node, values));
+      return {
+        height: base.height,
+        points: base.points.map((p) => ({ id: p.id, x: p.x, y: p.y })),
+        wallNames: base.wallNames,
+        openings: (base.openings || []).concat(holes),
+      };
+    }
+    return null;
+  }
+
+  function upstreamPlan(node, bp, stack, values) {
+    const link = (bp?.links || []).find((item) => item.to === node?.id && item.toPort === PLAN_PORT && item.fromPort === PLAN_PORT);
+    if (!link) return null;
+    const src = (bp.nodes || []).find((item) => item.id === link.from);
+    if (!src) return null;
+    return emitPlan(src, bp, stack || [], values || {});
+  }
+
+  function resolveHole(raw, plan, node, values) {
+    const hole = {
+      id: raw.id,
+      surface: raw.surface === "floor" || raw.surface === "ceiling" ? raw.surface : "wall",
+      wallId: String(raw.wallId || ""),
+      along: plannerNum(raw.along, 0),
+      rise: plannerNum(raw.rise, 0),
+      x: plannerNum(raw.x, 0),
+      y: plannerNum(raw.y, 0),
+      w: plannerNum(raw.w, 0.9),
+      h: plannerNum(raw.h, 2.1),
+      d: plannerNum(raw.d, 0.11),
+      picked: raw.picked !== false,
+      shape: raw.shape === "circle" ? "circle" : "rect",
+      local: true,
+    };
+    const read = (field) => {
+      if (!raw.bind?.[field] || !node) return null;
+      const value = values?.[`${node.id}:b:${raw.id}:${field}`];
+      return Number.isFinite(value) ? value : null;
+    };
+    if (hole.shape === "circle") {
+      const mm = read("d");
+      if (mm != null) hole.d = plannerClamp(mm / 1000, 0.005, 5);
+    } else {
+      const width = read("w");
+      const height = read("h");
+      if (width != null) hole.w = plannerClamp(width, 0.05, 500);
+      if (height != null) hole.h = plannerClamp(height, 0.05, 30);
+    }
+    const walls = plan ? plannerWalls(plan) : [];
+    const wall = walls.find((item) => item.id === hole.wallId) || null;
+    const roomH = plan?.height || 2.7;
+    if (hole.surface === "wall" && wall) {
+      if (hole.shape === "circle") {
+        hole.along = plannerClamp(hole.along, 0, wall.len);
+        hole.rise = plannerClamp(hole.rise, 0, roomH);
+      } else {
+        hole.w = plannerClamp(hole.w, 0.05, wall.len);
+        hole.h = plannerClamp(hole.h, 0.05, roomH);
+        if (hole.along < 0) hole.along = 0;
+        if (hole.rise < 0) hole.rise = 0;
+        if (hole.along + hole.w > wall.len + 0.0001) hole.along = Math.max(0, wall.len - hole.w);
+        if (hole.rise + hole.h > roomH + 0.0001) hole.rise = Math.max(0, roomH - hole.h);
+        if (hole.rise <= 0.02) hole.rise = 0;
+      }
+    }
+    hole.along = plannerRound(hole.along);
+    hole.rise = plannerRound(hole.rise);
+    hole.x = plannerRound(hole.x);
+    hole.y = plannerRound(hole.y);
+    hole.w = plannerRound(hole.w);
+    hole.h = plannerRound(hole.h);
+    hole.d = plannerRound(hole.d);
+    if (hole.shape === "circle") hole.role = "pipe";
+    else if (hole.surface === "wall" && hole.rise <= 0.02) hole.role = "door";
+    else if (hole.surface === "wall") hole.role = "window";
+    else hole.role = "hatch";
+    return hole;
+  }
+
+  function rectOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+    const x0 = Math.max(ax, bx);
+    const y0 = Math.max(ay, by);
+    const x1 = Math.min(ax + aw, bx + bw);
+    const y1 = Math.min(ay + ah, by + bh);
+    if (x1 <= x0 || y1 <= y0) return 0;
+    return (x1 - x0) * (y1 - y0);
+  }
+
+  function circleInRect(cx, cy, r, x0, y0, x1, y1) {
+    if (!(r > 0)) return 0;
+    const n = 24;
+    const step = (r * 2) / n;
+    let hit = 0;
+    for (let i = 0; i < n; i += 1) {
+      for (let j = 0; j < n; j += 1) {
+        const x = cx - r + (i + 0.5) * step;
+        const y = cy - r + (j + 0.5) * step;
+        if ((x - cx) * (x - cx) + (y - cy) * (y - cy) > r * r) continue;
+        if (x >= x0 && x <= x1 && y >= y0 && y <= y1) hit += 1;
+      }
+    }
+    return hit * step * step;
+  }
+
+  function wallRemain(wall, height, holes) {
+    const mine = (holes || []).filter((hole) => hole.surface === "wall" && hole.wallId === wall.id);
+    const full = mine.filter((hole) => hole.role === "door" && hole.along <= 0.03 && hole.w >= wall.len - 0.03);
+    const cut = (hole, y0, y1) => {
+      if (hole.shape === "circle") return circleInRect(hole.along, hole.rise, hole.d / 2, 0, y0, wall.len, y1);
+      return rectOverlap(hole.along, hole.rise, hole.w, hole.h, 0, y0, wall.len, y1 - y0);
+    };
+    if (full.length) {
+      const top = Math.max(...full.map((hole) => Math.min(height, hole.rise + hole.h)));
+      let area = wall.len * Math.max(0, height - top);
+      mine.forEach((hole) => {
+        if (full.includes(hole)) return;
+        area -= cut(hole, top, height);
+      });
+      return Math.max(0, plannerRound(area));
+    }
+    let area = wall.len * height;
+    mine.forEach((hole) => {
+      area -= cut(hole, 0, height);
+    });
+    return Math.max(0, plannerRound(area));
+  }
+
+  function markToneInputs(node) {
+    const tones = markTones(node);
+    const swatch = `linear-gradient(90deg, ${tones.floor} 0 34%, ${tones.ceiling} 34% 67%, ${tones.wall} 67% 100%)`;
+    const row = (key, title) => `<label class="calc-tone-row"><span>${title}</span><input type="color" data-mark-tone="${key}" data-node-tone="${esc(node.id)}" value="${esc(tones[key])}" aria-label="${title}" /></label>`;
+    return `<span class="calc-tone"><button type="button" class="calc-tone-btn" data-tone-open="${esc(node.id)}" title="Цвета: пол, потолок, стены" aria-label="Цвета" style="background:${swatch}"></button><div class="calc-tone-pop" hidden>${[["floor", "Пол"], ["ceiling", "Потолок"], ["wall", "Стены"]].map(([key, title]) => row(key, title)).join("")}</div></span>`;
+  }
+
+  function applyMarkTone(node, nodeEl, key, value) {
+    const tones = markTones(node);
+    if (tones[key] == null) return;
+    tones[key] = markHex(value, tones[key]);
+    node.color = node.type === "openings" ? tones.wall : tones.floor;
+    if (nodeEl) {
+      nodeEl.style.setProperty("--mark-floor", tones.floor);
+      nodeEl.style.setProperty("--mark-ceiling", tones.ceiling);
+      nodeEl.style.setProperty("--mark-wall", tones.wall);
+      nodeEl.style.setProperty("--planner-color", node.color);
+      const btn = nodeEl.querySelector(".calc-tone-btn");
+      if (btn) btn.style.background = `linear-gradient(90deg, ${tones.floor} 0 34%, ${tones.ceiling} 34% 67%, ${tones.wall} 67% 100%)`;
+    }
+    if (session.mark?.id === node.id) markDraw();
+    dirty();
+  }
+
+  function markTones(node) {
+    const rand = () => GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
+    if (!node.tones || typeof node.tones !== "object") {
+      const base = markHex(node.color, rand());
+      node.tones = node.type === "openings"
+        ? { floor: "#0284c7", ceiling: "#eab308", wall: base }
+        : { floor: base, ceiling: rand(), wall: rand() };
+    }
+    node.tones.floor = markHex(node.tones.floor, "#0284c7");
+    node.tones.ceiling = markHex(node.tones.ceiling, "#eab308");
+    node.tones.wall = markHex(node.tones.wall, "#94a3b8");
+    node.color = node.type === "openings" ? node.tones.wall : node.tones.floor;
+    return node.tones;
+  }
+
+  function ensureOpenings(node) {
+    if (!Array.isArray(node.holes)) node.holes = [];
+    const holes = [];
+    node.holes.forEach((raw) => {
+      if (!raw || typeof raw !== "object" || holes.length >= 80) return;
+      let id = String(raw.id || "").trim();
+      if (!id || holes.some((item) => item.id === id)) id = uid();
+      const shape = raw.shape === "circle" ? "circle" : "rect";
+      const surface = raw.surface === "floor" || raw.surface === "ceiling" ? raw.surface : "wall";
+      holes.push({
+        id,
+        surface,
+        wallId: String(raw.wallId || ""),
+        along: plannerRound(plannerClamp(plannerNum(raw.along, 0.4), -500, 500)),
+        rise: plannerRound(plannerClamp(plannerNum(raw.rise, 0), -500, 500)),
+        x: plannerRound(plannerClamp(plannerNum(raw.x, 0), -500, 500)),
+        y: plannerRound(plannerClamp(plannerNum(raw.y, 0), -500, 500)),
+        w: plannerRound(plannerClamp(plannerNum(raw.w, 0.9), 0.05, 500)),
+        h: plannerRound(plannerClamp(plannerNum(raw.h, 2.1), 0.05, 30)),
+        d: plannerRound(plannerClamp(plannerNum(raw.d, 0.11), 0.005, 5)),
+        shape,
+        bind: { w: !!raw.bind?.w, h: !!raw.bind?.h, d: !!raw.bind?.d },
+        picked: raw.picked !== false,
+        name: String(raw.name || "").trim().slice(0, 48),
+      });
+    });
+    node.holes = holes;
+    if (!Array.isArray(node.owns)) node.owns = [];
+    if (!node.outOn || typeof node.outOn !== "object") {
+      node.outOn = { "count:pick": true, "count:door": true, "count:window": true, "count:pipe": true, "count:hatch": true };
+    }
+    markTones(node);
+    node.name = String(node.name || "").trim().slice(0, 48) || "Проёмы";
+    return node;
+  }
+
+  function ensureElectrics(node) {
+    if (!Array.isArray(node.fixtures)) node.fixtures = [];
+    const list = [];
+    node.fixtures.forEach((raw) => {
+      if (!raw || typeof raw !== "object" || list.length >= 120) return;
+      let id = String(raw.id || "").trim();
+      if (!id || list.some((item) => item.id === id)) id = uid();
+      const kind = raw.kind === "light" ? "light" : "socket";
+      const surface = raw.surface === "floor" || raw.surface === "ceiling" ? raw.surface : "wall";
+      const cells = [];
+      (Array.isArray(raw.cells) ? raw.cells : ["socket"]).forEach((cell) => {
+        const key = String(cell || "").trim();
+        if (key && cells.length < 6) cells.push(key);
+      });
+      if (!cells.length) cells.push("socket");
+      list.push({
+        id,
+        kind,
+        surface,
+        wallId: String(raw.wallId || ""),
+        along: plannerRound(plannerClamp(plannerNum(raw.along, 0.5), -500, 500)),
+        rise: plannerRound(plannerClamp(plannerNum(raw.rise, 0.3), -500, 500)),
+        x: plannerRound(plannerClamp(plannerNum(raw.x, 0), -500, 500)),
+        y: plannerRound(plannerClamp(plannerNum(raw.y, 0), -500, 500)),
+        orient: raw.orient === "v" ? "v" : "h",
+        cells,
+        light: String(raw.light || "chandelier"),
+        name: String(raw.name || "").trim().slice(0, 48),
+        lw: plannerRound(plannerClamp(plannerNum(raw.lw, 0.6), 0.05, 8)),
+        ll: plannerRound(plannerClamp(plannerNum(raw.ll, 1.2), 0.05, 12)),
+        angle: lightAngle(raw),
+      });
+    });
+    node.fixtures = list;
+    if (!node.outOn || typeof node.outOn !== "object") node.outOn = {};
+    markTones(node);
+    node.name = String(node.name || "").trim().slice(0, 48) || "Электрика";
+    return node;
+  }
+
+  function markShown(node, id, linked, present) {
+    if (linked?.has(id)) return true;
+    if (node.outOn && Object.prototype.hasOwnProperty.call(node.outOn, id)) return !!node.outOn[id];
+    return !!present;
+  }
+
+  function markChecked(node, id, fallback) {
+    if (node.outOn && Object.prototype.hasOwnProperty.call(node.outOn, id)) return !!node.outOn[id];
+    return !!fallback;
+  }
+
+  function holeLabel(hole, index) {
+    const custom = String(hole.name || "").trim();
+    if (custom) return custom;
+    const role = hole.shape === "circle" || hole.role === "pipe" ? "Труба" : hole.rise <= 0.02 && hole.surface !== "floor" && hole.surface !== "ceiling" ? "Дверь" : hole.surface === "wall" ? "Окно" : "Люк";
+    return `${role} ${index + 1}`;
+  }
+
+  function openingInputs(node) {
+    ensureOpenings(node);
+    const ports = [{ id: PLAN_PORT, name: "Чертёж", signal: "plan" }];
+    node.holes.forEach((hole, index) => {
+      const fields = hole.shape === "circle" ? [["d", "диаметр, мм"]] : [["w", "ширина, м"], ["h", "высота, м"]];
+      fields.forEach(([field, title]) => {
+        if (!hole.bind?.[field]) return;
+        ports.push({ id: `b:${hole.id}:${field}`, name: `${holeLabel(hole, index)} · ${title}` });
+      });
+    });
+    return ports;
+  }
+
+  function openingOutputs(node, bp, values, links) {
+    ensureOpenings(node);
+    const host = bp || blueprintOf(node);
+    const plan = host ? emitPlan(node, host, [], values || {}) : null;
+    const linked = linkedFromPorts(node.id, links || host?.links || []);
+    const ports = [{ id: PLAN_PORT, name: "Чертёж", signal: "plan" }];
+    const walls = plan ? plannerWalls(plan) : [];
+    walls.forEach((wall, index) => {
+      const id = `wall:${wall.id}`;
+      if (!markShown(node, id, linked, false)) return;
+      ports.push({
+        id,
+        name: planWallName(plan, wall, index),
+        value: wallRemain(wall, plan.height, plan.openings),
+        unit: "м²",
+      });
+    });
+    const holes = plan?.openings || [];
+    [
+      ["count:pick", markLabel("pick", "Проёмы"), holes.filter((hole) => hole.picked !== false).length, true],
+      ["count:door", markLabel("doors", "Двери"), holes.filter((hole) => hole.role === "door").length, true],
+      ["count:window", markLabel("windows", "Окна"), holes.filter((hole) => hole.role === "window").length, true],
+      ["count:pipe", markLabel("pipes", "Трубы"), holes.filter((hole) => hole.role === "pipe").length, true],
+      ["count:hatch", markLabel("hatches", "Люки"), holes.filter((hole) => hole.role === "hatch").length, true],
+    ].forEach(([id, name, value, present]) => {
+      if (!markShown(node, id, linked, present)) return;
+      ports.push({ id, name, value, unit: "шт" });
+    });
+    (node.owns || []).forEach((own) => {
+      const id = `own:${own.id}`;
+      const have = new Set((node.holes || []).map((hole) => hole.id));
+      const value = (own.holes || []).filter((holeId) => have.has(holeId)).length;
+      if (!markShown(node, id, linked, true)) return;
+      ports.push({ id, name: String(own.name || "Свой").slice(0, 48), value, unit: "шт" });
+    });
+    return ports;
+  }
+
+  function frameKey(fix) {
+    return String(Math.max(1, (fix.cells || []).length));
+  }
+
+  function frameLabel(fix) {
+    return `${markLabel("frame", "Рамка")} · ${frameKey(fix)}`;
+  }
+
+  function electricOutputs(node, bp, values, links) {
+    ensureElectrics(node);
+    const host = bp || blueprintOf(node);
+    const linked = linkedFromPorts(node.id, links || host?.links || []);
+    const ports = [];
+    const counts = new Map();
+    const frames = new Map();
+    node.fixtures.forEach((fix) => {
+      if (fix.kind === "light") return;
+      const key = frameKey(fix);
+      if (!frames.has(key)) frames.set(key, { id: `frame:${key}`, name: frameLabel(fix), value: 0 });
+      frames.get(key).value += 1;
+      (fix.cells || []).forEach((typeId) => {
+        const type = socketById(typeId);
+        const id = `type:${typeId}`;
+        if (!counts.has(id)) counts.set(id, { id, name: type?.name || "Розетка", value: 0 });
+        counts.get(id).value += 1;
+      });
+    });
+    counts.forEach((row) => {
+      if (markShown(node, row.id, linked, row.value > 0)) ports.push({ ...row, unit: "шт" });
+    });
+    [...frames.values()]
+      .sort((a, b) => Number(a.id.slice(6)) - Number(b.id.slice(6)))
+      .forEach((row) => {
+        if (markShown(node, row.id, linked, row.value > 0)) ports.push({ ...row, unit: "шт" });
+      });
+    return ports;
+  }
+
+  function markNodeTitle(node) {
+    if (!node) return "Нода";
+    if (node.type === "planner") return plannerName(node);
+    if (node.type === "openings") return node.name || "Проёмы";
+    if (node.type === "electrics") return node.name || "Электрика";
+    if (node.type === "const") return "Константа";
+    if (node.type === "result") return node.name || "Результат";
+    if (node.type === "math") return "Оператор";
+    if (node.type === "formula") return "Формула";
+    if (node.type === "percent") return "Процент";
+    if (node.type === "filter") return "Фильтр";
+    if (node.type === "dashboard") return "Дашборд";
+    if (node.type === "order") return "Заказ";
+    if (node.type === "scheme") return "Схема";
+    return "Нода";
+  }
+
+  function planPortRow(io) {
+    const side = io === "in" ? "in" : "out";
+    return `<div class="calc-row ${side}">
+      ${side === "in" ? `<i class="calc-port in" data-port="plan" data-io="in" data-signal="plan" title="Чертёж"></i>` : ""}
+      <span class="calc-row-name">Чертёж</span>
+      ${side === "out" ? `<b class="calc-plan-tag">план</b><i class="calc-port out" data-port="plan" data-io="out" data-signal="plan" title="Чертёж"></i>` : ""}
+    </div>`;
+  }
+
+  function countRows(node, ports, graph) {
+    return (ports || [])
+      .filter((port) => port.signal !== "plan")
+      .map((port) => {
+        const value = graph?.values?.[`${node.id}:${port.id}`];
+        const shown = value != null && Number.isFinite(value) ? value : port.value;
+        const unit = port.unit || "";
+        return `<div class="calc-row out">
+          <span class="calc-row-name" title="${esc(port.name)}">${esc(port.name)}</span>
+          <b>${esc(fmtShort(shown))}${unit ? ` <small>${esc(unit)}</small>` : ""}</b>
+          <i class="calc-port out" data-port="${esc(port.id)}" data-io="out" title="${esc(port.name)}"></i>
+        </div>`;
+      })
+      .join("");
+  }
+
+  function filmItems(plan) {
+    const walls = plannerWalls(plan);
+    return [{ id: "floor", name: "Пол" }, { id: "ceiling", name: "Потолок" }].concat(
+      walls.map((wall, index) => ({ id: wall.id, name: planWallName(plan, wall, index), wall }))
+    );
+  }
+
+  function surfaceThumb(plan, item, holes, fixtures, tones) {
+    const vw = 64;
+    const vh = 46;
+    const pad = 3;
+    if (!plan?.points?.length) return "";
+    if (item.id === "floor" || item.id === "ceiling") {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      plan.points.forEach((p) => {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      });
+      const spanX = Math.max(0.05, maxX - minX);
+      const spanY = Math.max(0.05, maxY - minY);
+      const scale = Math.min((vw - pad * 2) / spanX, (vh - pad * 2) / spanY);
+      const ox = (vw - spanX * scale) / 2 - minX * scale;
+      const oy = (vh - spanY * scale) / 2 - minY * scale;
+      const d = plan.points
+        .map((p, i) => `${i ? "L" : "M"}${(ox + p.x * scale).toFixed(1)} ${(oy + p.y * scale).toFixed(1)}`)
+        .join("") + "Z";
+      const marks = (holes || [])
+        .filter((hole) => hole.surface === item.id)
+        .map((hole) => {
+          const x = ox + (hole.x + (hole.shape === "circle" ? 0 : hole.w / 2)) * scale;
+          const y = oy + (hole.y + (hole.shape === "circle" ? 0 : hole.h / 2)) * scale;
+          return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.2"/>`;
+        })
+        .join("");
+      const lights = (fixtures || [])
+        .filter((fix) => fix.surface === item.id)
+        .map((fix) => `<circle cx="${(ox + fix.x * scale).toFixed(1)}" cy="${(oy + fix.y * scale).toFixed(1)}" r="2.4"/>`)
+        .join("");
+      const tone = item.id === "ceiling" ? (tones?.ceiling || "var(--mark-ceiling, #eab308)") : (tones?.floor || "var(--mark-floor, #38bdf8)");
+      return `<svg class="calc-film-thumb" style="--film-tone:${tone}" viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><path d="${d}"/>${marks}${lights}</svg>`;
+    }
+    const wall = item.wall;
+    if (!wall) return "";
+    const len = Math.max(wall.len, 0.2);
+    const height = Math.max(plan.height || 2.7, 0.2);
+    const scale = Math.min((vw - pad * 2) / len, (vh - pad * 2) / height);
+    const ox = (vw - len * scale) / 2;
+    const oy = (vh - height * scale) / 2;
+    const at = (along, rise) => ({ x: ox + along * scale, y: oy + (height - rise) * scale });
+    const cuts = (holes || [])
+      .filter((hole) => hole.surface === "wall" && hole.wallId === wall.id)
+      .map((hole) => {
+        if (hole.shape === "circle") {
+          const c = at(hole.along, hole.rise);
+          return `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="${Math.max(1.6, (hole.d / 2) * scale).toFixed(1)}"/>`;
+        }
+        const p = at(hole.along, hole.rise + hole.h);
+        const q = at(hole.along + hole.w, hole.rise);
+        return `<rect x="${p.x.toFixed(1)}" y="${p.y.toFixed(1)}" width="${Math.max(1, q.x - p.x).toFixed(1)}" height="${Math.max(1, q.y - p.y).toFixed(1)}"/>`;
+      })
+      .join("");
+    const dots = (fixtures || [])
+      .filter((fix) => fix.surface === "wall" && fix.wallId === wall.id)
+      .map((fix) => {
+        const c = at(fix.along, fix.rise);
+        return `<rect x="${(c.x - 2).toFixed(1)}" y="${(c.y - 2).toFixed(1)}" width="4" height="4"/>`;
+      })
+      .join("");
+    const box = at(0, height);
+    const wallTone = tones?.wall || "var(--mark-wall, #94a3b8)";
+    return `<svg class="calc-film-thumb is-wall" style="--film-tone:${wallTone}" viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><rect class="calc-film-wall" x="${box.x.toFixed(1)}" y="${box.y.toFixed(1)}" width="${(len * scale).toFixed(1)}" height="${(height * scale).toFixed(1)}"/>${cuts}${dots}</svg>`;
+  }
+
+  function planLocateSvg(plan, wallId) {
+    const walls = plannerWalls(plan);
+    if (!plan?.points?.length || !walls.length) return "";
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    plan.points.forEach((p) => {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    });
+    const vw = 160;
+    const vh = 120;
+    const pad = 12;
+    const spanX = Math.max(0.05, maxX - minX);
+    const spanY = Math.max(0.05, maxY - minY);
+    const scale = Math.min((vw - pad * 2) / spanX, (vh - pad * 2) / spanY);
+    const ox = (vw - spanX * scale) / 2 - minX * scale;
+    const oy = (vh - spanY * scale) / 2 - minY * scale;
+    const d = plan.points.map((p, i) => `${i ? "L" : "M"}${(ox + p.x * scale).toFixed(1)} ${(oy + p.y * scale).toFixed(1)}`).join("") + "Z";
+    const lines = walls
+      .map((wall) => {
+        const x1 = ox + wall.a.x * scale;
+        const y1 = oy + wall.a.y * scale;
+        const x2 = ox + wall.b.x * scale;
+        const y2 = oy + wall.b.y * scale;
+        return `<line data-locate-wall="${esc(wall.id)}" class="${wall.id === wallId ? "is-on" : ""}" x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"/>`;
+      })
+      .join("");
+    return `<svg viewBox="0 0 ${vw} ${vh}" aria-hidden="true"><path d="${d}"/>${lines}</svg>`;
+  }
+
+  function filmStrip(plan, nodeId, active, holes, fixtures, tones) {
+    if (!plan?.points?.length) return `<div class="calc-empty">Нет чертежа</div>`;
+    return filmItems(plan)
+      .map((item) => {
+        const open = nodeId ? ` data-mark-open="${esc(nodeId)}"` : "";
+        return `<button type="button" class="calc-film-card ${item.id === active ? "is-on" : ""}"${open} data-mark-surface="${esc(item.id)}"><span class="calc-film-name">${esc(item.name)}</span>${surfaceThumb(plan, item, holes, fixtures, tones)}</button>`;
+      })
+      .join("");
+  }
+
+  function openingsNodeHtml(node, bp, graph) {
+    ensureOpenings(node);
+    const plan = upstreamPlan(node, bp, [], graph.values);
+    const outPlan = plan ? emitPlan(node, bp, [], graph.values) : null;
+    const inputs = openingInputs(node);
+    const outputs = openingOutputs(node, bp, graph.values, bp.links);
+    const sub = plan ? `${plannerWalls(plan).length} стен · ${(outPlan?.openings || []).length} проёмов` : "нет чертежа";
+    const binds = inputs.filter((port) => port.id !== PLAN_PORT);
+    const tones = markTones(node);
+    return `<article class="calc-node is-openings ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(tones.floor)};--mark-floor:${esc(tones.floor)};--mark-ceiling:${esc(tones.ceiling)};--mark-wall:${esc(tones.wall)}">
+      <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
+      <header class="calc-node-h">
+        <input class="calc-pname calc-planner-name" data-mark-title="${esc(node.id)}" value="${esc(node.name)}" maxlength="48" spellcheck="false" title="Имя проёмов" aria-label="Имя проёмов" />
+        ${markToneInputs(node)}
+        <button type="button" class="calc-text-btn" data-mark-edit="${esc(node.id)}" title="Проёмы на чертеже">Редактор</button>
+        <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
+      </header>
+      ${plan ? `<div class="calc-film calc-film-top">${filmStrip(plan, node.id, "", outPlan?.openings || [], [], tones)}</div>` : ""}
+      <div class="calc-node-sub">${esc(sub)}</div>
+      <div class="calc-ports">
+        ${planPortRow("in")}
+        ${binds
+          .map((port) => {
+            const value = graph.values[`${node.id}:${port.id}`];
+            const linked = (bp.links || []).some((link) => link.to === node.id && link.toPort === port.id);
+            return `<div class="calc-row in">
+              <i class="calc-port in" data-port="${esc(port.id)}" data-io="in" title="${esc(port.name)}"></i>
+              <span>${esc(port.name)}</span>
+              <b>${esc(fmtShort(value))}</b>
+              ${linked ? `<button type="button" class="calc-mini" data-del-in-link="${esc(port.id)}" title="Удалить связь">×</button>` : ""}
+            </div>`;
+          })
+          .join("")}
+        ${planPortRow("out")}
+        ${countRows(node, outputs, graph)}
+      </div>
+    </article>`;
+  }
+
+  function electricsNodeHtml(node, bp, graph) {
+    ensureElectrics(node);
+    const plan = upstreamPlan(node, bp, [], graph.values);
+    const outputs = electricOutputs(node, bp, graph.values, bp.links);
+    const sockets = node.fixtures.filter((item) => item.kind !== "light").reduce((sum, item) => sum + (item.cells || []).length, 0);
+    const frames = node.fixtures.filter((item) => item.kind !== "light").length;
+    const sub = plan ? `${sockets} шт. · ${frames} рамок` : "нет чертежа";
+    const linked = (bp.links || []).some((link) => link.to === node.id && link.toPort === PLAN_PORT);
+    const tones = markTones(node);
+    return `<article class="calc-node is-electrics ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(tones.floor)};--mark-floor:${esc(tones.floor)};--mark-ceiling:${esc(tones.ceiling)};--mark-wall:${esc(tones.wall)}">
+      <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
+      <header class="calc-node-h">
+        <input class="calc-pname calc-planner-name" data-mark-title="${esc(node.id)}" value="${esc(node.name)}" maxlength="48" spellcheck="false" title="Имя электрики" aria-label="Имя электрики" />
+        ${markToneInputs(node)}
+        <button type="button" class="calc-text-btn" data-mark-edit="${esc(node.id)}" title="Розетки и свет">Редактор</button>
+        <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
+      </header>
+      ${plan ? `<div class="calc-film calc-film-top">${filmStrip(plan, node.id, "", plan?.openings || [], node.fixtures, markTones(node))}</div>` : ""}
+      <div class="calc-node-sub">${esc(sub)}</div>
+      <div class="calc-ports">
+        <div class="calc-row in">
+          <i class="calc-port in" data-port="plan" data-io="in" data-signal="plan" title="Чертёж"></i>
+          <span>Чертёж</span>
+          <b class="calc-plan-tag">план</b>
+          ${linked ? `<button type="button" class="calc-mini" data-del-in-link="plan" title="Удалить связь">×</button>` : ""}
+        </div>
+        ${outputs.length ? countRows(node, outputs, graph) : `<div class="calc-empty">Поставьте точки — выходы появятся здесь</div>`}
+      </div>
+    </article>`;
+  }
+
+  function markNode() {
+    const id = session.mark?.id;
+    if (!id) return null;
+    const node = (activeBlueprint()?.nodes || []).find((item) => item.id === id && (item.type === "openings" || item.type === "electrics")) || null;
+    if (!node) {
+      session.mark = null;
+      $("mark-modal")?.classList.remove("open");
+    }
+    return node;
+  }
+
+  function markContext() {
+    const node = markNode();
+    const bp = activeBlueprint();
+    if (!node || !bp) return null;
+    const graph = computeGraph(bp);
+    const base = upstreamPlan(node, bp, [], graph.values);
+    const full = node.type === "openings" ? emitPlan(node, bp, [], graph.values) : base;
+    return { node, bp, graph, base, full };
+  }
+
+  function markSurfaceOk(plan, surface) {
+    if (surface === "floor" || surface === "ceiling") return surface;
+    if (plan && plannerWalls(plan).some((wall) => wall.id === surface)) return surface;
+    return "floor";
+  }
+
+  function openMark(nodeId, surface) {
+    const bp = activeBlueprint();
+    const node = bp?.nodes.find((item) => item.id === nodeId && (item.type === "openings" || item.type === "electrics"));
+    if (!node) return;
+    if (session.planner?.id) closePlanner();
+    ensureMarkModal();
+    if (node.type === "openings") ensureOpenings(node);
+    else ensureElectrics(node);
+    const plan = upstreamPlan(node, bp, [], computeGraph(bp).values);
+    session.mark = {
+      id: nodeId,
+      surface: markSurfaceOk(plan, surface || node.view || "floor"),
+      sel: "",
+      orient: "h",
+      section: 1,
+      drag: null,
+    };
+    session.selected = nodeId;
+    hidePortMenu();
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    $("mark-modal")?.classList.add("open");
+    markHideMenu();
+    requestAnimationFrame(() => markFill());
+  }
+
+  function closeMark() {
+    const node = markNode();
+    if (node) node.name = node.type === "electrics" ? ensureElectrics(node).name : ensureOpenings(node).name;
+    session.mark = null;
+    markHideMenu();
+    $("mark-preset-modal")?.classList.remove("open");
+    $("mark-modal")?.classList.remove("open");
+    if (api?.view?.() === "calculator") render();
+  }
+
+  function markHideMenu() {
+    const menu = $("mark-menu");
+    if (menu) menu.hidden = true;
+    const box = $("mark-nudge-box");
+    if (box) box.hidden = true;
+    if (session.mark) session.mark.menu = null;
+  }
+
+  function pruneMarkLinks(node) {
+    const bp = activeBlueprint();
+    if (!bp || !node) return;
+    const graph = computeGraph(bp);
+    const ports = node.type === "openings" ? openingOutputs(node, bp, graph.values, bp.links) : electricOutputs(node, bp, graph.values, bp.links);
+    const ids = new Set(ports.map((port) => port.id));
+    bp.links = (bp.links || []).filter((link) => link.from !== node.id || ids.has(link.fromPort));
+    const inputs = new Set((node.type === "openings" ? openingInputs(node) : [{ id: PLAN_PORT }]).map((port) => port.id));
+    bp.links = bp.links.filter((link) => link.to !== node.id || inputs.has(link.toPort));
+  }
+
+  function fitOpenings(node) {
+    const bp = activeBlueprint();
+    if (!bp) return;
+    const graph = computeGraph(bp);
+    const plan = upstreamPlan(node, bp, [], graph.values);
+    if (!plan) return;
+    node.holes.forEach((hole) => {
+      const live = resolveHole(hole, plan, node, graph.values);
+      hole.along = live.along;
+      hole.rise = live.rise;
+      hole.x = live.x;
+      hole.y = live.y;
+      if (!hole.bind?.w) hole.w = live.w;
+      if (!hole.bind?.h) hole.h = live.h;
+      if (!hole.bind?.d) hole.d = live.d;
+    });
+  }
+
+  function markCommit(rebuild) {
+    const node = markNode();
+    if (!node) return;
+    if (node.type === "openings") {
+      ensureOpenings(node);
+      fitOpenings(node);
+    } else ensureElectrics(node);
+    pruneMarkLinks(node);
+    dirty();
+    render();
+    if (!$("mark-modal")?.classList.contains("open")) return;
+    if (rebuild) markFill();
+    else markDraw();
+  }
+
+  function numericFeeds(exceptId, graph, bp) {
+    const rows = [];
+    (bp?.nodes || []).forEach((node) => {
+      if (node.id === exceptId) return;
+      const order = node.type === "order" ? api.findOrder(node.orderId) : null;
+      nodeOutputs(node, order, bp.links).forEach((port) => {
+        if (portSignal(node, port.id) === "plan") return;
+        const value = graph?.values?.[`${node.id}:${port.id}`];
+        rows.push({
+          key: `${node.id}\t${port.id}`,
+          label: `${markNodeTitle(node)} · ${port.name || port.id}${Number.isFinite(value) ? ` · ${fmtShort(value)}` : ""}`,
+        });
+      });
+    });
+    return rows;
+  }
+
+  function markSelect(attrs, name, options, current) {
+    const label = options.find((item) => item.value === current)?.label || options[0]?.label || "—";
+    const hidden = name ? `<input type="hidden" name="${esc(name)}" value="${esc(current)}" />` : "";
+    const list = options
+      .map((item) => `<button type="button" class="mark-opt ${item.value === current ? "is-on" : ""}" data-opt="${esc(item.value)}" ${attrs}>${esc(item.label)}</button>`)
+      .join("");
+    return `<div class="mark-select">${hidden}<button type="button" class="mark-select-btn" ${attrs}>${esc(label)}</button><div class="mark-select-list" hidden>${list}</div></div>`;
+  }
+
+  function placeMarkList(btn) {
+    const list = btn.parentElement?.querySelector(".mark-select-list");
+    const willOpen = !!list?.hidden;
+    document.querySelectorAll(".mark-select-list").forEach((el) => { el.hidden = true; });
+    if (!willOpen || !list) return;
+    const rect = btn.getBoundingClientRect();
+    const below = window.innerHeight - rect.bottom;
+    list.hidden = false;
+    list.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 228))}px`;
+    list.style.width = `${Math.max(rect.width, 180)}px`;
+    if (below < 200) {
+      list.style.top = "auto";
+      list.style.bottom = `${window.innerHeight - rect.top + 4}px`;
+    } else {
+      list.style.bottom = "auto";
+      list.style.top = `${rect.bottom + 4}px`;
+    }
+  }
+
+  function markOnSurface(item, surface) {
+    if (surface === "floor" || surface === "ceiling") return item.surface === surface;
+    return item.surface === "wall" && item.wallId === surface;
+  }
+
+  function markSideHtml(ctx) {
+    const { node, bp, graph, base, full } = ctx;
+    const feeds = numericFeeds(node.id, graph, bp);
+    const feedOpts = [{ value: "", label: "не назначено" }].concat(feeds.map((row) => ({ value: row.key, label: row.label })));
+    const linkKey = (portId) => {
+      const link = (bp.links || []).find((item) => item.to === node.id && item.toPort === portId);
+      return link ? `${link.from}\t${link.fromPort}` : "";
+    };
+    const surface = session.mark?.surface || "floor";
+    if (!base) {
+      return `<div class="planner-block"><div class="planner-block-h">${node.type === "electrics" ? "Электрика" : "Проёмы"}</div><p class="planner-lead">Соедините вход «Чертёж» с выходом «Чертёж» планировщика${node.type === "electrics" ? " или проёмов" : ""}.</p></div>`;
+    }
+    if (node.type === "openings") {
+      const walls = plannerWalls(base);
+      const inherited = (base.openings || []).length;
+      const holes = node.holes
+        .map((hole, index) => ({ hole, index, live: resolveHole(hole, base, node, graph.values) }))
+        .filter((item) => markOnSurface(item.live, surface))
+        .map(({ hole, index, live }) => {
+          const place = live.surface === "floor" ? "Пол" : live.surface === "ceiling" ? "Потолок" : planWallName(base, walls.find((wall) => wall.id === live.wallId) || { id: live.wallId }, Math.max(0, walls.findIndex((wall) => wall.id === live.wallId)));
+          const bindPick = (field) => (hole.bind?.[field] ? markSelect(`data-hole-var="${esc(hole.id)}" data-bind="${field}"`, "", feedOpts, linkKey(`b:${hole.id}:${field}`)) : "");
+          const dims = live.shape === "circle"
+            ? `<label class="planner-len">диаметр <input data-hole-d="${esc(hole.id)}" inputmode="decimal" value="${esc(plannerInput(hole.d * 1000))}" ${hole.bind?.d ? "readonly" : ""} /> мм</label>
+               <div class="mark-dias">${PIPE_MM.map((mm) => `<button type="button" data-hole-mm="${esc(hole.id)}" data-mm="${mm}">${mm}</button>`).join("")}</div>
+               <label class="planner-on"><input type="checkbox" data-hole-bind="${esc(hole.id)}" data-bind="d" ${hole.bind?.d ? "checked" : ""} /> С входа</label>
+               ${bindPick("d")}`
+            : `<label class="planner-len">ширина <input data-hole-w="${esc(hole.id)}" inputmode="decimal" value="${esc(plannerInput(hole.w))}" ${hole.bind?.w ? "readonly" : ""} /> м</label>
+               <label class="planner-on"><input type="checkbox" data-hole-bind="${esc(hole.id)}" data-bind="w" ${hole.bind?.w ? "checked" : ""} /> С входа</label>
+               ${bindPick("w")}
+               <label class="planner-len">высота <input data-hole-h="${esc(hole.id)}" inputmode="decimal" value="${esc(plannerInput(hole.h))}" ${hole.bind?.h ? "readonly" : ""} /> м</label>
+               <label class="planner-on"><input type="checkbox" data-hole-bind="${esc(hole.id)}" data-bind="h" ${hole.bind?.h ? "checked" : ""} /> С входа</label>
+               ${bindPick("h")}
+               ${live.role === "door" ? `<button type="button" class="btn" data-hole-full="${esc(hole.id)}">Во всю стену</button>` : ""}`;
+          const fallback = holeLabel({ ...hole, name: "" }, index);
+          return `<div class="planner-metric ${session.mark?.sel === hole.id ? "is-sel" : ""}">
+            <span class="planner-label">${cardNameInput(hole.id, "hole", hole.name, fallback)} · ${esc(place)}</span>
+            ${dims}
+            <label class="planner-on"><input type="checkbox" data-hole-pick="${esc(hole.id)}" ${hole.picked !== false ? "checked" : ""} /> В счёт</label>
+            <button type="button" class="calc-mini" data-hole-del="${esc(hole.id)}" title="Удалить">×</button>
+          </div>`;
+        })
+        .join("");
+      const wallRows = walls
+        .map((wall, index) => {
+          const id = `wall:${wall.id}`;
+          const area = full ? wallRemain(wall, full.height, full.openings) : 0;
+          const linked = linkedFromPorts(node.id, bp.links).has(id);
+          return `<label class="planner-part"><input type="checkbox" data-mark-out="${esc(id)}" ${markChecked(node, id, false) || linked ? "checked" : ""} ${linked ? "disabled" : ""} /> <span>${esc(planWallName(base, wall, index))}</span> <em>${esc(fmtShort(area))} м²</em></label>`;
+        })
+        .join("");
+      const counts = [
+        ["count:pick", markLabel("pick", "Проёмы"), (full?.openings || []).filter((hole) => hole.picked !== false).length],
+        ["count:door", markLabel("doors", "Двери"), (full?.openings || []).filter((hole) => hole.role === "door").length],
+        ["count:window", markLabel("windows", "Окна"), (full?.openings || []).filter((hole) => hole.role === "window").length],
+        ["count:pipe", markLabel("pipes", "Трубы"), (full?.openings || []).filter((hole) => hole.role === "pipe").length],
+        ["count:hatch", markLabel("hatches", "Люки"), (full?.openings || []).filter((hole) => hole.role === "hatch").length],
+      ]
+        .map(([id, name, value]) => {
+          const linked = linkedFromPorts(node.id, bp.links).has(id);
+          return `<label class="planner-part"><input type="checkbox" data-mark-out="${esc(id)}" ${markChecked(node, id, true) || linked ? "checked" : ""} ${linked ? "disabled" : ""} /> <span>${esc(name)}</span> <em>${value}</em></label>`;
+        })
+        .join("");
+      return `<div class="planner-block"><div class="planner-block-h">Проёмы</div>
+        <p class="planner-lead">Прямоугольник у пола — дверь. Ширина двери на всю стену оставляет только верх. Диаметр с входа приходит в миллиметрах, ширина и высота — в метрах.${inherited ? ` С чертежа уже пришло ${inherited}.` : ""}</p>
+        ${holes || `<div class="calc-empty">На этой поверхности проёмов нет</div>`}
+      </div>
+      <div class="planner-block"><div class="planner-block-h">На ноду</div>
+        <p class="planner-lead">Стены выходят уже с вырезами. «В счёт» меняет только число «Проёмы»: включённый проём прибавляется, выключенный на чертеже бледнеет. Двери, окна, трубы и люки считаются сами.</p>
+        <div class="mark-bulk">
+          <button type="button" class="btn" data-mark-bulk="walls-on">Все стены</button>
+          <button type="button" class="btn" data-mark-bulk="walls-off">Снять стены</button>
+          <button type="button" class="btn" data-mark-bulk="counts-on">Все счётчики</button>
+          <button type="button" class="btn" data-mark-bulk="counts-off">Снять счётчики</button>
+        </div>
+        <div class="planner-parts">${wallRows}${counts}</div>
+        <div class="planner-block-h">Свой счётчик <button type="button" class="btn" data-own-add>+ Свой</button></div>
+        ${(node.owns || []).map((own) => `<div class="planner-metric"><input class="planner-name" data-own-name="${esc(own.id)}" value="${esc(own.name || "Свой")}" maxlength="48" aria-label="Имя своего счётчика" /><button type="button" class="calc-mini" data-own-del="${esc(own.id)}" title="Удалить">×</button>${node.holes.map((hole, index) => `<label class="planner-part"><input type="checkbox" data-own="${esc(own.id)}" data-own-hole="${esc(hole.id)}" ${(own.holes || []).includes(hole.id) ? "checked" : ""} /> <span data-own-title="${esc(hole.id)}">${esc(holeLabel(resolveHole(hole, base, node, graph.values), index))}</span></label>`).join("")}</div>`).join("")}
+      </div>`;
+    }
+    const socketOpts = socketCatalog().map((type) => ({ value: type.id, label: type.name }));
+    const fixtures = node.fixtures
+      .filter((fix) => markOnSurface(fix, surface))
+      .map((fix) => {
+        if (fix.kind === "light") {
+          const lightName = lightById(fix.light)?.name || "Свет";
+          const shape = lightById(fix.light)?.shape;
+          const spin = lightRotates(shape)
+            ? `<button type="button" class="btn" data-light-spin="${esc(fix.id)}">+45°</button><label class="planner-len">угол <input data-light-angle="${esc(fix.id)}" inputmode="decimal" value="${esc(String(lightAngle(fix)))}" /> °</label>`
+            : "";
+          const dims = shape === "rect"
+            ? `<label class="planner-len">ширина <input data-light-w="${esc(fix.id)}" inputmode="decimal" value="${esc(plannerInput(fix.lw || 0.6))}" /> м</label><label class="planner-len">длина <input data-light-l="${esc(fix.id)}" inputmode="decimal" value="${esc(plannerInput(fix.ll || 0.3))}" /> м</label>${spin}`
+            : shape === "line"
+              ? `<label class="planner-len">длина <input data-light-l="${esc(fix.id)}" inputmode="decimal" value="${esc(plannerInput(fix.ll || 1.2))}" /> м</label>${spin}`
+              : "";
+          return `<div class="planner-metric ${session.mark?.sel === fix.id ? "is-sel" : ""}">
+            <span class="planner-label">${cardNameInput(fix.id, "fix", fix.name, lightName)}</span>
+            ${markSelect(`data-light="${esc(fix.id)}"`, "", lightCatalog().map((type) => ({ value: type.id, label: type.name })), fix.light || "")}
+            ${dims}
+            <button type="button" class="calc-mini" data-fix-del="${esc(fix.id)}" title="Удалить">×</button>
+          </div>`;
+        }
+        const cells = (fix.cells || [])
+          .map((cell, index) => `<label class="planner-len">${index + 1} ${markSelect(`data-cell="${esc(fix.id)}" data-cell-i="${index}"`, "", socketOpts, cell)}</label>`)
+          .join("");
+        return `<div class="planner-metric ${session.mark?.sel === fix.id ? "is-sel" : ""}">
+          <span class="planner-label">${cardNameInput(fix.id, "fix", fix.name, frameLabel({ ...fix, name: "" }))}</span>
+          <label class="planner-len">рамка ${markSelect(`data-orient="${esc(fix.id)}"`, "", [{ value: "h", label: "горизонтально" }, { value: "v", label: "вертикально" }], fix.orient === "v" ? "v" : "h")}</label>
+          ${cells}
+          ${(fix.cells || []).length < 6 ? `<button type="button" class="btn" data-cell-add="${esc(fix.id)}">Ещё секция</button>` : ""}
+          <button type="button" class="calc-mini" data-fix-del="${esc(fix.id)}" title="Удалить">×</button>
+        </div>`;
+      })
+      .join("");
+    const typeRows = [];
+    const frameRows = [];
+    const seenType = new Set();
+    const seenFrame = new Set();
+    node.fixtures.forEach((fix) => {
+      if (fix.kind === "light") return;
+      const key = frameKey(fix);
+      if (!seenFrame.has(key)) {
+        seenFrame.add(key);
+        const id = `frame:${key}`;
+        const value = node.fixtures.filter((item) => item.kind !== "light" && frameKey(item) === key).length;
+        const linked = linkedFromPorts(node.id, bp.links).has(id);
+        frameRows.push({ n: Number(key), html: `<label class="planner-part"><input type="checkbox" data-mark-out="${esc(id)}" ${markChecked(node, id, true) || linked ? "checked" : ""} ${linked ? "disabled" : ""} /> <span>${esc(frameLabel(fix))}</span> <em>${value}</em></label>` });
+      }
+      (fix.cells || []).forEach((typeId) => {
+        if (seenType.has(typeId)) return;
+        seenType.add(typeId);
+        const id = `type:${typeId}`;
+        const value = node.fixtures.filter((item) => item.kind !== "light").reduce((sum, item) => sum + (item.cells || []).filter((cell) => cell === typeId).length, 0);
+        const linked = linkedFromPorts(node.id, bp.links).has(id);
+        const name = socketById(typeId)?.name || "Розетка";
+        typeRows.push(`<label class="planner-part"><input type="checkbox" data-mark-out="${esc(id)}" ${markChecked(node, id, true) || linked ? "checked" : ""} ${linked ? "disabled" : ""} /> <span>${esc(name)}</span> <em>${value}</em></label>`);
+      });
+    });
+    frameRows.sort((a, b) => a.n - b.n);
+    return `<div class="planner-block"><div class="planner-block-h">Точки</div>
+      <p class="planner-lead">Правый клик ставит розетку или свет в эту точку. Рамка собирает несколько типов, горизонтально или вертикально.</p>
+      ${fixtures || `<div class="calc-empty">На этой поверхности точек нет</div>`}
+    </div>
+    <div class="planner-block"><div class="planner-block-h">На ноду</div>
+      <div class="planner-parts">${typeRows.join("")}${frameRows.map((row) => row.html).join("") || `<div class="calc-empty">Пока нечего считать</div>`}</div>
+    </div>`;
+  }
+
+  function markFill() {
+    const ctx = markContext();
+    const side = $("mark-side");
+    const title = $("mark-title");
+    const hint = $("mark-hint");
+    const cap = $("mark-cap");
+    if (!ctx || !side) return;
+    const scroll = side.scrollTop;
+    side.innerHTML = markSideHtml(ctx);
+    side.scrollTop = scroll;
+    if (title && document.activeElement !== title) title.value = ctx.node.name || "";
+    const surface = session.mark?.surface || "floor";
+    const walls = ctx.base ? plannerWalls(ctx.base) : [];
+    const wallIndex = walls.findIndex((wall) => wall.id === surface);
+    if (cap) {
+      cap.textContent = surface === "ceiling" ? "Потолок" : surface === "floor" ? "Пол" : wallIndex >= 0 ? planWallName(ctx.base, walls[wallIndex], wallIndex) : "План";
+    }
+    if (hint) {
+      hint.textContent = ctx.node.type === "electrics"
+        ? "Правый клик: розетка, ориентация и число секций. Точка встаёт туда, куда нажали. Стрелки двигают уже стоящую."
+        : "Правый клик: прямоугольник, круг или диаметр. У пола прямоугольник становится дверью. Стрелки двигают выбранный проём.";
+    }
+    const film = $("mark-film");
+    if (film) {
+      const holes = ctx.node.type === "openings" ? ctx.full?.openings || [] : ctx.base?.openings || [];
+      const fixtures = ctx.node.type === "electrics" ? ctx.node.fixtures : [];
+      film.innerHTML = ctx.base ? filmStrip(ctx.base, "", surface, holes, fixtures, markTones(ctx.node)) : `<div class="calc-empty">Нет чертежа</div>`;
+    }
+    let locate = $("mark-locate");
+    const wrap = $("mark-canvas")?.parentElement;
+    if (!locate && wrap) {
+      locate = document.createElement("div");
+      locate.id = "mark-locate";
+      locate.className = "mark-locate";
+      wrap.appendChild(locate);
+    }
+    if (locate) {
+      if (!locate.dataset.bound) {
+        locate.dataset.bound = "1";
+        locate.addEventListener("pointermove", (e) => {
+          if (!session.mark?.locateBig) return;
+          const wall = e.target.closest?.("[data-locate-wall]") || null;
+          locate.querySelectorAll("[data-locate-wall]").forEach((el) => el.classList.toggle("is-hot", el === wall));
+        });
+        locate.addEventListener("pointerleave", () => {
+          locate.querySelectorAll(".is-hot").forEach((el) => el.classList.remove("is-hot"));
+        });
+        locate.addEventListener("click", (e) => {
+          if (!session.mark) return;
+          if (e.target.closest("[data-locate-eye]")) {
+            session.mark.locateHide = !session.mark.locateHide;
+            markFill();
+            return;
+          }
+          const wall = e.target.closest("[data-locate-wall]");
+          if (session.mark.locateBig && wall) {
+            const node = markNode();
+            session.mark.surface = wall.dataset.locateWall;
+            if (node) node.view = session.mark.surface;
+            session.mark.locateBig = false;
+            session.mark.sel = "";
+            markCommit(true);
+            return;
+          }
+          session.mark.locateBig = !session.mark.locateBig;
+          markFill();
+        });
+      }
+      const eye = `<button type="button" class="calc-mini-toggle mark-locate-eye" data-locate-eye title="${session.mark?.locateHide ? "Показать план" : "Скрыть план"}" aria-label="Показать или скрыть план"><svg class="calc-mini-eye-on" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/></svg><svg class="calc-mini-eye-off" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 3l18 18M10.6 10.7a2.8 2.8 0 0 0 3.7 3.7M6.2 6.3C4.1 7.8 2.5 12 2.5 12s3.5 7 9.5 7c1.2 0 2.3-.2 3.3-.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>`;
+      locate.hidden = !ctx.base;
+      locate.classList.toggle("is-big", !!session.mark?.locateBig && !session.mark?.locateHide);
+      locate.classList.toggle("is-hidden", !!session.mark?.locateHide);
+      locate.innerHTML = `${ctx.base ? `<div class="mark-locate-map">${planLocateSvg(ctx.base, surface)}</div>` : ""}${eye}`;
+    }
+    markDraw();
+  }
+
+  function markViewOf(canvas, ctx) {
+    const surface = session.mark?.surface || "floor";
+    if (!ctx.base) return null;
+    if (surface === "floor" || surface === "ceiling") return { kind: "plan", view: plannerView(canvas, ctx.base.points, null), plan: ctx.base };
+    const walls = plannerWalls(ctx.base);
+    const wall = walls.find((item) => item.id === surface);
+    if (!wall) return { kind: "plan", view: plannerView(canvas, ctx.base.points, null), plan: ctx.base };
+    const pad = 28;
+    const len = Math.max(wall.len, 0.2);
+    const height = Math.max(ctx.base.height, 0.2);
+    const scale = Math.min((canvas.clientWidth - pad * 2) / len, (canvas.clientHeight - pad * 2) / height);
+    const ox = (canvas.clientWidth - len * scale) / 2;
+    const oy = (canvas.clientHeight - height * scale) / 2;
+    return {
+      kind: "wall",
+      wall,
+      height: ctx.base.height,
+      scale,
+      toAlong(along, rise) {
+        return { x: ox + along * scale, y: oy + (height - rise) * scale };
+      },
+      from(x, y) {
+        return { along: (x - ox) / scale, rise: height - (y - oy) / scale };
+      },
+    };
+  }
+
+  function markLocals(ctx) {
+    if (ctx.node.type !== "openings") return [];
+    return ctx.node.holes.map((hole) => resolveHole(hole, ctx.base, ctx.node, ctx.graph.values));
+  }
+
+  function frameBoxes(fix) {
+    const cells = (fix.cells || []).slice(0, 6);
+    const gap = 0.012;
+    const sizes = cells.map((id) => plannerClamp((socketById(id)?.size || 80) / 1000, 0.02, 0.4));
+    const horiz = fix.orient !== "v";
+    const total = sizes.reduce((sum, size) => sum + size, 0) + gap * Math.max(0, sizes.length - 1);
+    let cursor = -total / 2;
+    return cells.map((id, index) => {
+      const size = sizes[index];
+      const box = horiz
+        ? { x: cursor, y: -size / 2, w: size, h: size, id }
+        : { x: -size / 2, y: cursor, w: size, h: size, id };
+      cursor += size + gap;
+      return box;
+    });
+  }
+
+  function markDraw() {
+    const ctx = markContext();
+    const canvas = $("mark-canvas");
+    if (!ctx || !canvas || !session.mark) return;
+    const fitted = plannerFitCanvas(canvas);
+    if (!fitted) return;
+    const { ctx: g, w, h } = fitted;
+    const colors = plannerColors();
+    g.clearRect(0, 0, w, h);
+    g.fillStyle = colors.bg;
+    g.fillRect(0, 0, w, h);
+    const view = markViewOf(canvas, ctx);
+    session.mark.view = view;
+    if (!view || !ctx.base) {
+      g.fillStyle = colors.muted;
+      g.font = "14px sans-serif";
+      g.fillText("Подключите чертёж", 24, 36);
+      return;
+    }
+    const surface = session.mark.surface;
+    if (view.kind === "plan") {
+      g.beginPath();
+      ctx.base.points.forEach((p, index) => {
+        const spot = view.view.to(p);
+        if (index) g.lineTo(spot.x, spot.y);
+        else g.moveTo(spot.x, spot.y);
+      });
+      g.closePath();
+      const tones = markTones(ctx.node);
+      g.fillStyle = surface === "ceiling" ? tones.ceiling : tones.floor;
+      g.globalAlpha = 0.22;
+      g.fill();
+      g.globalAlpha = 1;
+      g.lineWidth = 2;
+      g.strokeStyle = surface === "ceiling" ? tones.ceiling : tones.floor;
+      g.stroke();
+    } else {
+      const a = view.toAlong(0, 0);
+      const b = view.toAlong(view.wall.len, view.height);
+      g.fillStyle = markTones(ctx.node).wall;
+      g.globalAlpha = 0.34;
+      g.fillRect(a.x, b.y, b.x - a.x, a.y - b.y);
+      g.globalAlpha = 1;
+      g.strokeStyle = markTones(ctx.node).wall;
+      g.lineWidth = 2;
+      g.strokeRect(a.x, b.y, b.x - a.x, a.y - b.y);
+    }
+    const drawHole = (hole, ghost) => {
+      const onWall = view.kind === "wall" && hole.surface === "wall" && hole.wallId === view.wall.id;
+      const onPlan = view.kind === "plan" && hole.surface === surface;
+      if (!onWall && !onPlan) return;
+      g.save();
+      g.globalAlpha = ghost ? 0.45 : hole.picked === false ? 0.28 : 1;
+      if (hole.picked === false) g.setLineDash([5, 4]);
+      g.fillStyle = colors.bg;
+      g.strokeStyle = hole.role === "door" ? "#b45309" : hole.role === "pipe" ? "#0369a1" : "#0f766e";
+      g.lineWidth = session.mark.sel === hole.id ? 3 : 1.5;
+      if (view.kind === "wall") {
+        if (hole.shape === "circle") {
+          const c = view.toAlong(hole.along, hole.rise);
+          g.beginPath();
+          g.arc(c.x, c.y, Math.max(3, (hole.d / 2) * view.scale), 0, Math.PI * 2);
+          g.fill();
+          g.stroke();
+        } else {
+          const p = view.toAlong(hole.along, hole.rise + hole.h);
+          const q = view.toAlong(hole.along + hole.w, hole.rise);
+          g.fillRect(p.x, p.y, q.x - p.x, q.y - p.y);
+          g.strokeRect(p.x, p.y, q.x - p.x, q.y - p.y);
+        }
+      } else if (hole.shape === "circle") {
+        const c = view.view.to({ x: hole.x, y: hole.y });
+        g.beginPath();
+        g.arc(c.x, c.y, Math.max(3, (hole.d / 2) * view.view.scale), 0, Math.PI * 2);
+        g.fill();
+        g.stroke();
+      } else {
+        const p = view.view.to({ x: hole.x, y: hole.y });
+        const q = view.view.to({ x: hole.x + hole.w, y: hole.y + hole.h });
+        g.fillRect(p.x, p.y, q.x - p.x, q.y - p.y);
+        g.strokeRect(p.x, p.y, q.x - p.x, q.y - p.y);
+      }
+      g.restore();
+    };
+    (ctx.base.openings || []).forEach((hole) => drawHole(hole, true));
+    if (ctx.node.type === "openings") markLocals(ctx).forEach((hole) => drawHole(hole, false));
+    if (ctx.node.type === "electrics") {
+      ctx.node.fixtures.forEach((fix) => {
+        const here = view.kind === "wall" ? fix.surface === "wall" && fix.wallId === view.wall.id : fix.surface === surface;
+        if (!here) return;
+        if (fix.kind === "light") {
+          lightPaint(g, view, fix, session.mark.sel === fix.id, colors.ink);
+          return;
+        }
+        frameBoxes(fix).forEach((box) => {
+          const type = socketById(box.id) || SOCKET_BUILTIN[0];
+          let x = 0;
+          let y = 0;
+          let bw = 8;
+          let bh = 8;
+          if (view.kind === "wall") {
+            const p = view.toAlong(fix.along + box.x, fix.rise + box.y + box.h);
+            const q = view.toAlong(fix.along + box.x + box.w, fix.rise + box.y);
+            x = p.x;
+            y = p.y;
+            bw = q.x - p.x;
+            bh = q.y - p.y;
+          } else {
+            const p = view.view.to({ x: fix.x + box.x, y: fix.y + box.y });
+            const q = view.view.to({ x: fix.x + box.x + box.w, y: fix.y + box.y + box.h });
+            x = p.x;
+            y = p.y;
+            bw = q.x - p.x;
+            bh = q.y - p.y;
+          }
+          g.fillStyle = type.color;
+          g.strokeStyle = session.mark.sel === fix.id ? colors.ink : "#1e293b";
+          g.lineWidth = session.mark.sel === fix.id ? 2.5 : 1;
+          g.fillRect(x, y, bw, bh);
+          g.strokeRect(x, y, bw, bh);
+          g.fillStyle = markInk(type.color);
+          g.font = `700 ${Math.max(9, Math.min(bw, bh) * 0.42)}px sans-serif`;
+          g.textAlign = "center";
+          g.textBaseline = "middle";
+          g.fillText(type.letters || "?", x + bw / 2, y + bh / 2);
+        });
+      });
+    }
+  }
+
+  function lightBox(fix) {
+    const type = lightById(fix.light) || LIGHT_BUILTIN[0];
+    const shape = type.shape || "circle";
+    let w = plannerClamp((type.size || 120) / 1000, 0.03, 0.8);
+    let h = w;
+    if (shape === "rect") {
+      w = plannerClamp(plannerNum(fix.lw, 0.6), 0.05, 8);
+      h = plannerClamp(plannerNum(fix.ll, 0.3), 0.05, 8);
+    } else if (shape === "line") {
+      w = plannerClamp(plannerNum(fix.ll, 1.2), 0.1, 12);
+      h = 0.02;
+    }
+    return { w, h, shape, type };
+  }
+
+  function lightAngle(fix) {
+    const raw = fix?.angle;
+    const fallback = fix?.orient === "v" ? 90 : 0;
+    const value = raw == null || raw === "" ? fallback : plannerNum(raw, fallback);
+    return Math.round(((((value % 360) + 360) % 360) * 10)) / 10;
+  }
+
+  function lightRotates(shape) {
+    return shape === "rect" || shape === "line";
+  }
+
+  function lightPaint(g, view, fix, selected, ink) {
+    const box = lightBox(fix);
+    const p = view.kind === "wall" ? view.toAlong(fix.along - box.w / 2, fix.rise + box.h / 2) : view.view.to({ x: fix.x - box.w / 2, y: fix.y - box.h / 2 });
+    const q = view.kind === "wall" ? view.toAlong(fix.along + box.w / 2, fix.rise - box.h / 2) : view.view.to({ x: fix.x + box.w / 2, y: fix.y + box.h / 2 });
+    const sw = Math.abs(q.x - p.x);
+    const sh = Math.abs(q.y - p.y);
+    const cx = (p.x + q.x) / 2;
+    const cy = (p.y + q.y) / 2;
+    g.save();
+    g.translate(cx, cy);
+    if (lightRotates(box.shape)) g.rotate((lightAngle(fix) * Math.PI) / 180);
+    g.fillStyle = box.type.color;
+    g.strokeStyle = selected ? ink : box.type.color;
+    g.lineWidth = 2;
+    const draw = box.shape === "line" || box.shape === "rect" ? "square" : box.shape;
+    markShape(g, draw, -sw / 2, -sh / 2, sw, sh);
+    g.restore();
+    return { cx, cy, sw, sh, angle: lightRotates(box.shape) ? lightAngle(fix) : 0 };
+  }
+
+  function markShape(g, shape, x, y, w, h) {
+    g.beginPath();
+    if (shape === "diamond") {
+      g.moveTo(x + w / 2, y);
+      g.lineTo(x + w, y + h / 2);
+      g.lineTo(x + w / 2, y + h);
+      g.lineTo(x, y + h / 2);
+      g.closePath();
+    } else if (shape === "square") g.rect(x, y, w, h);
+    else g.arc(x + w / 2, y + h / 2, Math.min(Math.abs(w), Math.abs(h)) / 2, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+  }
+
+  function markInk(hex) {
+    const n = Number.parseInt(String(hex || "").slice(1), 16);
+    if (!Number.isFinite(n)) return "#fff";
+    const r = (n >> 16) & 255;
+    const gv = (n >> 8) & 255;
+    const b = n & 255;
+    return r * 0.3 + gv * 0.59 + b * 0.11 > 160 ? "#1e293b" : "#fff";
+  }
+
+  function markHoleScreen(hole, view) {
+    if (!view) return null;
+    if (view.kind === "wall") {
+      if (hole.shape === "circle") {
+        const c = view.toAlong(hole.along, hole.rise);
+        const r = Math.max(4, (hole.d / 2) * view.scale);
+        return { x: c.x - r, y: c.y - r, w: r * 2, h: r * 2, circle: true };
+      }
+      const p = view.toAlong(hole.along, hole.rise + hole.h);
+      const q = view.toAlong(hole.along + hole.w, hole.rise);
+      return { x: Math.min(p.x, q.x), y: Math.min(p.y, q.y), w: Math.abs(q.x - p.x), h: Math.abs(q.y - p.y) };
+    }
+    if (hole.shape === "circle") {
+      const c = view.view.to({ x: hole.x, y: hole.y });
+      const edge = view.view.to({ x: hole.x + hole.d / 2, y: hole.y });
+      const r = Math.max(4, Math.hypot(edge.x - c.x, edge.y - c.y));
+      return { x: c.x - r, y: c.y - r, w: r * 2, h: r * 2, circle: true };
+    }
+    const p = view.view.to({ x: hole.x, y: hole.y });
+    const q = view.view.to({ x: hole.x + hole.w, y: hole.y + hole.h });
+    return { x: Math.min(p.x, q.x), y: Math.min(p.y, q.y), w: Math.abs(q.x - p.x), h: Math.abs(q.y - p.y) };
+  }
+
+  function markEdgeAt(box, x, y) {
+    const t = 8;
+    if (x < box.x - t || x > box.x + box.w + t || y < box.y - t || y > box.y + box.h + t) return "";
+    const left = Math.abs(x - box.x) <= t;
+    const right = Math.abs(x - (box.x + box.w)) <= t;
+    const top = Math.abs(y - box.y) <= t;
+    const bottom = Math.abs(y - (box.y + box.h)) <= t;
+    if (box.circle) return left || right || top || bottom ? "e" : "";
+    let edge = "";
+    if (top) edge += "n";
+    if (bottom) edge += "s";
+    if (left) edge += "w";
+    if (right) edge += "e";
+    return edge;
+  }
+
+  function markResize(hole, drag, world) {
+    const wall = hole.surface === "wall";
+    const dx = wall ? world.along - drag.pointer.along : world.x - drag.pointer.x;
+    const dy = wall ? world.rise - drag.pointer.rise : world.y - drag.pointer.y;
+    if (hole.shape === "circle") {
+      const dist = wall ? Math.hypot(world.along - hole.along, world.rise - hole.rise) : Math.hypot(world.x - hole.x, world.y - hole.y);
+      hole.d = plannerRound(plannerClamp(dist * 2, 0.01, 5));
+      return;
+    }
+    if (wall) {
+      let along = drag.along;
+      let rise = drag.rise;
+      let w = drag.w;
+      let h = drag.h;
+      if (drag.mode.includes("e")) w = drag.w + dx;
+      if (drag.mode.includes("w")) {
+        along = drag.along + dx;
+        w = drag.w - dx;
+      }
+      if (drag.mode.includes("n")) h = drag.h + dy;
+      if (drag.mode.includes("s")) {
+        rise = drag.rise + dy;
+        h = drag.h - dy;
+      }
+      hole.w = plannerRound(Math.max(0.05, w));
+      hole.h = plannerRound(Math.max(0.05, h));
+      hole.along = plannerRound(along);
+      hole.rise = plannerRound(rise);
+      return;
+    }
+    let x = drag.x;
+    let y = drag.y;
+    let w = drag.w;
+    let h = drag.h;
+    if (drag.mode.includes("e")) w = drag.w + dx;
+    if (drag.mode.includes("w")) {
+      x = drag.x + dx;
+      w = drag.w - dx;
+    }
+    if (drag.mode.includes("s")) h = drag.h + dy;
+    if (drag.mode.includes("n")) {
+      y = drag.y + dy;
+      h = drag.h - dy;
+    }
+    hole.w = plannerRound(Math.max(0.05, w));
+    hole.h = plannerRound(Math.max(0.05, h));
+    hole.x = plannerRound(x);
+    hole.y = plannerRound(y);
+  }
+
+  function markHit(ctx, x, y) {
+    const view = session.mark?.view;
+    if (!view) return "";
+    const surface = session.mark.surface;
+    if (ctx.node.type === "openings") {
+      const holes = markLocals(ctx);
+      for (let i = holes.length - 1; i >= 0; i -= 1) {
+        const hole = holes[i];
+        if (view.kind === "wall") {
+          if (hole.surface !== "wall" || hole.wallId !== view.wall.id) continue;
+          const spot = hole.shape === "circle" ? view.toAlong(hole.along, hole.rise) : view.toAlong(hole.along + hole.w / 2, hole.rise + hole.h / 2);
+          const reach = hole.shape === "circle" ? Math.max(10, (hole.d / 2) * view.scale + 6) : Math.max(12, Math.hypot((hole.w * view.scale) / 2, (hole.h * view.scale) / 2));
+          if (Math.hypot(x - spot.x, y - spot.y) <= reach) return hole.id;
+        } else if (hole.surface === surface) {
+          if (hole.shape === "circle") {
+            const spot = view.view.to({ x: hole.x, y: hole.y });
+            const edge = view.view.to({ x: hole.x + hole.d / 2, y: hole.y });
+            if (Math.hypot(x - spot.x, y - spot.y) <= Math.hypot(edge.x - spot.x, edge.y - spot.y) + 8) return hole.id;
+          } else {
+            const p = view.view.to({ x: hole.x, y: hole.y });
+            const q = view.view.to({ x: hole.x + hole.w, y: hole.y + hole.h });
+            const pad = 6;
+            if (x >= Math.min(p.x, q.x) - pad && x <= Math.max(p.x, q.x) + pad && y >= Math.min(p.y, q.y) - pad && y <= Math.max(p.y, q.y) + pad) return hole.id;
+          }
+        }
+      }
+      return "";
+    }
+    for (let i = ctx.node.fixtures.length - 1; i >= 0; i -= 1) {
+      const fix = ctx.node.fixtures[i];
+      const here = view.kind === "wall" ? fix.surface === "wall" && fix.wallId === view.wall.id : fix.surface === surface;
+      if (!here) continue;
+      if (fix.kind === "light") {
+        const box = lightBox(fix);
+        const p = view.kind === "wall" ? view.toAlong(fix.along - box.w / 2, fix.rise + box.h / 2) : view.view.to({ x: fix.x - box.w / 2, y: fix.y - box.h / 2 });
+        const q = view.kind === "wall" ? view.toAlong(fix.along + box.w / 2, fix.rise - box.h / 2) : view.view.to({ x: fix.x + box.w / 2, y: fix.y + box.h / 2 });
+        const cx = (p.x + q.x) / 2;
+        const cy = (p.y + q.y) / 2;
+        const ang = lightRotates(box.shape) ? (-lightAngle(fix) * Math.PI) / 180 : 0;
+        const dx = x - cx;
+        const dy = y - cy;
+        const rx = dx * Math.cos(ang) - dy * Math.sin(ang);
+        const ry = dx * Math.sin(ang) + dy * Math.cos(ang);
+        const pad = 6;
+        if (Math.abs(rx) <= Math.abs(q.x - p.x) / 2 + pad && Math.abs(ry) <= Math.abs(q.y - p.y) / 2 + pad) {
+          session.mark.hitCell = null;
+          return fix.id;
+        }
+        continue;
+      }
+      const boxes = frameBoxes(fix);
+      const hitIndex = boxes.findIndex((box) => {
+        const p = view.kind === "wall" ? view.toAlong(fix.along + box.x, fix.rise + box.y) : view.view.to({ x: fix.x + box.x, y: fix.y + box.y });
+        const q = view.kind === "wall" ? view.toAlong(fix.along + box.x + box.w, fix.rise + box.y + box.h) : view.view.to({ x: fix.x + box.x + box.w, y: fix.y + box.y + box.h });
+        return x >= Math.min(p.x, q.x) - 6 && x <= Math.max(p.x, q.x) + 6 && y >= Math.min(p.y, q.y) - 6 && y <= Math.max(p.y, q.y) + 6;
+      });
+      if (hitIndex >= 0) {
+        session.mark.hitCell = hitIndex;
+        return fix.id;
+      }
+      const spot = view.kind === "wall" ? view.toAlong(fix.along, fix.rise) : view.view.to({ x: fix.x, y: fix.y });
+      if (Math.hypot(x - spot.x, y - spot.y) <= 18) {
+        session.mark.hitCell = null;
+        return fix.id;
+      }
+    }
+    return "";
+  }
+
+  function markWorld(x, y) {
+    const view = session.mark?.view;
+    if (!view) return null;
+    if (view.kind === "wall") return view.from(x, y);
+    const point = view.view.from(x, y);
+    return { x: point.x, y: point.y };
+  }
+
+  function markPlace(node, world, extra) {
+    const surface = session.mark?.surface || "floor";
+    const spot = {
+      surface,
+      wallId: surface !== "floor" && surface !== "ceiling" ? surface : "",
+      along: world.along || 0,
+      rise: world.rise || 0,
+      x: world.x || 0,
+      y: world.y || 0,
+    };
+    if (node.type === "openings") {
+      const hole = {
+        id: uid(),
+        ...spot,
+        shape: extra.shape || "rect",
+        w: extra.w || 0.9,
+        h: extra.h || 2.1,
+        d: extra.d || 0.11,
+        bind: { w: false, h: false, d: false },
+        picked: true,
+      };
+      if (hole.shape === "rect" && hole.surface === "wall" && hole.rise < 0.15) {
+        hole.rise = 0;
+        hole.w = extra.w || 0.9;
+        hole.h = extra.h || 2.1;
+        hole.along = (world.along || 0) - hole.w / 2;
+      } else if (hole.shape === "rect") {
+        hole.w = extra.w || 1.2;
+        hole.h = extra.h || 1.2;
+        hole.along = (world.along || 0) - hole.w / 2;
+        hole.rise = (world.rise || 0) - hole.h / 2;
+        if (hole.surface !== "wall") {
+          hole.x = (world.x || 0) - hole.w / 2;
+          hole.y = (world.y || 0) - hole.h / 2;
+        }
+      }
+      node.holes.push(hole);
+      session.mark.sel = hole.id;
+      return hole.id;
+    }
+    if (extra.kind === "light") {
+      const lightId = extra.light || "chandelier";
+      const shape = lightById(lightId)?.shape;
+      const fix = { id: uid(), kind: "light", ...spot, orient: "h", cells: ["socket"], light: lightId, lw: shape === "rect" ? 0.6 : 0.6, ll: shape === "line" ? 1.2 : 0.3 };
+      node.fixtures.push(fix);
+      session.mark.sel = fix.id;
+      return fix.id;
+    }
+    const count = plannerClamp(session.mark?.section || 1, 1, 6);
+    const cells = Array.from({ length: count }, () => extra.type || "socket");
+    const fix = { id: uid(), kind: "socket", ...spot, orient: session.mark?.orient === "v" ? "v" : "h", cells, light: "chandelier" };
+    node.fixtures.push(fix);
+    session.mark.sel = fix.id;
+    return fix.id;
+  }
+
+  function presetSwatch(kind, type) {
+    const color = markHex(type?.color, kind === "light" ? "#facc15" : "#a78bfa");
+    const ink = markInk(color);
+    const px = Math.max(22, Math.min(46, Math.round(plannerNum(type?.size, kind === "light" ? 120 : 80) * 46 / 200)));
+    const shape = type?.shape || "circle";
+    let glyph = "";
+    if (kind !== "light") {
+      const x = (50 - px) / 2;
+      glyph = `<rect x="${x}" y="${x}" width="${px}" height="${px}" rx="5" fill="${color}"/><text x="25" y="26" text-anchor="middle" fill="${ink}" font-size="${Math.max(10, Math.round(px * 0.36))}" font-weight="700">${esc(type?.letters || "")}</text>`;
+    } else if (shape === "line") {
+      const w = Math.min(46, Math.max(28, px));
+      glyph = `<rect x="${(50 - w) / 2}" y="24" width="${w}" height="2" rx="1" fill="${color}"/>`;
+    } else if (shape === "rect") {
+      const w = Math.min(46, Math.max(30, px));
+      const h = Math.max(12, Math.round(w * 0.4));
+      glyph = `<rect x="${(50 - w) / 2}" y="${(50 - h) / 2}" width="${w}" height="${h}" rx="3" fill="${color}"/>`;
+    } else if (shape === "diamond") {
+      const s = px / 2;
+      glyph = `<polygon points="25,${25 - s} ${25 + s},25 25,${25 + s} ${25 - s},25" fill="${color}"/>`;
+    } else if (shape === "square") {
+      const x = (50 - px) / 2;
+      glyph = `<rect x="${x}" y="${x}" width="${px}" height="${px}" rx="3" fill="${color}"/>`;
+    } else {
+      glyph = `<circle cx="25" cy="25" r="${px / 2}" fill="${color}"/>`;
+    }
+    return `<span class="mark-swatch"><svg viewBox="0 0 50 50" width="50" height="50" aria-hidden="true">${glyph}</svg></span>`;
+  }
+
+  const PRESET_SHAPES = [
+    { value: "circle", label: "круг" },
+    { value: "square", label: "квадрат" },
+    { value: "diamond", label: "ромб" },
+    { value: "rect", label: "прямоугольник" },
+    { value: "line", label: "линейный" },
+  ];
+
+  function presetRow(kind, type) {
+    const id = esc(type.id);
+    const extra = kind === "light"
+      ? markSelect(`data-preset-shape="${id}"`, "", PRESET_SHAPES, type.shape || "circle")
+      : `<input data-preset-letters="${id}" data-preset-kind="socket" maxlength="3" value="${esc(type.letters || "")}" aria-label="Буквы" />`;
+    return `<div class="mark-preset-row" data-preset-id="${id}" data-preset-kind="${kind}"><span class="mark-drag" draggable="true" title="Перетащить" aria-label="Порядок"></span>${presetSwatch(kind, type)}<input data-preset-name="${id}" data-preset-kind="${kind}" maxlength="32" value="${esc(type.name)}" aria-label="Имя" />${extra}<input type="color" data-preset-color="${id}" data-preset-kind="${kind}" value="${esc(markHex(type.color, kind === "light" ? "#facc15" : "#a78bfa"))}" aria-label="Цвет" /><input data-preset-size="${id}" data-preset-kind="${kind}" inputmode="decimal" value="${esc(String(type.size || ""))}" aria-label="Размер, миллиметры" /><button type="button" class="calc-mini" data-del-custom="${kind}" data-custom-id="${id}" title="Удалить">×</button></div>`;
+  }
+
+  function refreshPresetRow(row) {
+    if (!row) return;
+    const kind = row.dataset.presetKind === "light" ? "light" : "socket";
+    const type = presetCatalog(kind).find((item) => item.id === row.dataset.presetId);
+    const slot = row.querySelector(".mark-swatch");
+    if (type && slot) slot.outerHTML = presetSwatch(kind, type);
+  }
+
+  function markPresetHtml() {
+    const socketForm = `<form class="mark-custom" data-custom="socket">${presetSwatch("socket", { letters: "Р", color: "#a78bfa", size: 80 })}<input name="name" maxlength="32" placeholder="Имя" aria-label="Имя розетки" /><input name="letters" maxlength="3" placeholder="Буквы" aria-label="Буквы, до трёх" /><input name="color" type="color" value="#a78bfa" aria-label="Цвет" /><input name="size" inputmode="decimal" value="80" aria-label="Размер, миллиметры" /><button type="submit" class="btn">Добавить</button></form>`;
+    const lightForm = `<form class="mark-custom" data-custom="light">${presetSwatch("light", { shape: "circle", color: "#facc15", size: 120 })}<input name="name" maxlength="32" placeholder="Имя" aria-label="Имя света" />${markSelect("", "shape", [{ value: "circle", label: "круг" }, { value: "square", label: "квадрат" }, { value: "diamond", label: "ромб" }, { value: "rect", label: "прямоугольник" }, { value: "line", label: "линейный" }], "circle")}<input name="color" type="color" value="#facc15" aria-label="Цвет" /><input name="size" inputmode="decimal" value="120" aria-label="Размер, миллиметры" /><button type="submit" class="btn">Добавить</button></form>`;
+    return `<div class="mark-presets" data-presets><section><h4>Розетки</h4>${socketForm}${socketCatalog().map((type) => presetRow("socket", type)).join("")}</section><section><h4>Свет</h4>${lightForm}${lightCatalog().map((type) => presetRow("light", type)).join("")}</section></div>`;
+  }
+
+  function refreshPresetDraft(form) {
+    const slot = form?.querySelector(".mark-swatch");
+    if (!slot) return;
+    const data = new FormData(form);
+    const next = form.dataset.custom === "light"
+      ? presetSwatch("light", { shape: String(data.get("shape") || "circle"), color: data.get("color"), size: data.get("size") })
+      : presetSwatch("socket", { letters: String(data.get("letters") || ""), color: data.get("color"), size: data.get("size") });
+    slot.outerHTML = next;
+  }
+
+  function markShowMenu(clientX, clientY, hitId) {
+    const canvas = $("mark-canvas");
+    const menu = $("mark-menu");
+    const card = $("mark-menu-card");
+    const node = markNode();
+    if (!canvas || !menu || !card || !node || !session.mark) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const world = markWorld(x, y);
+    if (!world) return;
+    session.mark.menu = { x, y, world, hitId: hitId || "" };
+    if (hitId) session.mark.sel = hitId;
+    menu.hidden = false;
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    menu.classList.toggle("is-plain", !hitId);
+    const arrows = $("mark-arrows");
+    if (arrows) arrows.hidden = !hitId;
+    const surface = session.mark.surface;
+    if (node.type === "openings") {
+      card.innerHTML = `<button type="button" data-mark-act="rect">Прямоугольник</button><button type="button" data-mark-act="circle">Круг</button><div class="mark-dias">${PIPE_MM.map((mm) => `<button type="button" data-mark-act="dia" data-mm="${mm}">${mm}</button>`).join("")}</div>`;
+    } else {
+      const fix = hitId ? node.fixtures.find((item) => item.id === hitId) : null;
+      const onSocket = fix && fix.kind !== "light" && session.mark.hitCell != null;
+      if (fix && fix.kind === "light") {
+        const swap = lightCatalog()
+          .map((type) => `<button type="button" data-mark-act="swap-light" data-type="${esc(type.id)}" class="${type.id === fix.light ? "is-on" : ""}">${esc(type.name)}</button>`)
+          .join("");
+        const shape = lightById(fix.light)?.shape;
+        const spin = lightRotates(shape)
+          ? `<button type="button" data-mark-act="spin">+45°</button><div class="mark-angle"><input data-menu-angle inputmode="decimal" value="${esc(String(lightAngle(fix)))}" aria-label="Угол, градусы" /><button type="button" data-mark-act="angle">Угол</button></div>`
+          : "";
+        card.innerHTML = `${spin}<div class="mark-types"><b>Свет</b>${swap}</div>`;
+      } else if (onSocket) {
+        const current = fix.cells[session.mark.hitCell] || "";
+        const swap = socketCatalog()
+          .map((type) => `<button type="button" data-mark-act="swap" data-type="${esc(type.id)}" class="${type.id === current ? "is-on" : ""}">${esc(type.letters)} · ${esc(type.name)}</button>`)
+          .join("");
+        const flip = fix.orient === "v" ? "Горизонтально" : "Вертикально";
+        card.innerHTML = `<button type="button" data-mark-act="flip">${flip}</button><div class="mark-sec"><span>Ячейки</span><button type="button" data-mark-act="sec" data-step="-1">−</button><b>${fix.cells.length}</b><button type="button" data-mark-act="sec" data-step="1">+</button></div><div class="mark-types"><b>Эта секция</b>${swap}</div>`;
+      } else {
+        const sockets = socketCatalog()
+          .map((type) => `<button type="button" data-mark-act="socket" data-type="${esc(type.id)}">${esc(type.letters)} · ${esc(type.name)}</button>`)
+          .join("");
+        const lights = lightCatalog()
+          .map((type) => `<button type="button" data-mark-act="light" data-type="${esc(type.id)}">${esc(type.name)}</button>`)
+          .join("");
+        card.innerHTML = `<div class="mark-orient">
+          <button type="button" data-mark-act="orient" data-orient="h" class="${session.mark.orient !== "v" ? "is-on" : ""}">Горизонтально</button>
+          <button type="button" data-mark-act="orient" data-orient="v" class="${session.mark.orient === "v" ? "is-on" : ""}">Вертикально</button>
+        </div>
+        <div class="mark-sec"><span>В секции</span><button type="button" data-mark-act="sec" data-step="-1">−</button><b>${session.mark.section || 1}</b><button type="button" data-mark-act="sec" data-step="1">+</button></div>
+        <div class="mark-types"><b>Розетки</b>${sockets}<b>Свет</b>${lights}</div>
+        <div class="mark-split"></div>
+        <button type="button" data-mark-act="presets">Предустановки</button>`;
+      }
+    }
+    const box = $("mark-nudge-box");
+    if (box) box.hidden = true;
+  }
+
+  function markShift(node, hitId, dir, dist) {
+    const vec = PLANNER_NUDGE_DIRS[dir];
+    if (!vec || !(dist > 0)) return false;
+    const len = Math.hypot(vec[0], vec[1]) || 1;
+    const dx = (vec[0] / len) * dist;
+    const dy = (vec[1] / len) * dist;
+    if (node.type === "openings") {
+      const hole = node.holes.find((item) => item.id === hitId);
+      if (!hole) return false;
+      if (hole.surface === "wall") {
+        hole.along = plannerRound(hole.along + dx);
+        hole.rise = plannerRound(hole.rise - dy);
+      } else {
+        hole.x = plannerRound(hole.x + dx);
+        hole.y = plannerRound(hole.y + dy);
+      }
+      return true;
+    }
+    const fix = node.fixtures.find((item) => item.id === hitId);
+    if (!fix) return false;
+    if (fix.surface === "wall") {
+      fix.along = plannerRound(fix.along + dx);
+      fix.rise = plannerRound(fix.rise - dy);
+    } else {
+      fix.x = plannerRound(fix.x + dx);
+      fix.y = plannerRound(fix.y + dy);
+    }
+    return true;
+  }
+
+  function ensureMarkModal() {
+    if ($("mark-modal")) return;
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    modal.id = "mark-modal";
+    modal.innerHTML = `<div class="modal-card planner-modal mark-modal" role="dialog" aria-label="Чертёж">
+      <div class="planner-head">
+        <input id="mark-title" class="planner-title" maxlength="48" spellcheck="false" aria-label="Имя" />
+        <button type="button" class="btn primary" id="mark-close">Готово</button>
+      </div>
+      <div class="planner-body">
+        <div class="planner-stage">
+          <div class="planner-cap" id="mark-cap">Пол</div>
+          <div class="planner-plan-wrap">
+            <canvas id="mark-canvas"></canvas>
+            <div id="mark-menu" class="mark-menu" hidden>
+              <div id="mark-arrows" class="planner-nudge">
+                <button type="button" class="planner-nudge-dir" data-dir="nw" aria-label="Вверх-влево"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+                <button type="button" class="planner-nudge-dir" data-dir="n" aria-label="Вверх"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+                <button type="button" class="planner-nudge-dir" data-dir="ne" aria-label="Вверх-вправо"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+                <button type="button" class="planner-nudge-dir" data-dir="w" aria-label="Влево"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+                <button type="button" class="planner-nudge-dir" data-dir="e" aria-label="Вправо"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+                <button type="button" class="planner-nudge-dir" data-dir="sw" aria-label="Вниз-влево"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+                <button type="button" class="planner-nudge-dir" data-dir="s" aria-label="Вниз"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+                <button type="button" class="planner-nudge-dir" data-dir="se" aria-label="Вниз-вправо"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
+              </div>
+              <form id="mark-nudge-box" class="planner-nudge-box" hidden>
+                <input id="mark-nudge-input" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="Сдвиг, метры" />
+                <span>м</span>
+                <button type="submit" aria-label="Сдвинуть"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.2 6.4 11.4 12.8 4.6"/></svg></button>
+              </form>
+              <div id="mark-menu-card" class="mark-menu-card"></div>
+            </div>
+          </div>
+          <div class="planner-hint" id="mark-hint"></div>
+          <div class="mark-film" id="mark-film"></div>
+        </div>
+        <div class="planner-side" id="mark-side"></div>
+      </div>
+    </div>`;
+    document.body.appendChild(modal);
+    const preset = document.createElement("div");
+    preset.className = "modal";
+    preset.id = "mark-preset-modal";
+    preset.innerHTML = `<div class="modal-card mark-preset-card" role="dialog" aria-label="Предустановки"><div class="planner-head"><strong>Предустановки</strong><button type="button" class="btn primary" id="mark-preset-close">Готово</button></div><div id="mark-preset-body"></div></div>`;
+    document.body.appendChild(preset);
+    preset.addEventListener("click", (e) => {
+      const pickBtn = e.target.closest(".mark-select-btn");
+      if (pickBtn) {
+        e.preventDefault();
+        placeMarkList(pickBtn);
+        return;
+      }
+      const opt = e.target.closest(".mark-opt");
+      if (opt) {
+        const box = opt.closest(".mark-select");
+        const hidden = box?.querySelector('input[type="hidden"]');
+        if (hidden) hidden.value = opt.dataset.opt || "";
+        const face = box?.querySelector(".mark-select-btn");
+        if (face) face.textContent = opt.textContent || "";
+        box?.querySelectorAll(".mark-select-list").forEach((el) => { el.hidden = true; });
+        const form = opt.closest("form");
+        if (form) refreshPresetDraft(form);
+        const shapeId = opt.dataset.presetShape;
+        if (shapeId) {
+          patchPreset("light", shapeId, { shape: opt.dataset.opt || "circle" });
+          refreshPresetRow(opt.closest(".mark-preset-row"));
+          markCommit(false);
+        }
+        return;
+      }
+      const delCustom = e.target.closest("[data-del-custom]");
+      if (delCustom) {
+        dropPreset(delCustom.dataset.delCustom === "light" ? "light" : "socket", delCustom.dataset.customId);
+        const body = $("mark-preset-body");
+        if (body) body.innerHTML = markPresetHtml();
+        markCommit(true);
+        return;
+      }
+      if (!e.target.closest(".mark-select")) document.querySelectorAll("#mark-preset-modal .mark-select-list").forEach((el) => { el.hidden = true; });
+      if (e.target === preset || e.target.closest("#mark-preset-close")) preset.classList.remove("open");
+    });
+    preset.addEventListener("input", (e) => {
+      const form = e.target.closest?.("form.mark-custom");
+      if (form) refreshPresetDraft(form);
+      const kind = e.target.dataset?.presetKind === "light" ? "light" : "socket";
+      const nameId = e.target.dataset?.presetName;
+      if (nameId) {
+        const name = String(e.target.value || "").trim().slice(0, 32);
+        if (name) patchPreset(kind, nameId, { name });
+        markCommit(false);
+        return;
+      }
+      const lettersId = e.target.dataset?.presetLetters;
+      if (lettersId) {
+        const letters = markLetters(e.target.value);
+        if (letters) {
+          patchPreset("socket", lettersId, { letters });
+          refreshPresetRow(e.target.closest(".mark-preset-row"));
+          markCommit(false);
+        }
+        return;
+      }
+      const colorId = e.target.dataset?.presetColor;
+      if (colorId) {
+        patchPreset(kind, colorId, { color: e.target.value });
+        refreshPresetRow(e.target.closest(".mark-preset-row"));
+        markCommit(false);
+        return;
+      }
+      const sizeId = e.target.dataset?.presetSize;
+      if (sizeId) {
+        const size = plannerDraft(e.target.value);
+        if (size == null) return;
+        patchPreset(kind, sizeId, { size });
+        refreshPresetRow(e.target.closest(".mark-preset-row"));
+        markCommit(false);
+      }
+    });
+    preset.addEventListener("dragstart", (e) => {
+      const handle = e.target.closest?.(".mark-drag");
+      const row = handle?.closest(".mark-preset-row");
+      if (!handle || !row) {
+        e.preventDefault();
+        return;
+      }
+      preset.dataset.dragId = row.dataset.presetId || "";
+      preset.dataset.dragKind = row.dataset.presetKind || "";
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", preset.dataset.dragId);
+      row.classList.add("is-drag");
+    });
+    preset.addEventListener("dragover", (e) => {
+      const row = e.target.closest?.(".mark-preset-row");
+      if (!row || !preset.dataset.dragId || row.dataset.presetKind !== preset.dataset.dragKind) return;
+      e.preventDefault();
+      const box = row.getBoundingClientRect();
+      const before = e.clientY < box.top + box.height / 2;
+      preset.querySelectorAll(".mark-preset-row").forEach((el) => el.classList.remove("is-before", "is-after"));
+      row.classList.add(before ? "is-before" : "is-after");
+      preset.dataset.dragBefore = before ? "1" : "0";
+      preset.dataset.dragOver = row.dataset.presetId || "";
+    });
+    preset.addEventListener("drop", (e) => {
+      const kind = preset.dataset.dragKind === "light" ? "light" : "socket";
+      const id = preset.dataset.dragId;
+      const target = preset.dataset.dragOver;
+      if (id && target) movePreset(kind, id, target, preset.dataset.dragBefore !== "0");
+      preset.querySelectorAll(".mark-preset-row").forEach((el) => el.classList.remove("is-drag", "is-before", "is-after"));
+      delete preset.dataset.dragId;
+      delete preset.dataset.dragKind;
+      delete preset.dataset.dragOver;
+      const body = $("mark-preset-body");
+      if (body) body.innerHTML = markPresetHtml();
+      markCommit(false);
+      e.preventDefault();
+    });
+    preset.addEventListener("dragend", () => {
+      preset.querySelectorAll(".mark-preset-row").forEach((el) => el.classList.remove("is-drag", "is-before", "is-after"));
+      delete preset.dataset.dragId;
+      delete preset.dataset.dragKind;
+    });
+    preset.addEventListener("submit", (e) => onMarkCustom(e));
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) closeMark();
+    });
+    $("mark-close")?.addEventListener("click", () => closeMark());
+    $("mark-title")?.addEventListener("input", (e) => {
+      const node = markNode();
+      if (!node) return;
+      node.name = String(e.target.value || "").trim().slice(0, 48);
+      const card = document.querySelector(`[data-mark-title="${cssEsc(node.id)}"]`);
+      if (card) card.value = node.name;
+    });
+    $("mark-title")?.addEventListener("change", () => markCommit(false));
+    $("mark-canvas")?.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      const ctx = markContext();
+      const canvas = $("mark-canvas");
+      if (!ctx || !canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const hit = markHit(ctx, e.clientX - rect.left, e.clientY - rect.top);
+      markShowMenu(e.clientX, e.clientY, hit);
+    });
+    $("mark-canvas")?.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      const ctx = markContext();
+      const canvas = $("mark-canvas");
+      if (!ctx || !canvas) return;
+      markHideMenu();
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const hit = markHit(ctx, x, y);
+      session.mark.sel = hit || "";
+      if (hit && ctx.node.type === "openings") {
+        const hole = ctx.node.holes.find((item) => item.id === hit);
+        const live = hole ? resolveHole(hole, ctx.base, ctx.node, ctx.graph.values) : null;
+        const box = live ? markHoleScreen(live, session.mark.view) : null;
+        const edge = box ? markEdgeAt(box, x, y) : "";
+        const world = markWorld(x, y);
+        if (edge && world && hole) {
+          session.mark.drag = {
+            id: hit,
+            mode: edge,
+            pointer: world,
+            along: hole.along,
+            rise: hole.rise,
+            w: hole.w,
+            h: hole.h,
+            x: hole.x,
+            y: hole.y,
+            d: hole.d,
+          };
+          markDraw();
+          return;
+        }
+      }
+      if (hit) {
+        session.mark.drag = { id: hit, x: e.clientX, y: e.clientY };
+        markDraw();
+      } else markFill();
+    });
+    $("mark-canvas")?.addEventListener("pointermove", (e) => {
+      const drag = session.mark?.drag;
+      const node = markNode();
+      if (!drag || !node) return;
+      const canvas = $("mark-canvas");
+      const rect = canvas.getBoundingClientRect();
+      const world = markWorld(e.clientX - rect.left, e.clientY - rect.top);
+      if (!world) return;
+      if (node.type === "openings") {
+        const hole = node.holes.find((item) => item.id === drag.id);
+        if (!hole) return;
+        if (drag.mode) {
+          markResize(hole, drag, world);
+          markDraw();
+          return;
+        }
+        if (hole.surface === "wall") {
+          if (hole.shape === "circle") {
+            hole.along = world.along;
+            hole.rise = world.rise;
+          } else {
+            hole.along = world.along - hole.w / 2;
+            hole.rise = world.rise - hole.h / 2;
+          }
+        } else if (hole.shape === "circle") {
+          hole.x = world.x;
+          hole.y = world.y;
+        } else {
+          hole.x = world.x - hole.w / 2;
+          hole.y = world.y - hole.h / 2;
+        }
+      } else {
+        const fix = node.fixtures.find((item) => item.id === drag.id);
+        if (!fix) return;
+        if (fix.surface === "wall") {
+          fix.along = world.along;
+          fix.rise = world.rise;
+        } else {
+          fix.x = world.x;
+          fix.y = world.y;
+        }
+      }
+      markDraw();
+    });
+    window.addEventListener("pointerup", () => {
+      if (!session.mark?.drag) return;
+      session.mark.drag = null;
+      markCommit(true);
+    });
+    $("mark-menu")?.addEventListener("contextmenu", (e) => e.preventDefault());
+    $("mark-arrows")?.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-dir]");
+      const menu = session.mark?.menu;
+      if (!btn || !menu?.hitId || !session.mark) return;
+      session.mark.nudgeDir = btn.dataset.dir;
+      $("mark-arrows")?.querySelectorAll("[data-dir]").forEach((el) => el.classList.toggle("is-on", el === btn));
+      const box = $("mark-nudge-box");
+      if (box) {
+        box.hidden = false;
+        $("mark-nudge-input")?.focus();
+      }
+    });
+    $("mark-nudge-box")?.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const node = markNode();
+      const menu = session.mark?.menu;
+      const dir = session.mark?.nudgeDir;
+      const value = plannerDraft($("mark-nudge-input")?.value);
+      const ok = !!(node && menu?.hitId && dir && value != null && markShift(node, menu.hitId, dir, value));
+      $("mark-nudge-box")?.classList.toggle("is-bad", !ok);
+      if (ok) markCommit(true);
+    });
+    $("mark-menu-card")?.addEventListener("click", (e) => {
+      const delCustom = e.target.closest("[data-del-custom]");
+      if (delCustom) {
+        dropPreset(delCustom.dataset.delCustom === "light" ? "light" : "socket", delCustom.dataset.customId);
+        markCommit(true);
+        return;
+      }
+      const btn = e.target.closest("[data-mark-act]");
+      const node = markNode();
+      const menu = session.mark?.menu;
+      if (!btn || !node || !menu) return;
+      const act = btn.dataset.markAct;
+      if (act === "flip") {
+        const fix = node.fixtures.find((item) => item.id === menu.hitId);
+        if (fix && fix.kind !== "light") fix.orient = fix.orient === "v" ? "h" : "v";
+        markShowMenu(menu.x + $("mark-canvas").getBoundingClientRect().left, menu.y + $("mark-canvas").getBoundingClientRect().top, menu.hitId);
+        markCommit(true);
+        return;
+      }
+      if (act === "spin" || act === "angle") {
+        const fix = node.fixtures.find((item) => item.id === menu.hitId);
+        if (fix && lightRotates(lightById(fix.light)?.shape)) {
+          if (act === "spin") fix.angle = (lightAngle(fix) + 45) % 360;
+          else {
+            const value = plannerDraft(btn.parentElement?.querySelector("[data-menu-angle]")?.value);
+            if (value == null) return;
+            fix.angle = lightAngle({ angle: value });
+          }
+        }
+        markShowMenu(menu.x + $("mark-canvas").getBoundingClientRect().left, menu.y + $("mark-canvas").getBoundingClientRect().top, menu.hitId);
+        markCommit(true);
+        return;
+      }
+      if (act === "orient") {
+        session.mark.orient = btn.dataset.orient === "v" ? "v" : "h";
+        if (menu.hitId) {
+          const fix = node.fixtures.find((item) => item.id === menu.hitId);
+          if (fix && fix.kind !== "light") fix.orient = session.mark.orient;
+        }
+        markShowMenu(menu.x + $("mark-canvas").getBoundingClientRect().left, menu.y + $("mark-canvas").getBoundingClientRect().top, menu.hitId);
+        if (menu.hitId) markCommit(true);
+        return;
+      }
+      if (act === "sec") {
+        const fix = menu.hitId ? node.fixtures.find((item) => item.id === menu.hitId) : null;
+        const step = Number(btn.dataset.step || 0);
+        if (fix && fix.kind !== "light" && session.mark.hitCell != null) {
+          const next = plannerClamp(fix.cells.length + step, 1, 6);
+          while (fix.cells.length < next) fix.cells.push(fix.cells[fix.cells.length - 1] || "socket");
+          while (fix.cells.length > next) fix.cells.pop();
+          if (session.mark.hitCell >= fix.cells.length) session.mark.hitCell = fix.cells.length - 1;
+          markShowMenu(menu.x + $("mark-canvas").getBoundingClientRect().left, menu.y + $("mark-canvas").getBoundingClientRect().top, menu.hitId);
+          markCommit(true);
+          return;
+        }
+        session.mark.section = plannerClamp((session.mark.section || 1) + step, 1, 6);
+        markShowMenu(menu.x + $("mark-canvas").getBoundingClientRect().left, menu.y + $("mark-canvas").getBoundingClientRect().top, menu.hitId);
+        return;
+      }
+      if (act === "swap") {
+        const fix = node.fixtures.find((item) => item.id === menu.hitId);
+        const index = session.mark.hitCell;
+        if (fix && index != null && fix.cells[index] != null) fix.cells[index] = btn.dataset.type;
+        markHideMenu();
+        markCommit(true);
+        return;
+      }
+      if (act === "swap-light") {
+        const fix = node.fixtures.find((item) => item.id === menu.hitId);
+        if (fix) {
+          fix.light = btn.dataset.type || fix.light;
+          const shape = lightById(fix.light)?.shape;
+          if (shape === "rect" && !(fix.lw > 0)) fix.lw = 0.6;
+          if (shape === "line" && !(fix.ll > 0.2)) fix.ll = 1.2;
+        }
+        markHideMenu();
+        markCommit(true);
+        return;
+      }
+      if (act === "presets") {
+        const body = $("mark-preset-body");
+        if (body) body.innerHTML = markPresetHtml();
+        $("mark-preset-modal")?.classList.add("open");
+        markHideMenu();
+        return;
+      }
+      if (act === "rect") markPlace(node, menu.world, { shape: "rect" });
+      else if (act === "circle") markPlace(node, menu.world, { shape: "circle", d: 0.11 });
+      else if (act === "dia") markPlace(node, menu.world, { shape: "circle", d: Number(btn.dataset.mm) / 1000 });
+      else if (act === "socket") markPlace(node, menu.world, { kind: "socket", type: btn.dataset.type });
+      else if (act === "light") markPlace(node, menu.world, { kind: "light", light: btn.dataset.type });
+      markHideMenu();
+      markCommit(true);
+    });
+    $("mark-film")?.addEventListener("wheel", (e) => {
+      const film = e.currentTarget;
+      if (!(film instanceof HTMLElement) || film.scrollWidth <= film.clientWidth + 4) return;
+      e.preventDefault();
+      film.scrollLeft += e.deltaY + e.deltaX;
+    }, { passive: false });
+    $("mark-film")?.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-mark-surface]");
+      const node = markNode();
+      if (!btn || !node || !session.mark) return;
+      const ctx = markContext();
+      session.mark.surface = markSurfaceOk(ctx?.base, btn.dataset.markSurface);
+      node.view = session.mark.surface;
+      session.mark.sel = "";
+      markHideMenu();
+      markCommit(true);
+    });
+    $("mark-side")?.addEventListener("click", (e) => {
+      const node = markNode();
+      if (!node) return;
+      const pickBtn = e.target.closest(".mark-select-btn");
+      if (pickBtn) {
+        e.preventDefault();
+        placeMarkList(pickBtn);
+        return;
+      }
+      const opt = e.target.closest(".mark-opt");
+      if (opt) {
+        const box = opt.closest(".mark-select");
+        const hidden = box?.querySelector('input[type="hidden"]');
+        const value = opt.dataset.opt || "";
+        if (hidden) hidden.value = value;
+        box?.querySelectorAll(".mark-select-list").forEach((el) => {
+          el.hidden = true;
+        });
+        const variable = opt.dataset.holeVar;
+        if (variable && node.type === "openings") {
+          const field = opt.dataset.bind;
+          const port = `b:${variable}:${field}`;
+          if (!value) disconnectInput(node.id, port);
+          else {
+            const [from, fromPort] = value.split("\t");
+            connect(from, fromPort, node.id, port);
+          }
+          markFill();
+          return;
+        }
+        const orient = opt.dataset.orient;
+        if (orient) {
+          const fix = node.fixtures.find((item) => item.id === orient);
+          if (fix) fix.orient = value === "v" ? "v" : "h";
+          markCommit(true);
+          return;
+        }
+        const cell = opt.dataset.cell;
+        if (cell) {
+          const fix = node.fixtures.find((item) => item.id === cell);
+          const index = Number(opt.dataset.cellI);
+          if (fix && fix.cells[index] != null) fix.cells[index] = value;
+          markCommit(true);
+          return;
+        }
+        const light = opt.dataset.light;
+        if (light) {
+          const fix = node.fixtures.find((item) => item.id === light);
+          if (fix) fix.light = value;
+          markCommit(true);
+        }
+        return;
+      }
+      if (!e.target.closest(".mark-select")) {
+        document.querySelectorAll("#mark-side .mark-select-list").forEach((el) => {
+          el.hidden = true;
+        });
+      }
+      const bulk = e.target.closest("[data-mark-bulk]");
+      if (bulk && node.type === "openings") {
+        const plan = markContext()?.base;
+        const walls = plan ? plannerWalls(plan) : [];
+        const on = bulk.dataset.markBulk.endsWith("on");
+        if (!node.outOn) node.outOn = {};
+        if (bulk.dataset.markBulk.startsWith("walls")) walls.forEach((wall) => { node.outOn[`wall:${wall.id}`] = on; });
+        else ["count:pick", "count:door", "count:window", "count:pipe", "count:hatch"].forEach((id) => { node.outOn[id] = on; });
+        markCommit(true);
+        return;
+      }
+      const ownAdd = e.target.closest("[data-own-add]");
+      if (ownAdd && node.type === "openings") {
+        if (!Array.isArray(node.owns)) node.owns = [];
+        node.owns.push({ id: uid(), name: "Свой", holes: [] });
+        markCommit(true);
+        return;
+      }
+      const ownDel = e.target.closest("[data-own-del]");
+      if (ownDel && node.type === "openings") {
+        node.owns = (node.owns || []).filter((own) => own.id !== ownDel.dataset.ownDel);
+        markCommit(true);
+        return;
+      }
+      const ownBox = e.target.closest("[data-own-hole]");
+      if (ownBox && node.type === "openings") {
+        const own = (node.owns || []).find((item) => item.id === ownBox.dataset.own);
+        if (!own) return;
+        if (!Array.isArray(own.holes)) own.holes = [];
+        const id = ownBox.dataset.ownHole;
+        own.holes = ownBox.checked ? own.holes.concat(own.holes.includes(id) ? [] : [id]) : own.holes.filter((item) => item !== id);
+        markCommit(true);
+        return;
+      }
+      const mmBtn = e.target.closest("[data-hole-mm]");
+      if (mmBtn && node.type === "openings") {
+        const hole = node.holes.find((item) => item.id === mmBtn.dataset.holeMm);
+        if (hole && !hole.bind?.d) {
+          hole.d = plannerRound(Number(mmBtn.dataset.mm) / 1000);
+          hole.shape = "circle";
+          markCommit(true);
+        }
+        return;
+      }
+      const delHole = e.target.closest("[data-hole-del]");
+      if (delHole && node.type === "openings") {
+        const id = delHole.dataset.holeDel;
+        node.holes = node.holes.filter((hole) => hole.id !== id);
+        const bp = activeBlueprint();
+        if (bp) bp.links = (bp.links || []).filter((link) => !(link.to === node.id && String(link.toPort || "").startsWith(`b:${id}:`)));
+        markCommit(true);
+        return;
+      }
+      const full = e.target.closest("[data-hole-full]");
+      if (full && node.type === "openings") {
+        const ctx = markContext();
+        const hole = node.holes.find((item) => item.id === full.dataset.holeFull);
+        const wall = ctx?.base ? plannerWalls(ctx.base).find((item) => item.id === hole?.wallId) : null;
+        if (hole && wall) {
+          hole.along = 0;
+          hole.rise = 0;
+          hole.w = plannerRound(wall.len);
+          hole.shape = "rect";
+          markCommit(true);
+        }
+        return;
+      }
+      const spin = e.target.closest("[data-light-spin]");
+      if (spin && node.type === "electrics") {
+        const fix = node.fixtures.find((item) => item.id === spin.dataset.lightSpin);
+        if (fix) fix.angle = (lightAngle(fix) + 45) % 360;
+        markCommit(true);
+        return;
+      }
+      const delFix = e.target.closest("[data-fix-del]");
+      if (delFix) {
+        node.fixtures = node.fixtures.filter((item) => item.id !== delFix.dataset.fixDel);
+        markCommit(true);
+        return;
+      }
+      const addCell = e.target.closest("[data-cell-add]");
+      if (addCell) {
+        const fix = node.fixtures.find((item) => item.id === addCell.dataset.cellAdd);
+        if (fix && fix.cells.length < 6) {
+          fix.cells.push(fix.cells[fix.cells.length - 1] || "socket");
+          markCommit(true);
+        }
+        return;
+      }
+      const delCustom = e.target.closest("[data-del-custom]");
+      if (delCustom) {
+        dropPreset(delCustom.dataset.delCustom === "light" ? "light" : "socket", delCustom.dataset.customId);
+        markCommit(true);
+      }
+    });
+    $("mark-side")?.addEventListener("change", (e) => {
+      const node = markNode();
+      const bp = activeBlueprint();
+      if (!node || !bp) return;
+      const out = e.target.dataset?.markOut;
+      if (out) {
+        const linked = linkedFromPorts(node.id, bp.links);
+        if (linked.has(out)) {
+          e.target.checked = true;
+          return;
+        }
+        node.outOn[out] = !!e.target.checked;
+        markCommit(false);
+        return;
+      }
+      const bind = e.target.dataset?.holeBind;
+      if (bind && node.type === "openings") {
+        const hole = node.holes.find((item) => item.id === bind);
+        const field = e.target.dataset.bind;
+        if (!hole || !field) return;
+        if (!hole.bind) hole.bind = { w: false, h: false, d: false };
+        hole.bind[field] = !!e.target.checked;
+        if (!e.target.checked) bp.links = bp.links.filter((link) => !(link.to === node.id && link.toPort === `b:${hole.id}:${field}`));
+        markCommit(true);
+        return;
+      }
+      const variable = e.target.dataset?.holeVar;
+      if (variable && node.type === "openings") {
+        const field = e.target.dataset.bind;
+        const port = `b:${variable}:${field}`;
+        const raw = String(e.target.value || "");
+        if (!raw) disconnectInput(node.id, port);
+        else {
+          const [from, fromPort] = raw.split("\t");
+          connect(from, fromPort, node.id, port);
+        }
+        markFill();
+        return;
+      }
+      const orient = e.target.dataset?.orient;
+      if (orient) {
+        const fix = node.fixtures.find((item) => item.id === orient);
+        if (fix) fix.orient = e.target.value === "v" ? "v" : "h";
+        markCommit(true);
+        return;
+      }
+      const cell = e.target.dataset?.cell;
+      if (cell) {
+        const fix = node.fixtures.find((item) => item.id === cell);
+        const index = Number(e.target.dataset.cellI);
+        if (fix && fix.cells[index] != null) fix.cells[index] = e.target.value;
+        markCommit(true);
+        return;
+      }
+      const light = e.target.dataset?.light;
+      if (light) {
+        const fix = node.fixtures.find((item) => item.id === light);
+        if (fix) fix.light = e.target.value;
+        markCommit(true);
+      }
+    });
+    $("mark-side")?.addEventListener("input", (e) => {
+      if (e.target.dataset?.cardName) {
+        const node = markNode();
+        if (!node) return;
+        const id = e.target.dataset.cardName;
+        const fallback = e.target.dataset.labelFallback || "";
+        const value = String(e.target.value || "").trim().slice(0, 48);
+        const list = e.target.dataset.cardKind === "hole" ? node.holes : node.fixtures;
+        const item = (list || []).find((row) => row.id === id);
+        if (item) item.name = !value || value === fallback ? "" : value;
+        if (item && e.target.dataset.cardKind === "hole") {
+          const title = item.name || fallback;
+          $("mark-side")?.querySelectorAll(`[data-own-title="${cssEsc(id)}"]`).forEach((el) => { el.textContent = title; });
+        }
+        markCommit(false);
+        return;
+      }
+      const lightAngleId = e.target.dataset?.lightAngle;
+      if (lightAngleId) {
+        const node = markNode();
+        const fix = node?.fixtures?.find((item) => item.id === lightAngleId);
+        const value = plannerDraft(e.target.value);
+        if (fix && value != null) {
+          fix.angle = lightAngle({ angle: value });
+          markCommit(false);
+        }
+        return;
+      }
+      const lightW = e.target.dataset?.lightW;
+      const lightL = e.target.dataset?.lightL;
+      if (lightW || lightL) {
+        const node = markNode();
+        const fix = node?.fixtures?.find((item) => item.id === (lightW || lightL));
+        const value = plannerDraft(e.target.value);
+        if (fix && value != null) {
+          if (lightW) fix.lw = plannerRound(plannerClamp(value, 0.05, 8));
+          else fix.ll = plannerRound(plannerClamp(value, 0.05, 12));
+          markCommit(false);
+        }
+        return;
+      }
+      const node = markNode();
+      if (!node || node.type !== "openings") return;
+      const map = [
+        ["holeW", "w", 0.05, 500],
+        ["holeH", "h", 0.05, 30],
+        ["holeD", "d", 5, 2000],
+      ];
+      for (const [data, field, lo, hi] of map) {
+        const id = e.target.dataset?.[data];
+        if (!id) continue;
+        const hole = node.holes.find((item) => item.id === id);
+        const value = plannerDraft(e.target.value);
+        if (!hole || value == null || hole.bind?.[field]) return;
+        if (field === "d") hole.d = plannerRound(plannerClamp(value / 1000, 0.005, 2));
+        else hole[field] = plannerRound(plannerClamp(value, lo, hi));
+        markCommit(false);
+        return;
+      }
+      const ownName = e.target.dataset?.ownName;
+      if (ownName) {
+        const own = (node.owns || []).find((item) => item.id === ownName);
+        if (own) own.name = String(e.target.value || "").trim().slice(0, 48) || "Свой";
+        markCommit(false);
+        return;
+      }
+      const pick = e.target.dataset?.holePick;
+      if (pick) {
+        const hole = node.holes.find((item) => item.id === pick);
+        if (hole) hole.picked = !!e.target.checked;
+        markCommit(true);
+      }
+    });
+    $("mark-menu-card")?.addEventListener("submit", onMarkCustom);
+    $("mark-side")?.addEventListener("submit", onMarkCustom);
+    function onMarkCustom(e) {
+      const form = e.target.closest?.("[data-custom]") || (e.target.dataset?.custom ? e.target : null);
+      if (!form) return;
+      e.preventDefault();
+      const calc = ensureState();
+      if (!calc) return;
+      const data = new FormData(form);
+      const name = String(data.get("name") || "").trim().slice(0, 32);
+      if (!name) return;
+      if (form.dataset.custom === "light") {
+        if (!Array.isArray(calc.lightTypes)) calc.lightTypes = [];
+        calc.lightTypes.push({
+          id: `c-${uid()}`,
+          name,
+          shape: ["square", "diamond", "rect", "line", "circle"].includes(String(data.get("shape"))) ? String(data.get("shape")) : "circle",
+          color: markHex(data.get("color"), "#facc15"),
+          size: Math.round(plannerClamp(plannerNum(data.get("size"), 120), 20, 800)),
+        });
+      } else {
+        const letters = markLetters(data.get("letters"));
+        if (!letters) {
+          api?.toast?.("Нужны буквы, от одной до трёх");
+          return;
+        }
+        if (!Array.isArray(calc.socketTypes)) calc.socketTypes = [];
+        calc.socketTypes.push({
+          id: `c-${uid()}`,
+          name,
+          letters,
+          color: markHex(data.get("color"), "#a78bfa"),
+          size: Math.round(plannerClamp(plannerNum(data.get("size"), 80), 20, 400)),
+        });
+      }
+      const old = form.closest("#mark-menu-card")?.querySelector("[data-presets]");
+      if (old) old.outerHTML = markPresetHtml();
+      const body = $("mark-preset-body");
+      if (body && $("mark-preset-modal")?.classList.contains("open")) body.innerHTML = markPresetHtml();
+      markCommit(true);
+    }
+    window.addEventListener("resize", () => {
+      if (session.mark?.id) markDraw();
+    });
+  }
+
   function addNode(type, point, extra) {
     const bp = activeBlueprint();
     if (!bp) return;
@@ -3447,6 +6196,21 @@
         ...ids.map((id) => ({ id: `w:${id}`, kind: "wall", name: "", on: false })),
         { id: uid(), kind: "sum", name: "Стены", on: true, parts: ids.map((id) => `w:${id}`) },
       ];
+    }
+    if (type === "openings") {
+      node.name = "Проёмы";
+      node.color = GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
+      node.holes = [];
+      node.outOn = { "count:pick": true, "count:door": true, "count:window": true, "count:pipe": true, "count:hatch": true };
+      node.owns = [];
+      node.view = "floor";
+    }
+    if (type === "electrics") {
+      node.name = "Электрика";
+      node.color = GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
+      node.fixtures = [];
+      node.outOn = {};
+      node.view = "floor";
     }
     if (type === "present") {
       node.pageId = extra?.pageId || "";
@@ -3630,6 +6394,10 @@
     if (!fromHit) return false;
     const port = resolveToPort(dst, toPort, bp.links);
     if (!port) return false;
+    if (portSignal(src, fromHit) !== portSignal(dst, port)) {
+      api?.toast?.("Чертёж соединяется только с чертежом");
+      return false;
+    }
     if (dst.type === "present" && dst.blockId) {
       const owner = presentOwner(dst.blockId, port, bp.id);
       if (owner) {
@@ -3835,6 +6603,8 @@
           ${calcToolButton("filter", "Фильтр", `<path d="M2.6 3.2h10.8L9.4 8.2v4.2l-2.8 1.2V8.2z"/>`)}
           ${calcToolButton("dashboard", "Дашборд", `<path d="M3 13V8.4M8 13V3.6M13 13V6.4M2.2 13h11.6"/>`)}
           ${calcToolButton("planner", "Планировщик", `<path d="M3 3.2h10v9.6H3zM3 7.4h4.2"/>`)}
+          ${calcToolButton("openings", "Проёмы", `<path d="M3 3.2h10v9.6H3zM6.2 12.8V7.2h3.6v5.6M4.2 6.2h2.2v2.4H4.2z"/>`)}
+          ${calcToolButton("electrics", "Электрика", `<path d="M8 2.8v3.2M6.2 6h3.6v2.4L8 13.2 6.2 8.4V6z"/>`)}
           ${calcToolButton("result", "Результат", `<path d="M2.6 5.2h6.4M2.6 10.8h6.4M10.2 8h3.4M11.6 6.2 13.8 8l-2.2 1.8"/>`)}
           ${calcToolButton("group", "Группа", `<rect x="3" y="3" width="10" height="10" rx="1.5" stroke-dasharray="2.2 1.5"/>`)}
           ${calcToolButton("comment", "Комментарий", `<path d="M3 2.8h6.6L13 6.2v7H3zM9.4 2.9V6h3.2M5 8.2h6M5 10.6h4"/>`)}
@@ -4804,6 +7574,13 @@
           ports.length
             ? ports
                 .map((port) => {
+                  if (port.id === "plan") {
+                    return `<div class="calc-row out">
+                      <span class="calc-row-name">Чертёж</span>
+                      <b class="calc-plan-tag">план</b>
+                      <i class="calc-port out" data-port="plan" data-io="out" data-signal="plan" title="Чертёж"></i>
+                    </div>`;
+                  }
                   const value = graph.values[`${node.id}:${port.id}`];
                   const shown = value != null && Number.isFinite(value) ? value : (port.value ?? port.area);
                   const unit = port.unit || "м²";
@@ -4956,7 +7733,7 @@
     const focusHost = host.contains(focus) || groups?.contains(focus) || groupUi?.contains(focus) ? focus : null;
     const keep = focusHost
       ? {
-          name: focus.dataset.inName || focus.dataset.outName || focus.dataset.outExpr || focus.dataset.resultName || focus.dataset.resultPrio || focus.dataset.constValue || focus.dataset.groupName || focus.dataset.plannerTitle || focus.dataset.filterField,
+          name: focus.dataset.inName || focus.dataset.outName || focus.dataset.outExpr || focus.dataset.resultName || focus.dataset.resultPrio || focus.dataset.constValue || focus.dataset.groupName || focus.dataset.plannerTitle || focus.dataset.markTitle || focus.dataset.filterField,
           start: focus.selectionStart,
           end: focus.selectionEnd,
           filterField: focus.dataset.filterField || "",
@@ -4990,6 +7767,8 @@
         if (node.type === "filter") return filterNodeHtml(node, graph);
         if (node.type === "dashboard") return dashboardNodeHtml(node, bp, graph);
         if (node.type === "planner") return plannerNodeHtml(node, bp, graph);
+        if (node.type === "openings") return openingsNodeHtml(node, bp, graph);
+        if (node.type === "electrics") return electricsNodeHtml(node, bp, graph);
         if (node.type === "present") return presentNodeHtml(node, bp, graph);
         return orderNodeHtml(node, api.findOrder(node.orderId), graph, bp);
       })
@@ -5005,7 +7784,7 @@
     if (keep?.name || keep?.filterField) {
       const again = keep.filterField && keep.nodeId
         ? host.querySelector(`[data-node="${cssEsc(keep.nodeId)}"] [data-filter-field="${cssEsc(keep.filterField)}"]`)
-        : host.querySelector(`[data-in-name="${cssEsc(keep.name)}"], [data-out-name="${cssEsc(keep.name)}"], [data-out-expr="${cssEsc(keep.name)}"], [data-result-name="${cssEsc(keep.name)}"], [data-result-prio="${cssEsc(keep.name)}"], [data-const-value="${cssEsc(keep.name)}"], [data-planner-title="${cssEsc(keep.name)}"]`) ||
+          : host.querySelector(`[data-in-name="${cssEsc(keep.name)}"], [data-out-name="${cssEsc(keep.name)}"], [data-out-expr="${cssEsc(keep.name)}"], [data-result-name="${cssEsc(keep.name)}"], [data-result-prio="${cssEsc(keep.name)}"], [data-const-value="${cssEsc(keep.name)}"], [data-planner-title="${cssEsc(keep.name)}"], [data-mark-title="${cssEsc(keep.name)}"]`) ||
           groupUi?.querySelector(`[data-group-name="${cssEsc(keep.name)}"]`);
       if (again) {
         again.focus({ preventScroll: true });
@@ -5096,6 +7875,7 @@
   }
 
   function wireKind(node, fromPort) {
+    if (fromPort === "plan") return "plan";
     const type = node?.type || "";
     if (type === "order") {
       if (fromPort === "total") return "order";
@@ -5114,7 +7894,7 @@
       }
       return "order";
     }
-    if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme" || type === "group" || type === "filter" || type === "dashboard" || type === "planner" || type === "present" || type === "comment") return type;
+    if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme" || type === "group" || type === "filter" || type === "dashboard" || type === "planner" || type === "openings" || type === "electrics" || type === "present" || type === "comment") return type;
     return "order";
   }
 
@@ -5191,6 +7971,12 @@
     const link = session.linking;
     board.classList.toggle("is-link-out", !!(link && !link.reverse));
     board.classList.toggle("is-link-in", !!(link && link.reverse));
+    const ownerId = link ? (link.reverse ? link.to : link.from) : "";
+    const portId = link ? (link.reverse ? link.toPort : link.fromPort) : "";
+    const owner = ownerId ? (activeBlueprint()?.nodes || []).find((item) => item.id === ownerId) : null;
+    const signal = link ? portSignal(owner, portId) : "";
+    board.classList.toggle("is-link-plan", signal === "plan");
+    board.classList.toggle("is-link-num", !!link && signal !== "plan");
   }
 
   function drawWires(bp, graph) {
@@ -6026,6 +8812,12 @@
     const bp = activeBlueprint();
     if (!bp) return;
     // Let nested scrollables (multi-select lists, side panels) scroll instead of zooming.
+    const filmWheel = e.target.closest(".calc-film, .mark-film");
+    if (filmWheel && filmWheel.scrollWidth > filmWheel.clientWidth + 4) {
+      e.preventDefault();
+      filmWheel.scrollLeft += e.deltaY + e.deltaX;
+      return;
+    }
     if (e.target.closest("input, textarea, select, .calc-multi-list, .calc-side, .calc-present-list, .calc-tabs")) return;
     e.preventDefault();
     const before = bp.zoom || 1;
@@ -6054,7 +8846,7 @@
     e.preventDefault();
     const at = worldPoint(bp, e.clientX, e.clientY);
     if (presentBlock) addPresentNode(presentPage, presentBlock, at);
-    else if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "comment" || kind === "filter" || kind === "dashboard" || kind === "planner") addNode(kind, at);
+    else if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "comment" || kind === "filter" || kind === "dashboard" || kind === "planner" || kind === "openings" || kind === "electrics") addNode(kind, at);
     else if (blueprintId && blueprintId !== bp.id) addNode("scheme", at, { blueprintId });
     else if (orderId && api.findOrder(orderId)) addNode("order", at, { orderId });
   }
@@ -6415,6 +9207,15 @@
       }, 1400);
     });
     root.addEventListener("click", (e) => {
+      const toneBtn = e.target.closest("[data-tone-open]");
+      if (toneBtn) {
+        const pop = toneBtn.parentElement?.querySelector(".calc-tone-pop");
+        const willOpen = !!pop?.hidden;
+        root.querySelectorAll(".calc-tone-pop").forEach((el) => { el.hidden = true; });
+        if (pop && willOpen) pop.hidden = false;
+        return;
+      }
+      if (!e.target.closest(".calc-tone-pop")) root.querySelectorAll(".calc-tone-pop").forEach((el) => { el.hidden = true; });
       const clearMulti = e.target.closest("[data-filter-multi-clear]");
       if (clearMulti) {
         e.preventDefault();
@@ -6524,17 +9325,31 @@
         openPlanner(plannerEdit.dataset.plannerEdit || node.id);
         return;
       }
+      const markEdit = e.target.closest("[data-mark-edit], [data-mark-open]");
+      if (markEdit) {
+        e.preventDefault();
+        e.stopPropagation();
+        openMark(markEdit.dataset.markEdit || markEdit.dataset.markOpen || node.id, markEdit.dataset.markSurface || "");
+        return;
+      }
       const orderTypes = e.target.closest("[data-order-types]");
       if (orderTypes && node.type === "order") {
         showOrderTypeMenu(e.clientX, e.clientY, node.id);
       }
     });
     root.addEventListener("input", (e) => {
+      if (e.target.dataset?.markTone) {
+        const nodeEl = e.target.closest(".calc-node");
+        const bp = activeBlueprint();
+        const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node) : null;
+        if (node && (node.type === "openings" || node.type === "electrics")) applyMarkTone(node, nodeEl, e.target.dataset.markTone, e.target.value);
+        return;
+      }
       if (e.target.dataset?.plannerColor) {
         const nodeEl = e.target.closest("[data-node]");
         const bp = activeBlueprint();
         const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node) : null;
-        if (node?.type === "planner") {
+        if (node?.type === "planner" || node?.type === "openings" || node?.type === "electrics") {
           node.color = String(e.target.value || "#65a30d").toLowerCase();
           nodeEl.style.setProperty("--planner-color", node.color);
           const path = nodeEl.querySelector(".calc-planner-thumb path");
@@ -6588,6 +9403,12 @@
         node.name = String(e.target.value || "").trim().slice(0, 48);
         const title = $("planner-title");
         if (title && document.activeElement !== title) title.value = node.name || "Планировщик";
+        return;
+      }
+      if (e.target.dataset?.markTitle && (node.type === "openings" || node.type === "electrics")) {
+        node.name = String(e.target.value || "").trim().slice(0, 48);
+        const title = $("mark-title");
+        if (title && document.activeElement !== title && session.mark?.id === node.id) title.value = node.name;
         return;
       }
       if ((e.target.dataset?.inName || e.target.dataset?.outName) && node.type === "formula") {
@@ -6681,6 +9502,19 @@
         const title = $("planner-title");
         if (title) title.value = node.name;
         dirty();
+        return;
+      }
+      if (e.target.dataset.markTitle && (node.type === "openings" || node.type === "electrics")) {
+        const fallback = node.type === "electrics" ? "Электрика" : "Проёмы";
+        node.name = String(e.target.value || "").trim().slice(0, 48) || fallback;
+        e.target.value = node.name;
+        const title = $("mark-title");
+        if (title && session.mark?.id === node.id) title.value = node.name;
+        dirty();
+        return;
+      }
+      if (e.target.dataset.markTone && (node.type === "openings" || node.type === "electrics")) {
+        applyMarkTone(node, nodeEl, e.target.dataset.markTone, e.target.value);
         return;
       }
       if (e.target.dataset.plannerColor && node.type === "planner") {
@@ -6812,10 +9646,42 @@
       const want = session.linking.reverse ? "out" : "in";
       nodesRoot()?.querySelectorAll(".calc-port").forEach((el) => el.classList.toggle("is-hot", false));
       const over = document.elementFromPoint(e.clientX, e.clientY)?.closest?.(".calc-port");
-      if (over?.dataset.io === want) over.classList.add("is-hot");
+      if (over?.dataset.io === want) {
+        const owner = bp.nodes.find((item) => item.id === over.closest(".calc-node")?.dataset.node);
+        const dragNode = bp.nodes.find((item) => item.id === (session.linking.reverse ? session.linking.to : session.linking.from));
+        const dragPort = session.linking.reverse ? session.linking.toPort : session.linking.fromPort;
+        if (portSignal(owner, over.dataset.port) === portSignal(dragNode, dragPort)) over.classList.add("is-hot");
+      }
     });
     document.addEventListener("keydown", (e) => {
       if (api?.view?.() !== "calculator") return;
+      if (session.mark?.id) {
+        const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
+        if (e.key === "Escape") {
+          e.preventDefault();
+          if (!$("mark-menu")?.hidden) markHideMenu();
+          else closeMark();
+          return;
+        }
+        if (!typing && (e.key === "Delete" || e.key === "Backspace")) {
+          e.preventDefault();
+          const node = markNode();
+          const sel = session.mark.sel;
+          if (!node || !sel) return;
+          if (node.type === "openings") {
+            node.holes = node.holes.filter((hole) => hole.id !== sel);
+            const bp = activeBlueprint();
+            if (bp) bp.links = (bp.links || []).filter((link) => !(link.to === node.id && String(link.toPort || "").startsWith(`b:${sel}:`)));
+          } else node.fixtures = node.fixtures.filter((item) => item.id !== sel);
+          session.mark.sel = "";
+          markCommit(true);
+          return;
+        }
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === "KeyD") {
+          e.preventDefault();
+          return;
+        }
+      }
       if (session.planner?.id) {
         const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
         if (e.key === "Escape") {

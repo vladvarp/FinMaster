@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="stage.css">
+  <style>
+    .modal-card.planner-modal { position: relative; width: min(980px, 100%); height: auto; max-height: none; }
+    .planner-plan-wrap { flex: none; height: 280px; min-height: 0; }
+    #mark-canvas { width: 100%; height: 280px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="modal-card planner-modal" role="dialog" aria-label="Проёмы">
+    <div class="planner-head">
+      <input class="planner-title" value="Проёмы" maxlength="48" readonly tabindex="-1" aria-label="Имя" />
+      <button type="button" class="btn primary" tabindex="-1">Готово</button>
+    </div>
+    <div class="planner-body">
+      <div class="planner-stage">
+        <div class="planner-cap">Стена 1</div>
+        <div class="planner-plan-wrap"><canvas id="mark-canvas"></canvas></div>
+        <div class="planner-hint"><span>Правый клик: прямоугольник, круг или диаметр. У пола прямоугольник становится дверью.</span></div>
+        <div class="mark-film">
+          <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Пол</span><svg class="calc-film-thumb" style="--film-tone:#0ea5e9" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 10H56V36H8Z"/></svg></button>
+          <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Потолок</span><svg class="calc-film-thumb is-ceiling" style="--film-tone:#eab308" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 10H56V36H8Z"/></svg></button>
+          <button type="button" class="calc-film-card is-on" tabindex="-1"><span class="calc-film-name">Стена 1</span><svg class="calc-film-thumb is-wall" style="--film-tone:#94a3b8" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/><rect x="12" y="16" width="12" height="22"/><rect x="30" y="14" width="10" height="8"/><circle cx="50" cy="24" r="3"/></svg></button>
+          <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Стена 2</span><svg class="calc-film-thumb is-wall" style="--film-tone:#94a3b8" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/></svg></button>
+          <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Стена 3</span><svg class="calc-film-thumb is-wall" style="--film-tone:#94a3b8" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/></svg></button>
+          <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Стена 4</span><svg class="calc-film-thumb is-wall" style="--film-tone:#94a3b8" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/></svg></button>
+        </div>
+      </div>
+      <div class="planner-side">
+        <div class="planner-block">
+          <div class="planner-block-h">Проёмы</div>
+          <p class="planner-lead">Прямоугольник у пола — дверь. Ширина двери на всю стену оставляет только верх. Диаметр с входа приходит в миллиметрах.</p>
+          <div class="planner-metric is-sel">
+            <span class="planner-label">Дверь 1 · Стена 1</span>
+            <label class="planner-len">ширина <input value="0,9" readonly tabindex="-1" /> м</label>
+            <label class="planner-len">высота <input value="2,1" readonly tabindex="-1" /> м</label>
+            <button type="button" class="btn" tabindex="-1">Во всю стену</button>
+            <label class="planner-on"><input type="checkbox" checked tabindex="-1" /> В счёт</label>
+          </div>
+          <div class="planner-metric">
+            <span class="planner-label">Окно 2 · Стена 1</span>
+            <label class="planner-len">ширина <input value="1,2" readonly tabindex="-1" /> м</label>
+            <label class="planner-len">высота <input value="1,2" readonly tabindex="-1" /> м</label>
+            <label class="planner-on"><input type="checkbox" checked tabindex="-1" /> В счёт</label>
+          </div>
+          <div class="planner-metric">
+            <span class="planner-label">Труба 3 · Стена 1</span>
+            <label class="planner-len">диаметр <input value="110" readonly tabindex="-1" /> мм</label>
+            <div class="mark-dias"><button type="button" tabindex="-1">50</button><button type="button" tabindex="-1">110</button><button type="button" tabindex="-1">160</button></div>
+            <label class="planner-on"><input type="checkbox" checked tabindex="-1" /> С входа</label>
+          </div>
+        </div>
+        <div class="planner-block">
+          <div class="planner-block-h">На ноду</div>
+          <div class="planner-parts">
+            <label class="planner-part"><input type="checkbox" checked tabindex="-1" /> <span>Стена 1</span> <em>6,4 м²</em></label>
+            <label class="planner-part"><input type="checkbox" checked tabindex="-1" /> <span>Проёмы</span> <em>3</em></label>
+            <label class="planner-part"><input type="checkbox" checked tabindex="-1" /> <span>Двери</span> <em>1</em></label>
+            <label class="planner-part"><input type="checkbox" checked tabindex="-1" /> <span>Окна</span> <em>1</em></label>
+            <label class="planner-part"><input type="checkbox" checked tabindex="-1" /> <span>Трубы</span> <em>1</em></label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      const canvas = document.getElementById("mark-canvas");
+      function fit() {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.max(1, Math.round(rect.width * dpr));
+        canvas.height = Math.max(1, Math.round(rect.height * dpr));
+        const ctx = canvas.getContext("2d");
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        return { ctx, w: rect.width, h: rect.height };
+      }
+      function draw() {
+        const { ctx, w, h } = fit();
+        const css = getComputedStyle(document.documentElement);
+        const ink = css.getPropertyValue("--ink").trim() || "#0f172a";
+        const card = css.getPropertyValue("--card").trim() || "#fff";
+        const bg = css.getPropertyValue("--bg-2").trim() || "#f8fafc";
+        const pad = 28;
+        const len = 4;
+        const height = 2.7;
+        const scale = Math.min((w - pad * 2) / len, (h - pad * 2) / height);
+        const ox = (w - len * scale) / 2;
+        const oy = (h - height * scale) / 2;
+        const X = (along, rise) => ({ x: ox + along * scale, y: oy + (height - rise) * scale });
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, w, h);
+        const a = X(0, 0);
+        const b = X(len, height);
+        ctx.fillStyle = card;
+        ctx.strokeStyle = ink;
+        ctx.lineWidth = 2;
+        ctx.fillRect(a.x, b.y, b.x - a.x, a.y - b.y);
+        ctx.strokeRect(a.x, b.y, b.x - a.x, a.y - b.y);
+        function hole(x0, y0, x1, y1, color) {
+          ctx.fillStyle = bg;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+          ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+        }
+        const door = [X(0.8, 2.1), X(1.7, 0)];
+        hole(door[0].x, door[0].y, door[1].x, door[1].y, "#b45309");
+        const win = [X(2.4, 2.2), X(3.6, 1)];
+        hole(win[0].x, win[0].y, win[1].x, win[1].y, "#0f766e");
+        const pipe = X(3.2, 0.4);
+        ctx.beginPath();
+        ctx.arc(pipe.x, pipe.y, 0.055 * scale, 0, Math.PI * 2);
+        ctx.fillStyle = bg;
+        ctx.strokeStyle = "#0369a1";
+        ctx.fill();
+        ctx.stroke();
+      }
+      draw();
+      window.addEventListener("resize", draw);
+    })();
+  </script>
+</body>
+</html>
