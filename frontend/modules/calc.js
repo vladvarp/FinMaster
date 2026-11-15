@@ -7931,7 +7931,7 @@
     const ports = plannerOutputs(node, bp.links);
     const sub = `пол ${fmtShort(model.floor)} м² · ${model.walls.length} стен · h ${fmtShort(model.height)} м`;
 
-    const film = node.layouts.map((layout) => `<button type="button" class="calc-film-card ${layout.id === node.layoutId ? "is-on" : ""}" data-planner-layout="${esc(layout.id)}" data-planner-edit="${esc(node.id)}" title="${esc(layout.name)}"><span class="calc-film-name">${esc(layout.name)}</span>${plannerThumb(layout.points, true, layout.color)}</button>`).join("");
+    const film = node.layouts.map((layout) => `<div class="calc-film-card ${layout.id === node.layoutId ? "is-on" : ""}" data-planner-layout="${esc(layout.id)}" title="${esc(layout.name)}"><span class="calc-film-name">${esc(layout.name)}</span>${plannerThumb(layout.points, true, layout.color)}</div>`).join("");
     const groups = node.layouts.map((layout) => {
       const rows = ports.filter((port) => port.layoutId === layout.id);
       return `<div class="calc-plan-group" style="--planner-color:${esc(layout.color)}">${rows.map((port) => plannerPortRow(node, port, graph)).join("")}</div>`;
@@ -9504,9 +9504,9 @@
     board.addEventListener("pointerup", onBoardPointerUp);
     board.addEventListener("pointercancel", onBoardPointerUp);
     board.addEventListener("dblclick", (e) => {
-      const thumb = e.target.closest(".calc-planner-thumb");
-      if (!thumb) return;
-      const nodeEl = thumb.closest(".calc-node");
+      const card = e.target.closest(".calc-film-card");
+      if (!card) return;
+      const nodeEl = card.closest(".calc-node");
       const bp = activeBlueprint();
       const node = nodeEl && bp
         ? bp.nodes.find((item) => item.id === nodeEl.dataset.node && item.type === "planner")
