@@ -5011,7 +5011,9 @@
             const fallback = holeLabel(hole, index);
             return `<label class="planner-part"><input type="checkbox" data-own="${esc(own.id)}" data-own-hole="${esc(hole.id)}" ${(own.holes || []).includes(hole.id) ? "checked" : ""} /> <span data-own-title="${esc(hole.id)}">${esc(hole.name || fallback)}</span></label>`;
           }).join("");
-          return `<div class="planner-own-group-title">${esc(group.name)}</div>${items}`;
+          const groupIds = group.items.map(({ hole }) => hole.id);
+          const hasAny = groupIds.some((id) => (own.holes || []).includes(id));
+          return `<div class="planner-own-group-title"><span>${esc(group.name)}</span><button type="button" class="calc-mini planner-own-group-toggle" data-own-group-toggle data-own-group-own="${esc(own.id)}" data-own-group-key="${esc(key)}" title="${hasAny ? "Снять все отметки" : "Отметить все"}" aria-label="${hasAny ? "Снять все отметки" : "Отметить все"}">${hasAny ? "−" : "+"}</button></div>${items}`;
         }).join("");
         return `<div class="planner-metric"><input class="planner-name" data-own-name="${esc(own.id)}" value="${esc(own.name || "Свой")}" maxlength="48" aria-label="Имя своего счётчика" /><button type="button" class="calc-mini" data-own-del="${esc(own.id)}" title="Удалить">×</button>${toggles || `<div class="calc-empty">Нет карточек для подсчёта</div>`}</div>`;
       }).join("");
@@ -6288,6 +6290,24 @@
       const ownDel = e.target.closest("[data-own-del]");
       if (ownDel && node.type === "openings") {
         node.owns = (node.owns || []).filter((own) => own.id !== ownDel.dataset.ownDel);
+        markCommit(true);
+        return;
+      }
+      const ownGroupToggle = e.target.closest("[data-own-group-toggle]");
+      if (ownGroupToggle && node.type === "openings") {
+        const own = (node.owns || []).find((item) => item.id === ownGroupToggle.dataset.ownGroupOwn);
+        if (!own) return;
+        if (!Array.isArray(own.holes)) own.holes = [];
+        const groupKey = ownGroupToggle.dataset.ownGroupKey;
+        const groupIds = node.holes.filter((hole) => {
+          const live = resolveHole(hole, base, node, graph.values);
+          const key = live.surface === "wall" ? `wall:${live.wallId}` : live.surface;
+          return key === groupKey;
+        }).map((hole) => hole.id);
+        const hasAny = groupIds.some((id) => own.holes.includes(id));
+        own.holes = hasAny
+          ? own.holes.filter((id) => !groupIds.includes(id))
+          : [...new Set(own.holes.concat(groupIds))];
         markCommit(true);
         return;
       }
