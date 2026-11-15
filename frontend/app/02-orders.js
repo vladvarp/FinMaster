@@ -1320,8 +1320,8 @@
     return { dir: diff > 0 ? "up" : "down", text: `${diff > 0 ? "+" : "−"}${Math.abs(Math.round(diff))}%` };
   }
 
-  function insightCard({ tint, ico, label, value, note, trend }) {
-    return `<div class="insight" style="--tint:${tint}">
+  function insightCard({ id, tint, ico, label, value, note, trend }) {
+    return `<button type="button" class="insight" data-insight="${esc(id)}" style="--tint:${tint}" aria-label="${esc(label)}">
       <div class="insight-ico">${ico}</div>
       <div class="insight-body">
         <div class="insight-label">${esc(label)}</div>
@@ -1329,7 +1329,7 @@
         <div class="insight-note">${esc(note)}</div>
       </div>
       ${trend ? `<span class="trend ${trend.dir}">${esc(trend.text)}</span>` : ""}
-    </div>`;
+    </button>`;
   }
 
   function topBy(rows, keyFn, valueFn) {
@@ -1351,6 +1351,7 @@
     if (!box) return;
     const rows = dashScopedRows();
     if (!rows.length) {
+      insightSnap = null;
       box.innerHTML = `<div class="empty">Добавьте первый заказ — здесь появятся выводы по выручке, долгам и заказчикам.</div>`;
       return;
     }
@@ -1407,6 +1408,7 @@
     const netCards = s.cost
       ? [
           insightCard({
+            id: "cost",
             tint: "#b45309",
             ico: "▼",
             label: "Налоги и затраты",
@@ -1414,6 +1416,7 @@
             note: `${s.costCount} строк расхода · за месяц ${money(curMonthCost)}`,
           }),
           insightCard({
+            id: "net",
             tint: s.net >= 0 ? "#047857" : "#dc2626",
             ico: "=",
             label: "Чистая прибыль",
@@ -1425,6 +1428,7 @@
 
     box.innerHTML = [
       insightCard({
+        id: "month",
         tint: "#0f766e",
         ico: "▲",
         label: fact ? "Поступило за месяц" : "Выручка за месяц",
@@ -1434,6 +1438,7 @@
       }),
       ...netCards,
       insightCard({
+        id: "forecast",
         tint: "#2563eb",
         ico: "◈",
         label: "Прогноз до конца месяца",
@@ -1441,6 +1446,7 @@
         note: `по темпу за ${dayOfMonth} дн. из ${daysInMonth}`,
       }),
       insightCard({
+        id: "check",
         tint: "#c9a227",
         ico: "≡",
         label: "Средний чек",
@@ -1448,6 +1454,7 @@
         note: `по ${paidOrders.length} заказам`,
       }),
       insightCard({
+        id: "collect",
         tint: paidShare >= 80 ? "#059669" : "#d97706",
         ico: "%",
         label: "Собираемость оплат",
@@ -1455,6 +1462,7 @@
         note: `не оплачено ${money(s.unpaid)}`,
       }),
       insightCard({
+        id: "customer",
         tint: "#7c3aed",
         ico: "★",
         label: "Лучший заказчик",
@@ -1462,6 +1470,7 @@
         note: topCustomer ? `принёс ${money(topCustomer.value)}` : "укажите заказчиков в заказах",
       }),
       insightCard({
+        id: "product",
         tint: "#0891b2",
         ico: "✦",
         label: "Хит продаж",
@@ -1469,6 +1478,7 @@
         note: topProduct ? `выручка ${money(topProduct.value)}` : "укажите продукты в строках",
       }),
       insightCard({
+        id: "overdue",
         tint: overdueSum > 0 ? "#dc2626" : "#64748b",
         ico: "!",
         label: "Долги старше 30 дней",
@@ -1476,6 +1486,7 @@
         note: overdue.length ? `${overdue.length} позиций ждут оплаты` : "просроченных долгов нет",
       }),
       insightCard({
+        id: "pace",
         tint: "#0284c7",
         ico: "◐",
         label: fact ? "Оплат за 30 дней" : "Заказов за 30 дней",
@@ -1484,6 +1495,391 @@
         trend: trendChip(recentOrders.size, olderOrders.size),
       }),
     ].join("");
+    insightSnap = {
+      rows,
+      fact,
+      curKey,
+      prevKey,
+      curMonth,
+      prevMonth,
+      curMonthCost,
+      s,
+      daysInMonth,
+      dayOfMonth,
+      forecast,
+      avgCheck,
+      paidCount: paidOrders.length,
+      orderSums,
+      paidShare,
+      overdue,
+      overdueSum,
+      recentOrders,
+      olderOrders,
+      monthAgo,
+      twoMonthsAgo,
+    };
+    bindInsightClicks();
+  }
+
+  const INSIGHT_MONTHS_IN = ["январе", "феврале", "марте", "апреле", "мае", "июне", "июле", "августе", "сентябре", "октябре", "ноябре", "декабре"];
+  let insightSnap = null;
+  let insightClicksBound = false;
+
+  function insightMonthIn(key) {
+    const [y, m] = String(key || "").split("-");
+    const name = INSIGHT_MONTHS_IN[Number(m) - 1];
+    return name ? `${name} ${y}` : "этом периоде";
+  }
+
+  function insightRank(rows, keyFn, valueFn, limit) {
+    const map = new Map();
+    rows.forEach((row) => {
+      const raw = String(keyFn(row) || "").trim();
+      if (!raw) return;
+      const cur = map.get(raw) || { key: raw, value: 0 };
+      cur.value += valueFn(row);
+      map.set(raw, cur);
+    });
+    return [...map.values()].sort((a, b) => b.value - a.value).slice(0, limit);
+  }
+
+  function insightBars(items, textFn) {
+    if (!items.length) return `<p class="insight-empty">В этом срезе нечего показать.</p>`;
+    const max = Math.max(...items.map((item) => item.value), 0.01);
+    return `<div class="insight-bars">${items
+      .map((item) => {
+        const width = Math.max(6, Math.round((item.value / max) * 100));
+        return `<div class="insight-bar"><div class="insight-bar-top"><span>${esc(item.key)}</span><b>${esc(textFn(item))}</b></div><div class="insight-bar-track"><i style="width:${width}%"></i></div></div>`;
+      })
+      .join("")}</div>`;
+  }
+
+  function insightStats(items) {
+    return `<div class="insight-stats">${items.map(([name, value]) => `<div><small>${esc(name)}</small><b>${esc(value)}</b></div>`).join("")}</div>`;
+  }
+
+  function insightSection(title, html) {
+    return `<section class="insight-section"><h4>${esc(title)}</h4>${html}</section>`;
+  }
+
+  function insightShare(part, whole) {
+    if (!whole || part <= 0) return "0%";
+    const pct = (part / whole) * 100;
+    if (pct < 1) return "<1%";
+    return `${Math.round(pct)}%`;
+  }
+
+  function insightRows(n) {
+    const n10 = n % 10;
+    const n100 = n % 100;
+    const word = n10 === 1 && n100 !== 11 ? "строка" : n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14) ? "строки" : "строк";
+    return `${n} ${word}`;
+  }
+
+  function insightDayLabel(iso) {
+    const parts = String(iso || "").split("-");
+    const month = ZOOM_MONTHS_GEN[Number(parts[1]) - 1];
+    if (!month || !parts[2]) return iso || "без даты";
+    return `${Number(parts[2])} ${month}`;
+  }
+
+  function insightCount(n) {
+    const n10 = n % 10;
+    const n100 = n % 100;
+    const word = n10 === 1 && n100 !== 11 ? "заказ" : n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14) ? "заказа" : "заказов";
+    return `${n} ${word}`;
+  }
+
+  function insightAmount(row) {
+    return insightSnap.fact && !row.totals.expense ? row.totals.paid : row.totals.after;
+  }
+
+  function insightWhen(line) {
+    return insightSnap.fact ? rowDateIso(line, "payment_date") : dateDay(line.order_date) || "";
+  }
+
+  function insightOrderLabel(order) {
+    const num = order.number || "—";
+    const name = order.name || order.customer || "";
+    return name ? `${num} · ${name}` : num;
+  }
+
+  function insightAge(iso) {
+    const day = parseDay(dateDay(iso));
+    if (!day) return "—";
+    const days = Math.max(0, Math.round((Date.now() - day.getTime()) / 86400000));
+    return `${days} дн.`;
+  }
+
+  function insightMedian(values) {
+    if (!values.length) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  function insightView(id) {
+    const snap = insightSnap;
+    const income = snap.rows.filter((row) => !row.totals.expense);
+    const amount = insightAmount;
+    const monthOf = (row) => monthKeyOf(insightWhen(row.line));
+    if (id === "month") {
+      const curRows = income.filter((row) => monthOf(row) === snap.curKey);
+      const days = insightRank(curRows, (row) => insightDayLabel(insightWhen(row.line)), amount, 5);
+      const people = insightRank(curRows, (row) => row.order.customer, amount, 5);
+      const diff = snap.curMonth - snap.prevMonth;
+      const where = insightMonthIn(snap.curKey);
+      const prev = insightMonthIn(snap.prevKey);
+      const verb = snap.fact ? "поступило" : "выручка";
+      const change = Math.abs(diff) < 0.5 ? `столько же, сколько в ${prev}` : `${diff > 0 ? "на " + money(diff) + " больше" : "на " + money(Math.abs(diff)) + " меньше"}, чем в ${prev}`;
+      const daily = snap.dayOfMonth ? snap.curMonth / snap.dayOfMonth : 0;
+      return {
+        tint: "#0f766e",
+        title: snap.fact ? "Поступило за месяц" : "Выручка за месяц",
+        lead: `В ${where} ${verb} ${money(snap.curMonth)}. Это ${change}.`,
+        html:
+          insightStats([
+            ["Этот месяц", money(snap.curMonth)],
+            ["Прошлый", money(snap.prevMonth)],
+            ["Разница", Math.abs(diff) < 0.5 ? "0" : `${diff > 0 ? "+" : "−"}${money(Math.abs(diff))}`],
+            ["В среднем за день", money(daily)],
+          ]) +
+          insightSection("Крупные дни", insightBars(days, (item) => money(item.value))) +
+          insightSection("Кто принёс", insightBars(people, (item) => money(item.value))),
+      };
+    }
+    if (id === "cost") {
+      const expenses = snap.rows.filter((row) => row.totals.expense);
+      const byKind = insightRank(expenses, (row) => (row.totals.kind === "tax" ? "Налоги" : "Затраты"), (row) => row.totals.cost, 2);
+      const byType = insightRank(expenses, (row) => row.line.order_type || "без типа", (row) => row.totals.cost, 5);
+      return {
+        tint: "#b45309",
+        title: "Налоги и затраты",
+        lead: `${insightRows(snap.s.costCount)} на ${money(snap.s.cost)}. В ${insightMonthIn(snap.curKey)} из них ${money(snap.curMonthCost)}.`,
+        html:
+          insightStats([
+            ["Всего", `−${money(snap.s.cost)}`],
+            ["Этот месяц", `−${money(snap.curMonthCost)}`],
+            ["Строк", String(snap.s.costCount)],
+          ]) +
+          insightSection("Налоги и затраты", insightBars(byKind, (item) => money(item.value))) +
+          insightSection("По типам", insightBars(byType, (item) => money(item.value))),
+      };
+    }
+    if (id === "net") {
+      const margin = snap.s.net < 0 ? "убыток" : insightShare(snap.s.net, snap.s.after);
+      return {
+        tint: snap.s.net >= 0 ? "#047857" : "#dc2626",
+        title: "Чистая прибыль",
+        lead: `Из выручки ${money(snap.s.after)} вычтены расходы ${money(snap.s.cost)}. Остаётся ${money(snap.s.net)} — ${margin} от выручки.`,
+        html: insightStats([
+          ["Выручка", money(snap.s.after)],
+          ["Расходы", `−${money(snap.s.cost)}`],
+          ["Чистыми", money(snap.s.net)],
+          ["Маржа", margin],
+        ]),
+      };
+    }
+    if (id === "forecast") {
+      const daily = snap.dayOfMonth ? snap.curMonth / snap.dayOfMonth : 0;
+      const left = Math.max(0, snap.daysInMonth - snap.dayOfMonth);
+      const rest = daily * left;
+      const verb = snap.fact ? "поступлений" : "выручки";
+      const lead = snap.curMonth
+        ? `За ${snap.dayOfMonth} дн. темп ${verb} ${money(daily)} в день. Если он сохранится, за оставшиеся ${left} дн. добавится ${money(rest)}, и месяц закроется на ${money(snap.forecast)}.`
+        : `В ${insightMonthIn(snap.curKey)} ещё нет ${verb}, поэтому прогноз нулевой.`;
+      return {
+        tint: "#2563eb",
+        title: "Прогноз до конца месяца",
+        lead,
+        html: insightStats([
+          ["Уже есть", money(snap.curMonth)],
+          ["В день", money(daily)],
+          ["Осталось дней", String(left)],
+          ["К концу месяца", money(snap.forecast)],
+        ]),
+      };
+    }
+    if (id === "check") {
+      const checks = [...snap.orderSums.entries()].filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]);
+      const values = checks.map(([, value]) => value);
+      const mid = insightMedian(values);
+      const top = checks.slice(0, 5).map(([idOrder, value]) => {
+        const order = snap.rows.find((row) => row.order.id === idOrder)?.order;
+        return { key: order ? insightOrderLabel(order) : "заказ", value };
+      });
+      const biggest = values[0] || 0;
+      return {
+        tint: "#c9a227",
+        title: "Средний чек",
+        lead: snap.paidCount
+          ? `Среднее по ${snap.paidCount} заказам — ${money(snap.avgCheck)}. Половина заказов не выше ${money(mid)}.`
+          : "В этом срезе нет заказов с суммой.",
+        html:
+          insightStats([
+            ["Среднее", money(snap.avgCheck)],
+            ["Медиана", money(mid)],
+            ["Самый крупный", money(biggest)],
+            ["Заказов", String(snap.paidCount)],
+          ]) + insightSection("Крупные заказы", insightBars(top, (item) => money(item.value))),
+      };
+    }
+    if (id === "collect") {
+      const debtors = insightRank(
+        income.filter((row) => row.totals.unpaid > 0.005),
+        (row) => row.order.customer || "без заказчика",
+        (row) => row.totals.unpaid,
+        5
+      );
+      let full = 0;
+      let part = 0;
+      let none = 0;
+      income.forEach((row) => {
+        if (row.totals.after <= 0.005) return;
+        if (row.totals.unpaid <= 0.005) full += 1;
+        else if (row.totals.paid > 0.005) part += 1;
+        else none += 1;
+      });
+      return {
+        tint: snap.paidShare >= 80 ? "#059669" : "#d97706",
+        title: "Собираемость оплат",
+        lead: snap.s.after
+          ? `Собрано ${snap.paidShare}%: ${money(snap.s.paid)} из ${money(snap.s.after)}. Осталось ${money(snap.s.unpaid)}.`
+          : "В этом срезе нет сумм к оплате.",
+        html:
+          insightStats([
+            ["Собрано", `${snap.paidShare}%`],
+            ["Оплачено", money(snap.s.paid)],
+            ["Долг", money(snap.s.unpaid)],
+            ["Закрыто позиций", String(full)],
+          ]) +
+          insightSection("Как платят", insightBars(
+            [
+              { key: "Оплачено целиком", value: full },
+              { key: "Частично", value: part },
+              { key: "Без оплаты", value: none },
+            ].filter((item) => item.value > 0),
+            (item) => String(item.value)
+          )) +
+          insightSection("Кто должен", insightBars(debtors, (item) => money(item.value))),
+      };
+    }
+    if (id === "customer" || id === "product") {
+      const keyFn = id === "customer" ? (row) => row.order.customer : (row) => row.line.product;
+      const ranked = insightRank(income, keyFn, amount, 6);
+      const pool = income.reduce((acc, row) => acc + (keyFn(row) ? amount(row) : 0), 0);
+      const best = ranked[0];
+      const title = id === "customer" ? "Лучший заказчик" : "Хит продаж";
+      const noun = id === "customer" ? "заказчиков" : "позиций";
+      return {
+        tint: id === "customer" ? "#7c3aed" : "#0891b2",
+        title,
+        lead: best
+          ? `${best.key} — ${money(best.value)}, это ${insightShare(best.value, pool)} суммы, где ${id === "customer" ? "указан заказчик" : "указана позиция"}.`
+          : `В строках не заполнены ${noun}.`,
+        html: insightSection(id === "customer" ? "Заказчики" : "Позиции", insightBars(ranked, (item) => `${money(item.value)} · ${insightShare(item.value, pool)}`)),
+      };
+    }
+    if (id === "overdue") {
+      const list = [...snap.overdue].sort((a, b) => b.totals.unpaid - a.totals.unpaid);
+      const shown = list.slice(0, 8);
+      const body = shown.length
+        ? shown
+            .map(({ order, line, totals }) => `<tr><td>${esc(order.number || "—")}</td><td>${esc(order.customer || "—")}</td><td>${esc(line.product || "—")}</td><td class="num">${esc(insightAge(line.order_date))}</td><td class="num">${esc(money(totals.unpaid))}</td></tr>`)
+            .join("")
+        : `<tr><td colspan="5">Просроченных долгов нет</td></tr>`;
+      const more = list.length > shown.length ? `<p class="insight-empty">Показаны ${shown.length} из ${list.length}, сначала самые крупные.</p>` : "";
+      const table = list.length
+        ? insightStats([
+            ["Сумма", money(snap.overdueSum)],
+            ["Позиций", String(list.length)],
+            ["Крупнейший", money(shown[0].totals.unpaid)],
+          ]) +
+          `<div class="table-wrap insight-table"><table class="data"><thead><tr><th>№</th><th>Заказчик</th><th>Позиция</th><th class="num">Возраст</th><th class="num">Долг</th></tr></thead><tbody>${body}</tbody></table></div>${more}`
+        : "";
+      return {
+        tint: snap.overdueSum > 0 ? "#dc2626" : "#64748b",
+        title: "Долги старше 30 дней",
+        lead: list.length
+          ? `${list.length} позиций на ${money(snap.overdueSum)}. Срок считается от даты заказа.`
+          : "Позиций с долгом старше 30 дней нет.",
+        html: table,
+      };
+    }
+    if (id === "pace") {
+      const inSpan = (from, to) =>
+        income.filter((row) => {
+          const day = insightWhen(row.line);
+          if (!day || day < from) return false;
+          if (to && day >= to) return false;
+          return true;
+        });
+      const recentRows = inSpan(snap.monthAgo, "");
+      const olderRows = inSpan(snap.twoMonthsAgo, snap.monthAgo);
+      const recentSum = recentRows.reduce((acc, row) => acc + amount(row), 0);
+      const olderSum = olderRows.reduce((acc, row) => acc + amount(row), 0);
+      const recentRank = insightRank(recentRows, (row) => insightOrderLabel(row.order), amount, 5);
+      return {
+        tint: "#0284c7",
+        title: snap.fact ? "Оплаты за 30 дней" : "Заказы за 30 дней",
+        lead: `За последние 30 дней ${insightCount(snap.recentOrders.size)} на ${money(recentSum)}. За предыдущие 30 дней — ${insightCount(snap.olderOrders.size)} на ${money(olderSum)}.`,
+        html:
+          insightStats([
+            ["Последние 30 дней", String(snap.recentOrders.size)],
+            ["Предыдущие 30", String(snap.olderOrders.size)],
+            ["Сумма сейчас", money(recentSum)],
+            ["Сумма до этого", money(olderSum)],
+          ]) + insightSection("Свежие заказы", insightBars(recentRank, (item) => money(item.value))),
+      };
+    }
+    return null;
+  }
+
+  function insightModal() {
+    let el = $("insight-modal");
+    if (el) return el;
+    el = document.createElement("div");
+    el.id = "insight-modal";
+    el.className = "modal";
+    el.innerHTML = `<div class="modal-card insight-modal" role="dialog" aria-modal="true" aria-labelledby="insight-modal-title">
+      <div class="modal-title-row">
+        <h3 id="insight-modal-title"></h3>
+        <button type="button" class="btn small" id="insight-modal-close">Закрыть</button>
+      </div>
+      <p class="insight-scope" id="insight-modal-scope"></p>
+      <p class="insight-lead" id="insight-modal-lead"></p>
+      <div class="insight-modal-body" id="insight-modal-body"></div>
+    </div>`;
+    el.addEventListener("click", (e) => {
+      if (e.target === el || e.target.closest("#insight-modal-close")) el.classList.remove("open");
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") el.classList.remove("open");
+    });
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function openInsight(id) {
+    const view = insightSnap && insightView(id);
+    if (!view) return;
+    const modal = insightModal();
+    modal.querySelector(".modal-card").style.setProperty("--tint", view.tint);
+    $("insight-modal-title").textContent = view.title;
+    $("insight-modal-scope").textContent = dashScopeNote();
+    $("insight-modal-lead").textContent = view.lead;
+    $("insight-modal-body").innerHTML = view.html;
+    modal.classList.add("open");
+  }
+
+  function bindInsightClicks() {
+    if (insightClicksBound) return;
+    insightClicksBound = true;
+    document.addEventListener("click", (e) => {
+      const card = e.target.closest?.("#insights .insight");
+      if (!card || !insightSnap) return;
+      openInsight(card.dataset.insight);
+    });
   }
 
   const LINE_METRICS = [

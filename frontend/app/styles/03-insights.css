@@ -128,4 +128,88 @@
 }
 .trend.up { background: rgba(5, 150, 105, 0.14); color: var(--ok); }
 .trend.down { background: rgba(220, 38, 38, 0.14); color: var(--danger); }
+button.insight {
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+.insight:focus-visible {
+  outline: 2px solid var(--tint, var(--accent));
+  outline-offset: 2px;
+}
+.modal-card.insight-modal {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(84vh, 740px);
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  color: var(--ink);
+}
+.modal-card.insight-modal .insight-scope {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.modal-card.insight-modal .insight-lead {
+  margin: 0 0 14px;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.45;
+}
+.insight-modal-body { overflow: auto; min-height: 0; }
+.insight-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 8px;
+}
+.insight-stats div {
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--bg-2);
+}
+.insight-stats small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.insight-stats b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.insight-section { margin-top: 14px; }
+.insight-section h4 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.insight-bars { display: grid; gap: 8px; }
+.insight-bar-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+.insight-bar-top span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.insight-bar-top b { font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.insight-bar-track {
+  height: 6px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--tint, var(--accent)) 16%, var(--bg-2));
+  margin-top: 4px;
+  overflow: hidden;
+}
+.insight-bar-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--tint, var(--accent));
+}
+.insight-empty { margin: 0; color: var(--muted); font-size: 13px; }
+.insight-table { margin-top: 12px; max-height: 280px; }
 
