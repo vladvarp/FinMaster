@@ -100,11 +100,10 @@
         const b = X(len, height);
         ctx.fillStyle = "#a5e90e";
         ctx.globalAlpha = 0.24;
-        ctx.fillRect(0, 0, w, h);
+        ctx.fillRect(a.x, b.y, b.x - a.x, a.y - b.y);
         ctx.globalAlpha = 1;
         ctx.strokeStyle = "#a5e90e";
         ctx.lineWidth = 2;
-        ctx.fillRect(a.x, b.y, b.x - a.x, a.y - b.y);
         ctx.strokeRect(a.x, b.y, b.x - a.x, a.y - b.y);
         function hole(x0, y0, x1, y1, color) {
           ctx.fillStyle = bg;
