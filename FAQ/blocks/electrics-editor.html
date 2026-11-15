@@ -99,11 +99,10 @@
         ctx.fillRect(0, 0, w, h);
         ctx.fillStyle = "#a5e90e";
         ctx.globalAlpha = 0.24;
-        ctx.fillRect(0, 0, w, h);
+        ctx.fillRect(ox, oy, 4 * scale, 2.7 * scale);
         ctx.globalAlpha = 1;
         ctx.strokeStyle = "#a5e90e";
         ctx.lineWidth = 2;
-        ctx.fillRect(ox, oy, 4 * scale, 2.7 * scale);
         ctx.strokeRect(ox, oy, 4 * scale, 2.7 * scale);
         const cells = [
           ["В", "#38bdf8"],
