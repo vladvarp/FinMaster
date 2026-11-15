@@ -937,6 +937,7 @@ html[data-theme="dark"] .calc-mini-toggle {
   color: var(--ink);
   font-size: 10px;
   font-weight: 800;
+  cursor: pointer;
 }
 .calc-film-name {
   display: block;
