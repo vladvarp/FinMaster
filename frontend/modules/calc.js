@@ -4025,6 +4025,11 @@
     return value || fallback;
   }
 
+  function openingCounterLabel(node, key, fallback) {
+    const custom = String(node?.counterNames?.[key] || "").trim();
+    return custom || markLabel(key, fallback);
+  }
+
   function cardNameInput(id, kind, current, fallback) {
     return `<input class="mark-inline-name" data-card-name="${esc(id)}" data-card-kind="${kind}" data-label-fallback="${esc(fallback)}" maxlength="48" value="${esc(current || fallback)}" aria-label="Имя карточки" />`;
   }
@@ -4194,6 +4199,7 @@
   function resolveHole(raw, plan, node, values) {
     const hole = {
       id: raw.id,
+      name: String(raw.name || "").trim().slice(0, 48),
       surface: raw.surface === "floor" || raw.surface === "ceiling" ? raw.surface : "wall",
       wallId: String(raw.wallId || ""),
       along: plannerNum(raw.along, 0),
@@ -4366,6 +4372,7 @@
       });
     });
     node.holes = holes;
+    if (!node.counterNames || typeof node.counterNames !== "object" || Array.isArray(node.counterNames)) node.counterNames = {};
     if (!Array.isArray(node.owns)) node.owns = [];
     if (!node.outOn || typeof node.outOn !== "object") {
       node.outOn = { "count:pick": true, "count:door": true, "count:window": true, "count:pipe": true, "count:hatch": true };
@@ -4465,11 +4472,11 @@
     });
     const holes = plan?.openings || [];
     [
-      ["count:pick", markLabel("pick", "Проёмы"), holes.filter((hole) => hole.picked !== false).length, true],
-      ["count:door", markLabel("doors", "Двери"), holes.filter((hole) => hole.role === "door").length, true],
-      ["count:window", markLabel("windows", "Окна"), holes.filter((hole) => hole.role === "window").length, true],
-      ["count:pipe", markLabel("pipes", "Трубы"), holes.filter((hole) => hole.role === "pipe").length, true],
-      ["count:hatch", markLabel("hatches", "Люки"), holes.filter((hole) => hole.role === "hatch").length, true],
+      ["count:pick", openingCounterLabel(node, "pick", "Проёмы"), holes.filter((hole) => hole.picked !== false).length, true],
+      ["count:door", openingCounterLabel(node, "doors", "Двери"), holes.filter((hole) => hole.role === "door").length, true],
+      ["count:window", openingCounterLabel(node, "windows", "Окна"), holes.filter((hole) => hole.role === "window").length, true],
+      ["count:pipe", openingCounterLabel(node, "pipes", "Трубы"), holes.filter((hole) => hole.role === "pipe").length, true],
+      ["count:hatch", openingCounterLabel(node, "hatches", "Люки"), holes.filter((hole) => hole.role === "hatch").length, true],
     ].forEach(([id, name, value, present]) => {
       if (!markShown(node, id, linked, present)) return;
       ports.push({ id, name, value, unit: "шт" });
@@ -4974,17 +4981,40 @@
         })
         .join("");
       const counts = [
-        ["count:pick", markLabel("pick", "Проёмы"), (full?.openings || []).filter((hole) => hole.picked !== false).length],
-        ["count:door", markLabel("doors", "Двери"), (full?.openings || []).filter((hole) => hole.role === "door").length],
-        ["count:window", markLabel("windows", "Окна"), (full?.openings || []).filter((hole) => hole.role === "window").length],
-        ["count:pipe", markLabel("pipes", "Трубы"), (full?.openings || []).filter((hole) => hole.role === "pipe").length],
-        ["count:hatch", markLabel("hatches", "Люки"), (full?.openings || []).filter((hole) => hole.role === "hatch").length],
+        ["count:pick", "pick", "Проёмы", (full?.openings || []).filter((hole) => hole.picked !== false).length],
+        ["count:door", "doors", "Двери", (full?.openings || []).filter((hole) => hole.role === "door").length],
+        ["count:window", "windows", "Окна", (full?.openings || []).filter((hole) => hole.role === "window").length],
+        ["count:pipe", "pipes", "Трубы", (full?.openings || []).filter((hole) => hole.role === "pipe").length],
+        ["count:hatch", "hatches", "Люки", (full?.openings || []).filter((hole) => hole.role === "hatch").length],
       ]
-        .map(([id, name, value]) => {
+        .map(([id, key, fallback, value]) => {
+          const name = openingCounterLabel(node, key, fallback);
           const linked = linkedFromPorts(node.id, bp.links).has(id);
-          return `<label class="planner-part"><input type="checkbox" data-mark-out="${esc(id)}" ${markChecked(node, id, true) || linked ? "checked" : ""} ${linked ? "disabled" : ""} /> <span>${esc(name)}</span> <em>${value}</em></label>`;
+          return `<label class="planner-part"><input type="checkbox" data-mark-out="${esc(id)}" ${markChecked(node, id, true) || linked ? "checked" : ""} ${linked ? "disabled" : ""} /> <input class="planner-name planner-counter-name" data-counter-name="${esc(key)}" value="${esc(name)}" maxlength="48" aria-label="Название счётчика" /> <em>${value}</em></label>`;
         })
         .join("");
+      const ownRows = (node.owns || []).map((own) => {
+        const groups = new Map();
+        node.holes.forEach((hole, index) => {
+          const live = resolveHole(hole, base, node, graph.values);
+          const key = live.surface === "wall" ? `wall:${live.wallId}` : live.surface;
+          const wallIndex = walls.findIndex((wall) => wall.id === live.wallId);
+          const place = live.surface === "floor" ? "Пол" : live.surface === "ceiling" ? "Потолок" : planWallName(base, walls[wallIndex] || { id: live.wallId }, Math.max(0, wallIndex));
+          if (!groups.has(key)) groups.set(key, { name: place, items: [] });
+          groups.get(key).items.push({ hole, index });
+        });
+        const ordered = walls.map((wall) => `wall:${wall.id}`).concat(["floor", "ceiling"]);
+        const keys = ordered.concat([...groups.keys()].filter((key) => !ordered.includes(key)));
+        const toggles = keys.filter((key) => groups.has(key)).map((key) => {
+          const group = groups.get(key);
+          const items = group.items.map(({ hole, index }) => {
+            const fallback = holeLabel(hole, index);
+            return `<label class="planner-part"><input type="checkbox" data-own="${esc(own.id)}" data-own-hole="${esc(hole.id)}" ${(own.holes || []).includes(hole.id) ? "checked" : ""} /> <span data-own-title="${esc(hole.id)}">${esc(hole.name || fallback)}</span></label>`;
+          }).join("");
+          return `<div class="planner-block-h">${esc(group.name)}</div>${items}`;
+        }).join("");
+        return `<div class="planner-metric"><input class="planner-name" data-own-name="${esc(own.id)}" value="${esc(own.name || "Свой")}" maxlength="48" aria-label="Имя своего счётчика" /><button type="button" class="calc-mini" data-own-del="${esc(own.id)}" title="Удалить">×</button>${toggles || `<div class="calc-empty">Нет карточек для подсчёта</div>`}</div>`;
+      }).join("");
       return `<div class="planner-block"><div class="planner-block-h">Проёмы</div>
         <p class="planner-lead">Прямоугольник у пола — дверь. Ширина двери на всю стену оставляет только верх. Диаметр с входа приходит в миллиметрах, ширина и высота — в метрах.${inherited ? ` С чертежа уже пришло ${inherited}.` : ""}</p>
         ${holes || `<div class="calc-empty">На этой поверхности проёмов нет</div>`}
@@ -4999,7 +5029,7 @@
         </div>
         <div class="planner-parts">${wallRows}${counts}</div>
         <div class="planner-block-h">Свой счётчик <button type="button" class="btn" data-own-add>+ Свой</button></div>
-        ${(node.owns || []).map((own) => `<div class="planner-metric"><input class="planner-name" data-own-name="${esc(own.id)}" value="${esc(own.name || "Свой")}" maxlength="48" aria-label="Имя своего счётчика" /><button type="button" class="calc-mini" data-own-del="${esc(own.id)}" title="Удалить">×</button>${node.holes.map((hole, index) => `<label class="planner-part"><input type="checkbox" data-own="${esc(own.id)}" data-own-hole="${esc(hole.id)}" ${(own.holes || []).includes(hole.id) ? "checked" : ""} /> <span data-own-title="${esc(hole.id)}">${esc(holeLabel(resolveHole(hole, base, node, graph.values), index))}</span></label>`).join("")}</div>`).join("")}
+        ${ownRows}
       </div>`;
     }
     const socketOpts = socketCatalog().map((type) => ({ value: type.id, label: type.name }));
@@ -6394,6 +6424,17 @@
       }
     });
     $("mark-side")?.addEventListener("input", (e) => {
+      if (e.target.dataset?.counterName) {
+        const node = markNode();
+        if (!node || node.type !== "openings") return;
+        if (!node.counterNames || typeof node.counterNames !== "object" || Array.isArray(node.counterNames)) node.counterNames = {};
+        const key = e.target.dataset.counterName;
+        const allowed = new Set(["pick", "doors", "windows", "pipes", "hatches"]);
+        if (!allowed.has(key)) return;
+        node.counterNames[key] = String(e.target.value || "").trim().slice(0, 48);
+        markCommit(false);
+        return;
+      }
       if (e.target.dataset?.cardName) {
         const node = markNode();
         if (!node) return;
