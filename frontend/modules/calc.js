@@ -3445,6 +3445,12 @@
       const layout = node && plannerActive(node);
       if (!layout || !session.planner) return;
       layout.name = String(e.target.value || "").trim().slice(0, 48);
+      const index = Math.max(0, (node.layouts || []).indexOf(layout));
+      const shownName = plannerLayoutName(layout, index);
+      const picker = $("planner-layout-trigger");
+      const menuItem = $("planner-layout-menu")?.querySelector(`[data-planner-layout-choice="${cssEsc(layout.id)}"]`);
+      if (picker) picker.textContent = shownName;
+      if (menuItem) menuItem.textContent = shownName;
       session.planner.touched = true;
     });
     $("planner-title")?.addEventListener("change", (e) => {
