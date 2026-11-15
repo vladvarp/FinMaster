@@ -958,6 +958,16 @@ html[data-theme="dark"] .calc-mini-toggle {
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  transform: scale(0.85);
+}
+.calc-film-card[data-planner-layout]:hover .calc-film-delete,
+.calc-film-card[data-planner-layout]:focus-within .calc-film-delete {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
 }
 .calc-film-delete:hover:not(:disabled) {
   border-color: var(--danger, #ef4444);
