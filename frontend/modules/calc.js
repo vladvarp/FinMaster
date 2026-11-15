@@ -9839,6 +9839,27 @@
           if (thumb) thumb.style.setProperty("--film-tone", node.color);
           const path = thumb?.querySelector("path");
           if (path) path.style.stroke = node.color;
+
+          // Обновляем цвета всех подключённых нод без перерисовки DOM:
+          // так цветовой диалог остаётся открытым, а миниатюры меняются сразу.
+          const graph = computeGraph(bp);
+          (bp.nodes || []).forEach((target) => {
+            if (target.type !== "openings" && target.type !== "electrics") return;
+            const plan = upstreamPlan(target, bp, [], graph.values);
+            if (!plan || plan.sourceNodeId !== node.id) return;
+            const tones = markTones(target, plan.color);
+            const targetEl = nodesRoot()?.querySelector(`.calc-node[data-node="${cssEsc(target.id)}"]`);
+            if (!targetEl) return;
+            targetEl.style.setProperty("--planner-color", tones.floor);
+            targetEl.style.setProperty("--mark-floor", tones.floor);
+            targetEl.style.setProperty("--mark-ceiling", tones.ceiling);
+            targetEl.style.setProperty("--mark-wall", tones.wall);
+            targetEl.querySelectorAll(".calc-film-card[data-mark-surface]").forEach((filmCard) => {
+              const surface = filmCard.dataset.markSurface;
+              const tone = surface === "ceiling" ? tones.ceiling : surface === "floor" ? tones.floor : tones.wall;
+              filmCard.querySelector(".calc-film-thumb")?.style.setProperty("--film-tone", tone);
+            });
+          });
           dirty();
         } else if (node?.type === "openings" || node?.type === "electrics") {
           node.color = String(e.target.value || "#65a30d").toLowerCase();
