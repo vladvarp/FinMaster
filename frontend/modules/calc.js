@@ -9836,30 +9836,31 @@
           nodeEl.style.setProperty("--planner-color", node.color);
           const card = nodeEl.querySelector(`.calc-film-card[data-planner-layout="${cssEsc(node.layoutId)}"]`);
           const thumb = card?.querySelector(".calc-planner-thumb");
-          if (thumb) thumb.style.setProperty("--film-tone", node.color);
-          const path = thumb?.querySelector("path");
-          if (path) path.style.stroke = node.color;
+          if (thumb) thumb.style.setProperty("--planner-color", node.color);
 
-          // Обновляем цвета всех подключённых нод без перерисовки DOM:
-          // так цветовой диалог остаётся открытым, а миниатюры меняются сразу.
+          // Распространяем цвет по всей цепочке чертежей, а не только по прямым связям с планировщиком.
+          // Обновление выполняется без render(), чтобы не закрывать системный выбор цвета.
           const graph = computeGraph(bp);
           (bp.nodes || []).forEach((target) => {
             if (target.type !== "openings" && target.type !== "electrics") return;
-            const sourceLink = (bp.links || []).find((link) => link.to === target.id && link.toPort === PLAN_PORT && link.from === node.id);
-            if (!sourceLink) return;
             const plan = upstreamPlan(target, bp, [], graph.values);
             if (!plan) return;
             const tones = markTones(target, plan.color);
-            const targetEl = nodesRoot()?.querySelector(`.calc-node[data-node="${cssEsc(target.id)}"]`);
+            const targetEl = findNodeEl(target.id);
             if (!targetEl) return;
             targetEl.style.setProperty("--planner-color", tones.floor);
             targetEl.style.setProperty("--mark-floor", tones.floor);
             targetEl.style.setProperty("--mark-ceiling", tones.ceiling);
             targetEl.style.setProperty("--mark-wall", tones.wall);
-            targetEl.querySelectorAll(".calc-film-card[data-mark-surface]").forEach((filmCard) => {
+            targetEl.querySelectorAll(".calc-film-thumb").forEach((filmThumb) => {
+              const filmCard = filmThumb.closest("[data-mark-surface]");
+              if (!filmCard) {
+                filmThumb.style.setProperty("--film-tone", tones.floor);
+                return;
+              }
               const surface = filmCard.dataset.markSurface;
               const tone = surface === "ceiling" ? tones.ceiling : surface === "floor" ? tones.floor : tones.wall;
-              filmCard.querySelector(".calc-film-thumb")?.style.setProperty("--film-tone", tone);
+              filmThumb.style.setProperty("--film-tone", tone);
             });
           });
           dirty();
