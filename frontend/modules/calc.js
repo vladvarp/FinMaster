@@ -4342,6 +4342,8 @@
   }
 
   function ensureOpenings(node) {
+    delete node.tones;
+    delete node.color;
     if (!Array.isArray(node.holes)) node.holes = [];
     const holes = [];
     node.holes.forEach((raw) => {
@@ -4378,6 +4380,8 @@
   }
 
   function ensureElectrics(node) {
+    delete node.tones;
+    delete node.color;
     if (!Array.isArray(node.fixtures)) node.fixtures = [];
     const list = [];
     node.fixtures.forEach((raw) => {
