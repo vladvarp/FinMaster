@@ -795,6 +795,53 @@ html[data-theme="dark"] .calc-mini-toggle {
   font-weight: 700;
   line-height: 1.2;
 }
+.calc-plan-pick {
+  flex: 0 1 118px;
+  min-width: 0;
+  max-width: 132px;
+  height: 22px;
+  margin: 0;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+.calc-plan-group {
+  margin: 0 0 8px;
+  padding-left: 6px;
+  border-left: 3px solid var(--planner-color, #65a30d);
+}
+.calc-plan-group:last-child { margin-bottom: 0; }
+.calc-plan-head .calc-row-name { font-weight: 800; }
+.calc-node.is-planner .calc-film { margin: 0 0 4px; }
+.planner-clip {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+  display: flex;
+  gap: 6px;
+}
+.planner-clip-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+.planner-clip-btn svg { width: 16px; height: 16px; display: block; }
+.planner-clip-btn:hover { color: #fff; background: #65a30d; border-color: #65a30d; }
+.planner-clip-btn[hidden] { display: none; }
 .calc-planner-color {
   flex: 0 0 24px;
   width: 24px;
@@ -2219,3 +2266,81 @@ html[data-theme="dark"] .calc-order.is-used small { color: #5eead4; }
   .pres-view.is-inspector-collapsed .calc-layout { grid-template-columns: 160px minmax(0, 1fr) 36px; }
 }
 
+
+/* Выпадающее меню планировок внутри редактора. */
+.planner-layout-control {
+  position: relative;
+  z-index: 30;
+  flex: 0 0 190px;
+  width: 190px;
+  max-width: 190px;
+}
+.planner-layout-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.planner-layout-trigger::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-right: 1.7px solid currentColor;
+  border-bottom: 1.7px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+}
+.planner-layout-menu {
+  position: absolute;
+  z-index: 1000;
+  top: calc(100% + 5px);
+  left: 0;
+  width: max(100%, 210px);
+  max-height: min(320px, 55vh);
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: 0 12px 32px rgba(0,0,0,.28);
+}
+.planner-layout-menu[hidden] { display: none !important; }
+.planner-layout-option {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.planner-layout-option:hover,
+.planner-layout-option.is-active {
+  background: var(--bg-2);
+}
+.planner-layout-option.is-active { font-weight: 750; }
+.planner-layout-option.is-create { color: var(--accent, #0f9b8e); }
+.planner-layout-menu-sep {
+  height: 1px;
+  margin: 4px 3px;
+  background: var(--line);
+}
+@media (max-width: 760px) {
+  .planner-layout-control { flex: 1 1 150px; width: auto; max-width: 100%; }
+}

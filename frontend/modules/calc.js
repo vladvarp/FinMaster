@@ -1635,8 +1635,13 @@
     if (node.type === "result") return { w: 376, h: 120 };
     if (node.type === "filter" || node.type === "dashboard") return { w: 384, h: 420 };
     if (node.type === "planner") {
-      const n = Array.isArray(node.outs) ? node.outs.filter((item) => item && item.on).length : 2;
-      return { w: 300, h: 420 + Math.max(1, n) * 28 };
+      const layouts = Array.isArray(node.layouts) && node.layouts.length ? node.layouts : [node];
+      let n = layouts.length;
+      layouts.forEach((layout) => {
+        n += Array.isArray(layout.outs) ? layout.outs.filter((item) => item && item.on).length : 1;
+        if (layout.heightOut) n += 1;
+      });
+      return { w: 300, h: 168 + n * 28 };
     }
     if (node.type === "openings" || node.type === "electrics") return { w: 300, h: 460 };
     if (node.type === "present") return { w: 220, h: 160 };
@@ -2029,6 +2034,8 @@
 
   const PLANNER_MAX_PTS = 24;
   const PLANNER_MAX_SUMS = 8;
+  const PLANNER_MAX_LAYOUTS = 12;
+  let plannerClip = null;
 
   function plannerRound(n) {
     return Math.round(Number(n) * 10000) / 10000;
@@ -2126,12 +2133,56 @@
     return { w: maxX - minX, d: maxY - minY, minX, maxX, minY, maxY };
   }
 
-  function ensurePlanner(node) {
-    if (!node || node.type !== "planner") return node;
-    if (!Array.isArray(node.points)) node.points = [];
+  function plannerLayoutColor(layouts) {
+    const used = new Set((layouts || []).map((item) => String(item?.color || "").toLowerCase()));
+    const start = (layouts || []).length % GROUP_COLORS.length;
+    for (let i = 0; i < GROUP_COLORS.length; i += 1) {
+      const color = GROUP_COLORS[(start + i) % GROUP_COLORS.length];
+      if (!used.has(color)) return color;
+    }
+    return GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
+  }
+
+  function plannerPort(layout, kind) {
+    if (layout?.legacy) return kind === "plan" ? "plan" : kind === "floor" ? "floor" : "height";
+    return `${kind}:${layout?.id || ""}`;
+  }
+
+  function plannerLayoutName(layout, index) {
+    const name = String(layout?.name || "").trim().slice(0, 48);
+    return name || `Планировка ${(index || 0) + 1}`;
+  }
+
+  function plannerActive(node) {
+    return (node?.layouts || []).find((item) => item.id === node.layoutId) || node?.layouts?.[0] || null;
+  }
+
+  function plannerRemember(node) {
+    const layout = plannerActive(node);
+    if (!layout) return;
+    layout.points = node.points;
+    layout.outs = node.outs;
+    layout.height = node.height;
+    layout.heightOut = !!node.heightOut;
+    layout.color = node.color;
+  }
+
+  function plannerApply(node, layout) {
+    if (!layout) return;
+    node.layoutId = layout.id;
+    node.points = layout.points;
+    node.outs = layout.outs;
+    node.height = layout.height;
+    node.heightOut = !!layout.heightOut;
+    node.color = layout.color;
+  }
+
+  function plannerNormalize(layout, index) {
+    if (!layout) return layout;
+    if (!Array.isArray(layout.points)) layout.points = [];
     const seen = new Set();
     const points = [];
-    node.points.forEach((p) => {
+    layout.points.forEach((p) => {
       if (!p || typeof p !== "object" || points.length >= PLANNER_MAX_PTS) return;
       let id = String(p.id || "").trim();
       if (!id || seen.has(id)) id = uid();
@@ -2145,24 +2196,26 @@
       points.push(p);
     });
     if (points.length < 3) {
-      node.points = [
+      layout.points = [
         { id: uid(), x: 0, y: 0 },
         { id: uid(), x: 4, y: 0 },
         { id: uid(), x: 4, y: 3 },
         { id: uid(), x: 0, y: 3 },
       ];
-    } else node.points = points;
-    node.height = plannerRound(plannerClamp(plannerNum(node.height, 2.7), 0.2, 30));
-    node.heightOut = !!node.heightOut;
-    const plannerColor = String(node.color || "").trim().toLowerCase();
-    node.color = /^#[0-9a-f]{6}$/.test(plannerColor) ? plannerColor : "#65a30d";
-    const fresh = !Array.isArray(node.outs);
-    const prev = fresh ? [] : node.outs;
+    } else layout.points = points;
+    layout.height = plannerRound(plannerClamp(plannerNum(layout.height, 2.7), 0.2, 30));
+    layout.heightOut = !!layout.heightOut;
+    const rawColor = String(layout.color || "").trim().toLowerCase();
+    layout.color = /^#[0-9a-f]{6}$/.test(rawColor) ? rawColor : plannerLayoutColor([]);
+    layout.name = plannerLayoutName(layout, index);
+    const floorId = plannerPort(layout, "floor");
+    const fresh = !Array.isArray(layout.outs);
+    const prev = fresh ? [] : layout.outs;
     const byId = new Map(prev.filter((item) => item && item.id).map((item) => [String(item.id), item]));
-    const walls = plannerWalls(node);
+    const walls = plannerWalls(layout);
     const wallIds = new Set(walls.map((wall) => wall.id));
-    const floor = byId.get("floor");
-    const outs = [{ id: "floor", kind: "floor", name: "Пол", on: floor ? floor.on !== false : true }];
+    const floor = byId.get(floorId) || prev.find((item) => item && item.kind === "floor");
+    const outs = [{ id: floorId, kind: "floor", name: "Пол", on: floor ? floor.on !== false : true }];
     walls.forEach((wall) => {
       const old = byId.get(wall.id);
       const name = String(old?.name || "").trim();
@@ -2187,8 +2240,9 @@
       const parts = [];
       const seenParts = new Set();
       (Array.isArray(item.parts) ? item.parts : []).forEach((part) => {
-        const key = String(part || "");
-        if (seenParts.has(key) || (key !== "floor" && !wallIds.has(key))) return;
+        let key = String(part || "");
+        if (key === "floor" || key.startsWith("floor:")) key = floorId;
+        if (seenParts.has(key) || (key !== floorId && !wallIds.has(key))) return;
         seenParts.add(key);
         parts.push(key);
       });
@@ -2200,17 +2254,74 @@
         parts,
       });
     });
-    node.outs = outs;
+    layout.outs = outs;
+    return layout;
+  }
+
+  function ensurePlanner(node) {
+    if (!node || node.type !== "planner") return node;
+    if (!Array.isArray(node.layouts) || !node.layouts.length) {
+      const id = uid();
+      const named = plannerName(node);
+      node.layouts = [{
+        id,
+        legacy: true,
+        name: named === "Планировщик" ? "Планировка 1" : named,
+        color: node.color,
+        points: node.points,
+        outs: node.outs,
+        height: node.height,
+        heightOut: node.heightOut,
+      }];
+      node.layoutId = id;
+    } else plannerRemember(node);
+    node.layouts.forEach((layout, index) => plannerNormalize(layout, index));
+    plannerApply(node, plannerActive(node));
     return node;
   }
 
-  function plannerModel(node) {
+  function plannerUseLayout(node, id) {
     ensurePlanner(node);
+    const layout = (node.layouts || []).find((item) => item.id === id);
+    if (!layout || layout.id === node.layoutId) return false;
+    plannerRemember(node);
+    plannerApply(node, layout);
+    return true;
+  }
+
+  function plannerAddLayout(node) {
+    ensurePlanner(node);
+    if (node.layouts.length >= PLANNER_MAX_LAYOUTS) return null;
+    const ids = [uid(), uid(), uid(), uid()];
+    const layout = {
+      id: uid(),
+      legacy: false,
+      name: `Планировка ${node.layouts.length + 1}`,
+      color: plannerLayoutColor(node.layouts),
+      height: 2.7,
+      heightOut: false,
+      points: [
+        { id: ids[0], x: 0, y: 0 },
+        { id: ids[1], x: 4, y: 0 },
+        { id: ids[2], x: 4, y: 3 },
+        { id: ids[3], x: 0, y: 3 },
+      ],
+    };
+    node.layouts.push(layout);
+    plannerNormalize(layout, node.layouts.length - 1);
+    plannerApply(node, layout);
+    return layout;
+  }
+
+  function plannerModel(node) {
+    if (node?.type === "planner") ensurePlanner(node);
     const walls = plannerWalls(node);
     const floor = plannerArea(node.points);
     const height = node.height;
     const outById = Object.fromEntries((node.outs || []).map((item) => [item.id, item]));
-    const rows = [{ id: "floor", kind: "floor", name: "Пол", area: floor, on: !!outById.floor?.on }];
+    const floorOut = (node.outs || []).find((item) => item.kind === "floor");
+    const floorId = floorOut?.id || "floor";
+    const rows = [{ id: floorId, kind: "floor", name: "Пол", area: floor, on: !!outById[floorId]?.on }];
     walls.forEach((wall, index) => {
       const out = outById[wall.id];
       rows.push({
@@ -2248,13 +2359,18 @@
   }
 
   function plannerOutputs(node, links) {
-    const model = plannerModel(node);
+    ensurePlanner(node);
     const linked = linkedFromPorts(node.id, links || []);
-    const ports = [{ id: "plan", name: "Чертёж", signal: "plan" }];
-    model.rows.concat(model.sums).forEach((row) => {
-      if (row.on || linked.has(row.id)) ports.push({ id: row.id, name: row.name, value: row.value ?? row.area, unit: row.unit || "м²" });
+    const ports = [];
+    (node.layouts || []).forEach((layout) => {
+      const model = plannerModel(layout);
+      ports.push({ id: plannerPort(layout, "plan"), name: layout.name, signal: "plan", layoutId: layout.id });
+      model.rows.concat(model.sums).forEach((row) => {
+        if (row.on || linked.has(row.id)) ports.push({ id: row.id, name: row.name, value: row.value ?? row.area, unit: row.unit || "м²", layoutId: layout.id });
+      });
+      const heightId = plannerPort(layout, "height");
+      if (layout.heightOut || linked.has(heightId)) ports.push({ id: heightId, name: "Высота стен", value: model.height, unit: "м", layoutId: layout.id });
     });
-    if (node.heightOut || linked.has("height")) ports.push({ id: "height", name: "Высота стен", value: model.height, unit: "м" });
     return ports;
   }
 
@@ -2266,7 +2382,7 @@
   }
 
   function plannerSumNote(parts, wallCount) {
-    const floor = parts.includes("floor");
+    const floor = (parts || []).some((id) => id === "floor" || String(id).startsWith("floor:"));
     const walls = parts.filter((id) => String(id).startsWith("w:")).length;
     const bits = [];
     if (floor) bits.push("пол");
@@ -2913,9 +3029,10 @@
     });
     const heightOut = document.querySelector('#planner-side [data-planner-height-on]');
     if (heightOut) {
-      heightOut.checked = !!(node.heightOut || linked.has("height"));
-      heightOut.disabled = linked.has("height");
-      heightOut.title = linked.has("height") ? "Сначала снимите связь на схеме" : "Вывести высоту стен на ноду";
+      const heightId = plannerPort(plannerActive(node), "height");
+      heightOut.checked = !!(node.heightOut || linked.has(heightId));
+      heightOut.disabled = linked.has(heightId);
+      heightOut.title = linked.has(heightId) ? "Сначала снимите связь на схеме" : "Вывести высоту стен на ноду";
     }
     document.querySelectorAll("#planner-side [data-planner-row]").forEach((el) => {
       const wall = plannerSelWall(node);
@@ -2950,10 +3067,10 @@
     const rows = model.rows
       .map((row) => {
         if (row.kind === "floor") {
-          return `<div class="planner-metric" data-planner-row="floor">
+          return `<div class="planner-metric" data-planner-row="${esc(row.id)}">
             ${onBox(row.id, row.on)}
             <span class="planner-label">Пол</span>
-            <b data-planner-val="floor">${esc(fmtShort(row.area))} м²</b>
+            <b data-planner-val="${esc(row.id)}">${esc(fmtShort(row.area))} м²</b>
           </div>`;
         }
         return `<div class="planner-metric" data-planner-row="${esc(row.id)}">
@@ -3033,8 +3150,71 @@
     if (depth && document.activeElement !== depth) depth.value = plannerInput(boxD || 3);
     if (height && document.activeElement !== height) height.value = plannerInput(node.height);
     const title = $("planner-title");
-    if (title && document.activeElement !== title) title.value = plannerName(node);
+    const layout = plannerActive(node);
+    if (title && document.activeElement !== title) title.value = layout?.name || "Планировка 1";
+    const picker = $("planner-layout-trigger");
+    const menu = $("planner-layout-menu");
+    if (picker && menu) {
+      picker.textContent = layout?.name || "Планировка";
+      menu.innerHTML = `${(node.layouts || []).map((item) => `<button type="button" class="planner-layout-option ${item.id === node.layoutId ? "is-active" : ""}" role="menuitem" data-planner-layout-choice="${esc(item.id)}">${esc(item.name)}</button>`).join("")}<div class="planner-layout-menu-sep"></div><button type="button" class="planner-layout-option is-create" role="menuitem" data-planner-layout-choice="__new">＋ Создать планировку</button>`;
+    }
+    const paste = $("planner-paste");
+    if (paste) paste.hidden = !plannerClip;
     plannerDraw();
+  }
+
+  async function plannerPasteLayout() {
+    const node = plannerNode();
+    const layout = node && plannerActive(node);
+    if (!node || !layout || !plannerClip) return;
+    const ok = api?.confirm
+      ? await api.confirm({
+          title: "Заменить планировку?",
+          text: "Текущая планировка будет заменена копией.",
+          ok: "Заменить",
+          danger: true,
+        })
+      : true;
+    if (!ok || !plannerNode()) return;
+    const src = JSON.parse(JSON.stringify(plannerClip));
+    const map = new Map();
+    (src.points || []).forEach((p) => {
+      const next = uid();
+      map.set(p.id, next);
+      p.id = next;
+    });
+    const floorId = plannerPort(layout, "floor");
+    const oldIds = new Set((layout.outs || []).map((item) => item.id).concat(plannerPort(layout, "height")));
+    (src.outs || []).forEach((out) => {
+      if (out.kind === "wall") {
+        const next = map.get(String(out.id || "").slice(2));
+        out.id = next ? `w:${next}` : `w:${uid()}`;
+      } else if (out.kind === "floor") out.id = floorId;
+      else if (out.kind === "sum") {
+        out.id = uid();
+        out.parts = (out.parts || []).map((part) => {
+          const key = String(part || "");
+          if (key === "floor" || key.startsWith("floor:")) return floorId;
+          if (key.startsWith("w:")) {
+            const next = map.get(key.slice(2));
+            return next ? `w:${next}` : "";
+          }
+          return "";
+        }).filter(Boolean);
+      }
+    });
+    layout.name = plannerLayoutName({ name: src.name }, Math.max(0, node.layouts.indexOf(layout)));
+    layout.color = src.color;
+    layout.height = src.height;
+    layout.heightOut = !!src.heightOut;
+    layout.points = src.points;
+    layout.outs = src.outs;
+    plannerApply(node, layout);
+    ensurePlanner(node);
+    const keep = new Set((node.outs || []).map((item) => item.id).concat(plannerPort(layout, "height"), plannerPort(layout, "plan")));
+    plannerDropPorts(node, [...oldIds].filter((id) => !keep.has(id)));
+    if (session.planner) session.planner.sel = null;
+    plannerCommit(true);
   }
 
   const editorHist = { on: false, stack: [], index: -1 };
@@ -3170,7 +3350,11 @@
     modal.id = "planner-modal";
     modal.innerHTML = `<div class="modal-card planner-modal" role="dialog" aria-label="Планировщик">
       <div class="planner-head">
-        <input id="planner-title" class="planner-title" maxlength="48" spellcheck="false" aria-label="Имя планировщика" />
+        <div class="planner-layout-control" id="planner-layout-control">
+          <button type="button" class="planner-layout-trigger" id="planner-layout-trigger" aria-haspopup="true" aria-expanded="false">Планировка</button>
+          <div class="planner-layout-menu" id="planner-layout-menu" role="menu" hidden></div>
+        </div>
+        <input id="planner-title" class="planner-title" maxlength="48" spellcheck="false" aria-label="Имя планировки" />
         <label>Высота <input id="planner-height" inputmode="decimal" aria-label="Высота стен, метры" /> м</label>
         <label>Ширина <input id="planner-width" inputmode="decimal" aria-label="Ширина, метры" /> м</label>
         <label>Глубина <input id="planner-depth" inputmode="decimal" aria-label="Глубина, метры" /> м</label>
@@ -3182,6 +3366,10 @@
           <div class="planner-cap">План пола</div>
           <div class="planner-plan-wrap">
             <canvas id="planner-plan"></canvas>
+            <div class="planner-clip">
+              <button type="button" class="planner-clip-btn" id="planner-paste" title="Вставить планировку" aria-label="Вставить планировку" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h8v2h2a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2V5z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 5.5h6V7H9z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button>
+              <button type="button" class="planner-clip-btn" id="planner-copy" title="Копировать планировку" aria-label="Копировать планировку"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 15V5.5A1.5 1.5 0 0 1 6.5 4H16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+            </div>
             <div class="calc-mini-wrap planner-mini" id="planner-mini-wrap">
               <canvas id="planner-minimap" class="calc-minimap" width="200" height="128" aria-label="Карта плана"></canvas>
               <button type="button" class="calc-mini-toggle" id="planner-mini-toggle" title="Скрыть карту" aria-label="Показать или скрыть карту"><svg class="calc-mini-eye-on" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/></svg><svg class="calc-mini-eye-off" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 3l18 18M10.6 10.7a2.8 2.8 0 0 0 3.7 3.7M6.2 6.3C4.1 7.8 2.5 12 2.5 12s3.5 7 9.5 7c1.2 0 2.3-.2 3.3-.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
@@ -3220,24 +3408,77 @@
       if (e.target === modal) closePlanner();
     });
     $("planner-close")?.addEventListener("click", () => closePlanner());
+    $("planner-layout-trigger")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const menu = $("planner-layout-menu");
+      if (!menu) return;
+      const opening = menu.hidden;
+      menu.hidden = !opening;
+      $("planner-layout-trigger")?.setAttribute("aria-expanded", String(opening));
+    });
+    $("planner-layout-menu")?.addEventListener("click", (e) => {
+      const option = e.target.closest("[data-planner-layout-choice]");
+      if (!option) return;
+      const node = plannerNode();
+      if (!node) return;
+      const value = option.dataset.plannerLayoutChoice;
+      if (value === "__new") {
+        const created = plannerAddLayout(node);
+        if (!created) {
+          api?.toast?.("Достигнут лимит планировок");
+          return;
+        }
+      } else plannerUseLayout(node, value);
+      $("planner-layout-menu").hidden = true;
+      $("planner-layout-trigger")?.setAttribute("aria-expanded", "false");
+      if (session.planner) session.planner.sel = null;
+      plannerCommit(true);
+    });
+    $("planner-modal")?.addEventListener("click", (e) => {
+      if (e.target.closest("#planner-layout-control")) return;
+      const menu = $("planner-layout-menu");
+      if (menu) menu.hidden = true;
+      $("planner-layout-trigger")?.setAttribute("aria-expanded", "false");
+    });
     $("planner-title")?.addEventListener("input", (e) => {
       const node = plannerNode();
-      if (!node || !session.planner) return;
-      node.name = String(e.target.value || "").trim().slice(0, 48);
+      const layout = node && plannerActive(node);
+      if (!layout || !session.planner) return;
+      layout.name = String(e.target.value || "").trim().slice(0, 48);
+      const index = Math.max(0, (node.layouts || []).indexOf(layout));
+      const shownName = plannerLayoutName(layout, index);
+      const picker = $("planner-layout-trigger");
+      const menuItem = $("planner-layout-menu")?.querySelector(`[data-planner-layout-choice="${cssEsc(layout.id)}"]`);
+      if (picker) picker.textContent = shownName;
+      if (menuItem) menuItem.textContent = shownName;
       session.planner.touched = true;
-      const card = document.querySelector(`[data-planner-title="${cssEsc(node.id)}"]`);
-      if (card) card.value = node.name || "Планировщик";
     });
     $("planner-title")?.addEventListener("change", (e) => {
       const node = plannerNode();
-      if (!node) return;
-      node.name = plannerName(node);
-      e.target.value = node.name;
-      const card = document.querySelector(`[data-planner-title="${cssEsc(node.id)}"]`);
-      if (card) card.value = node.name;
+      const layout = node && plannerActive(node);
+      if (!layout) return;
+      const index = Math.max(0, (node.layouts || []).indexOf(layout));
+      layout.name = plannerLayoutName(layout, index);
+      e.target.value = layout.name;
       if (session.planner) session.planner.touched = false;
       plannerCommit(false);
     });
+    $("planner-copy")?.addEventListener("click", () => {
+      const node = plannerNode();
+      const layout = node && plannerActive(node);
+      if (!layout) return;
+      plannerClip = JSON.parse(JSON.stringify({
+        name: layout.name,
+        color: layout.color,
+        height: layout.height,
+        heightOut: !!layout.heightOut,
+        points: layout.points,
+        outs: layout.outs,
+      }));
+      const paste = $("planner-paste");
+      if (paste) paste.hidden = false;
+    });
+    $("planner-paste")?.addEventListener("click", () => plannerPasteLayout());
     $("planner-make-rect")?.addEventListener("click", () => plannerAskRect());
     $("planner-add-corner")?.addEventListener("click", () => {
       const node = plannerNode();
@@ -3272,11 +3513,14 @@
       if (!node) return;
       if (e.target.matches("[data-planner-height-on]")) {
         const linked = linkedFromPorts(node.id, activeBlueprint()?.links || []);
-        if (linked.has("height")) {
+        const heightId = plannerPort(plannerActive(node), "height");
+        if (linked.has(heightId)) {
           e.target.checked = true;
           return;
         }
         node.heightOut = !!e.target.checked;
+        const layout = plannerActive(node);
+        if (layout) layout.heightOut = node.heightOut;
         plannerCommit(false);
         return;
       }
@@ -3687,9 +3931,10 @@
   ];
 
   function portSignal(node, portId) {
-    if (portId !== PLAN_PORT || !node) return "num";
-    if (node.type === "planner" || node.type === "openings") return "plan";
-    if (node.type === "electrics") return "plan";
+    if (!node) return "num";
+    const id = String(portId || "");
+    if (node.type === "planner" && (id === "plan" || id.startsWith("plan:"))) return "plan";
+    if ((node.type === "openings" || node.type === "electrics") && id === PLAN_PORT) return "plan";
     return "num";
   }
 
@@ -3872,22 +4117,24 @@
     return plan?.wallNames?.[wall.id] || `Стена ${index + 1}`;
   }
 
-  function emitPlan(node, bp, stack, values) {
+  function emitPlan(node, bp, stack, values, fromPort) {
     if (!node || !bp) return null;
     const chain = stack || [];
     if (chain.includes(node.id)) return null;
     const next = chain.concat(node.id);
     if (node.type === "planner") {
       ensurePlanner(node);
-      const walls = plannerWalls(node);
+      const layout = (node.layouts || []).find((item) => plannerPort(item, "plan") === fromPort) || plannerActive(node);
+      if (!layout) return null;
+      const walls = plannerWalls(layout);
       const wallNames = {};
       walls.forEach((wall, index) => {
-        const out = (node.outs || []).find((item) => item.id === wall.id);
+        const out = (layout.outs || []).find((item) => item.id === wall.id);
         wallNames[wall.id] = plannerWallName(out, index);
       });
       return {
-        height: node.height,
-        points: node.points.map((p) => ({ id: p.id, x: p.x, y: p.y })),
+        height: layout.height,
+        points: layout.points.map((p) => ({ id: p.id, x: p.x, y: p.y })),
         wallNames,
         openings: [],
       };
@@ -3908,11 +4155,11 @@
   }
 
   function upstreamPlan(node, bp, stack, values) {
-    const link = (bp?.links || []).find((item) => item.to === node?.id && item.toPort === PLAN_PORT && item.fromPort === PLAN_PORT);
+    const link = (bp?.links || []).find((item) => item.to === node?.id && item.toPort === PLAN_PORT);
     if (!link) return null;
     const src = (bp.nodes || []).find((item) => item.id === link.from);
-    if (!src) return null;
-    return emitPlan(src, bp, stack || [], values || {});
+    if (!src || portSignal(src, link.fromPort) !== "plan") return null;
+    return emitPlan(src, bp, stack || [], values || {}, link.fromPort);
   }
 
   function resolveHole(raw, plan, node, values) {
@@ -7631,7 +7878,7 @@
     </article>`;
   }
 
-  function plannerThumb(points) {
+  function plannerThumb(points, film, color) {
     const pts = Array.isArray(points) ? points : [];
     if (pts.length < 3) return "";
     let minX = Infinity;
@@ -7654,56 +7901,52 @@
     const d = pts
       .map((p, i) => `${i ? "L" : "M"}${(ox + p.x * scale).toFixed(1)} ${(oy + p.y * scale).toFixed(1)}`)
       .join("") + "Z";
-    return `<svg class="calc-planner-thumb" viewBox="0 0 ${size} ${size}" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><path d="${d}"/></svg>`;
+    const cls = film ? "calc-film-thumb" : "calc-planner-thumb";
+    const tone = film && color ? ` style="--film-tone:${esc(color)}"` : "";
+    return `<svg class="${cls}"${tone} viewBox="0 0 ${size} ${size}" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><path d="${d}"/></svg>`;
+  }
+
+  function plannerPortRow(node, port, graph) {
+    if (port.signal === "plan") {
+      return `<div class="calc-row out calc-plan-head">
+        <span class="calc-row-name">${esc(port.name)}</span>
+        <b class="calc-plan-tag">чертёж</b>
+        <i class="calc-port out" data-port="${esc(port.id)}" data-io="out" data-signal="plan" title="${esc(port.name)}"></i>
+      </div>`;
+    }
+    const value = graph.values[`${node.id}:${port.id}`];
+    const shown = value != null && Number.isFinite(value) ? value : (port.value ?? port.area);
+    const unit = port.unit || "м²";
+    const tip = `${port.name} · ${fmtShort(shown)} ${unit}`;
+    return `<div class="calc-row out">
+      <span class="calc-row-name" title="${esc(tip)}">${esc(port.name)}</span>
+      <b>${esc(fmtShort(shown))} <small>${esc(unit)}</small></b>
+      <i class="calc-port out" data-port="${esc(port.id)}" data-io="out" title="${esc(tip)}"></i>
+    </div>`;
   }
 
   function plannerNodeHtml(node, bp, graph) {
+    ensurePlanner(node);
     const model = plannerModel(node);
     const ports = plannerOutputs(node, bp.links);
-    const totalArea = model.floor;
     const sub = `пол ${fmtShort(model.floor)} м² · ${model.walls.length} стен · h ${fmtShort(model.height)} м`;
+
+    const film = node.layouts.map((layout) => `<button type="button" class="calc-film-card ${layout.id === node.layoutId ? "is-on" : ""}" data-planner-layout="${esc(layout.id)}" data-planner-edit="${esc(node.id)}" title="${esc(layout.name)}"><span class="calc-film-name">${esc(layout.name)}</span>${plannerThumb(layout.points, true, layout.color)}</button>`).join("");
+    const groups = node.layouts.map((layout) => {
+      const rows = ports.filter((port) => port.layoutId === layout.id);
+      return `<div class="calc-plan-group" style="--planner-color:${esc(layout.color)}">${rows.map((port) => plannerPortRow(node, port, graph)).join("")}</div>`;
+    }).join("");
     return `<article class="calc-node is-planner ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(node.color || "#65a30d")}">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <input class="calc-pname calc-planner-name" data-planner-title="${esc(node.id)}" value="${esc(plannerName(node))}" maxlength="48" spellcheck="false" title="Имя планировщика" aria-label="Имя планировщика" />
-        <input class="calc-planner-color" type="color" data-planner-color="${esc(node.id)}" value="${esc(node.color || "#65a30d")}" title="Цвет плана" aria-label="Цвет плана" />
+        <input class="calc-planner-color" type="color" data-planner-color="${esc(node.id)}" value="${esc(node.color || "#65a30d")}" title="Цвет текущей планировки" aria-label="Цвет текущей планировки" />
         <button type="button" class="calc-text-btn" data-planner-edit="${esc(node.id)}" title="План пола и площади">Редактор</button>
         <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
       </header>
+      <div class="calc-film calc-film-top">${film}</div>
       <div class="calc-node-sub">${esc(sub)}</div>
-      <div class="calc-planner-preview">
-        ${plannerThumb(node.points)}
-        <div class="calc-planner-preview-info">
-          <div class="calc-planner-preview-title">${esc(plannerName(node))}</div>
-          <div class="calc-planner-preview-area">${esc(fmtShort(totalArea))} м²</div>
-        </div>
-      </div>
-      <div class="calc-ports">
-        ${
-          ports.length
-            ? ports
-                .map((port) => {
-                  if (port.id === "plan") {
-                    return `<div class="calc-row out">
-                      <span class="calc-row-name">Чертёж</span>
-                      <b class="calc-plan-tag">план</b>
-                      <i class="calc-port out" data-port="plan" data-io="out" data-signal="plan" title="Чертёж"></i>
-                    </div>`;
-                  }
-                  const value = graph.values[`${node.id}:${port.id}`];
-                  const shown = value != null && Number.isFinite(value) ? value : (port.value ?? port.area);
-                  const unit = port.unit || "м²";
-                  const tip = `${port.name} · ${fmtShort(shown)} ${unit}`;
-                  return `<div class="calc-row out">
-                    <span class="calc-row-name" title="${esc(tip)}">${esc(port.name)}</span>
-                    <b>${esc(fmtShort(shown))} <small>${esc(unit)}</small></b>
-                    <i class="calc-port out" data-port="${esc(port.id)}" data-io="out" title="${esc(tip)}"></i>
-                  </div>`;
-                })
-                .join("")
-            : `<div class="calc-empty">Включите выходы в редакторе</div>`
-        }
-      </div>
+      <div class="calc-ports">${groups || `<div class="calc-empty">Включите выходы в редакторе</div>`}</div>
     </article>`;
   }
 
@@ -9431,6 +9674,8 @@
       if (plannerEdit) {
         e.preventDefault();
         e.stopPropagation();
+        const layoutId = e.target.closest("[data-planner-layout]")?.dataset.plannerLayout;
+        if (layoutId && node?.type === "planner") plannerUseLayout(node, layoutId);
         openPlanner(plannerEdit.dataset.plannerEdit || node.id);
         return;
       }
@@ -9510,8 +9755,6 @@
       }
       if (e.target.dataset?.plannerTitle && node.type === "planner") {
         node.name = String(e.target.value || "").trim().slice(0, 48);
-        const title = $("planner-title");
-        if (title && document.activeElement !== title) title.value = node.name || "Планировщик";
         return;
       }
       if (e.target.dataset?.markTitle && (node.type === "openings" || node.type === "electrics")) {
@@ -9596,7 +9839,9 @@
     root.addEventListener("change", (e) => {
       const nodeEl = e.target.closest(".calc-node, .calc-group-chrome");
       const bp = activeBlueprint();
-      const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node) : null;
+      const plannerPick = e.target.matches?.("[data-planner-pick]") ? e.target : null;
+      const plannerId = plannerPick?.dataset.plannerPick || "";
+      const node = bp ? bp.nodes.find((item) => item.id === (plannerId || nodeEl?.dataset.node)) : null;
       if (!node) return;
       if (e.target.dataset.resultName && node.type === "result") {
         node.name = String(e.target.value || "").trim().slice(0, 48) || "Результат";
@@ -9608,9 +9853,26 @@
       if (e.target.dataset.plannerTitle && node.type === "planner") {
         node.name = plannerName({ name: e.target.value });
         e.target.value = node.name;
-        const title = $("planner-title");
-        if (title) title.value = node.name;
         dirty();
+        return;
+      }
+      if (plannerPick && node.type === "planner") {
+        const value = plannerPick.value;
+        if (value === "__new") {
+          const created = plannerAddLayout(node);
+          if (!created) {
+            plannerPick.value = node.layoutId;
+            api?.toast?.("Достигнут лимит планировок");
+            return;
+          }
+        } else plannerUseLayout(node, value);
+        if (session.planner?.id === node.id) {
+          session.planner.sel = null;
+          plannerCommit(true);
+        } else {
+          dirty();
+          render();
+        }
         return;
       }
       if (e.target.dataset.markTitle && (node.type === "openings" || node.type === "electrics")) {
