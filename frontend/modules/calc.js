@@ -5236,29 +5236,66 @@
     markDraw();
   }
 
+  function markCamera() {
+    if (!session.mark) return { k: 1, x: 0, y: 0 };
+    if (!session.mark.cam) session.mark.cam = { k: 1, x: 0, y: 0 };
+    return session.mark.cam;
+  }
+
   function markViewOf(canvas, ctx) {
     const surface = session.mark?.surface || "floor";
     if (!ctx.base) return null;
-    if (surface === "floor" || surface === "ceiling") return { kind: "plan", view: plannerView(canvas, ctx.base.points, null), plan: ctx.base };
+    const cam = markCamera();
+    const k = cam.k || 1;
+    const width = canvas.clientWidth;
+    const heightPx = canvas.clientHeight;
+    if (surface === "floor" || surface === "ceiling") {
+      const fit = plannerFit(canvas, ctx.base.points);
+      const scale = fit.scale * k;
+      const ox = (fit.ox - width / 2) * k + width / 2 + (cam.x || 0);
+      const oy = (fit.oy - heightPx / 2) * k + heightPx / 2 + (cam.y || 0);
+      return {
+        kind: "plan",
+        plan: ctx.base,
+        view: {
+          scale,
+          to(p) { return { x: ox + p.x * scale, y: oy + p.y * scale }; },
+          from(x, y) { return { x: (x - ox) / scale, y: (y - oy) / scale }; },
+        },
+      };
+    }
     const walls = plannerWalls(ctx.base);
     const wall = walls.find((item) => item.id === surface);
-    if (!wall) return { kind: "plan", view: plannerView(canvas, ctx.base.points, null), plan: ctx.base };
+    if (!wall) {
+      const fit = plannerFit(canvas, ctx.base.points);
+      const scale = fit.scale * k;
+      const ox = (fit.ox - width / 2) * k + width / 2 + (cam.x || 0);
+      const oy = (fit.oy - heightPx / 2) * k + heightPx / 2 + (cam.y || 0);
+      return { kind: "plan", plan: ctx.base, view: {
+        scale,
+        to(p) { return { x: ox + p.x * scale, y: oy + p.y * scale }; },
+        from(x, y) { return { x: (x - ox) / scale, y: (y - oy) / scale }; },
+      }};
+    }
     const pad = 28;
     const len = Math.max(wall.len, 0.2);
-    const height = Math.max(ctx.base.height, 0.2);
-    const scale = Math.min((canvas.clientWidth - pad * 2) / len, (canvas.clientHeight - pad * 2) / height);
-    const ox = (canvas.clientWidth - len * scale) / 2;
-    const oy = (canvas.clientHeight - height * scale) / 2;
+    const wallHeight = Math.max(ctx.base.height, 0.2);
+    const baseScale = Math.min((width - pad * 2) / len, (heightPx - pad * 2) / wallHeight);
+    const scale = baseScale * k;
+    const baseOx = (width - len * baseScale) / 2;
+    const baseOy = (heightPx - wallHeight * baseScale) / 2;
+    const ox = (baseOx - width / 2) * k + width / 2 + (cam.x || 0);
+    const oy = (baseOy - heightPx / 2) * k + heightPx / 2 + (cam.y || 0);
     return {
       kind: "wall",
       wall,
       height: ctx.base.height,
       scale,
       toAlong(along, rise) {
-        return { x: ox + along * scale, y: oy + (height - rise) * scale };
+        return { x: ox + along * scale, y: oy + (wallHeight - rise) * scale };
       },
       from(x, y) {
-        return { along: (x - ox) / scale, rise: height - (y - oy) / scale };
+        return { along: (x - ox) / scale, rise: wallHeight - (y - oy) / scale };
       },
     };
   }
@@ -6097,16 +6134,43 @@
       const hit = markHit(ctx, e.clientX - rect.left, e.clientY - rect.top);
       markShowMenu(e.clientX, e.clientY, hit);
     });
-    $("mark-canvas")?.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0) return;
+    $("mark-canvas")?.addEventListener("wheel", (e) => {
       const ctx = markContext();
       const canvas = $("mark-canvas");
-      if (!ctx || !canvas) return;
+      if (!ctx || !canvas || !session.mark) return;
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const view = markViewOf(canvas, ctx);
+      const world = view?.kind === "wall" ? view.from(sx, sy) : view?.view.from(sx, sy);
+      if (!world) return;
+      const cam = markCamera();
+      cam.k = Math.max(0.2, Math.min(12, cam.k * (e.deltaY > 0 ? 1 / 1.12 : 1.12)));
+      const next = markViewOf(canvas, ctx);
+      const spot = next.kind === "wall" ? next.toAlong(world.along, world.rise) : next.view.to(world);
+      cam.x += sx - spot.x;
+      cam.y += sy - spot.y;
+      markDraw();
+    }, { passive: false });
+    $("mark-canvas")?.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 && e.button !== 1) return;
+      const ctx = markContext();
+      const canvas = $("mark-canvas");
+      if (!ctx || !canvas || !session.mark) return;
       markHideMenu();
       const rect = canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       const hit = markHit(ctx, x, y);
+      if (e.button === 1 || (!hit && e.button === 0)) {
+        const cam = markCamera();
+        session.mark.drag = { pan: true, x: e.clientX, y: e.clientY, ox: cam.x, oy: cam.y };
+        canvas.setPointerCapture(e.pointerId);
+        canvas.style.cursor = "grabbing";
+        return;
+      }
+      if (e.button !== 0) return;
       session.mark.sel = hit || "";
       if (hit && ctx.node.type === "openings") {
         const hole = ctx.node.holes.find((item) => item.id === hit);
@@ -6139,6 +6203,13 @@
     $("mark-canvas")?.addEventListener("pointermove", (e) => {
       const drag = session.mark?.drag;
       const node = markNode();
+      if (drag?.pan && session.mark) {
+        const cam = markCamera();
+        cam.x = drag.ox + (e.clientX - drag.x);
+        cam.y = drag.oy + (e.clientY - drag.y);
+        markDraw();
+        return;
+      }
       if (!drag || !node) return;
       const canvas = $("mark-canvas");
       const rect = canvas.getBoundingClientRect();
@@ -6182,8 +6253,12 @@
     });
     window.addEventListener("pointerup", () => {
       if (!session.mark?.drag) return;
+      const wasPan = !!session.mark.drag.pan;
       session.mark.drag = null;
-      markCommit(true);
+      const canvas = $("mark-canvas");
+      if (canvas) canvas.style.cursor = "";
+      if (wasPan) markDraw();
+      else markCommit(true);
     });
     $("mark-menu")?.addEventListener("contextmenu", (e) => e.preventDefault());
     $("mark-arrows")?.addEventListener("click", (e) => {
