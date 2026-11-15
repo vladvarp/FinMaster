@@ -592,6 +592,7 @@
     }
     state.dirty = true;
     renderAll();
+    window.FinCalc?.refreshEditors?.();
     syncDirty();
     updateHistoryButtons();
     persistHistorySoon();

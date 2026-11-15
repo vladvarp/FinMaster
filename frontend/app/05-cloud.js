@@ -4569,6 +4569,12 @@
         }
         return;
       }
+      if ((code === "KeyZ" && !e.shiftKey) || code === "KeyY" || (code === "KeyZ" && e.shiftKey)) {
+        if (window.FinCalc?.editorKeys?.(e)) {
+          e.preventDefault();
+          return;
+        }
+      }
       if (code === "KeyZ" && !e.shiftKey) {
         if (dictionaryTextUndo(e)) {
           e.preventDefault();

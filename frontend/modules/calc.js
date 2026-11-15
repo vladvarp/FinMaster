@@ -137,6 +137,10 @@
     api?.markDirty?.("Калькулятор");
   }
 
+  function dirtyLive() {
+    api?.markDirty?.("Калькулятор", { history: false });
+  }
+
   function fmt(value) {
     if (value == null || !Number.isFinite(value)) return "—";
     return api?.money ? api.money(value) : String(value);
@@ -3033,11 +3037,117 @@
     plannerDraw();
   }
 
+  const editorHist = { on: false, stack: [], index: -1 };
+
+  function editorBundle() {
+    const plannerOpen = $("planner-modal")?.classList.contains("open");
+    const markOpen = $("mark-modal")?.classList.contains("open");
+    const node = plannerOpen ? plannerNode() : markOpen ? markNode() : null;
+    const bp = activeBlueprint();
+    const calc = ensureState();
+    if (!node || !bp || !calc) return "";
+    const links = (bp.links || []).filter((link) => link.from === node.id || link.to === node.id);
+    const catalog = node.type === "electrics"
+      ? {
+          socketTypes: calc.socketTypes || [],
+          lightTypes: calc.lightTypes || [],
+          labels: calc.labels || {},
+          typeOff: calc.typeOff || [],
+        }
+      : null;
+    return JSON.stringify({ node, links, catalog });
+  }
+
+  function editorBegin() {
+    editorHist.on = true;
+    editorHist.stack = [];
+    editorHist.index = -1;
+    const snap = editorBundle();
+    if (!snap) return;
+    editorHist.stack.push(snap);
+    editorHist.index = 0;
+  }
+
+  function editorEnd() {
+    const base = editorHist.stack[0] || "";
+    const now = editorHist.on ? editorBundle() : "";
+    const changed = !!(editorHist.on && base && now && base !== now);
+    editorHist.on = false;
+    editorHist.stack = [];
+    editorHist.index = -1;
+    if (changed) dirty();
+  }
+
+  function editorPush() {
+    if (!editorHist.on) return;
+    const snap = editorBundle();
+    if (!snap || editorHist.stack[editorHist.index] === snap) return;
+    editorHist.stack = editorHist.stack.slice(0, editorHist.index + 1);
+    editorHist.stack.push(snap);
+    if (editorHist.stack.length > 80) editorHist.stack.shift();
+    editorHist.index = editorHist.stack.length - 1;
+    dirtyLive();
+  }
+
+  function editorApply(snap) {
+    const data = JSON.parse(snap);
+    const bp = activeBlueprint();
+    const calc = ensureState();
+    if (!bp || !data?.node) return;
+    const at = (bp.nodes || []).findIndex((item) => item.id === data.node.id);
+    if (at < 0) return;
+    bp.nodes[at] = data.node;
+    bp.links = (bp.links || []).filter((link) => link.from !== data.node.id && link.to !== data.node.id).concat(data.links || []);
+    if (data.catalog && calc) {
+      calc.socketTypes = data.catalog.socketTypes || [];
+      calc.lightTypes = data.catalog.lightTypes || [];
+      calc.labels = data.catalog.labels || {};
+      calc.typeOff = data.catalog.typeOff || [];
+    }
+    if (session.planner) session.planner.drag = null;
+    if (session.mark) session.mark.drag = null;
+    render();
+    if ($("planner-modal")?.classList.contains("open")) plannerFill();
+    if ($("mark-modal")?.classList.contains("open")) {
+      markFill();
+      const body = $("mark-preset-body");
+      if (body && $("mark-preset-modal")?.classList.contains("open")) body.innerHTML = markPresetHtml();
+    }
+    dirtyLive();
+  }
+
+  function editorUndo() {
+    if (!editorHist.on || editorHist.index <= 0) return false;
+    editorHist.index -= 1;
+    editorApply(editorHist.stack[editorHist.index]);
+    return true;
+  }
+
+  function editorRedo() {
+    if (!editorHist.on || editorHist.index >= editorHist.stack.length - 1) return false;
+    editorHist.index += 1;
+    editorApply(editorHist.stack[editorHist.index]);
+    return true;
+  }
+
+  function refreshEditors() {
+    if (editorHist.on) editorBegin();
+    if (session.planner) session.planner.drag = null;
+    if (session.mark) session.mark.drag = null;
+    if ($("planner-modal")?.classList.contains("open")) plannerFill();
+    if ($("mark-modal")?.classList.contains("open")) {
+      markFill();
+      const body = $("mark-preset-body");
+      if (body && $("mark-preset-modal")?.classList.contains("open")) body.innerHTML = markPresetHtml();
+    } else $("mark-preset-modal")?.classList.remove("open");
+  }
+
   function plannerCommit(rebuild) {
     const node = plannerNode();
     if (!node) return;
     ensurePlanner(node);
-    dirty();
+    if ($("planner-modal")?.classList.contains("open")) editorPush();
+    else dirty();
     render();
     if (!$("planner-modal")?.classList.contains("open")) return;
     if (rebuild) plannerFill();
@@ -3545,17 +3655,17 @@
     hidePortMenu();
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     $("planner-modal")?.classList.add("open");
+    editorBegin();
     requestAnimationFrame(() => plannerFill());
   }
 
   function closePlanner() {
     const node = plannerNode();
     if (node) node.name = plannerName(node);
-    const touched = !!session.planner?.touched;
+    editorEnd();
     plannerHideNudge();
     session.planner = null;
     $("planner-modal")?.classList.remove("open");
-    if (touched) dirty();
     if (api?.view?.() === "calculator") render();
   }
 
@@ -4419,12 +4529,14 @@
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     $("mark-modal")?.classList.add("open");
     markHideMenu();
+    editorBegin();
     requestAnimationFrame(() => markFill());
   }
 
   function closeMark() {
     const node = markNode();
     if (node) node.name = node.type === "electrics" ? ensureElectrics(node).name : ensureOpenings(node).name;
+    editorEnd();
     session.mark = null;
     markHideMenu();
     $("mark-preset-modal")?.classList.remove("open");
@@ -4477,7 +4589,8 @@
       fitOpenings(node);
     } else ensureElectrics(node);
     pruneMarkLinks(node);
-    dirty();
+    if ($("mark-modal")?.classList.contains("open")) editorPush();
+    else dirty();
     render();
     if (!$("mark-modal")?.classList.contains("open")) return;
     if (rebuild) markFill();
@@ -9768,6 +9881,22 @@
     },
     refreshPresent() {
       renderPresentPanel();
+    },
+    refreshEditors() {
+      refreshEditors();
+    },
+    editorKeys(e) {
+      const open = $("planner-modal")?.classList.contains("open") || $("mark-modal")?.classList.contains("open");
+      if (!open || !e.ctrlKey && !e.metaKey) return false;
+      if (e.code === "KeyZ" && !e.shiftKey) {
+        editorUndo();
+        return true;
+      }
+      if (e.code === "KeyY" || (e.code === "KeyZ" && e.shiftKey)) {
+        editorRedo();
+        return true;
+      }
+      return false;
     },
     hidePresentPanel() {
       hidePresentPanel();

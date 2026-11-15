@@ -565,7 +565,7 @@
     previewHold = on && state.doc ? JSON.stringify(state.doc) : "";
   }
 
-  function markDirty(label) {
+  function markDirty(label, opts = {}) {
     if (state.preview) {
       if (previewLock) return;
       previewLock = true;
@@ -584,7 +584,7 @@
     if (!state.doc || history.busy) return;
     state.dirty = true;
     state.doc.modified_at = new Date().toISOString();
-    historySchedule(label);
+    if (opts.history !== false) historySchedule(label);
     updateChrome();
     syncDirty();
     remotePublish();
