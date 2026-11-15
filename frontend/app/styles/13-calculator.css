@@ -923,6 +923,7 @@ html[data-theme="dark"] .calc-mini-toggle {
   padding: 2px 0 6px;
 }
 .calc-film-card, .mark-film button {
+  position: relative;
   flex: 0 0 76px;
   display: flex;
   flex-direction: column;
@@ -939,6 +940,35 @@ html[data-theme="dark"] .calc-mini-toggle {
   font-weight: 800;
   cursor: pointer;
 }
+
+.calc-film-delete {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.calc-film-delete:hover:not(:disabled) {
+  border-color: var(--danger, #ef4444);
+  background: var(--danger, #ef4444);
+  color: #fff;
+}
+.calc-film-delete:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .calc-film-name {
   display: block;
   overflow: hidden;
