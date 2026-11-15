@@ -2084,10 +2084,6 @@
       log.innerHTML = `<p class="update-wait">${all ? "История коммитов пуста." : "От установленной версии до последней изменений нет."}</p>`;
       return;
     }
-    if (!all && rows.length === 1 && rows[0].current) {
-      log.innerHTML = '<p class="update-wait">Это последняя версия.</p>';
-      return;
-    }
     log.innerHTML = `<ol class="update-path">${rows.map(updateCommitItem).join("")}</ol>`;
   }
 
