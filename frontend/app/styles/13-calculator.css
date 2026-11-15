@@ -1341,6 +1341,60 @@ html[data-theme="dark"] .calc-mini-toggle {
   color: var(--muted);
 }
 .planner-plan-wrap { position: relative; flex: 1; min-height: 0; }
+.editor-snap-controls {
+  position: absolute;
+  z-index: 7;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--card) 94%, transparent);
+  box-shadow: var(--shadow);
+}
+.editor-snap-toggle {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.editor-snap-toggle svg { width: 20px; height: 20px; }
+.editor-snap-toggle.is-on {
+  color: #fff;
+  border-color: #65a30d;
+  background: #65a30d;
+}
+.editor-snap-step {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+.editor-snap-step input {
+  width: 58px;
+  min-width: 0;
+  padding: 5px 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  text-align: right;
+}
+.editor-snap-step span { color: var(--muted); }
 .planner-nudge {
   position: absolute;
   z-index: 3;
