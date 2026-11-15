@@ -857,6 +857,16 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         if kind == "openings":
             node["holes"] = _calc_holes(raw.get("holes"))
             node["owns"] = _calc_owns(raw.get("owns"))
+            raw_counter_names = raw.get("counterNames")
+            if isinstance(raw_counter_names, dict):
+                allowed_counter_names = ("pick", "doors", "windows", "pipes", "hatches")
+                counter_names = {
+                    key: _clip_text(raw_counter_names.get(key), 48)
+                    for key in allowed_counter_names
+                    if _clip_text(raw_counter_names.get(key), 48)
+                }
+                if counter_names:
+                    node["counterNames"] = counter_names
         else:
             node["fixtures"] = _calc_fixtures(raw.get("fixtures"))
     elif kind == "present":
