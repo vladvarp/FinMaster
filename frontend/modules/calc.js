@@ -9845,8 +9845,10 @@
           const graph = computeGraph(bp);
           (bp.nodes || []).forEach((target) => {
             if (target.type !== "openings" && target.type !== "electrics") return;
+            const sourceLink = (bp.links || []).find((link) => link.to === target.id && link.toPort === PLAN_PORT && link.from === node.id);
+            if (!sourceLink) return;
             const plan = upstreamPlan(target, bp, [], graph.values);
-            if (!plan || plan.sourceNodeId !== node.id) return;
+            if (!plan) return;
             const tones = markTones(target, plan.color);
             const targetEl = nodesRoot()?.querySelector(`.calc-node[data-node="${cssEsc(target.id)}"]`);
             if (!targetEl) return;
