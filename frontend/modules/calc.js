@@ -8938,7 +8938,7 @@
       session.selectedLink = "";
       drawWires(bp, computeGraph(bp));
     }
-    if (e.target.closest("button")) return;
+    if (e.target.closest("button") && !e.target.closest(".calc-film-card")) return;
     if (drag && node) {
       e.preventDefault();
       session.selected = node.dataset.node;
@@ -9509,12 +9509,15 @@
       const nodeEl = card.closest(".calc-node");
       const bp = activeBlueprint();
       const node = nodeEl && bp
-        ? bp.nodes.find((item) => item.id === nodeEl.dataset.node && item.type === "planner")
+        ? bp.nodes.find((item) => item.id === nodeEl.dataset.node)
         : null;
       if (!node) return;
       e.preventDefault();
       e.stopPropagation();
-      openPlanner(node.id);
+      if (node.type === "planner") openPlanner(node.id);
+      else if (node.type === "openings" || node.type === "electrics") {
+        openMark(node.id, card.dataset.markSurface || "");
+      }
     });
     board.addEventListener("auxclick", (e) => {
       if (e.button === 1) e.preventDefault();
@@ -9693,7 +9696,7 @@
         return;
       }
       const markEdit = e.target.closest("[data-mark-edit], [data-mark-open]");
-      if (markEdit) {
+      if (markEdit && !e.target.closest(".calc-film-card")) {
         e.preventDefault();
         e.stopPropagation();
         openMark(markEdit.dataset.markEdit || markEdit.dataset.markOpen || node.id, markEdit.dataset.markSurface || "");
