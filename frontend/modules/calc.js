@@ -2957,12 +2957,7 @@
       if (activeDrag?.id && activeDrag.moved) {
         const moving = node.points.find((p) => p.id === activeDrag.id);
         if (moving) {
-          const guides = { x: false, y: false };
-          node.points.forEach((p) => {
-            if (p.id === moving.id) return;
-            if (Math.abs(p.x - moving.x) < 0.0001) guides.x = true;
-            if (Math.abs(p.y - moving.y) < 0.0001) guides.y = true;
-          });
+          const guides = { x: true, y: true };
           ctx.save();
           ctx.strokeStyle = "#0ea5e9";
           ctx.lineWidth = 1;
@@ -5383,56 +5378,6 @@
     g.restore();
   }
 
-  function markAlignmentCenters(ctx, movingId) {
-    const view = session.mark?.view;
-    if (!ctx || !view) return [];
-    const surface = session.mark.surface || "floor";
-    const items = [];
-    if (ctx.node.type === "openings") {
-      markLocals(ctx).forEach((hole) => {
-        if (hole.id === movingId || hole.surface !== surface) return;
-        if (view.kind === "wall" && hole.wallId !== view.wall.id) return;
-        items.push(view.kind === "wall"
-          ? { id: hole.id, x: hole.shape === "circle" ? hole.along : hole.along + hole.w / 2, y: hole.shape === "circle" ? hole.rise : hole.rise + hole.h / 2 }
-          : { id: hole.id, x: hole.shape === "circle" ? hole.x : hole.x + hole.w / 2, y: hole.shape === "circle" ? hole.y : hole.y + hole.h / 2 });
-      });
-    } else {
-      (ctx.node.fixtures || []).forEach((fix) => {
-        if (fix.id === movingId || fix.surface !== surface) return;
-        if (view.kind === "wall" && fix.wallId !== view.wall.id) return;
-        items.push({ id: fix.id, x: view.kind === "wall" ? fix.along : fix.x, y: view.kind === "wall" ? fix.rise : fix.y });
-      });
-    }
-    return items;
-  }
-
-  function markAlignWorld(ctx, drag, world) {
-    if (!ctx || !drag || drag.mode || !world || session.mark?.snapEnabled === false) {
-      if (session.mark) session.mark.guides = null;
-      return world;
-    }
-    const view = session.mark.view;
-    const hole = ctx.node.type === "openings" ? ctx.node.holes.find((item) => item.id === drag.id) : null;
-    const fix = ctx.node.type === "electrics" ? ctx.node.fixtures.find((item) => item.id === drag.id) : null;
-    if (!hole && !fix) return world;
-    let nextX = view.kind === "wall" ? world.along : world.x;
-    let nextY = view.kind === "wall" ? world.rise : world.y;
-    const offsetX = hole && hole.shape !== "circle" ? hole.w / 2 : 0;
-    const offsetY = hole && hole.shape !== "circle" ? hole.h / 2 : 0;
-    const threshold = Math.max(0.035, 9 / (view.scale || view.view?.scale || 1));
-    let guideX = null, guideY = null, bestX = threshold, bestY = threshold;
-    markAlignmentCenters(ctx, drag.id).forEach((item) => {
-      const dx = Math.abs(nextX + offsetX - item.x);
-      const dy = Math.abs(nextY + offsetY - item.y);
-      if (dx < bestX) { bestX = dx; guideX = item.x; }
-      if (dy < bestY) { bestY = dy; guideY = item.y; }
-    });
-    if (guideX != null) nextX = guideX - offsetX;
-    if (guideY != null) nextY = guideY - offsetY;
-    session.mark.guides = guideX != null || guideY != null ? { x: guideX, y: guideY } : null;
-    return view.kind === "wall" ? { ...world, along: nextX, rise: nextY } : { ...world, x: nextX, y: nextY };
-  }
-
   function markDraw() {
     const ctx = markContext();
     const canvas = $("mark-canvas");
@@ -6305,9 +6250,8 @@
       if (!drag || !node) return;
       const canvas = $("mark-canvas");
       const rect = canvas.getBoundingClientRect();
-      let world = markWorld(e.clientX - rect.left, e.clientY - rect.top);
+      const world = markWorld(e.clientX - rect.left, e.clientY - rect.top);
       if (!world) return;
-      world = markAlignWorld(markContext(), drag, world);
       if (node.type === "openings") {
         const hole = node.holes.find((item) => item.id === drag.id);
         if (!hole) return;
@@ -6341,6 +6285,18 @@
           fix.x = world.x;
           fix.y = world.y;
         }
+      }
+      const view = session.mark.view;
+      const movedHole = node.type === "openings" ? node.holes.find((item) => item.id === drag.id) : null;
+      const movedFix = node.type === "electrics" ? node.fixtures.find((item) => item.id === drag.id) : null;
+      if (movedHole) {
+        session.mark.guides = view.kind === "wall"
+          ? { x: movedHole.shape === "circle" ? movedHole.along : movedHole.along + movedHole.w / 2, y: movedHole.shape === "circle" ? movedHole.rise : movedHole.rise + movedHole.h / 2 }
+          : { x: movedHole.shape === "circle" ? movedHole.x : movedHole.x + movedHole.w / 2, y: movedHole.shape === "circle" ? movedHole.y : movedHole.y + movedHole.h / 2 };
+      } else if (movedFix) {
+        session.mark.guides = view.kind === "wall"
+          ? { x: movedFix.along, y: movedFix.rise }
+          : { x: movedFix.x, y: movedFix.y };
       }
       markDraw();
     });
