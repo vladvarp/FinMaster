@@ -1717,8 +1717,6 @@ def _commit_row(item: dict[str, Any]) -> dict[str, Any] | None:
     message = str(commit.get("message") or "").replace("\r\n", "\n").strip()
     title, _, body = message.partition("\n")
     body = body.strip()
-    if len(body) > 700:
-        body = body[:700].rstrip() + "…"
     when = ""
     for key in ("committer", "author"):
         person = commit.get(key) if isinstance(commit.get(key), dict) else {}

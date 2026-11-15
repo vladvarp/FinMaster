@@ -1,7 +1,17 @@
 ## Commit Message Rules
 
-Commit messages are shown to the user in the program update window. Write them in Russian, for that person, not for a developer.
+The commit message is shown in the program update window. Write it in Russian for the user of the program.
 
-One line only. Say what changed in the program, in plain words. No second paragraph, no bullet list, no file paths, no function names.
+Shape, exactly:
 
-Example: «Количество округляется до двух знаков после запятой».
+First line: a short title, what changed. No period.
+Blank line.
+Then 2–4 lines. Each line starts with "- " and names one change the user will notice.
+
+Do not write a single sentence. Do not skip the list. Do not mention files, functions, or folders.
+
+Example:
+План дня копируется в буфер
+
+- Кнопка «План» копирует только выделенный день.
+- В тексте дата, группы работ и позиции этого дня.

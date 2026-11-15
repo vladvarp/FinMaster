@@ -3029,25 +3029,61 @@
     setPointDay(dayKey(d), isWeekend(d) ? "work" : "off");
   }
 
-  function calendarPlanText() {
-    const win = calendarWindow();
-    const all = calendarOrdersAll();
-    const now = all.filter((order) => workStatus(order) === "now");
-    const lines = [`План работ ${win.title}`, ""];
-    lines.push(`Сейчас в работе (${now.length}):`);
-    if (now.length) now.forEach((order) => lines.push(`• ${orderNum(order)} ${orderTitle(order)} — ${order.customer || "без заказчика"}`));
-    else lines.push("• нет");
-    lines.push("");
-    win.days.forEach((day) => {
-      const key = dayKey(day);
-      const starts = all.filter((order) => dateDay(order.work_start) === key);
-      const ends = all.filter((order) => dateDay(order.work_end) === key);
-      const load = all.filter((order) => orderCoversDay(order, day) && workStatus(order) !== "cancelled").length;
-      if (!starts.length && !ends.length) return;
-      lines.push(`${calFmtDay(day, true)} · ${load} в работе`);
-      starts.forEach((order) => lines.push(`  старт  ${orderNum(order)} ${orderTitle(order)}`));
-      ends.forEach((order) => lines.push(`  финиш ${orderNum(order)} ${orderTitle(order)}`));
+  function dayPlanLines(order, day) {
+    const hidePause = hidePausedOnBoard();
+    return calendarWorkLines(order)
+      .map((line, index) => ({ line, index, kind: lineActiveOnDay(order, line, day) }))
+      .filter((row) => row.kind && !(hidePause && row.kind === "pause"));
+  }
+
+  function dayPlanOrderText(order, day) {
+    const customer = String(order.customer || "").trim();
+    const head = `${orderNum(order)} ${orderTitle(order)}${customer ? ` · ${customer}` : ""}`;
+    const rows = dayPlanLines(order, day).map(({ line, index }) => {
+      const proxy = lineWorkProxy(order, line);
+      const role = boardRole(proxy, day);
+      const mark = role === "пауза" || role === "старт" || role === "финиш" || role === "старт и финиш" ? ` — ${role}` : "";
+      const note = String(line.notes || "").trim();
+      const name = `  ${lineWorkName(line, index)}${mark}`;
+      return note ? `${name}\n  ${note}` : name;
     });
+    return [head, ...rows].join("\n");
+  }
+
+  function calendarDayPlanText() {
+    const day = parseDay(calendarState().pick);
+    if (!day) return "";
+    const key = dayKey(day);
+    const orders = calendarOrders().filter((order) => orderMarksDay(order, day) && !orderPauseHidden(order, day));
+    const groups = { both: [], start: [], run: [], pause: [], end: [] };
+    orders.forEach((order) => {
+      if (boardDayPaused(order, day)) groups.pause.push(order);
+      else {
+        const start = firstWorkDayKey(order);
+        const end = dateDay(order.work_end);
+        if (start === key && end === key) groups.both.push(order);
+        else if (start === key) groups.start.push(order);
+        else if (end === key) groups.end.push(order);
+        else groups.run.push(order);
+      }
+    });
+    const byNum = (a, b) => String(a.number).localeCompare(String(b.number), "ru", { numeric: true });
+    Object.values(groups).forEach((list) => list.sort(byNum));
+    const weekday = RU_WEEKDAYS[(day.getDay() + 6) % 7];
+    const lines = [`${calFmtDay(day, true)}, ${weekday}`];
+    const note = String(dayNote(key) || "").trim();
+    if (note) lines.push(note);
+    const block = (title, items) => {
+      if (!items.length) return;
+      lines.push("", title);
+      items.forEach((order) => lines.push(dayPlanOrderText(order, day)));
+    };
+    block("Старт", groups.start);
+    block("Старт и финиш", groups.both);
+    block(weekColumnHeads(day).mid, groups.run);
+    block("Пауза", groups.pause);
+    block("Финиш", groups.end);
+    if (!orders.length) lines.push("", "В этот день работ нет.");
     return lines.join("\n");
   }
 
@@ -3283,7 +3319,12 @@
       return;
     }
     if (e.target.closest("#cal-copy")) {
-      cashCopy(calendarPlanText(), "План работ скопирован");
+      const text = calendarDayPlanText();
+      if (!text) {
+        toast("Сначала выделите день");
+        return;
+      }
+      cashCopy(text, "План дня скопирован");
       return;
     }
     const noteBtn = e.target.closest("[data-cal-note]");

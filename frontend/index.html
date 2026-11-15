@@ -566,7 +566,7 @@
                 </button>
                 <div class="cal-filter-menu cal-weekend-menu" id="cal-weekend-menu" hidden role="menu"></div>
               </div>
-              <button class="btn cal-ico" type="button" id="cal-copy" title="Скопировать план работ на видимый период" aria-label="План работ">
+              <button class="btn cal-ico" type="button" id="cal-copy" title="Скопировать план на выбранный день" aria-label="План на выбранный день">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <rect x="6" y="4" width="12" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/>
                   <path d="M9 3.8h6v2.8H9zM9 11h6M9 14.2h6M9 17.4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -904,23 +904,27 @@
   </div>
 
   <div class="modal" id="update-modal">
-    <div class="modal-card update-modal" role="dialog" aria-modal="true" aria-labelledby="update-title">
-      <div class="modal-title-row">
-        <h3 id="update-title">Обновление</h3>
-        <button class="btn" type="button" id="update-about">О программе</button>
+    <div class="update-stage">
+      <div class="modal-card update-path-modal" role="dialog" aria-labelledby="update-log-title">
+        <div class="update-log-head">
+          <h3 id="update-log-title">Путь изменений</h3>
+          <button type="button" class="btn small" id="update-log-all">Вся история</button>
+        </div>
+        <div class="update-log" id="update-log"></div>
       </div>
-      <div class="update-versions" id="update-versions"></div>
-      <div id="update-check"></div>
-      <div class="confirm-diff" id="update-diff"></div>
-      <div class="update-log-head">
-        <h4 id="update-log-title">Дополнительная информация</h4>
-        <button type="button" class="btn small" id="update-log-all">Вся история</button>
-      </div>
-      <div class="update-log" id="update-log"></div>
-      <div class="modal-actions">
-        <button class="btn" type="button" id="update-integrity" hidden>Проверить целостность</button>
-        <button class="btn" type="button" id="update-cancel">Не сейчас</button>
-        <button class="btn primary" type="button" id="update-go">Обновить</button>
+      <div class="modal-card update-modal" role="dialog" aria-modal="true" aria-labelledby="update-title">
+        <div class="modal-title-row">
+          <h3 id="update-title">Обновление</h3>
+          <button class="btn" type="button" id="update-about">О программе</button>
+        </div>
+        <div class="update-versions" id="update-versions"></div>
+        <div id="update-check"></div>
+        <div class="confirm-diff" id="update-diff"></div>
+        <div class="modal-actions">
+          <button class="btn" type="button" id="update-integrity" hidden>Проверить целостность</button>
+          <button class="btn" type="button" id="update-cancel">Не сейчас</button>
+          <button class="btn primary" type="button" id="update-go">Обновить</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1322,9 +1326,9 @@
       <span class="net-console-hint"><kbd>Ctrl</kbd><kbd>Ё</kbd></span>
       <span class="net-console-spacer"></span>
       <span class="net-console-cal" data-console-only="net">
+        <span class="net-console-cal-day" id="net-console-cal-day"></span>
         <button type="button" class="net-console-tool" id="net-console-cal-next" title="Сдвинуть «сегодня» календаря на один день">+1 день</button>
         <button type="button" class="net-console-tool" id="net-console-cal-reset" title="Вернуть настоящий сегодняшний день">Сброс</button>
-        <span class="net-console-cal-day" id="net-console-cal-day"></span>
       </span>
       <button type="button" class="net-console-tool" id="net-console-clear">Очистить</button>
       <button type="button" class="net-console-tool" id="net-console-close" title="Закрыть" aria-label="Закрыть">✕</button>
