@@ -2266,3 +2266,15 @@ html[data-theme="dark"] .calc-order.is-used small { color: #5eead4; }
   .pres-view.is-inspector-collapsed .calc-layout { grid-template-columns: 160px minmax(0, 1fr) 36px; }
 }
 
+
+/* Переключатель схем расположен в шапке редактора планировщика. */
+.planner-layout-pick {
+  flex: 0 0 190px;
+  width: 190px;
+  max-width: 190px;
+  height: 32px;
+  font-size: 13px;
+}
+@media (max-width: 760px) {
+  .planner-layout-pick { flex: 1 1 150px; width: auto; max-width: 100%; }
+}
