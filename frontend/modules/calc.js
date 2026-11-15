@@ -5036,7 +5036,7 @@
     const right = Math.abs(x - (box.x + box.w)) <= t;
     const top = Math.abs(y - box.y) <= t;
     const bottom = Math.abs(y - (box.y + box.h)) <= t;
-    if (box.circle) return left || right || top || bottom ? "e" : "";
+    if (box.circle) return "";
     let edge = "";
     if (top) edge += "n";
     if (bottom) edge += "s";
@@ -5049,11 +5049,7 @@
     const wall = hole.surface === "wall";
     const dx = wall ? world.along - drag.pointer.along : world.x - drag.pointer.x;
     const dy = wall ? world.rise - drag.pointer.rise : world.y - drag.pointer.y;
-    if (hole.shape === "circle") {
-      const dist = wall ? Math.hypot(world.along - hole.along, world.rise - hole.rise) : Math.hypot(world.x - hole.x, world.y - hole.y);
-      hole.d = plannerRound(plannerClamp(dist * 2, 0.01, 5));
-      return;
-    }
+    if (hole.shape === "circle") return;
     if (wall) {
       let along = drag.along;
       let rise = drag.rise;
