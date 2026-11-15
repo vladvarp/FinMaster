@@ -9836,9 +9836,9 @@
           nodeEl.style.setProperty("--planner-color", node.color);
           const card = nodeEl.querySelector(`.calc-film-card[data-planner-layout="${cssEsc(node.layoutId)}"]`);
           const thumb = card?.querySelector(".calc-planner-thumb");
-          // Миниатюра планировщика использует --planner-color для заливки и обводки.
-          // Обновляем переменную на самом SVG, чтобы оба свойства менялись сразу при input.
-          if (thumb) thumb.style.setProperty("--planner-color", node.color);
+          if (thumb) thumb.style.setProperty("--film-tone", node.color);
+          const path = thumb?.querySelector("path");
+          if (path) path.style.stroke = node.color;
 
           // Обновляем цвета всех подключённых нод без перерисовки DOM:
           // так цветовой диалог остаётся открытым, а миниатюры меняются сразу.
