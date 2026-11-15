@@ -2525,7 +2525,7 @@
       button.classList.toggle("is-on", state.snapEnabled !== false);
       button.setAttribute("aria-pressed", state.snapEnabled !== false ? "true" : "false");
     }
-    if (input && document.activeElement !== input) input.value = plannerInput(state.snapStep || EDITOR_SNAP_DEFAULT);
+    if (input && document.activeElement !== input) input.value = String(state.snapStep || EDITOR_SNAP_DEFAULT);
   }
   function bindEditorSnap(modal, kind) {
     modal.addEventListener("click", (e) => {
@@ -2548,7 +2548,7 @@
         return;
       }
       state.snapStep = plannerRound(value);
-      input.value = plannerInput(state.snapStep);
+      input.value = String(state.snapStep);
       if (kind === "planner") plannerDraw(); else markDraw();
     });
   }
