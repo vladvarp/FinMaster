@@ -2289,6 +2289,35 @@
     return true;
   }
 
+  function plannerRemoveLayout(node, id) {
+    ensurePlanner(node);
+    if (node.layouts.length <= 1) {
+      api?.toast?.("Нельзя удалить последнюю планировку");
+      return false;
+    }
+    const index = node.layouts.findIndex((item) => item.id === id);
+    if (index < 0) return false;
+    plannerRemember(node);
+    const [removed] = node.layouts.splice(index, 1);
+    const outputIds = new Set([
+      plannerPort(removed, "plan"),
+      plannerPort(removed, "floor"),
+      plannerPort(removed, "height"),
+      ...(removed.outs || []).map((item) => item.id),
+    ]);
+    const bp = activeBlueprint();
+    if (bp) {
+      bp.links = (bp.links || []).filter(
+        (link) => !(link.from === node.id && outputIds.has(link.fromPort))
+      );
+    }
+    if (node.layoutId === id) {
+      const next = node.layouts[Math.min(index, node.layouts.length - 1)] || node.layouts[0];
+      plannerApply(node, next);
+    }
+    return true;
+  }
+
   function plannerAddLayout(node) {
     ensurePlanner(node);
     if (node.layouts.length >= PLANNER_MAX_LAYOUTS) return null;
@@ -7931,7 +7960,7 @@
     const ports = plannerOutputs(node, bp.links);
     const sub = `пол ${fmtShort(model.floor)} м² · ${model.walls.length} стен · h ${fmtShort(model.height)} м`;
 
-    const film = node.layouts.map((layout) => `<div class="calc-film-card ${layout.id === node.layoutId ? "is-on" : ""}" data-planner-layout="${esc(layout.id)}" title="${esc(layout.name)}"><span class="calc-film-name">${esc(layout.name)}</span>${plannerThumb(layout.points, true, layout.color)}</div>`).join("");
+    const film = node.layouts.map((layout) => `<div class="calc-film-card ${layout.id === node.layoutId ? "is-on" : ""}" data-planner-layout="${esc(layout.id)}" title="${esc(layout.name)}"><span class="calc-film-name">${esc(layout.name)}</span>${plannerThumb(layout.points, true, layout.color)}<button type="button" class="calc-film-delete" data-del-planner-layout="${esc(layout.id)}" title="Удалить планировку" aria-label="Удалить планировку ${esc(layout.name)}" ${node.layouts.length <= 1 ? "disabled" : ""}>×</button></div>`).join("");
     const groups = node.layouts.map((layout) => {
       const rows = ports.filter((port) => port.layoutId === layout.id);
       return `<div class="calc-plan-group" style="--planner-color:${esc(layout.color)}">${rows.map((port) => plannerPortRow(node, port, graph)).join("")}</div>`;
@@ -8793,6 +8822,18 @@
       session.busy = true;
       session.pan = { x: e.clientX, y: e.clientY, ox: bp.x || 0, oy: bp.y || 0 };
       $("calc-board").setPointerCapture(e.pointerId);
+      return;
+    }
+    const delLayout = e.target.closest("[data-del-planner-layout]");
+    if (delLayout) {
+      e.preventDefault();
+      e.stopPropagation();
+      const nodeEl = delLayout.closest(".calc-node");
+      const node = nodeEl && bp.nodes.find((item) => item.id === nodeEl.dataset.node && item.type === "planner");
+      if (node && plannerRemoveLayout(node, delLayout.dataset.delPlannerLayout)) {
+        dirty();
+        render();
+      }
       return;
     }
     const del = e.target.closest("[data-del-node]");
