@@ -20,7 +20,7 @@
 <body>
   <div class="modal-card planner-modal" role="dialog" aria-label="Планировщик">
     <div class="planner-head">
-      <input class="planner-title" value="Кухня" maxlength="48" readonly tabindex="-1" aria-label="Имя планировщика" />
+      <input class="planner-title" value="Кухня" maxlength="48" readonly tabindex="-1" aria-label="Имя планировки" />
       <label>Высота <input value="2,7" readonly tabindex="-1" aria-label="Высота стен, метры" /> м</label>
       <label>Ширина <input value="4" readonly tabindex="-1" aria-label="Ширина, метры" /> м</label>
       <label>Глубина <input value="3" readonly tabindex="-1" aria-label="Глубина, метры" /> м</label>
@@ -29,7 +29,13 @@
     <div class="planner-body">
       <div class="planner-stage">
         <div class="planner-cap">План пола</div>
-        <div class="planner-plan-wrap"><canvas id="planner-plan"></canvas></div>
+        <div class="planner-plan-wrap">
+          <canvas id="planner-plan"></canvas>
+          <div class="planner-clip">
+            <button type="button" class="planner-clip-btn" tabindex="-1" title="Вставить планировку" aria-label="Вставить планировку"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h8v2h2a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2V5z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 5.5h6V7H9z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button>
+            <button type="button" class="planner-clip-btn" tabindex="-1" title="Копировать планировку" aria-label="Копировать планировку"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 15V5.5A1.5 1.5 0 0 1 6.5 4H16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+          </div>
+        </div>
         <div class="planner-hint">
           <span>Тяните угол. Клик по стене — длина справа. Двойной клик по стене добавляет угол. Правый клик по углу или стене сдвигает их стрелками. Shift держит линию прямой.</span>
           <span class="planner-hint-btns">
