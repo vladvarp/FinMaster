@@ -9503,6 +9503,19 @@
     board.addEventListener("pointermove", onBoardPointerMove);
     board.addEventListener("pointerup", onBoardPointerUp);
     board.addEventListener("pointercancel", onBoardPointerUp);
+    board.addEventListener("dblclick", (e) => {
+      const thumb = e.target.closest(".calc-planner-thumb");
+      if (!thumb) return;
+      const nodeEl = thumb.closest(".calc-node");
+      const bp = activeBlueprint();
+      const node = nodeEl && bp
+        ? bp.nodes.find((item) => item.id === nodeEl.dataset.node && item.type === "planner")
+        : null;
+      if (!node) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openPlanner(node.id);
+    });
     board.addEventListener("auxclick", (e) => {
       if (e.button === 1) e.preventDefault();
     });
