@@ -5993,6 +5993,7 @@
     modal.innerHTML = `<div class="modal-card planner-modal mark-modal" role="dialog" aria-label="Чертёж">
       <div class="planner-head">
         <input id="mark-title" class="planner-title" maxlength="48" spellcheck="false" aria-label="Имя" />
+        <button type="button" class="btn" id="mark-reset">Сброс</button>
         <button type="button" class="btn primary" id="mark-close">Готово</button>
       </div>
       <div class="planner-body">
@@ -6152,6 +6153,31 @@
     preset.addEventListener("submit", (e) => onMarkCustom(e));
     modal.addEventListener("click", (e) => {
       if (e.target === modal) closeMark();
+    });
+    $("mark-reset")?.addEventListener("click", async () => {
+      const node = markNode();
+      if (!node) return;
+      const ok = api?.confirm
+        ? await api.confirm({
+            title: "Сбросить ноду?",
+            text: node.type === "openings"
+              ? "Все добавленные проёмы и пользовательские счётчики будут удалены."
+              : "Все добавленные розетки, рамки и светильники будут удалены.",
+            ok: "Сбросить",
+            danger: true,
+          })
+        : true;
+      if (!ok || !markNode()) return;
+      if (node.type === "openings") {
+        node.holes = [];
+        node.owns = [];
+      } else {
+        node.fixtures = [];
+      }
+      session.mark.sel = "";
+      session.mark.guides = null;
+      markHideMenu();
+      markCommit(true);
     });
     $("mark-close")?.addEventListener("click", () => closeMark());
     $("mark-title")?.addEventListener("input", (e) => {
