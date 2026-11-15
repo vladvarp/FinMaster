@@ -24,8 +24,8 @@
         <div class="planner-hint"><span>Правый клик: прямоугольник, круг или диаметр. У пола прямоугольник становится дверью.</span></div>
         <div class="mark-film">
           <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Пол</span><svg class="calc-film-thumb" style="--film-tone:#0ea5e9" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 10H56V36H8Z"/></svg></button>
-          <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Потолок</span><svg class="calc-film-thumb is-ceiling" style="--film-tone:#eab308" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 10H56V36H8Z"/></svg></button>
-          <button type="button" class="calc-film-card is-on" tabindex="-1"><span class="calc-film-name">Стена 1</span><svg class="calc-film-thumb is-wall" style="--film-tone:#94a3b8" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/><rect x="12" y="16" width="12" height="22"/><rect x="30" y="14" width="10" height="8"/><circle cx="50" cy="24" r="3"/></svg></button>
+          <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Потолок</span><svg class="calc-film-thumb is-ceiling" style="--film-tone:#e90ea5" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 10H56V36H8Z"/></svg></button>
+          <button type="button" class="calc-film-card is-on" tabindex="-1"><span class="calc-film-name">Стена 1</span><svg class="calc-film-thumb is-wall" style="--film-tone:#a5e90e" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/><rect x="12" y="16" width="12" height="22"/><rect x="30" y="14" width="10" height="8"/><circle cx="50" cy="24" r="3"/></svg></button>
           <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Стена 2</span><svg class="calc-film-thumb is-wall" style="--film-tone:#94a3b8" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/></svg></button>
           <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Стена 3</span><svg class="calc-film-thumb is-wall" style="--film-tone:#94a3b8" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/></svg></button>
           <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Стена 4</span><svg class="calc-film-thumb is-wall" style="--film-tone:#94a3b8" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/></svg></button>
@@ -98,8 +98,11 @@
         ctx.fillRect(0, 0, w, h);
         const a = X(0, 0);
         const b = X(len, height);
-        ctx.fillStyle = card;
-        ctx.strokeStyle = ink;
+        ctx.fillStyle = "#a5e90e";
+        ctx.globalAlpha = 0.24;
+        ctx.fillRect(0, 0, w, h);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "#a5e90e";
         ctx.lineWidth = 2;
         ctx.fillRect(a.x, b.y, b.x - a.x, a.y - b.y);
         ctx.strokeRect(a.x, b.y, b.x - a.x, a.y - b.y);
