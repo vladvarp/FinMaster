@@ -2504,9 +2504,60 @@
     wall.b.y = plannerRound(plannerClamp(wall.a.y + (dy / cur) * length, -500, 500));
   }
 
+  const EDITOR_SNAP_DEFAULT = 0.05;
+  function editorSnapValue(value, step) {
+    const size = plannerClamp(plannerNum(step, EDITOR_SNAP_DEFAULT), 0.01, 5);
+    return plannerRound(Math.round(Number(value) / size) * size);
+  }
+  function editorSnapControls(kind) {
+    return '<div class="editor-snap-controls" data-snap-controls="' + kind + '">' +
+      '<button type="button" class="editor-snap-toggle is-on" data-snap-toggle="' + kind + '" aria-pressed="true" title="Привязка к сетке" aria-label="Включить или выключить привязку">' +
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 13.5 4 11a3.5 3.5 0 0 1 5-5l2 2m1.5 2.5L15 13a3.5 3.5 0 0 1-5 5l-2-2m-1-5 8-8m-3 11 8-8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
+      '<label class="editor-snap-step"><input type="number" min="0.01" max="5" step="0.01" value="0.05" data-snap-step="' + kind + '" aria-label="Шаг привязки" /><span>м</span></label></div>';
+  }
+  function editorSnapRefresh(kind) {
+    const state = kind === "planner" ? session.planner : session.mark;
+    const root = $(kind === "planner" ? "planner-modal" : "mark-modal");
+    if (!state || !root) return;
+    const button = root.querySelector('[data-snap-toggle="' + kind + '"]');
+    const input = root.querySelector('[data-snap-step="' + kind + '"]');
+    if (button) {
+      button.classList.toggle("is-on", state.snapEnabled !== false);
+      button.setAttribute("aria-pressed", state.snapEnabled !== false ? "true" : "false");
+    }
+    if (input && document.activeElement !== input) input.value = plannerInput(state.snapStep || EDITOR_SNAP_DEFAULT);
+  }
+  function bindEditorSnap(modal, kind) {
+    modal.addEventListener("click", (e) => {
+      const button = e.target.closest('[data-snap-toggle="' + kind + '"]');
+      if (!button) return;
+      const state = kind === "planner" ? session.planner : session.mark;
+      if (!state) return;
+      state.snapEnabled = state.snapEnabled === false;
+      editorSnapRefresh(kind);
+      if (kind === "planner") plannerDraw(); else markDraw();
+    });
+    modal.addEventListener("change", (e) => {
+      const input = e.target.closest('[data-snap-step="' + kind + '"]');
+      if (!input) return;
+      const state = kind === "planner" ? session.planner : session.mark;
+      if (!state) return;
+      const value = plannerDraft(input.value);
+      if (value == null || value < 0.01 || value > 5) {
+        editorSnapRefresh(kind);
+        return;
+      }
+      state.snapStep = plannerRound(value);
+      input.value = plannerInput(state.snapStep);
+      if (kind === "planner") plannerDraw(); else markDraw();
+    });
+  }
+
   function plannerSnap(node, pointId, x, y, shift, origin) {
-    let nx = Math.round(x * 20) / 20;
-    let ny = Math.round(y * 20) / 20;
+    const snapOn = session.planner?.snapEnabled !== false;
+    const step = session.planner?.snapStep || EDITOR_SNAP_DEFAULT;
+    let nx = snapOn ? editorSnapValue(x, step) : plannerRound(x);
+    let ny = snapOn ? editorSnapValue(y, step) : plannerRound(y);
     if (shift && origin) {
       if (Math.abs(x - origin.x) >= Math.abs(y - origin.y)) ny = origin.y;
       else nx = origin.x;
@@ -2515,7 +2566,7 @@
     let bestY = null;
     let bestDx = 0.12;
     let bestDy = 0.12;
-    node.points.forEach((p) => {
+    if (snapOn) node.points.forEach((p) => {
       if (p.id === pointId) return;
       const dx = Math.abs(nx - p.x);
       const dy = Math.abs(ny - p.y);
@@ -2830,7 +2881,8 @@
       ctx.clearRect(0, 0, w, h);
       ctx.fillStyle = colors.bg;
       ctx.fillRect(0, 0, w, h);
-      const step = view.scale >= 70 ? 0.5 : 1;
+      const step = session.planner.snapStep || EDITOR_SNAP_DEFAULT;
+      if (session.planner.snapEnabled !== false) {
       ctx.save();
       ctx.beginPath();
       ctx.strokeStyle = colors.line;
@@ -2854,6 +2906,7 @@
       }
       ctx.stroke();
       ctx.restore();
+      }
       ctx.beginPath();
       node.points.forEach((p, i) => {
         const s = view.to(p);
@@ -3394,6 +3447,7 @@
         <div class="planner-stage">
           <div class="planner-cap">План пола</div>
           <div class="planner-plan-wrap">
+            ${editorSnapControls("planner")}
             <canvas id="planner-plan"></canvas>
             <div class="planner-clip">
               <button type="button" class="planner-clip-btn" id="planner-paste" title="Вставить планировку" aria-label="Вставить планировку" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h8v2h2a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2V5z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 5.5h6V7H9z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button>
@@ -3433,6 +3487,7 @@
       </div>
     </div>`;
     document.body.appendChild(modal);
+    bindEditorSnap(modal, "planner");
     modal.addEventListener("click", (e) => {
       if (e.target === modal) closePlanner();
     });
@@ -3922,12 +3977,13 @@
     if (!node) return;
     ensurePlannerModal();
     ensurePlanner(node);
-    session.planner = { id: nodeId, sel: null, drag: null, viewLock: null, hits: [], touched: false, nudge: null };
+    session.planner = { id: nodeId, sel: null, drag: null, viewLock: null, hits: [], touched: false, nudge: null, snapEnabled: true, snapStep: EDITOR_SNAP_DEFAULT };
     plannerHideNudge();
     session.selected = nodeId;
     hidePortMenu();
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     $("planner-modal")?.classList.add("open");
+    editorSnapRefresh("planner");
     editorBegin();
     requestAnimationFrame(() => plannerFill());
   }
@@ -4804,11 +4860,14 @@
       orient: "h",
       section: 1,
       drag: null,
+      snapEnabled: true,
+      snapStep: EDITOR_SNAP_DEFAULT,
     };
     session.selected = nodeId;
     hidePortMenu();
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     $("mark-modal")?.classList.add("open");
+    editorSnapRefresh("mark");
     markHideMenu();
     editorBegin();
     requestAnimationFrame(() => markFill());
@@ -5226,6 +5285,44 @@
     });
   }
 
+  function markDrawGrid(g, view, width, height, step) {
+    if (session.mark?.snapEnabled === false || !view) return;
+    const size = plannerClamp(plannerNum(step, EDITOR_SNAP_DEFAULT), 0.01, 5);
+    let a, b, to;
+    if (view.kind === "wall") {
+      a = view.from(0, 0);
+      b = view.from(width, height);
+      to = (x, y) => view.toAlong(x, y);
+    } else {
+      a = view.view.from(0, 0);
+      b = view.view.from(width, height);
+      to = (x, y) => view.view.to({ x, y });
+    }
+    const ax = a.along ?? a.x, bx = b.along ?? b.x;
+    const ay = a.rise ?? a.y, by = b.rise ?? b.y;
+    const minX = Math.floor(Math.min(ax, bx) / size) * size;
+    const maxX = Math.ceil(Math.max(ax, bx) / size) * size;
+    const minY = Math.floor(Math.min(ay, by) / size) * size;
+    const maxY = Math.ceil(Math.max(ay, by) / size) * size;
+    g.save();
+    g.beginPath();
+    g.strokeStyle = plannerColors().line;
+    g.globalAlpha = 0.65;
+    g.lineWidth = 1;
+    for (let x = minX; x <= maxX + size * 0.001; x += size) {
+      const p = to(x, 0);
+      g.moveTo(p.x, 0);
+      g.lineTo(p.x, height);
+    }
+    for (let y = minY; y <= maxY + size * 0.001; y += size) {
+      const p = to(0, y);
+      g.moveTo(0, p.y);
+      g.lineTo(width, p.y);
+    }
+    g.stroke();
+    g.restore();
+  }
+
   function markDraw() {
     const ctx = markContext();
     const canvas = $("mark-canvas");
@@ -5246,6 +5343,7 @@
       return;
     }
     const surface = session.mark.surface;
+    markDrawGrid(g, view, w, h, session.mark.snapStep || EDITOR_SNAP_DEFAULT);
     const tones = markTones(ctx.node, ctx.base.color);
     if (view.kind === "plan") {
       g.beginPath();
@@ -5582,9 +5680,19 @@
   function markWorld(x, y) {
     const view = session.mark?.view;
     if (!view) return null;
-    if (view.kind === "wall") return view.from(x, y);
+    const step = session.mark?.snapStep || EDITOR_SNAP_DEFAULT;
+    if (view.kind === "wall") {
+      const point = view.from(x, y);
+      if (session.mark?.snapEnabled !== false) {
+        point.along = editorSnapValue(point.along, step);
+        point.rise = editorSnapValue(point.rise, step);
+      }
+      return point;
+    }
     const point = view.view.from(x, y);
-    return { x: point.x, y: point.y };
+    return session.mark?.snapEnabled !== false
+      ? { x: editorSnapValue(point.x, step), y: editorSnapValue(point.y, step) }
+      : { x: plannerRound(point.x), y: plannerRound(point.y) };
   }
 
   function markPlace(node, world, extra) {
@@ -5817,6 +5925,7 @@
         <div class="planner-stage">
           <div class="planner-cap" id="mark-cap">Пол</div>
           <div class="planner-plan-wrap">
+            ${editorSnapControls("mark")}
             <canvas id="mark-canvas"></canvas>
             <div id="mark-menu" class="mark-menu" hidden>
               <div id="mark-arrows" class="planner-nudge">
@@ -5844,6 +5953,7 @@
       </div>
     </div>`;
     document.body.appendChild(modal);
+    bindEditorSnap(modal, "mark");
     const preset = document.createElement("div");
     preset.className = "modal";
     preset.id = "mark-preset-modal";
