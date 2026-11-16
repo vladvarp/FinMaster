@@ -227,6 +227,139 @@
     return "off";
   }
 
+  function chainBetween(bp, fromId, toId) {
+    if (!fromId || !toId) return null;
+    if (fromId === toId) return [fromId];
+    const next = new Map();
+    const add = (a, b) => {
+      if (!a || !b || a === b) return;
+      if (!next.has(a)) next.set(a, []);
+      next.get(a).push(b);
+    };
+    (bp.links || []).forEach((link) => {
+      add(link.from, link.to);
+      add(link.to, link.from);
+    });
+    const prev = new Map([[fromId, ""]]);
+    const queue = [fromId];
+    while (queue.length) {
+      const cur = queue.shift();
+      if (cur === toId) break;
+      (next.get(cur) || []).forEach((nid) => {
+        if (prev.has(nid)) return;
+        prev.set(nid, cur);
+        queue.push(nid);
+      });
+    }
+    if (!prev.has(toId)) return null;
+    const path = [];
+    let cur = toId;
+    while (cur) {
+      path.push(cur);
+      cur = prev.get(cur);
+    }
+    return path;
+  }
+
+  function selectChain(bp, id) {
+    const path = session.selected ? chainBetween(bp, session.selected, id) : null;
+    if (path) selectNodes(path, session.selected);
+    else selectOnly(id);
+  }
+
+  function togglePick(id) {
+    const ids = new Set(selectionIds());
+    if (ids.has(id)) ids.delete(id);
+    else ids.add(id);
+    const anchor = ids.has(session.selected) ? session.selected : [...ids][0] || "";
+    selectNodes([...ids], anchor);
+  }
+
+  function marqueeEl() {
+    let el = document.getElementById("calc-marquee");
+    if (el) return el;
+    el = document.createElement("div");
+    el.id = "calc-marquee";
+    el.className = "calc-marquee";
+    el.hidden = true;
+    $("calc-board")?.appendChild(el);
+    return el;
+  }
+
+  function showMarquee(x0, y0, x1, y1) {
+    const board = $("calc-board")?.getBoundingClientRect();
+    const el = marqueeEl();
+    if (!board || !el) return;
+    el.hidden = false;
+    el.style.left = `${Math.min(x0, x1) - board.left}px`;
+    el.style.top = `${Math.min(y0, y1) - board.top}px`;
+    el.style.width = `${Math.abs(x1 - x0)}px`;
+    el.style.height = `${Math.abs(y1 - y0)}px`;
+  }
+
+  function hideMarquee() {
+    const el = document.getElementById("calc-marquee");
+    if (el) el.hidden = true;
+  }
+
+  function nodesInMarquee(x0, y0, x1, y1) {
+    const left = Math.min(x0, x1);
+    const right = Math.max(x0, x1);
+    const top = Math.min(y0, y1);
+    const bottom = Math.max(y0, y1);
+    const ids = [];
+    document.querySelectorAll("#calc-nodes .calc-node, #calc-groups .calc-node, #calc-group-ui .calc-group-chrome").forEach((el) => {
+      const id = el.dataset.node;
+      if (!id || ids.includes(id)) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return;
+      if (rect.right < left || rect.left > right || rect.bottom < top || rect.top > bottom) return;
+      ids.push(id);
+    });
+    return ids;
+  }
+
+  function applyMarquee(box) {
+    const hits = nodesInMarquee(box.x, box.y, box.cx, box.cy);
+    const ids = box.ctrl ? [...new Set([...box.base, ...hits])] : hits;
+    const anchor = ids.includes(session.selected) ? session.selected : ids[0] || "";
+    selectNodes(ids, anchor);
+  }
+
+  function beginNodeDrag(bp, id, origin, frameOnly) {
+    if (!selectionIds().has(id)) selectOnly(id);
+    const origins = [];
+    const byId = Object.fromEntries((bp.nodes || []).map((item) => [item.id, item]));
+    const moveIds = new Set([id]);
+    const dragged = byId[id];
+    const mode = chainMode();
+    const along = mode === "in" ? upstreamNodeIds(bp, id) : mode === "out" ? downstreamNodeIds(bp, id) : null;
+    if (dragged?.type === "group") {
+      if (!frameOnly) nodesInsideGroup(bp, dragged).forEach((item) => moveIds.add(item.id));
+      if (along) along.forEach((nid) => moveIds.add(nid));
+    } else if (along) along.forEach((nid) => moveIds.add(nid));
+    if (selectionIds().size > 1) {
+      selectionIds().forEach((nid) => {
+        moveIds.add(nid);
+        const item = byId[nid];
+        if (item?.type === "group" && !frameOnly) nodesInsideGroup(bp, item).forEach((child) => moveIds.add(child.id));
+      });
+    }
+    moveIds.forEach((nid) => {
+      const item = byId[nid];
+      if (item) origins.push({ id: nid, x: item.x || 0, y: item.y || 0 });
+    });
+    session.drag = {
+      id,
+      dx: origin.clientX,
+      dy: origin.clientY,
+      origins,
+      isGroup: dragged?.type === "group",
+    };
+    session.selectedLink = "";
+    session.busy = true;
+  }
+
   function upstreamNodeIds(bp, nodeId) {
     const ids = new Set();
     if (!bp || !nodeId) return ids;
@@ -402,6 +535,7 @@
         e.stopPropagation();
         session.selectedLink = item.id;
         session.selected = "";
+        session.picked = new Set();
         document.querySelectorAll(".calc-node.is-on, .calc-group-chrome.is-on").forEach((el) => el.classList.remove("is-on"));
         drawWires(bp, computeGraph(bp));
       });
@@ -928,62 +1062,48 @@
       drawWires(bp, computeGraph(bp));
     }
     if (e.target.closest("button") && !e.target.closest(".calc-film-card")) return;
-    if (drag && node) {
-      e.preventDefault();
-      session.selected = node.dataset.node;
-      session.selectedLink = "";
-      session.busy = true;
+    if (node && e.button === 0) {
       const id = node.dataset.node;
-      const origins = [];
-      const byId = Object.fromEntries((bp.nodes || []).map((item) => [item.id, item]));
-      const moveIds = new Set([id]);
-      const dragged = byId[id];
-      const mode = chainMode();
-      const along = mode === "in" ? upstreamNodeIds(bp, id) : mode === "out" ? downstreamNodeIds(bp, id) : null;
-      if (dragged?.type === "group") {
-        if (!e.shiftKey) nodesInsideGroup(bp, dragged).forEach((item) => moveIds.add(item.id));
-        if (along) along.forEach((nid) => moveIds.add(nid));
-      } else if (along) {
-        along.forEach((nid) => moveIds.add(nid));
-      }
-      moveIds.forEach((nid) => {
-        const item = byId[nid];
-        if (item) origins.push({ id: nid, x: item.x || 0, y: item.y || 0 });
-      });
-      session.drag = {
+      const kind = bp.nodes.find((item) => item.id === id)?.type;
+      session.press = {
         id,
-        dx: e.clientX,
-        dy: e.clientY,
-        origins,
-        isGroup: dragged?.type === "group",
+        x: e.clientX,
+        y: e.clientY,
+        ctrl: e.ctrlKey,
+        shift: e.shiftKey,
+        grip: !!drag,
+        group: kind === "group",
       };
-      $("calc-board").setPointerCapture(e.pointerId);
-      document.querySelectorAll("#calc-nodes .calc-node, #calc-groups .calc-node, #calc-group-ui .calc-group-chrome").forEach((el) => {
-        el.classList.toggle("is-on", el.dataset.node === id);
-      });
-      return;
-    }
-    if (node) {
-      session.selected = node.dataset.node;
       session.selectedLink = "";
-      document.querySelectorAll("#calc-nodes .calc-node, #calc-groups .calc-node, #calc-group-ui .calc-group-chrome").forEach((el) => {
-        el.classList.toggle("is-on", el.dataset.node === node.dataset.node);
-      });
-      drawWires(bp, computeGraph(bp));
+      if (drag) {
+        e.preventDefault();
+        $("calc-board").setPointerCapture(e.pointerId);
+      }
       return;
     }
-    session.selected = "";
-    session.selectedLink = "";
-    document.querySelectorAll("#calc-nodes .calc-node, #calc-groups .calc-node, #calc-group-ui .calc-group-chrome").forEach((el) => el.classList.remove("is-on"));
-    drawWires(bp, computeGraph(bp));
+    if (node || (e.button !== 0 && e.button !== 2)) return;
     session.busy = true;
-    session.pan = { x: e.clientX, y: e.clientY, ox: bp.x || 0, oy: bp.y || 0 };
     $("calc-board").setPointerCapture(e.pointerId);
+    if (e.button === 0) {
+      session.marquee = { x: e.clientX, y: e.clientY, cx: e.clientX, cy: e.clientY, ctrl: e.ctrlKey, moved: false, base: [...selectionIds()] };
+      return;
+    }
+    session.pan = { x: e.clientX, y: e.clientY, ox: bp.x || 0, oy: bp.y || 0 };
   }
 
   function onBoardPointerMove(e) {
     const bp = activeBlueprint();
     if (!bp) return;
+    if (session.marquee) {
+      const box = session.marquee;
+      if (Math.hypot(e.clientX - box.x, e.clientY - box.y) >= 4) box.moved = true;
+      if (!box.moved) return;
+      box.cx = e.clientX;
+      box.cy = e.clientY;
+      showMarquee(box.x, box.y, box.cx, box.cy);
+      applyMarquee(box);
+      return;
+    }
     if (session.pan) {
       bp.x = session.pan.ox + (e.clientX - session.pan.x);
       bp.y = session.pan.oy + (e.clientY - session.pan.y);
@@ -1003,6 +1123,21 @@
       session.linking.y = at.y;
       drawWires(bp, computeGraph(bp));
       return;
+    }
+    if (session.press && !session.drag) {
+      const press = session.press;
+      if (!e.buttons) {
+        session.press = null;
+        session.busy = false;
+        return;
+      }
+      const dist = Math.hypot(e.clientX - press.x, e.clientY - press.y);
+      if (dist < 4) return;
+      if (press.grip && !press.ctrl && (!press.shift || press.group)) {
+        beginNodeDrag(bp, press.id, { clientX: press.x, clientY: press.y }, press.shift && press.group);
+        session.press = null;
+        $("calc-board").setPointerCapture(e.pointerId);
+      } else return;
     }
     if (session.resize) {
       const zoom = bp.zoom || 1;
@@ -1043,9 +1178,37 @@
     const movedPan = session.pan;
     const resized = session.resize;
     const linking = session.linking;
+    const press = session.press;
+    const marquee = session.marquee;
     session.drag = null;
     session.pan = null;
     session.resize = null;
+    session.press = null;
+    session.marquee = null;
+    if (marquee) {
+      hideMarquee();
+      session.busy = false;
+      if (!marquee.moved && e.button === 0 && bp) {
+        session.selected = "";
+        session.picked = new Set();
+        session.selectedLink = "";
+        document.querySelectorAll("#calc-nodes .calc-node, #calc-groups .calc-node, #calc-group-ui .calc-group-chrome").forEach((el) => el.classList.remove("is-on"));
+        drawWires(bp, computeGraph(bp));
+      } else if (marquee.moved && bp) {
+        drawWires(bp, computeGraph(bp));
+      }
+      return;
+    }
+    if (press && !movedNode) {
+      session.busy = false;
+      if (e.button === 0 && bp) {
+        if (press.ctrl) togglePick(press.id);
+        else if (press.shift) selectChain(bp, press.id);
+        else selectOnly(press.id);
+        drawWires(bp, computeGraph(bp));
+      }
+      return;
+    }
 
     // Средняя кнопка — только панорама; тянущуюся связь не сбрасываем.
     if (e.button === 1) {
@@ -1619,7 +1782,7 @@
         render();
         return;
       }
-      session.selected = node.id;
+      if (!e.ctrlKey && !e.shiftKey) selectOnly(node.id);
       const op = e.target.closest("[data-op]");
       if (op && node.type === "math") {
         node.op = op.dataset.op;
@@ -2144,7 +2307,7 @@
       }
       if ((e.key === "Delete" || e.key === "Backspace") && session.selected) {
         e.preventDefault();
-        removeNode(session.selected);
+        removeNodes([...selectionIds()]);
       }
     });
     window.addEventListener("resize", () => {

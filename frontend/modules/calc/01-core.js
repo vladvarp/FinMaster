@@ -56,6 +56,7 @@
     bound: false,
     busy: false,
     selected: "",
+    picked: null,
     selectedLink: "",
     linking: null,
     search: "",
@@ -865,6 +866,29 @@
     }
   }
 
+  function selectionIds() {
+    if (!session.selected) return new Set();
+    if (session.picked?.size && session.picked.has(session.selected)) return session.picked;
+    return new Set([session.selected]);
+  }
+
+  function nodeSelected(id) {
+    return !!id && selectionIds().has(id);
+  }
+
+  function selectNodes(ids, anchor) {
+    const list = [...new Set((ids || []).filter(Boolean))];
+    session.picked = new Set(list);
+    session.selected = list.includes(anchor) ? anchor : list[0] || "";
+    document.querySelectorAll("#calc-nodes .calc-node, #calc-groups .calc-node, #calc-group-ui .calc-group-chrome").forEach((el) => {
+      el.classList.toggle("is-on", nodeSelected(el.dataset.node));
+    });
+  }
+
+  function selectOnly(id) {
+    selectNodes(id ? [id] : [], id || "");
+  }
+
   function multiSummary(selected, emptyLabel = "Все") {
     if (!selected.length) return emptyLabel;
     if (selected.length === 1) return selected[0];
@@ -1191,7 +1215,8 @@
       if (!drop.size) return;
       bp.nodes = (bp.nodes || []).filter((node) => !drop.has(node.id));
       bp.links = (bp.links || []).filter((link) => !drop.has(link.from) && !drop.has(link.to));
-      if (session.selected && drop.has(session.selected)) session.selected = "";
+      if (session.picked) drop.forEach((nid) => session.picked.delete(nid));
+      if (session.selected && drop.has(session.selected)) session.selected = [...(session.picked || [])][0] || "";
       changed = true;
     });
     [...presentValues.keys()].forEach((key) => {
@@ -1934,7 +1959,7 @@
       const rw = Math.max(4, size.w * scale);
       const rh = Math.max(3, size.h * scale);
       ctx.fillStyle = miniNodeColor(node);
-      ctx.globalAlpha = session.selected === node.id ? 1 : 0.85;
+      ctx.globalAlpha = nodeSelected(node.id) ? 1 : 0.85;
       ctx.beginPath();
       const r = 2;
       ctx.moveTo(x + r, y);
@@ -1944,7 +1969,7 @@
       ctx.arcTo(x, y, x + rw, y, r);
       ctx.closePath();
       ctx.fill();
-      if (session.selected === node.id) {
+      if (nodeSelected(node.id)) {
         ctx.strokeStyle = dark ? "#f8fafc" : "#0f172a";
         ctx.lineWidth = 1.2;
         ctx.stroke();

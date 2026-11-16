@@ -119,6 +119,14 @@
   cursor: grab;
 }
 .calc-board:active { cursor: grabbing; }
+.calc-marquee {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  border: 1px solid var(--accent-2);
+  background: color-mix(in srgb, var(--accent-2) 18%, transparent);
+}
+.calc-marquee[hidden] { display: none !important; }
 .calc-board-tools {
   position: absolute;
   top: 10px;

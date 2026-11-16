@@ -1042,44 +1042,96 @@
   }
 
   function removeNode(id) {
+    removeNodes(id ? [id] : []);
+  }
+
+  function removeNodes(ids) {
     const bp = activeBlueprint();
-    if (!bp) return;
-    bp.nodes = bp.nodes.filter((node) => node.id !== id);
-    bp.links = bp.links.filter((link) => link.from !== id && link.to !== id);
-    if (session.selected === id) session.selected = "";
+    const drop = new Set((ids || []).filter(Boolean));
+    if (!bp || !drop.size) return;
+    bp.nodes = (bp.nodes || []).filter((node) => !drop.has(node.id));
+    bp.links = (bp.links || []).filter((link) => !drop.has(link.from) && !drop.has(link.to));
+    drop.forEach((nid) => session.picked?.delete(nid));
+    if (!session.selected || drop.has(session.selected)) session.selected = [...(session.picked || [])].find((nid) => !drop.has(nid)) || "";
+    if (!session.selected) session.picked = new Set();
     dirty();
     render();
   }
 
   function duplicateNode(id) {
+    const picked = [...selectionIds()];
+    const ids = picked.length && (!id || picked.includes(id)) ? picked : id ? [id] : [];
     const bp = activeBlueprint();
-    if (!bp || !id) return;
-    const src = (bp.nodes || []).find((node) => node.id === id);
-    if (!src) return;
-    let clone;
-    try {
-      clone = JSON.parse(JSON.stringify(src));
-    } catch {
-      return;
-    }
-    clone.id = uid();
-    clone.x = (Number(src.x) || 0) + 48;
-    clone.y = (Number(src.y) || 0) + 48;
-    if (clone.type === "formula") {
-      (clone.inputs || []).forEach((port) => {
-        port.id = uid();
-      });
-      (clone.outputs || []).forEach((port) => {
-        port.id = uid();
-      });
-    }
-    if (clone.type === "result") {
-      clone.priority = nextResultPriority(bp);
-    }
-    bp.nodes.push(clone);
-    session.selected = clone.id;
+    if (!bp || !ids.length) return;
+    const map = new Map();
+    const portMap = new Map();
+    const clones = [];
+    ids.forEach((srcId) => {
+      const src = (bp.nodes || []).find((node) => node.id === srcId);
+      if (!src || map.has(srcId)) return;
+      let clone;
+      try {
+        clone = JSON.parse(JSON.stringify(src));
+      } catch {
+        return;
+      }
+      clone.id = uid();
+      clone.x = (Number(src.x) || 0) + 48;
+      clone.y = (Number(src.y) || 0) + 48;
+      const ports = {};
+      if (clone.type === "formula") {
+        (clone.inputs || []).forEach((port) => {
+          const next = uid();
+          ports[port.id] = next;
+          port.id = next;
+        });
+        (clone.outputs || []).forEach((port) => {
+          const next = uid();
+          ports[port.id] = next;
+          port.id = next;
+        });
+      }
+      map.set(srcId, clone.id);
+      portMap.set(srcId, ports);
+      clones.push(clone);
+    });
+    if (!clones.length) return;
+    bp.nodes.push(...clones);
+    clones.forEach((clone) => {
+      if (clone.type === "result") clone.priority = nextResultPriority(bp);
+    });
+    const takenOrder = new Set();
+    const takenPort = new Set();
+    (bp.links || []).forEach((link) => takenPort.add(`${link.to}|${link.toPort}`));
+    const remapPort = (nodeId, portId) => portMap.get(nodeId)?.[portId] || portId;
+    const extra = [];
+    (bp.links || []).forEach((link) => {
+      if (!map.has(link.from) && !map.has(link.to)) return;
+      const from = map.get(link.from) || link.from;
+      const to = map.get(link.to) || link.to;
+      if (!from || !to || from === to) return;
+      const fromPort = remapPort(link.from, link.fromPort);
+      const toPort = remapPort(link.to, link.toPort);
+      const dst = (bp.nodes || []).find((node) => node.id === to);
+      if (dst?.type === "order") {
+        const parsed = parseLinePort(toPort);
+        if (parsed?.input && parsed.field) {
+          const key = `${dst.orderId}|${parsed.lineId}|${parsed.field}`;
+          if (takenOrder.has(key) || orderFieldOwner(dst.orderId, parsed.lineId, parsed.field)) return;
+          takenOrder.add(key);
+        }
+      }
+      if (dst?.type === "present" && dst.blockId && presentOwner(dst.blockId, toPort)) return;
+      const portKey = `${to}|${toPort}`;
+      if (takenPort.has(portKey)) return;
+      takenPort.add(portKey);
+      extra.push({ id: uid(), from, fromPort, to, toPort });
+    });
+    bp.links.push(...extra);
+    selectNodes(clones.map((node) => node.id), clones[0].id);
     dirty();
     render();
+    if (extra.some((link) => (bp.nodes || []).some((node) => node.id === link.to && node.type === "order"))) api?.refreshOrders?.();
   }
 
   function pruneOrphanNodes() {
@@ -1096,7 +1148,8 @@
     if (!removed) return 0;
     const keep = new Set(bp.nodes.map((node) => node.id));
     bp.links = (bp.links || []).filter((link) => keep.has(link.from) && keep.has(link.to));
-    if (session.selected && !keep.has(session.selected)) session.selected = "";
+    if (session.picked) [...session.picked].forEach((nid) => { if (!keep.has(nid)) session.picked.delete(nid); });
+    if (session.selected && !keep.has(session.selected)) session.selected = [...(session.picked || [])][0] || "";
     dirty();
     render();
     return removed;
@@ -1788,7 +1841,7 @@
     const missing = !order;
     const ports = nodeOutputs(node, order, bp?.links);
     const linkedIn = usedInputPorts(node.id, bp?.links || []);
-    return `<article class="calc-node is-order ${missing ? "is-error" : ""} ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+    return `<article class="calc-node is-order ${missing ? "is-error" : ""} ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <span title="${esc(missing ? "Заказ удалён" : (order.number || "—"))}">${missing ? "Заказ удалён" : esc(order.number || "—")}</span>
@@ -1845,7 +1898,7 @@
     const ports = nodeInputs(node, bp.links);
     const linked = usedInputPorts(node.id, bp.links);
     const value = graph.values[`${node.id}:out`];
-    return `<article class="calc-node is-math ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+    return `<article class="calc-node is-math ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <span>Оператор</span>
@@ -2133,7 +2186,7 @@
     const linked = usedInputPorts(node.id, bp.links);
     const w = formulaWidth(node);
     const mark = (key) => (badFields.has(key) ? " is-bad" : "");
-    return `<article class="calc-node is-formula ${bad ? "is-error" : ""} ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;width:${w}px">
+    return `<article class="calc-node is-formula ${bad ? "is-error" : ""} ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;width:${w}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <span>Формула</span>
@@ -2180,7 +2233,7 @@
   function constNodeHtml(node, graph) {
     const value = graph.values[`${node.id}:out`];
     const raw = Number.isFinite(Number(node.value)) ? String(node.value) : "0";
-    return `<article class="calc-node is-const ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+    return `<article class="calc-node is-const ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <span>Константа</span>
@@ -2202,7 +2255,7 @@
     const linked = usedInputPorts(node.id, bp.links);
     const prio = Number.isFinite(Number(node.priority)) ? Number(node.priority) : nextResultPriority(bp);
     const shown = resultVisible(node);
-    return `<article class="calc-node is-result ${shown ? "" : "is-scheme-off"} ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+    return `<article class="calc-node is-result ${shown ? "" : "is-scheme-off"} ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <input class="calc-result-prio" data-result-prio="${esc(node.id)}" type="number" min="0" max="9999" step="1" value="${prio}" title="Приоритет на схеме (меньше — выше)" aria-label="Приоритет" />
@@ -2228,7 +2281,7 @@
   function percentNodeHtml(node, bp, graph) {
     const value = graph.values[`${node.id}:out`];
     const linked = usedInputPorts(node.id, bp.links);
-    return `<article class="calc-node is-percent ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+    return `<article class="calc-node is-percent ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <span>Процент</span>
@@ -2257,7 +2310,7 @@
     const other = findBlueprint(node.blueprintId);
     const missing = !other;
     const ports = nodeOutputs(node);
-    return `<article class="calc-node is-scheme ${missing ? "is-error" : ""} ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+    return `<article class="calc-node is-scheme ${missing ? "is-error" : ""} ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <span title="${esc(missing ? "Схема удалена" : (other.name || "Схема"))}">${missing ? "Схема удалена" : esc(other.name || "Схема")}</span>
@@ -2287,7 +2340,7 @@
     const h = Math.max(120, node.h || 220);
     const color = String(node.color || "#14b8a6");
     const z = Number.isFinite(zIndex) ? zIndex : 0;
-    return `<article class="calc-node is-group ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;width:${w}px;height:${h}px;z-index:${z};--group-color:${esc(color)}"></article>`;
+    return `<article class="calc-node is-group ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;width:${w}px;height:${h}px;z-index:${z};--group-color:${esc(color)}"></article>`;
   }
 
   function groupChromeHtml(node, zIndex) {
@@ -2296,7 +2349,7 @@
     const color = String(node.color || "#14b8a6");
     const name = String(node.name || "").trim() || "Группа";
     const z = Number.isFinite(zIndex) ? zIndex : 0;
-    return `<div class="calc-group-chrome ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;width:${w}px;height:${h}px;z-index:${z};--group-color:${esc(color)}">
+    return `<div class="calc-group-chrome ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;width:${w}px;height:${h}px;z-index:${z};--group-color:${esc(color)}">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить группу · Shift — только рамка"></i>
       <header class="calc-node-h calc-group-h">
         <input class="calc-pname calc-group-name" data-group-name="${esc(node.id)}" value="${esc(name)}" maxlength="48" spellcheck="false" title="${esc(name)}" aria-label="Имя группы" />
@@ -2308,7 +2361,7 @@
   }
 
   function commentNodeHtml(node) {
-    return `<article class="calc-node is-comment ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+    return `<article class="calc-node is-comment ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <span>Комментарий</span>
@@ -2319,7 +2372,7 @@
   }
 
   function filterNodeHtml(node, graph) {
-    return `<article class="calc-node is-filter ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+    return `<article class="calc-node is-filter ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <span>Фильтр</span>
@@ -2391,7 +2444,7 @@
       return `<div class="calc-plan-group" style="--planner-color:${esc(layout.color)}">${rows.map((port) => plannerPortRow(node, port, graph)).join("")}</div>`;
     }).join("");
     const commons = ports.filter((port) => port.common);
-    return `<article class="calc-node is-planner ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(node.color || "#65a30d")}">
+    return `<article class="calc-node is-planner ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(node.color || "#65a30d")}">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <input class="calc-pname calc-planner-name" data-planner-title="${esc(node.id)}" value="${esc(plannerName(node))}" maxlength="48" spellcheck="false" title="${esc(plannerName(node))}" aria-label="Имя планировщика" />
@@ -2407,7 +2460,7 @@
 
   function dashboardNodeHtml(node, bp, graph) {
     const ports = nodeOutputs(node, null, bp.links).map((port) => port.id);
-    return `<article class="calc-node is-dashboard ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+    return `<article class="calc-node is-dashboard ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <span>Дашборд</span>
@@ -2428,7 +2481,7 @@
     const meta = window.FinPresent?.blockMeta?.(node.blockType || found?.block?.type || "metric");
     const linked = usedInputPorts(node.id, bp.links);
     const ports = presentPorts(node);
-    return `<article class="calc-node is-present ${session.selected === node.id ? "is-on" : ""} ${session.presentHover && session.presentHover === node.blockId ? "is-present-hl" : ""}" data-node="${esc(node.id)}" data-present-block-id="${esc(node.blockId || "")}" style="left:${node.x}px;top:${node.y}px">
+    return `<article class="calc-node is-present ${nodeSelected(node.id) ? "is-on" : ""} ${session.presentHover && session.presentHover === node.blockId ? "is-present-hl" : ""}" data-node="${esc(node.id)}" data-present-block-id="${esc(node.blockId || "")}" style="left:${node.x}px;top:${node.y}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <span title="${esc(pageName)} · ${esc(title)}"><span class="pres-tool-ico" aria-hidden="true">${esc(meta?.ico || "▣")}</span><span class="pres-tool-name">${esc(title)}</span></span>

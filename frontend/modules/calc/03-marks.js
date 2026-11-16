@@ -1502,7 +1502,7 @@
     const title = electrics ? "Имя электрики" : "Имя проёмов";
     const edit = electrics ? "Розетки и свет" : "Проёмы на чертеже";
     const filmsTitle = node.filmsOff ? "Показать ленты" : "Скрыть ленты";
-    return `<article class="calc-node ${electrics ? "is-electrics" : "is-openings"} ${node.filmsOff ? "is-films-off" : ""} ${session.selected === node.id ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(tones.floor)};--mark-floor:${esc(tones.floor)};--mark-ceiling:${esc(tones.ceiling)};--mark-wall:${esc(tones.wall)}">
+    return `<article class="calc-node ${electrics ? "is-electrics" : "is-openings"} ${node.filmsOff ? "is-films-off" : ""} ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(tones.floor)};--mark-floor:${esc(tones.floor)};--mark-ceiling:${esc(tones.ceiling)};--mark-wall:${esc(tones.wall)}">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <input class="calc-pname calc-planner-name" data-mark-title="${esc(node.id)}" value="${esc(node.name)}" maxlength="48" spellcheck="false" title="${esc(node.name)}" aria-label="${title}" />
