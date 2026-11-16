@@ -641,7 +641,13 @@
             <aside class="card calc-side" id="pres-side"></aside>
             <div class="card calc-board pres-board" id="pres-board">
               <div class="pres-board-tools">
-                <button type="button" class="pres-lock-btn" id="pres-lock-btn" data-pres-canvas-lock aria-pressed="false" title="Заблокировать выделение и перемещение">⊡</button>
+                <button type="button" class="pres-board-btn pres-lock-btn" id="pres-lock-btn" data-pres-canvas-lock aria-pressed="false" title="Заблокировать выделение и перемещение" aria-label="Заблокировать выделение и перемещение">
+                  <svg class="pres-lock-open" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 11V8a4 4 0 0 1 7.5-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                  <svg class="pres-lock-shut" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                </button>
+                <button type="button" class="pres-board-btn" id="pres-pdf-btn" title="Сохранить презентацию в PDF" aria-label="Сохранить презентацию в PDF">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3.5h7l5 5V20a1.5 1.5 0 0 1-1.5 1.5h-10.5A1.5 1.5 0 0 1 5.5 20V5A1.5 1.5 0 0 1 7 3.5z" stroke="currentColor" stroke-width="1.8"/><path d="M14 3.8V9h5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 16.5h8M8 13h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                </button>
               </div>
               <input id="pres-page-name" class="calc-bp-name" maxlength="48" spellcheck="false" title="Название страницы" />
               <div class="pres-world" id="pres-world"></div>
@@ -1790,6 +1796,7 @@
   <script src="/cloud.js"></script>
   <script src="/calc.js"></script>
   <script src="/presentation.js"></script>
+  <script src="/prespdf.js"></script>
   <script src="/pdf.js"></script>
   <script src="/vault.js"></script>
   <script src="/datepicker.js"></script>

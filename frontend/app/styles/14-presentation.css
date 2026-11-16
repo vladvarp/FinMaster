@@ -30,7 +30,7 @@
   gap: 6px;
   pointer-events: auto;
 }
-.pres-lock-btn {
+.pres-board-btn {
   width: 34px;
   height: 34px;
   border: 1px solid var(--line);
@@ -45,10 +45,13 @@
   place-items: center;
   padding: 0;
 }
-.pres-lock-btn:hover {
+.pres-board-btn:hover {
   border-color: var(--accent-2);
   background: var(--card);
 }
+.pres-lock-btn .pres-lock-shut { display: none; }
+.pres-lock-btn.is-on .pres-lock-open { display: none; }
+.pres-lock-btn.is-on .pres-lock-shut { display: block; }
 .pres-lock-btn.is-on {
   border-color: var(--accent-2);
   color: #fff;
@@ -824,5 +827,74 @@
   color: var(--muted);
   font-size: 12px;
 }
+.pres-pdf-modal .modal-card {
+  width: min(920px, calc(100vw - 32px));
+  max-height: min(88vh, 860px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--card);
+  color: var(--ink);
+}
+.pres-pdf-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pres-pdf-head h3 { margin: 0; }
+.pres-pdf-styles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pres-pdf-styles > span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.pres-pdf-themes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pres-pdf-themes button {
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.pres-pdf-themes button.is-on {
+  background: var(--accent);
+  border-color: var(--accent-2);
+  color: #fff;
+}
+.pres-pdf-view {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-2) 80%, #000);
+}
+.pres-pdf-page {
+  margin: 0 auto;
+  box-shadow: var(--shadow);
+}
+.pres-pdf-page svg { display: block; width: 100%; height: auto; }
+.pres-pdf-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pres-pdf-foot p { margin: 0; color: var(--muted); font-size: 13px; }
+.pres-pdf-actions { display: flex; gap: 8px; }
 
 

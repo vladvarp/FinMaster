@@ -215,7 +215,7 @@
       btn.classList.toggle("is-on", locked);
       btn.setAttribute("aria-pressed", locked ? "true" : "false");
       btn.title = locked ? "Разблокировать холст" : "Заблокировать выделение и перемещение";
-      btn.textContent = locked ? "⊠" : "⊡";
+      btn.setAttribute("aria-label", btn.title);
     }
   }
 
@@ -1254,10 +1254,142 @@
     });
   }
 
+  function cssHex(name, fallback) {
+    const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    if (/^#[0-9a-f]{6}$/i.test(raw)) return raw.toLowerCase();
+    const rgb = raw.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+    if (!rgb) return fallback;
+    return `#${rgb.slice(1, 4).map((part) => Number(part).toString(16).padStart(2, "0")).join("")}`;
+  }
+
+  function mixHex(a, b, t) {
+    const pick = (hex) => [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
+    const pa = pick(a);
+    const pb = pick(b);
+    return `#${pa.map((v, i) => Math.round(v * t + pb[i] * (1 - t)).toString(16).padStart(2, "0")).join("")}`;
+  }
+
+  function blockLook(style) {
+    const fill = style.fill === "auto" ? "solid" : style.fill;
+    const card = cssHex("--card", "#ffffff");
+    return {
+      card: fill === "none" ? card : hexOk(style.bg) || card,
+      ink: hexOk(style.fg) || cssHex("--ink", "#0f172a"),
+      muted: hexOk(style.muted) || cssHex("--muted", "#64748b"),
+      accent: hexOk(style.accent) || cssHex("--accent-2", "#14b8a6"),
+      line: hexOk(style.border) || cssHex("--line", "#dbe3ec"),
+      track: cssHex("--bg-2", "#e2e8f0"),
+      up: cssHex("--ok", "#059669"),
+      down: cssHex("--danger", "#dc2626"),
+      hollow: fill === "none",
+      sw: style.borderW >= 0 ? style.borderW : 1,
+    };
+  }
+
+  function exportBlock(block, page) {
+    clampBlock(block, page);
+    const style = blockStyle(block);
+    const meta = blockMeta(block.type);
+    const item = {
+      type: block.type,
+      x: block.x || 0,
+      y: block.y || 0,
+      w: block.w || meta.w,
+      h: block.h || meta.h,
+      radius: style.radius >= 0 ? style.radius : 16,
+      align: style.align,
+      bold: style.weight !== "normal",
+      opacity: style.opacity,
+      fs: contentScale(block),
+      pad: style.pad,
+      hollow: style.fill === "none",
+      look: blockLook(style),
+      label: style.label ? String(block.title || meta.name) : "",
+      text: "",
+      sub: "",
+      delta: "",
+      up: true,
+      pair: null,
+      progress: null,
+      bars: null,
+      share: null,
+    };
+    if (block.type === "title") item.text = String(block.text || item.label || meta.name);
+    else if (block.type === "note") item.text = String(block.text || "");
+    else if (block.type === "kpi") {
+      item.text = fmt(liveValue(block, "value"));
+      const goal = liveValue(block, "goal");
+      if (goal != null) item.sub = `цель ${fmt(goal)}`;
+    } else if (block.type === "metric") item.text = fmt(liveValue(block, "value"));
+    else if (block.type === "compare") {
+      item.pair = [
+        { k: String(block.labels?.a || "A"), v: fmt(liveValue(block, "a")) },
+        { k: String(block.labels?.b || "B"), v: fmt(liveValue(block, "b")) },
+      ];
+    } else if (block.type === "delta") {
+      const now = liveValue(block, "now");
+      const was = liveValue(block, "was");
+      item.text = fmt(now);
+      if (now != null && was != null && was !== 0) {
+        const pct = ((now - was) / Math.abs(was)) * 100;
+        item.delta = `${pct >= 0 ? "+" : ""}${Math.round(pct)}%`;
+        item.up = pct >= 0;
+      } else item.delta = "—";
+    } else if (block.type === "progress") {
+      const value = liveValue(block, "value") || 0;
+      const max = liveValue(block, "max");
+      const denom = max != null && max > 0 ? max : 100;
+      item.text = fmt(value);
+      item.sub = fmt(denom);
+      item.progress = Math.max(0, Math.min(100, (value / denom) * 100));
+    } else if (block.type === "bars") {
+      const ports = ["a", "b", "c", "d"];
+      const vals = ports.map((id) => liveValue(block, id)).filter((v) => v != null);
+      const peak = Math.max(1, ...vals.map((v) => Math.abs(v)));
+      item.bars = ports
+        .map((id) => {
+          const v = liveValue(block, id);
+          if (v == null) return null;
+          return { k: String(block.labels?.[id] || id.toUpperCase()), h: Math.max(6, Math.round((Math.abs(v) / peak) * 100)) };
+        })
+        .filter(Boolean);
+    } else if (block.type === "share") {
+      const part = liveValue(block, "part");
+      const whole = liveValue(block, "whole");
+      const pct = part != null && whole != null && whole !== 0 ? (part / whole) * 100 : null;
+      item.share = pct == null ? 0 : Math.max(0, Math.min(100, pct));
+      item.text = pct == null ? "—" : `${Math.round(pct)}%`;
+    }
+    return item;
+  }
+
+  function exportSheet() {
+    const pres = ensurePresentation();
+    if (!pres) return null;
+    const doc = api?.doc?.() || {};
+    const title = String(doc.title || doc.name || "Презентация").trim() || "Презентация";
+    return {
+      title,
+      pages: (pres.pages || []).map((page) => {
+        const size = pageSize(page);
+        return {
+          name: page.name || "Страница",
+          w: size.w,
+          h: size.h,
+          grid: !!page.showGrid,
+          paper: hexOk(page.bg) || mixHex(cssHex("--card", "#ffffff"), cssHex("--bg-2", "#f7fafc"), 0.55),
+          gridColor: cssHex("--line", "#dbe3ec"),
+          blocks: [...(page.blocks || [])].sort((a, b) => (a.z || 1) - (b.z || 1)).map((block) => exportBlock(block, page)),
+        };
+      }),
+    };
+  }
+
   window.FinPresent = {
     BLOCK_TYPES,
     blockMeta,
     ensurePresentation,
+    sheet: exportSheet,
     pages() {
       return ensurePresentation()?.pages || [];
     },

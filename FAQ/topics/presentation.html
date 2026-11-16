@@ -1,13 +1,13 @@
 <h1>Презентация</h1>
-<p class="lead">Холст инфографики. Числа приходят из <a href="#calculator">калькулятора</a>: на схеме ставят ноду блока и соединяют выходы со входами блока. На <a href="#mobile">телефоне</a> раздела нет. Подразделы: <a href="#presentation/stranicy-i-bloki">Страницы и блоки</a>, <a href="#presentation/holst">Холст</a>, <a href="#presentation/pravaya-panel">Правая панель</a>.</p>
+<p class="lead">Холст инфографики. Числа приходят из <a href="#calculator">калькулятора</a>: на схеме ставят ноду блока и соединяют выходы со входами блока. На <a href="#mobile">телефоне</a> раздела нет. Подразделы: <a href="#presentation/stranicy-i-bloki">Страницы и блоки</a>, <a href="#presentation/holst">Холст</a>, <a href="#presentation/pdf">PDF</a>, <a href="#presentation/pravaya-panel">Правая панель</a>.</p>
 <section data-sub="stranicy-i-bloki">
 <figure class="shot">
   <div class="live" data-sel="#view-presentation .calc-tabbar, #view-presentation .pres-board-tools" aria-label="Панель презентации"></div>
-  <figcaption>Страницы и замок холста. Числа приходят из калькулятора.</figcaption>
+  <figcaption>Вкладки страниц. Слева на холсте — замок и кнопка PDF.</figcaption>
 </figure>
 <figure class="shot">
-  <div class="live" data-sel="[data-add-pres-page], #pres-lock-btn" data-flow="row" aria-label="Кнопки презентации"></div>
-  <figcaption><strong>+</strong> — новая страница. <strong>Замок</strong> запрещает выделять и двигать блоки. Стрелка на правой панели сворачивает инспектор свойств.</figcaption>
+  <div class="live" data-sel="[data-add-pres-page], #pres-lock-btn, #pres-pdf-btn" data-flow="row" aria-label="Кнопки презентации"></div>
+  <figcaption><strong>+</strong> — новая страница. Открытый замок — блоки можно выделять и двигать, закрытый — нельзя. Лист справа от замка открывает <a href="#presentation/pdf">PDF</a>. Стрелка справа сворачивает инспектор.</figcaption>
 </figure>
 <figure class="shot">
   <div class="live" data-block="pres" aria-label="Блоки холста"></div>
@@ -16,6 +16,7 @@
 
 <h2>Страницы и блоки</h2>
 <p>Вкладки страниц сверху: несколько страниц в одном отчёте, переименование, добавление и закрытие. Имя активной страницы правится в поле на холсте.</p>
+<p>Слева сверху на холсте две кнопки. <strong>Замок</strong> переключает блокировку: открытый замок оставляет выделение и перетаскивание, закрытый их запрещает. <strong>Лист</strong> справа от замка сохраняет презентацию в PDF.</p>
 <p>Слева каталог. Клик или перетаскивание добавляет блок.</p>
 <table>
   <tr><th>Блок</th><th>Зачем</th><th>Входы</th></tr>
@@ -33,6 +34,11 @@
 <section data-sub="holst">
 <h2>Холст</h2>
 <p>Страница по умолчанию 1200×800 и вписывается в окно без ручного зума. Блоки перетаскивают и меняют размер за угол по сетке 10 px, за края страницы они не выезжают. У страницы можно задать фон и показать сетку.</p>
+</section>
+<section data-sub="pdf">
+<h2>PDF</h2>
+<p>Кнопка листа справа от замка открывает предпросмотр всех страниц. Лист PDF совпадает с пропорциями страницы. В файле векторные фигуры и текст, без картинок.</p>
+<p>Над предпросмотром список <strong>Стили</strong>. Первым стоит <strong>Текущий вид</strong> — цвета холста как на экране. Дальше: белый, чёрный, чёрно-белый, газета, блюпринт, старая газета. Выбранный стиль сразу виден в предпросмотре, файл пишется кнопкой «Сохранить PDF».</p>
 </section>
 <section data-sub="pravaya-panel">
 <h2>Правая панель</h2>

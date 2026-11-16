@@ -137,6 +137,7 @@ window.FAQ_TOC = [
       { id: "presentation", title: "Презентация", keys: "блок kpi холст инфографика", subs: [
         { id: "stranicy-i-bloki", title: "Страницы и блоки" },
         { id: "holst", title: "Холст" },
+        { id: "pdf", title: "PDF" },
         { id: "pravaya-panel", title: "Правая панель" },
       ] },
       { id: "cloud", title: "Облако", keys: "карта галактика 3d долг", subs: [

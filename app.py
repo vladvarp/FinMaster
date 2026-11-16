@@ -619,6 +619,7 @@ _MODULE_FILES = (
     "charts.js",
     "cloud.js",
     "presentation.js",
+    "prespdf.js",
     "pdf.js",
     "vault.js",
     "datepicker.js",
@@ -674,6 +675,7 @@ def _bundle_bytes(folder: str, ext: str) -> bytes | None:
 @app.get("/cloud.js")
 @app.get("/calc.js")
 @app.get("/presentation.js")
+@app.get("/prespdf.js")
 @app.get("/pdf.js")
 @app.get("/vault.js")
 @app.get("/datepicker.js")
@@ -777,7 +779,7 @@ def api_guide_open():
 @app.get("/<path:filename>")
 def static_files(filename: str):
     response = send_from_directory(FRONTEND, filename)
-    if filename in {"mobile.js", "mobile.css", "mobile.html", "bank.js", "bank.css", "bank.html", "app.js", "cloud.js", "calc.js", "presentation.js", "pdf.js", "vault.js", "datepicker.js", "styles.css", "charts.js"}:
+    if filename in {"mobile.js", "mobile.css", "mobile.html", "bank.js", "bank.css", "bank.html", "app.js", "cloud.js", "calc.js", "presentation.js", "prespdf.js", "pdf.js", "vault.js", "datepicker.js", "styles.css", "charts.js"}:
         return _no_cache(response)
     return response
 
