@@ -39,6 +39,8 @@
         if (node.type === "result") return resultNodeHtml(node, bp, graph);
         if (node.type === "formula") return formulaNodeHtml(node, bp, graph);
         if (node.type === "comment") return commentNodeHtml(node);
+        if (node.type === "joint") return jointNodeHtml(node);
+        if (node.type === "bus") return busNodeHtml(node, bp, graph);
         if (node.type === "scheme") return schemeNodeHtml(node, graph);
         if (node.type === "filter") return filterNodeHtml(node, graph);
         if (node.type === "dashboard") return dashboardNodeHtml(node, bp, graph);
@@ -150,8 +152,733 @@
     };
   }
 
+  function polyPath(pts) {
+    return pts.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
+  }
+
+  function dedupePts(pts) {
+    const out = [];
+    pts.forEach((p) => {
+      const prev = out[out.length - 1];
+      if (!prev || Math.abs(prev.x - p.x) > 0.4 || Math.abs(prev.y - p.y) > 0.4) out.push(p);
+    });
+    return out;
+  }
+
+  function polyMid(pts) {
+    let total = 0;
+    const lens = [];
+    for (let i = 1; i < pts.length; i += 1) {
+      const len = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+      lens.push(len);
+      total += len;
+    }
+    let left = total / 2;
+    for (let i = 1; i < pts.length; i += 1) {
+      if (lens[i - 1] >= left) {
+        const t = lens[i - 1] ? left / lens[i - 1] : 0;
+        return {
+          x: pts[i - 1].x + (pts[i].x - pts[i - 1].x) * t,
+          y: pts[i - 1].y + (pts[i].y - pts[i - 1].y) * t,
+        };
+      }
+      left -= lens[i - 1];
+    }
+    return pts[0];
+  }
+
+  const WIRE_STUB = 18;
+  const WIRE_GAP = 14;
+
+  function loadWirePrefs() {
+    if (session.wirePrefsLoaded) return;
+    session.wirePrefsLoaded = true;
+    try {
+      const raw = JSON.parse(localStorage.getItem("finmaster.calc.wires") || "null");
+      if (raw?.route === "curve" || raw?.route === "ortho" || raw?.route === "diag") session.wireRoute = raw.route;
+      if (typeof raw?.avoid === "boolean") session.wireAvoid = raw.avoid;
+      if (typeof raw?.snap === "boolean") session.wireSnap = raw.snap;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function saveWirePrefs() {
+    const route = session.wireRoute === "ortho" || session.wireRoute === "diag" ? session.wireRoute : "curve";
+    try {
+      localStorage.setItem("finmaster.calc.wires", JSON.stringify({
+        route,
+        avoid: !!session.wireAvoid,
+        snap: !!session.wireSnap,
+      }));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function nodeObstacles(skip) {
+    const world = $("calc-world");
+    if (!world) return [];
+    const zoom = Number(activeBlueprint()?.zoom) || 1;
+    const wr = world.getBoundingClientRect();
+    const pad = 16;
+    const boxes = [];
+    world.querySelectorAll(".calc-node").forEach((el) => {
+      if (el.classList.contains("is-group")) return;
+      const id = el.dataset.node || "";
+      if (skip?.has(id)) return;
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) return;
+      boxes.push({
+        id,
+        x: (r.left - wr.left) / zoom - pad,
+        y: (r.top - wr.top) / zoom - pad,
+        r: (r.right - wr.left) / zoom + pad,
+        b: (r.bottom - wr.top) / zoom + pad,
+      });
+    });
+    return boxes;
+  }
+
+  function wireBoxes(opens, force) {
+    loadWirePrefs();
+    if (!session.wireAvoid && !force) return [];
+    const boxes = nodeObstacles(null);
+    (opens || []).forEach((open) => {
+      if (!open?.id) return;
+      const box = boxes.find((item) => item.id === open.id);
+      if (!box) return;
+      if (open.side === "out") box.r = Math.min(box.r, open.at - 1);
+      else box.x = Math.max(box.x, open.at + 1);
+    });
+    return boxes.filter((box) => box.r > box.x + 4 && box.b > box.y + 4);
+  }
+
+  function pointInBox(p, box) {
+    return p.x > box.x && p.x < box.r && p.y > box.y && p.y < box.b;
+  }
+
+  function segsCross(ax, ay, bx, by, cx, cy, dx, dy) {
+    const cross = (px, py, qx, qy) => px * qy - py * qx;
+    const d1 = cross(bx - ax, by - ay, cx - ax, cy - ay);
+    const d2 = cross(bx - ax, by - ay, dx - ax, dy - ay);
+    const d3 = cross(dx - cx, dy - cy, ax - cx, ay - cy);
+    const d4 = cross(dx - cx, dy - cy, bx - cx, by - cy);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+  }
+
+  function segHitsBox(p, q, box) {
+    if (pointInBox(p, box) || pointInBox(q, box)) return true;
+    return segsCross(p.x, p.y, q.x, q.y, box.x, box.y, box.r, box.y)
+      || segsCross(p.x, p.y, q.x, q.y, box.r, box.y, box.r, box.b)
+      || segsCross(p.x, p.y, q.x, q.y, box.r, box.b, box.x, box.b)
+      || segsCross(p.x, p.y, q.x, q.y, box.x, box.b, box.x, box.y);
+  }
+
+  function pathHits(pts, boxes) {
+    if (!boxes.length || pts.length < 2) return false;
+    for (let i = 1; i < pts.length; i += 1) {
+      if (boxes.some((box) => segHitsBox(pts[i - 1], pts[i], box))) return true;
+    }
+    return false;
+  }
+
+  function pathLen(pts) {
+    let total = 0;
+    for (let i = 1; i < pts.length; i += 1) total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    return total;
+  }
+
+  function orthoPoints(a, b) {
+    const stub = WIRE_STUB;
+    if (b.x >= a.x + stub * 2) {
+      const mid = (a.x + b.x) / 2;
+      return dedupePts([a, { x: mid, y: a.y }, { x: mid, y: b.y }, b]);
+    }
+    const midY = (a.y + b.y) / 2;
+    return dedupePts([
+      a,
+      { x: a.x + stub, y: a.y },
+      { x: a.x + stub, y: midY },
+      { x: b.x - stub, y: midY },
+      { x: b.x - stub, y: b.y },
+      b,
+    ]);
+  }
+
+  function pushHorizontal(y, x0, x1, boxes, dir) {
+    let lane = y;
+    const left = Math.min(x0, x1);
+    const right = Math.max(x0, x1);
+    for (let i = 0; i < 12; i += 1) {
+      const hit = boxes.filter((box) => segHitsBox({ x: left, y: lane }, { x: right, y: lane }, box));
+      if (!hit.length) return lane;
+      lane = dir < 0 ? Math.min(...hit.map((box) => box.y)) - WIRE_GAP : Math.max(...hit.map((box) => box.b)) + WIRE_GAP;
+    }
+    return lane;
+  }
+
+  function openX(port, laneY, boxes, prefer, lo, hi) {
+    const fits = (x) => !boxes.some((box) => segHitsBox(port, { x, y: port.y }, box) || segHitsBox({ x, y: port.y }, { x, y: laneY }, box));
+    if (fits(prefer)) return prefer;
+    if (fits(port.x)) return port.x;
+    let best = null;
+    const start = Math.min(lo, hi);
+    const end = Math.max(lo, hi);
+    for (let x = start; x <= end; x += 6) {
+      if (!fits(x)) continue;
+      if (best == null || Math.abs(x - prefer) < Math.abs(best - prefer)) best = x;
+    }
+    return best == null ? port.x : best;
+  }
+
+  function orthoAvoid(a, b, boxes) {
+    const plain = orthoPoints(a, b);
+    if (!pathHits(plain, boxes)) return plain;
+    const options = [-1, 1].map((dir) => {
+      const lo = Math.min(a.x, b.x) - 120;
+      const hi = Math.max(a.x, b.x) + 120;
+      let y = dir < 0 ? Math.min(a.y, b.y) - WIRE_GAP : Math.max(a.y, b.y) + WIRE_GAP;
+      let x1 = a.x + WIRE_STUB;
+      let x2 = b.x - WIRE_STUB;
+      for (let pass = 0; pass < 4; pass += 1) {
+        y = pushHorizontal(y, Math.min(lo, x1, x2), Math.max(hi, x1, x2), boxes, dir);
+        x1 = openX(a, y, boxes, a.x + WIRE_STUB, a.x, hi);
+        x2 = openX(b, y, boxes, b.x - WIRE_STUB, lo, b.x);
+      }
+      const pts = dedupePts([
+        a,
+        { x: x1, y: a.y },
+        { x: x1, y },
+        { x: x2, y },
+        { x: x2, y: b.y },
+        b,
+      ]);
+      return { pts, ok: !pathHits(pts, boxes), len: pathLen(pts) };
+    });
+    const good = options.filter((item) => item.ok).sort((p, q) => p.len - q.len);
+    return (good[0] || options.sort((p, q) => p.len - q.len)[0]).pts;
+  }
+
+  function firstBlocking(p, q, boxes) {
+    let best = null;
+    let bestT = Infinity;
+    boxes.forEach((box) => {
+      if (!segHitsBox(p, q, box)) return;
+      let t = 1;
+      if (pointInBox(p, box)) t = 0;
+      else {
+        const edges = [
+          [box.x, box.y, box.r, box.y],
+          [box.r, box.y, box.r, box.b],
+          [box.r, box.b, box.x, box.b],
+          [box.x, box.b, box.x, box.y],
+        ];
+        edges.forEach(([x1, y1, x2, y2]) => {
+          const den = (p.x - q.x) * (y1 - y2) - (p.y - q.y) * (x1 - x2);
+          if (Math.abs(den) < 1e-6) return;
+          const tt = ((p.x - x1) * (y1 - y2) - (p.y - y1) * (x1 - x2)) / den;
+          const uu = ((p.x - x1) * (p.y - q.y) - (p.y - y1) * (p.x - q.x)) / den;
+          if (tt >= 0 && tt <= 1 && uu >= 0 && uu <= 1 && tt < t) t = tt;
+        });
+      }
+      if (t < bestT) {
+        bestT = t;
+        best = box;
+      }
+    });
+    return best;
+  }
+
+  function diagWalk(a, b, boxes, dir) {
+    const stub = WIRE_STUB;
+    let startX = a.x + stub;
+    const early = boxes.find((box) => segHitsBox(a, { x: startX, y: a.y }, box));
+    if (early) startX = Math.max(a.x, early.x - WIRE_GAP);
+    let goalX = b.x - stub;
+    const late = boxes.find((box) => segHitsBox({ x: goalX, y: b.y }, b, box));
+    if (late) goalX = Math.min(b.x, late.r + WIRE_GAP);
+    const start = { x: startX, y: a.y };
+    const goal = { x: goalX, y: b.y };
+    const pts = [a, start];
+    let cur = start;
+    const seen = new Set();
+    for (let n = 0; n < 10; n += 1) {
+      if (!boxes.some((box) => segHitsBox(cur, goal, box))) {
+        pts.push(goal);
+        break;
+      }
+      const box = firstBlocking(cur, goal, boxes);
+      if (!box) {
+        pts.push(goal);
+        break;
+      }
+      const y = dir < 0 ? box.y : box.b;
+      const corners = [{ x: box.x, y }, { x: box.r, y }]
+        .map((corner) => ({ corner, key: `${Math.round(corner.x)}:${Math.round(corner.y)}` }))
+        .filter((item) => !seen.has(item.key))
+        .sort((p, q) => Math.hypot(p.corner.x - cur.x, p.corner.y - cur.y) - Math.hypot(q.corner.x - cur.x, q.corner.y - cur.y));
+      const pick = corners.find((item) => !segHitsBox(cur, item.corner, box)) || corners[0];
+      if (!pick) break;
+      seen.add(pick.key);
+      pts.push(pick.corner);
+      cur = pick.corner;
+    }
+    if (pts[pts.length - 1] !== goal) pts.push(goal);
+    pts.push(b);
+    return dedupePts(pts);
+  }
+
+  function diagDirect(a, b) {
+    const stub = WIRE_STUB;
+    if (Math.abs(a.y - b.y) < 1.5 && b.x >= a.x) return [a, b];
+    const p1 = { x: a.x + stub, y: a.y };
+    const p2 = { x: b.x - stub, y: b.y };
+    if (p2.x < p1.x + 8) return orthoPoints(a, b);
+    return dedupePts([a, p1, p2, b]);
+  }
+
+  function diagAvoid(a, b, boxes) {
+    const direct = diagDirect(a, b);
+    if (!pathHits(direct, boxes)) return direct;
+    const options = [-1, 1].map((dir) => {
+      const pts = diagWalk(a, b, boxes, dir);
+      return { pts, ok: !pathHits(pts, boxes), len: pathLen(pts) };
+    });
+    const good = options.filter((item) => item.ok).sort((p, q) => p.len - q.len);
+    return (good[0] || options.sort((p, q) => p.len - q.len)[0]).pts;
+  }
+
+  function bezierPoint(p0, p1, p2, p3, t) {
+    const u = 1 - t;
+    return {
+      x: u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
+      y: u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y,
+    };
+  }
+
+  function bezierHits(p0, p1, p2, p3, boxes) {
+    if (!boxes.length) return false;
+    let prev = p0;
+    for (let i = 1; i <= 24; i += 1) {
+      const cur = bezierPoint(p0, p1, p2, p3, i / 24);
+      if (boxes.some((box) => segHitsBox(prev, cur, box))) return true;
+      prev = cur;
+    }
+    return false;
+  }
+
+  function curveDirect(a, b) {
+    const dx = Math.max(40, Math.abs(b.x - a.x) * 0.45);
+    const sign = b.x >= a.x ? 1 : -1;
+    return {
+      d: `M${a.x},${a.y} C${a.x + sign * dx},${a.y} ${b.x - sign * dx},${b.y} ${b.x},${b.y}`,
+      mid: bezierMid(a, b),
+    };
+  }
+
+  function curveHits(a, b, boxes) {
+    const dx = Math.max(40, Math.abs(b.x - a.x) * 0.45);
+    const sign = b.x >= a.x ? 1 : -1;
+    return bezierHits(a, { x: a.x + sign * dx, y: a.y }, { x: b.x - sign * dx, y: b.y }, b, boxes);
+  }
+
+  function roundPoly(pts, radius) {
+    const p = dedupePts(pts);
+    if (p.length < 3) return polyPath(p);
+    const parts = [`M${p[0].x},${p[0].y}`];
+    for (let i = 1; i < p.length - 1; i += 1) {
+      const prev = p[i - 1];
+      const cur = p[i];
+      const next = p[i + 1];
+      const len1 = Math.hypot(cur.x - prev.x, cur.y - prev.y);
+      const len2 = Math.hypot(next.x - cur.x, next.y - cur.y);
+      const r = Math.min(radius, len1 / 2, len2 / 2);
+      if (r < 4 || len1 < 1 || len2 < 1) {
+        parts.push(`L${cur.x},${cur.y}`);
+        continue;
+      }
+      const ux1 = (cur.x - prev.x) / len1;
+      const uy1 = (cur.y - prev.y) / len1;
+      const ux2 = (next.x - cur.x) / len2;
+      const uy2 = (next.y - cur.y) / len2;
+      const k = 0.5519;
+      const a1x = cur.x - ux1 * r;
+      const a1y = cur.y - uy1 * r;
+      const a2x = cur.x + ux2 * r;
+      const a2y = cur.y + uy2 * r;
+      parts.push(`L${a1x},${a1y} C${a1x + ux1 * r * k},${a1y + uy1 * r * k} ${a2x - ux2 * r * k},${a2y - uy2 * r * k} ${a2x},${a2y}`);
+    }
+    const last = p[p.length - 1];
+    parts.push(`L${last.x},${last.y}`);
+    return parts.join(" ");
+  }
+
+  function curveAvoid(a, b, boxes) {
+    if (!curveHits(a, b, boxes)) return curveDirect(a, b);
+    const stub = WIRE_STUB;
+    let p1 = { x: a.x + stub, y: a.y };
+    let p2 = { x: b.x - stub, y: b.y };
+    if (boxes.some((box) => segHitsBox(a, p1, box))) p1 = { x: a.x, y: a.y };
+    if (boxes.some((box) => segHitsBox(p2, b, box))) p2 = { x: b.x, y: b.y };
+    const spanL = Math.min(p1.x, p2.x);
+    const spanR = Math.max(p1.x, p2.x);
+    const between = boxes.filter((box) => box.r > spanL && box.x < spanR);
+    const options = [-1, 1].map((dir) => {
+      const seed = between.length
+        ? (dir < 0 ? Math.min(...between.map((box) => box.y)) : Math.max(...between.map((box) => box.b)))
+        : (dir < 0 ? Math.min(a.y, b.y) - 48 : Math.max(a.y, b.y) + 48);
+      let apex = seed + dir * WIRE_GAP;
+      let hit = true;
+      let controls = null;
+      for (let n = 0; n < 14 && hit; n += 1) {
+        const c = (apex - 0.125 * (p1.y + p2.y)) / 0.75;
+        const dx = Math.max(28, Math.abs(p2.x - p1.x) * 0.22);
+        const sign = p2.x >= p1.x ? 1 : -1;
+        controls = {
+          c1: { x: p1.x + sign * dx, y: c },
+          c2: { x: p2.x - sign * dx, y: c },
+        };
+        hit = bezierHits(p1, controls.c1, controls.c2, p2, boxes);
+        if (hit) apex += dir * 28;
+      }
+      return { apex, controls, hit };
+    });
+    const fit = options.find((item) => item.controls && !item.hit) || options[0];
+    if (fit?.controls && !fit.hit) {
+      const c1 = fit.controls.c1;
+      const c2 = fit.controls.c2;
+      return {
+        d: `M${a.x},${a.y} L${p1.x},${p1.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${p2.x},${p2.y} L${b.x},${b.y}`,
+        mid: bezierPoint(p1, c1, c2, p2, 0.5),
+      };
+    }
+    const pts = orthoAvoid(a, b, boxes);
+    return { pts, radius: 36, d: roundPoly(pts, 36), mid: polyMid(pts) };
+  }
+
+  const WIRE_LANE = 8;
+
+  function spreadWireLanes(items) {
+    const segs = [];
+    items.forEach((item) => {
+      const pts = item.geo?.pts;
+      if (!pts || pts.length < 4 || item.bundled) return;
+      for (let i = 1; i < pts.length - 2; i += 1) {
+        const p = pts[i];
+        const q = pts[i + 1];
+        const dx = q.x - p.x;
+        const dy = q.y - p.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 110) continue;
+        const vertical = Math.abs(dx) < 1.5;
+        const horizontal = Math.abs(dy) < 1.5;
+        if (!vertical && !horizontal) continue;
+        if (horizontal && (i === 1 || i + 1 === pts.length - 2)) continue;
+        segs.push({
+          item,
+          i,
+          vertical,
+          x: (p.x + q.x) / 2,
+          y: (p.y + q.y) / 2,
+          lo: vertical ? Math.min(p.y, q.y) : Math.min(p.x, q.x),
+          hi: vertical ? Math.max(p.y, q.y) : Math.max(p.x, q.x),
+          sort: pts[0].y * 100000 + pts[0].x,
+        });
+      }
+    });
+    const used = new Array(segs.length).fill(false);
+    const overlaps = (a, b) => {
+      if (a.vertical !== b.vertical || a.item === b.item) return false;
+      const coord = a.vertical ? Math.abs(a.x - b.x) : Math.abs(a.y - b.y);
+      if (coord > 3) return false;
+      return Math.min(a.hi, b.hi) - Math.max(a.lo, b.lo) >= 16;
+    };
+    segs.forEach((seg, index) => {
+      if (used[index]) return;
+      const group = [];
+      const queue = [index];
+      used[index] = true;
+      while (queue.length) {
+        const cur = queue.pop();
+        group.push(segs[cur]);
+        segs.forEach((other, j) => {
+          if (used[j] || !overlaps(segs[cur], other)) return;
+          used[j] = true;
+          queue.push(j);
+        });
+      }
+      if (group.length < 2) return;
+      group.sort((a, b) => a.sort - b.sort);
+      const mid = (group.length - 1) / 2;
+      group.forEach((entry, lane) => {
+        const pts = entry.item.geo.pts;
+        const p = pts[entry.i];
+        const q = pts[entry.i + 1];
+        const axis = entry.vertical ? "x" : "y";
+        if ((p._lane && p._lane[axis]) || (q._lane && q._lane[axis])) return;
+        const want = (lane - mid) * WIRE_LANE;
+        const boxes = entry.item.laneBoxes || [];
+        const ox = p.x;
+        const oy = p.y;
+        const qx = q.x;
+        const qy = q.y;
+        const sign = want < 0 ? -1 : 1;
+        let placed = false;
+        for (let step = Math.abs(want); step >= 2; step -= 2) {
+          const delta = sign * step;
+          if (axis === "x") {
+            p.x = ox + delta;
+            q.x = qx + delta;
+          } else {
+            p.y = oy + delta;
+            q.y = qy + delta;
+          }
+          const from = Math.max(1, entry.i);
+          const to = Math.min(pts.length - 1, entry.i + 2);
+          let hit = false;
+          for (let k = from; k <= to; k += 1) {
+            if (boxes.some((box) => segHitsBox(pts[k - 1], pts[k], box))) {
+              hit = true;
+              break;
+            }
+          }
+          if (!hit) {
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          p.x = ox;
+          p.y = oy;
+          q.x = qx;
+          q.y = qy;
+          return;
+        }
+        p._lane = p._lane || {};
+        q._lane = q._lane || {};
+        p._lane[axis] = true;
+        q._lane[axis] = true;
+      });
+    });
+  }
+
+  function orthoCandidates(a, b) {
+    const stub = WIRE_STUB;
+    const list = [];
+    if (b.x >= a.x + stub * 2) {
+      const lo = a.x + stub;
+      const hi = b.x - stub;
+      [0.22, 0.5, 0.78].forEach((t) => {
+        const mid = lo + (hi - lo) * t;
+        list.push(dedupePts([a, { x: mid, y: a.y }, { x: mid, y: b.y }, b]));
+      });
+      [ -1, 1 ].forEach((dir) => {
+        const y = a.y + dir * 36;
+        list.push(dedupePts([
+          a,
+          { x: a.x + stub, y: a.y },
+          { x: a.x + stub, y },
+          { x: b.x - stub, y },
+          { x: b.x - stub, y: b.y },
+          b,
+        ]));
+      });
+      return list;
+    }
+    const x1 = a.x + stub;
+    const x2 = b.x - stub;
+    [a.y, (a.y + b.y) / 2, b.y].forEach((y) => {
+      list.push(dedupePts([
+        a,
+        { x: x1, y: a.y },
+        { x: x1, y },
+        { x: x2, y },
+        { x: x2, y: b.y },
+        b,
+      ]));
+    });
+    return list;
+  }
+
+  function floatPenalty(pts) {
+    const a = pts[0];
+    const b = pts[pts.length - 1];
+    const minX = Math.min(a.x, b.x);
+    const maxX = Math.max(a.x, b.x);
+    const minY = Math.min(a.y, b.y);
+    const maxY = Math.max(a.y, b.y);
+    let penalty = 0;
+    for (let i = 1; i < pts.length; i += 1) {
+      const p = pts[i - 1];
+      const q = pts[i];
+      const len = Math.hypot(q.x - p.x, q.y - p.y);
+      if (len < 40) continue;
+      if (Math.abs(p.y - q.y) < 1.5) {
+        const y = p.y;
+        const align = Math.min(Math.abs(y - a.y), Math.abs(y - b.y));
+        penalty += y < minY - 8 || y > maxY + 8 ? align + 80 : align * 0.2;
+      } else if (Math.abs(p.x - q.x) < 1.5 && (p.x < minX - 8 || p.x > maxX + 8)) {
+        penalty += Math.min(Math.abs(p.x - a.x), Math.abs(p.x - b.x)) + 40;
+      }
+    }
+    return penalty;
+  }
+
+  function countRouteCrossings(pts, routed) {
+    let count = 0;
+    (routed || []).forEach((other) => {
+      for (let i = 1; i < pts.length; i += 1) {
+        for (let j = 1; j < other.length; j += 1) {
+          if (segsCross(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y, other[j - 1].x, other[j - 1].y, other[j].x, other[j].y)) count += 1;
+        }
+      }
+    });
+    return count;
+  }
+
+  function pickRoute(candidates, routed) {
+    const pool = candidates.filter((pts) => pts && pts.length >= 2);
+    if (!pool.length) return null;
+    let minLen = Infinity;
+    pool.forEach((pts) => { minLen = Math.min(minLen, pathLen(pts)); });
+    const budget = minLen + 120;
+    let best = null;
+    pool.forEach((pts) => {
+      const len = pathLen(pts);
+      if (len > budget) return;
+      const score = [countRouteCrossings(pts, routed), floatPenalty(pts), len];
+      if (!best
+        || score[0] < best.score[0]
+        || (score[0] === best.score[0] && score[1] < best.score[1])
+        || (score[0] === best.score[0] && score[1] === best.score[1] && score[2] < best.score[2])) {
+        best = { pts, score };
+      }
+    });
+    return (best || { pts: pool[0] }).pts;
+  }
+
+  function chooseWirePts(a, b, boxes, mode, routed) {
+    const avoid = boxes || [];
+    const shaped = orthoCandidates(a, b).filter((pts) => !avoid.length || !pathHits(pts, avoid));
+    const native = mode === "diag"
+      ? [avoid.length ? diagAvoid(a, b, avoid) : diagDirect(a, b)]
+      : [];
+    let pool = native.concat(shaped);
+    if (!pool.length) pool = [mode === "diag" ? diagAvoid(a, b, avoid) : orthoAvoid(a, b, avoid)];
+    return pickRoute(pool, routed);
+  }
+
+  function bundlePaths(specs) {
+    loadWirePrefs();
+    const mode = session.wireRoute === "ortho" || session.wireRoute === "diag" ? session.wireRoute : "curve";
+    if (mode === "curve") return;
+    const groups = new Map();
+    specs.forEach((spec) => {
+      const forward = spec.b.x >= spec.a.x + WIRE_STUB;
+      const key = `${spec.link.from}:${forward ? "f" : "b"}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(spec);
+    });
+    groups.forEach((group) => {
+      if (group.length < 2) return;
+      const ordered = group.slice().sort((p, q) => p.a.y - q.a.y || p.a.x - q.a.x);
+      const n = ordered.length;
+      const forward = ordered[0].b.x >= ordered[0].a.x + WIRE_STUB;
+      const rises = ordered.map((spec) => spec.b.y - spec.a.y).sort((p, q) => p - q);
+      const rising = rises[Math.floor((n - 1) / 2)] < -4;
+      const laneOf = (index) => (rising ? index : n - 1 - index);
+      if (forward) {
+        const left = Math.max(...ordered.map((spec) => spec.a.x)) + WIRE_STUB;
+        const right = Math.min(...ordered.map((spec) => spec.b.x)) - WIRE_STUB;
+        const room = Math.max(0, right - left);
+        const step = n === 1 ? 0 : Math.min(WIRE_LANE, room / (n - 1));
+        const base = Math.max(left, right - step * (n - 1));
+        ordered.forEach((spec, index) => {
+          const x = base + laneOf(index) * step;
+          const pts = dedupePts([spec.a, { x, y: spec.a.y }, { x, y: spec.b.y }, spec.b]);
+          const boxes = wireBoxes(spec.opens);
+          if (!boxes.length || !pathHits(pts, boxes)) spec.bundlePts = pts;
+        });
+        return;
+      }
+      const edge = Math.max(...ordered.map((spec) => spec.a.x)) + WIRE_STUB;
+      ordered.forEach((spec, index) => {
+        const x = edge + laneOf(index) * WIRE_LANE;
+        const pts = dedupePts([
+          spec.a,
+          { x, y: spec.a.y },
+          { x, y: spec.b.y },
+          { x: spec.b.x - WIRE_STUB, y: spec.b.y },
+          spec.b,
+        ]);
+        const boxes = wireBoxes(spec.opens);
+        if (!boxes.length || !pathHits(pts, boxes)) spec.bundlePts = pts;
+      });
+    });
+  }
+
+  function wireGeometry(a, b, boxes, routed) {
+    loadWirePrefs();
+    const mode = session.wireRoute === "ortho" || session.wireRoute === "diag" ? session.wireRoute : "curve";
+    const avoid = boxes || [];
+    if (mode === "curve") return avoid.length ? curveAvoid(a, b, avoid) : curveDirect(a, b);
+    const pts = chooseWirePts(a, b, avoid, mode, routed || []);
+    return { pts, radius: 22, d: roundPoly(pts, 22), mid: polyMid(pts) };
+  }
+
+  function syncWireBtns() {
+    loadWirePrefs();
+    const route = $("calc-wire-route");
+    const avoid = $("calc-wire-avoid");
+    const mode = session.wireRoute === "ortho" || session.wireRoute === "diag" ? session.wireRoute : "curve";
+    const routeTitle = mode === "ortho" ? "Прямоугольные линии" : mode === "diag" ? "Прямоугольные и диагональные" : "Плавные линии";
+    if (route) {
+      route.dataset.route = mode;
+      route.title = routeTitle;
+      route.setAttribute("aria-label", routeTitle);
+    }
+    if (avoid) {
+      const on = !!session.wireAvoid;
+      avoid.classList.toggle("is-on", on);
+      avoid.setAttribute("aria-pressed", on ? "true" : "false");
+      const title = on ? "Обходить ноды: включено" : "Обходить ноды: выключено";
+      avoid.title = title;
+      avoid.setAttribute("aria-label", title);
+    }
+    const snap = $("calc-snap");
+    if (snap) {
+      const on = !!session.wireSnap;
+      snap.classList.toggle("is-on", on);
+      snap.setAttribute("aria-pressed", on ? "true" : "false");
+      const title = on ? "Привязка к сетке: включено" : "Привязка к сетке: выключено";
+      snap.title = title;
+      snap.setAttribute("aria-label", title);
+    }
+    syncSnapGrid(activeBlueprint());
+  }
+
+  const SNAP = 20;
+
+  function snapCoord(value) {
+    return Math.round((Number(value) || 0) / SNAP) * SNAP;
+  }
+
+  function syncSnapGrid(bp) {
+    const board = $("calc-board");
+    if (!board) return;
+    loadWirePrefs();
+    const on = !!session.wireSnap;
+    board.classList.toggle("is-snap", on);
+    const zoom = bp?.zoom || 1;
+    board.style.setProperty("--snap-size", `${SNAP * zoom}px`);
+    board.style.setProperty("--snap-x", `${bp?.x || 0}px`);
+    board.style.setProperty("--snap-y", `${bp?.y || 0}px`);
+  }
+
   function wireKind(node, fromPort) {
-    if (fromPort === "plan") return "plan";
+    const portId = String(fromPort || "");
+    if (portId === "plan" || portId.startsWith("plan:")) return "plan";
     const type = node?.type || "";
     if (type === "order") {
       if (fromPort === "total") return "order";
@@ -169,6 +896,12 @@
         if (order) return typeTone(order, typed.typeName);
       }
       return "order";
+    }
+    if (type === "joint") return node.tone || "order";
+    if (type === "bus") {
+      const laneId = String(fromPort || "").startsWith("out:") ? String(fromPort).slice(4) : "";
+      const lane = (node.lanes || []).find((item) => item.id === laneId);
+      return lane?.tone || "order";
     }
     if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme" || type === "group" || type === "filter" || type === "dashboard" || type === "planner" || type === "openings" || type === "electrics" || type === "present" || type === "comment") return type;
     return "order";
@@ -413,8 +1146,12 @@
     const portId = link ? (link.reverse ? link.toPort : link.fromPort) : "";
     const owner = ownerId ? (activeBlueprint()?.nodes || []).find((item) => item.id === ownerId) : null;
     const signal = link ? portSignal(owner, portId) : "";
-    board.classList.toggle("is-link-plan", signal === "plan");
-    board.classList.toggle("is-link-num", !!link && signal !== "plan");
+    const openPass = !!(owner && (
+      (owner.type === "joint" && !owner.tone)
+      || (owner.type === "bus" && laneOf(owner, portId) && !laneOf(owner, portId).tone)
+    ));
+    board.classList.toggle("is-link-plan", !openPass && signal === "plan");
+    board.classList.toggle("is-link-num", !openPass && !!link && signal !== "plan");
   }
 
   function drawWires(bp, graph) {
@@ -469,6 +1206,7 @@
       findPortEl(fromEl, picked.fromPort, "out")?.classList.add("is-link-pick");
       findPortEl(toEl, picked.toPort, "in")?.classList.add("is-link-pick");
     }
+    const specs = [];
     (bp.links || []).forEach((link) => {
       const fromEl = findNodeEl(link.from);
       const toEl = findNodeEl(link.to);
@@ -476,8 +1214,45 @@
       const a = portWorld(fromEl, link.fromPort, "out", bp);
       const b = portWorld(toEl, link.toPort, "in", bp);
       if (!a || !b) return;
-      const dx = Math.max(40, Math.abs(b.x - a.x) * 0.45);
-      const d = `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`;
+      specs.push({
+        link,
+        fromEl,
+        toEl,
+        a,
+        b,
+        opens: [
+          { id: link.from, side: "out", at: a.x },
+          { id: link.to, side: "in", at: b.x },
+        ],
+      });
+    });
+    specs.sort((p, q) => p.a.y - q.a.y || p.a.x - q.a.x);
+    bundlePaths(specs);
+    const routed = [];
+    const pending = specs.map((spec) => {
+      if (spec.bundlePts) {
+        const pts = spec.bundlePts;
+        routed.push(pts);
+        return {
+          link: spec.link,
+          fromEl: spec.fromEl,
+          toEl: spec.toEl,
+          geo: { pts, radius: 22, d: roundPoly(pts, 22), mid: polyMid(pts) },
+          laneBoxes: wireBoxes(spec.opens, true),
+          bundled: true,
+        };
+      }
+      const geo = wireGeometry(spec.a, spec.b, wireBoxes(spec.opens), routed);
+      if (geo.pts) routed.push(geo.pts);
+      return { link: spec.link, fromEl: spec.fromEl, toEl: spec.toEl, geo, laneBoxes: wireBoxes(spec.opens, true) };
+    });
+    spreadWireLanes(pending);
+    pending.forEach(({ link, fromEl, toEl, geo }) => {
+      if (geo.pts) {
+        geo.d = roundPoly(geo.pts, geo.radius || 22);
+        geo.mid = polyMid(geo.pts);
+      }
+      const d = geo.d;
       const src = byId[link.from];
       const onFlow = flow.linkIds.has(link.id);
       const onPick = !!(picked && picked.id === link.id);
@@ -496,7 +1271,7 @@
       }
       if (!session.linking && !session.drag && !session.pan) {
         const hit = addPath(d, "calc-wire-hit", { "data-link": link.id });
-        const mid = bezierMid(a, b);
+        const mid = geo.mid;
         hostButtons.push({ id: link.id, x: mid.x, y: mid.y, wire, hit });
       }
     });
@@ -530,6 +1305,12 @@
         hide();
       });
       item.hit.addEventListener("pointerdown", (e) => {
+        if (e.button === 2) {
+          e.preventDefault();
+          e.stopPropagation();
+          removeLink(item.id);
+          return;
+        }
         if (e.button !== 0) return;
         e.preventDefault();
         e.stopPropagation();
@@ -562,8 +1343,10 @@
         kind = wireKind(byId[L.from], L.fromPort);
       }
       if (a && b) {
-        const dx = Math.max(40, Math.abs(b.x - a.x) * 0.45);
-        addPath(`M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`, `calc-wire is-temp is-${kind}`, { "pointer-events": "none" });
+        const geo = wireGeometry(a, b, wireBoxes(L.reverse
+          ? [{ id: L.to, side: "in", at: b.x }]
+          : [{ id: L.from, side: "out", at: a.x }]));
+        addPath(geo.d, `calc-wire is-temp is-${kind}`, { "pointer-events": "none" });
       }
     }
     setLinkingClass();
@@ -613,6 +1396,7 @@
 
   function render() {
     if (!api || api.view() !== "calculator") {
+      closePalette();
       const panel = $("calc-present-panel");
       if (panel) panel.hidden = true;
       return;
@@ -736,10 +1520,7 @@
     if (!el) return;
     const show = api?.view?.() === "calculator" && session.presentPanel;
     el.hidden = !show;
-    if (!session.presentPanel) {
-      setPresentHover("");
-      return;
-    }
+    if (!session.presentPanel) return;
     if (show && !el.dataset.moved) {
       const board = $("calc-board");
       const rect = board?.getBoundingClientRect();
@@ -909,7 +1690,7 @@
       else disconnectInput(unlink.closest(".calc-node")?.dataset.node, unlink.dataset.delInLink);
       return;
     }
-    if (e.target.closest(".calc-refresh, .calc-chain-move, .calc-present-btn, .calc-present-panel, .calc-board-tools, .calc-bp-name, .calc-screen-copy, .calc-minimap, .calc-mini-toggle, .calc-mini-wrap, input, textarea, select")) return;
+    if (e.target.closest(".calc-refresh, .calc-chain-move, .calc-wire-route, .calc-wire-avoid, .calc-present-btn, .calc-present-panel, .calc-board-tools, .calc-bp-name, .calc-screen-copy, .calc-minimap, .calc-mini-toggle, .calc-mini-wrap, input, textarea, select")) return;
     const resizeFormula = e.target.closest("[data-resize-formula]");
     if (resizeFormula) {
       e.preventDefault();
@@ -1156,8 +1937,11 @@
     }
     if (session.drag) {
       const zoom = bp.zoom || 1;
-      const dx = (e.clientX - session.drag.dx) / zoom;
-      const dy = (e.clientY - session.drag.dy) / zoom;
+      const dx0 = (e.clientX - session.drag.dx) / zoom;
+      const dy0 = (e.clientY - session.drag.dy) / zoom;
+      const anchor = (session.drag.origins || []).find((origin) => origin.id === session.drag.id) || session.drag.origins?.[0];
+      const dx = session.wireSnap && anchor ? snapCoord(anchor.x + dx0) - anchor.x : dx0;
+      const dy = session.wireSnap && anchor ? snapCoord(anchor.y + dy0) - anchor.y : dy0;
       const byId = Object.fromEntries((bp.nodes || []).map((item) => [item.id, item]));
       (session.drag.origins || []).forEach((origin) => {
         const item = byId[origin.id];
@@ -1232,7 +2016,7 @@
       if (bp) drawMinimap(bp);
       return;
     }
-    if (e.target.closest?.("input, textarea, select, .calc-bp-name, .calc-refresh, .calc-chain-move, .calc-board-tools")) return;
+    if (e.target.closest?.("input, textarea, select, .calc-bp-name, .calc-refresh, .calc-chain-move, .calc-wire-route, .calc-wire-avoid, .calc-board-tools")) return;
     if (linking) {
       const over = document.elementFromPoint(e.clientX, e.clientY)?.closest?.(".calc-port");
       const nodeId = over?.closest?.(".calc-node")?.dataset.node;
@@ -1352,7 +2136,7 @@
     e.preventDefault();
     const at = worldPoint(bp, e.clientX, e.clientY);
     if (presentBlock) addPresentNode(presentPage, presentBlock, at);
-    else if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "comment" || kind === "filter" || kind === "dashboard" || kind === "planner" || kind === "openings" || kind === "electrics") addNode(kind, at);
+    else if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "comment" || kind === "filter" || kind === "dashboard" || kind === "planner" || kind === "openings" || kind === "electrics" || kind === "joint" || kind === "bus") addNode(kind, at);
     else if (blueprintId && blueprintId !== bp.id) addNode("scheme", at, { blueprintId });
     else if (orderId && api.findOrder(orderId)) addNode("order", at, { orderId });
   }
@@ -1490,6 +2274,33 @@
       session.moveChain = order[(at + 1) % order.length];
       syncChainMoveBtn();
     });
+    $("calc-wire-route")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const order = ["curve", "ortho", "diag"];
+      const at = order.indexOf(session.wireRoute);
+      session.wireRoute = order[(at + 1) % order.length];
+      saveWirePrefs();
+      syncWireBtns();
+      const bp = activeBlueprint();
+      if (bp) drawWires(bp, computeGraph(bp));
+    });
+    $("calc-wire-avoid")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      session.wireAvoid = !session.wireAvoid;
+      saveWirePrefs();
+      syncWireBtns();
+      const bp = activeBlueprint();
+      if (bp) drawWires(bp, computeGraph(bp));
+    });
+    $("calc-snap")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      session.wireSnap = !session.wireSnap;
+      saveWirePrefs();
+      syncWireBtns();
+    });
     $("calc-prune")?.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -1537,6 +2348,7 @@
       e.dataTransfer.effectAllowed = "copy";
     });
     syncChainMoveBtn();
+    syncWireBtns();
     syncMiniToggle();
     $("calc-mini-toggle")?.addEventListener("click", (e) => {
       e.preventDefault();
@@ -1630,6 +2442,127 @@
       },
       true
     );
+    let paletteCloseTimer = 0;
+    const placeFromPalette = (spec, point) => {
+      if (spec.presentBlock) addPresentNode(spec.presentPage, spec.presentBlock, point);
+      else if (spec.orderId) addNode("order", point, { orderId: spec.orderId });
+      else if (spec.blueprintId) addNode("scheme", point, { blueprintId: spec.blueprintId });
+      else if (spec.kind) addNode(spec.kind, point);
+    };
+    const followPeek = (x, y, glide) => {
+      const peek = document.getElementById("calc-peek");
+      if (!peek) return;
+      const card = peek.querySelector(".calc-node, .calc-peek-group");
+      const w = card?.offsetWidth || 230;
+      const board = $("calc-board")?.getBoundingClientRect();
+      const over = board && x >= board.left && x <= board.right && y >= board.top && y <= board.bottom;
+      const zoom = over ? (activeBlueprint()?.zoom || 1) : 1;
+      if (glide) {
+        peek.classList.add("is-glide");
+        setTimeout(() => peek.classList.remove("is-glide"), 180);
+      }
+      peek.style.transformOrigin = `${w / 2}px 22px`;
+      if (!peek.classList.contains("is-follow")) {
+        peek.style.transform = "scale(1)";
+        peek.classList.add("is-follow");
+        void peek.offsetWidth;
+      }
+      peek.style.transform = `scale(${zoom})`;
+      peek.style.left = `${Math.round(x - w / 2)}px`;
+      peek.style.top = `${Math.round(y - 22)}px`;
+    };
+    const armPaletteClose = () => {
+      clearTimeout(paletteCloseTimer);
+      paletteCloseTimer = setTimeout(() => {
+        if (!session.palette) closePalette();
+      }, 140);
+    };
+    $("calc-side")?.addEventListener("pointerover", (e) => {
+      const btn = e.target.closest("[data-palette]");
+      if (!btn) return;
+      clearTimeout(paletteCloseTimer);
+      openPalette(btn);
+    });
+    $("calc-side")?.addEventListener("pointerout", (e) => {
+      if (!e.target.closest?.("[data-palette]")) return;
+      if (e.relatedTarget?.closest?.("#calc-palette, [data-palette]")) return;
+      armPaletteClose();
+    });
+    document.addEventListener("pointerover", (e) => {
+      if (api?.view?.() !== "calculator") return;
+      const item = e.target.closest?.("#calc-palette [data-peek]");
+      if (item) {
+        clearTimeout(paletteCloseTimer);
+        showPeek(item.dataset.peek);
+        if (item.dataset.presentUsed === "1") setPresentHover(item.dataset.presentBlock || "");
+        else if (session.presentHover) setPresentHover("");
+        return;
+      }
+      if (e.target.closest?.("#calc-palette")) clearTimeout(paletteCloseTimer);
+    });
+    document.addEventListener("pointerout", (e) => {
+      if (!e.target.closest?.("#calc-palette")) return;
+      if (e.relatedTarget?.closest?.("#calc-palette, [data-palette]")) return;
+      if (session.presentHover) setPresentHover("");
+      armPaletteClose();
+    });
+    document.addEventListener("pointerdown", (e) => {
+      const item = e.target.closest?.("#calc-palette [data-add-node], #calc-palette [data-order], #calc-palette [data-blueprint], #calc-palette [data-present-block]");
+      if (!item || e.button !== 0 || api?.view?.() !== "calculator") return;
+      e.preventDefault();
+      item.setPointerCapture?.(e.pointerId);
+      session.palette = {
+        x: e.clientX,
+        y: e.clientY,
+        kind: item.dataset.addNode || "",
+        orderId: item.dataset.order || "",
+        blueprintId: item.dataset.blueprint || "",
+        presentBlock: item.dataset.presentBlock || "",
+        presentPage: item.dataset.presentPage || "",
+        moved: false,
+      };
+      showPeek(item.dataset.peek);
+    });
+    document.addEventListener("pointermove", (e) => {
+      const drag = session.palette;
+      if (!drag) return;
+      if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 5) return;
+      const start = !drag.moved;
+      drag.moved = true;
+      followPeek(e.clientX, e.clientY, start);
+    });
+    document.addEventListener("pointerup", (e) => {
+      const drag = session.palette;
+      if (!drag) return;
+      session.palette = null;
+      const peek = document.getElementById("calc-peek");
+      peek?.classList.remove("is-glide", "is-follow");
+      if (!drag.moved) {
+        placeFromPalette(drag, null);
+        return;
+      }
+      const rect = $("calc-board")?.getBoundingClientRect();
+      const inside = rect && e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+      if (inside) {
+        const bp = activeBlueprint();
+        const at = screenToWorld(e.clientX, e.clientY, bp);
+        const card = peek?.querySelector(".calc-node");
+        const zoom = bp?.zoom || 1;
+        at.x -= ((card?.offsetWidth || 230) / 2) / zoom;
+        at.y -= 22 / zoom;
+        placeFromPalette(drag, at);
+        hidePeek();
+        return;
+      }
+      const item = document.elementFromPoint(e.clientX, e.clientY)?.closest?.("#calc-palette [data-peek]");
+      if (item) showPeek(item.dataset.peek);
+      else hidePeek();
+    });
+    document.addEventListener("pointercancel", () => {
+      if (!session.palette) return;
+      session.palette = null;
+      hidePeek();
+    });
     $("calc-side")?.addEventListener("dragstart", (e) => {
       const order = e.target.closest("[data-order]");
       const tool = e.target.closest("[data-add-node]");
@@ -1679,7 +2612,7 @@
       if (e.button === 1) e.preventDefault();
     });
     board.addEventListener("contextmenu", (e) => {
-      if (e.target.closest(".calc-port, .calc-port-menu")) e.preventDefault();
+      if (e.target.closest(".calc-wire-hit, #calc-wires, .calc-port, .calc-port-menu")) e.preventDefault();
     });
     board.addEventListener("wheel", onBoardWheel, { passive: false });
     const mini = $("calc-minimap");
@@ -2220,7 +3153,11 @@
         const owner = bp.nodes.find((item) => item.id === over.closest(".calc-node")?.dataset.node);
         const dragNode = bp.nodes.find((item) => item.id === (session.linking.reverse ? session.linking.to : session.linking.from));
         const dragPort = session.linking.reverse ? session.linking.toPort : session.linking.fromPort;
-        if (portSignal(owner, over.dataset.port) === portSignal(dragNode, dragPort)) over.classList.add("is-hot");
+        const fromNode = session.linking.reverse ? owner : dragNode;
+        const fromPort = session.linking.reverse ? over.dataset.port : dragPort;
+        const toNode = session.linking.reverse ? dragNode : owner;
+        const toPort = session.linking.reverse ? dragPort : over.dataset.port;
+        if (fromNode && toNode && passSignalOk(fromNode, fromPort, toNode, toPort, bp.links)) over.classList.add("is-hot");
       }
     });
     document.addEventListener("keydown", (e) => {
@@ -2247,7 +3184,7 @@
           markCommit(true);
           return;
         }
-        if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === "KeyD") {
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.code === "KeyD" || e.code === "KeyC" || e.code === "KeyX" || e.code === "KeyV")) {
           e.preventDefault();
           return;
         }
@@ -2265,7 +3202,7 @@
           plannerDeleteSelected();
           return;
         }
-        if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === "KeyD") {
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.code === "KeyD" || e.code === "KeyC" || e.code === "KeyX" || e.code === "KeyV")) {
           e.preventDefault();
           return;
         }
@@ -2295,9 +3232,24 @@
       }
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
       if (typing) return;
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === "KeyD" && session.selected) {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === "KeyD" && session.selected) {
         e.preventDefault();
         duplicateNode(session.selected);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === "KeyC" && session.selected) {
+        e.preventDefault();
+        copyNodes(false);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === "KeyX" && session.selected) {
+        e.preventDefault();
+        copyNodes(true);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === "KeyV" && nodeClip) {
+        e.preventDefault();
+        pasteNodes();
         return;
       }
       if ((e.key === "Delete" || e.key === "Backspace") && session.selectedLink) {

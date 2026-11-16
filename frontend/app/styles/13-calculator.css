@@ -118,7 +118,13 @@
     var(--bg-2);
   cursor: grab;
 }
-.calc-board:active { cursor: grabbing; }
+html[data-theme] .calc-board.is-snap,
+.calc-board.is-snap {
+  background-color: var(--bg-2);
+  background-image: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--accent-2) 38%, transparent) 1.2px, transparent 0);
+  background-position: var(--snap-x, 0px) var(--snap-y, 0px);
+  background-size: var(--snap-size, 20px) var(--snap-size, 20px);
+}
 .calc-marquee {
   position: absolute;
   z-index: 6;
@@ -138,6 +144,9 @@
 }
 .calc-refresh,
 .calc-chain-move,
+.calc-wire-route,
+.calc-wire-avoid,
+.calc-snap,
 .calc-present-btn,
 .calc-prune {
   position: relative;
@@ -158,6 +167,9 @@
 }
 .calc-refresh:hover,
 .calc-chain-move:hover,
+.calc-wire-route:hover,
+.calc-wire-avoid:hover,
+.calc-snap:hover,
 .calc-present-btn:hover,
 .calc-prune:hover {
   border-color: var(--accent-2);
@@ -175,12 +187,22 @@
 .calc-chain-move[data-chain="off"] .calc-chain-off,
 .calc-chain-move[data-chain="in"] .calc-chain-in,
 .calc-chain-move[data-chain="out"] .calc-chain-out { display: block; }
-.calc-chain-move.is-on {
+.calc-chain-move.is-on,
+.calc-wire-avoid.is-on,
+.calc-snap.is-on {
   border-color: var(--accent-2);
   color: var(--accent);
   background: color-mix(in srgb, var(--accent-2) 18%, var(--card));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 28%, transparent), var(--shadow);
 }
+.calc-wire-route,
+.calc-wire-avoid,
+.calc-snap { display: grid; place-items: center; padding: 0; }
+.calc-wire-route .calc-route-ico { display: none; }
+.calc-wire-route[data-route="curve"] .calc-route-curve,
+.calc-wire-route[data-route="ortho"] .calc-route-ortho,
+.calc-wire-route[data-route="diag"] .calc-route-diag { display: block; }
+.calc-wire-avoid svg { display: block; }
 .calc-bp-name {
   position: absolute;
   top: 10px;
@@ -492,6 +514,69 @@ html[data-theme="dark"] .calc-mini-toggle {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+.calc-group-btn.is-open {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 1px var(--accent-2);
+}
+.calc-palette {
+  position: fixed;
+  z-index: 40;
+  width: 220px;
+  box-sizing: border-box;
+  padding: 8px;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid var(--accent-2);
+  background: color-mix(in srgb, var(--card) 94%, transparent);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transform-origin: left center;
+}
+.calc-palette[hidden] { display: none !important; }
+.calc-palette.is-on {
+  transition: top 180ms cubic-bezier(.2, .8, .2, 1), left 180ms cubic-bezier(.2, .8, .2, 1), height 180ms cubic-bezier(.2, .8, .2, 1), clip-path 180ms cubic-bezier(.2, .8, .2, 1);
+}
+.calc-palette::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+}
+.calc-palette .calc-tool,
+.calc-palette .calc-order { width: 100%; margin: 0; }
+.calc-peek {
+  position: fixed;
+  z-index: 41;
+  pointer-events: none;
+  filter: drop-shadow(0 16px 28px rgba(0, 0, 0, 0.28));
+}
+.calc-peek[hidden] { display: none !important; }
+.calc-peek.is-follow {
+  transition: transform 180ms cubic-bezier(.2, .8, .2, 1);
+}
+.calc-peek.is-glide {
+  transition: left 180ms cubic-bezier(.2, .8, .2, 1), top 180ms cubic-bezier(.2, .8, .2, 1), transform 180ms cubic-bezier(.2, .8, .2, 1);
+}
+.calc-peek .calc-node,
+.calc-peek .calc-group-chrome {
+  pointer-events: none;
+}
+.calc-peek .calc-node {
+  position: relative;
+  left: auto !important;
+  top: auto !important;
+}
+.calc-peek-group { position: relative; }
+.calc-peek-group .calc-node,
+.calc-peek-group .calc-group-chrome {
+  position: absolute;
+  left: 0 !important;
+  top: 0 !important;
+}
 .calc-orders { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .calc-schemes { flex: 0 0 auto; }
 .calc-schemes .calc-order-list { max-height: 160px; }
@@ -557,6 +642,51 @@ html[data-theme="dark"] .calc-mini-toggle {
   padding: 8px 8px 10px;
   overflow: visible;
 }
+.calc-node.is-joint {
+  width: 36px;
+  height: 36px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+.calc-node.is-joint.is-on { box-shadow: 0 0 0 2px var(--accent-2); border-radius: 50%; }
+.calc-node.is-joint .calc-joint-dot {
+  left: 8px;
+  top: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--joint, var(--accent));
+  background-image: none;
+  border: 2px solid var(--card);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--joint, var(--accent)) 45%, transparent);
+  opacity: 1;
+}
+.calc-node.is-joint .calc-port {
+  position: absolute;
+  top: 11px;
+  margin: 0;
+  background: var(--joint, var(--accent-2));
+}
+.calc-node.is-joint .calc-port.in { left: -2px; }
+.calc-node.is-joint .calc-port.out { right: -2px; }
+.calc-node.is-joint .calc-x {
+  position: absolute;
+  top: -10px;
+  right: -12px;
+  opacity: 0;
+}
+.calc-node.is-joint:hover .calc-x,
+.calc-node.is-joint.is-on .calc-x { opacity: 1; }
+.calc-node.is-bus { width: 220px; }
+.calc-row.bus {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  text-align: center;
+}
+.calc-row.bus > span { color: var(--ink); font-weight: 700; }
 .calc-node.is-group {
   z-index: 0;
   width: auto;
@@ -958,6 +1088,7 @@ html[data-theme="dark"] .calc-mini-toggle {
 .calc-node.is-electrics .calc-port.out { background: #fbbf24; box-shadow: 0 0 0 1px #b45309; }
 .calc-port[data-signal="plan"] { background: #c4b5fd !important; box-shadow: 0 0 0 1px #6d28d9 !important; }
 .calc-plan-tag { color: #7c3aed; font-size: 11px; letter-spacing: 0.02em; }
+.calc-row.is-idle > span { color: var(--muted); }
 .calc-node.is-openings .calc-node-sub,
 .calc-node.is-electrics .calc-node-sub,
 .calc-node.is-openings .calc-row small,
@@ -1313,8 +1444,8 @@ html[data-theme="dark"] .calc-mini-toggle {
 .mark-opt.is-on, .mark-opt:hover { background: color-mix(in srgb, #7c3aed 22%, var(--bg-2)); }
 .mark-custom input, .mark-custom select { min-width: 0; }
 .mark-custom input[name="name"] { flex: 1 1 120px; }
-.calc-board.is-link-out.is-link-plan .calc-port.in:not([data-signal="plan"]),
-.calc-board.is-link-in.is-link-plan .calc-port.out:not([data-signal="plan"]),
+.calc-board.is-link-out.is-link-plan .calc-port.in:not([data-signal="plan"]):not([data-pass]),
+.calc-board.is-link-in.is-link-plan .calc-port.out:not([data-signal="plan"]):not([data-pass]),
 .calc-board.is-link-out.is-link-num .calc-port.in[data-signal="plan"],
 .calc-board.is-link-in.is-link-num .calc-port.out[data-signal="plan"] {
   transform: none;

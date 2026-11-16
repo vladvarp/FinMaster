@@ -624,6 +624,12 @@
     const id = String(portId || "");
     if (node.type === "planner" && (id === "plan" || id.startsWith("plan:"))) return "plan";
     if ((node.type === "openings" || node.type === "electrics") && (id === PLAN_PORT || id.startsWith("plan:"))) return "plan";
+    if (node.type === "joint") return node.signal === "plan" ? "plan" : "num";
+    if (node.type === "bus") {
+      const laneId = id.startsWith("in:") ? id.slice(3) : id.startsWith("out:") ? id.slice(4) : "";
+      const lane = (node.lanes || []).find((item) => item.id === laneId);
+      return lane?.signal === "plan" ? "plan" : "num";
+    }
     return "num";
   }
 
@@ -1406,20 +1412,14 @@
       .join("");
   }
 
-  function planInRow(portId, linked, label) {
-    return `<div class="calc-row in">
+  function planPairRow(portId, linked, outPort) {
+    const out = outPort
+      ? `<b class="calc-plan-tag">${esc(outPort.name)}</b><i class="calc-port out" data-port="${esc(outPort.id)}" data-io="out" data-signal="plan" title="${esc(outPort.name)}"></i>`
+      : "";
+    return `<div class="calc-row both${linked ? "" : " is-idle"}">
       <i class="calc-port in" data-port="${esc(portId)}" data-io="in" data-signal="plan" title="Чертёж"></i>
       <span>Чертёж</span>
-      <b class="calc-plan-tag">${esc(label || "план")}</b>
-      ${linked ? `<button type="button" class="calc-mini" data-del-in-link="${esc(portId)}" title="Удалить связь">×</button>` : ""}
-    </div>`;
-  }
-
-  function planOutRow(port) {
-    return `<div class="calc-row out">
-      <span class="calc-row-name">Чертёж</span>
-      <b class="calc-plan-tag">${esc(port.name)}</b>
-      <i class="calc-port out" data-port="${esc(port.id)}" data-io="out" data-signal="plan" title="${esc(port.name)}"></i>
+      ${out}
     </div>`;
   }
 
@@ -1473,7 +1473,7 @@
       const linked = (bp.links || []).some((link) => link.to === node.id && link.toPort === feedPort(feed));
       if (!plan && !linked) {
         if (feed !== node.feeds[node.feeds.length - 1]) return "";
-        return `<div class="calc-plan-group">${planInRow(feedPort(feed), false, "план")}</div>`;
+        return `<div class="calc-plan-group">${planPairRow(feedPort(feed), false, null)}</div>`;
       }
       const feedTones = markTones(node, plan?.color || tones.floor);
       const feedPorts = outputs.filter((port) => port.feed === feed.id && !port.common);
@@ -1494,9 +1494,9 @@
           ${taken ? `<button type="button" class="calc-mini" data-del-in-link="${esc(port.id)}" title="Удалить связь">×</button>` : ""}
         </div>`;
       }).join("");
-      const planOut = feedPorts.filter((port) => port.signal === "plan").map(planOutRow).join("");
+      const plans = feedPorts.filter((port) => port.signal === "plan");
       const nums = countRows(node, feedPorts, graph);
-      return `<div class="calc-plan-group" style="--planner-color:${esc(feedTones.floor)}">${film}${planInRow(feedPort(feed), linked, linked ? feedTitle(node, feed, bp) : "план")}${binds}${planOut}${nums}</div>`;
+      return `<div class="calc-plan-group" style="--planner-color:${esc(feedTones.floor)}">${film}${planPairRow(feedPort(feed), linked, plans[0] || null)}${binds}${nums}</div>`;
     }).join("");
     const commons = outputs.filter((port) => port.common);
     const title = electrics ? "Имя электрики" : "Имя проёмов";

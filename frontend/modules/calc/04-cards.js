@@ -937,17 +937,14 @@
     });
   }
 
-  function addNode(type, point, extra) {
-    const bp = activeBlueprint();
-    if (!bp) return;
-    const at = point || viewCenter(bp);
-    session.place += 1;
-    const node = { id: uid(), type, x: at.x, y: at.y };
+  function blankNode(type, extra) {
+    const node = { id: uid(), type, x: 0, y: 0 };
+    const color = GROUP_COLORS[0];
     if (type === "math") node.op = "+";
     if (type === "result") {
       node.op = "result";
       node.name = "Результат";
-      node.priority = nextResultPriority(bp);
+      node.priority = 1;
       node.visible = true;
     }
     if (type === "percent") node.op = "percent";
@@ -964,7 +961,7 @@
       ];
     }
     if (type === "order") node.orderId = extra?.orderId || "";
-    if (type === "filter") {
+    if (type === "filter" || type === "dashboard") {
       node.customers = [];
       node.orderIds = [];
       node.period = "all";
@@ -976,23 +973,11 @@
       node.dateFrom = "";
       node.dateTo = "";
     }
-    if (type === "dashboard") {
-      node.customers = [];
-      node.orderIds = [];
-      node.period = "all";
-      node.payFilters = [];
-      node.payStatusFilters = [];
-      node.statuses = [];
-      node.orderTypes = [];
-      node.products = [];
-      node.dateFrom = "";
-      node.dateTo = "";
-      node.openPorts = DASH_DEFAULT.slice();
-    }
+    if (type === "dashboard") node.openPorts = DASH_DEFAULT.slice();
     if (type === "planner") {
       const ids = [uid(), uid(), uid(), uid()];
       node.name = "Планировщик";
-      node.color = GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
+      node.color = color;
       node.height = 2.7;
       node.heightOut = false;
       node.points = [
@@ -1009,7 +994,7 @@
     }
     if (type === "openings") {
       node.name = "Проёмы";
-      node.color = GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
+      node.color = color;
       node.holes = [];
       node.outOn = {};
       node.owns = [];
@@ -1017,7 +1002,7 @@
     }
     if (type === "electrics") {
       node.name = "Электрика";
-      node.color = GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
+      node.color = color;
       node.fixtures = [];
       node.outOn = {};
       node.view = "floor";
@@ -1030,11 +1015,32 @@
     }
     if (type === "group") {
       node.name = "Группа";
-      node.color = GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
+      node.color = color;
       node.w = 320;
       node.h = 220;
     }
     if (type === "comment") node.text = "";
+    if (type === "joint") {
+      node.signal = "num";
+      node.tone = "";
+    }
+    if (type === "bus") node.lanes = [{ id: uid(), signal: "num", tone: "" }];
+    return node;
+  }
+
+  function addNode(type, point, extra) {
+    const bp = activeBlueprint();
+    if (!bp) return;
+    const at = point || viewCenter(bp);
+    session.place += 1;
+    const node = blankNode(type, extra);
+    loadWirePrefs();
+    node.x = session.wireSnap ? snapCoord(at.x) : at.x;
+    node.y = session.wireSnap ? snapCoord(at.y) : at.y;
+    if (type === "result") node.priority = nextResultPriority(bp);
+    if (type === "planner" || type === "openings" || type === "electrics" || type === "group") {
+      node.color = GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
+    }
     bp.nodes.push(node);
     session.selected = node.id;
     dirty();
@@ -1058,26 +1064,47 @@
     render();
   }
 
-  function duplicateNode(id) {
-    const picked = [...selectionIds()];
-    const ids = picked.length && (!id || picked.includes(id)) ? picked : id ? [id] : [];
+  let nodeClip = null;
+
+  function nodeSnapshot(ids) {
     const bp = activeBlueprint();
-    if (!bp || !ids.length) return;
+    const idSet = new Set(ids || []);
+    if (!bp || !idSet.size) return null;
+    const nodes = [];
+    idSet.forEach((srcId) => {
+      const src = (bp.nodes || []).find((node) => node.id === srcId);
+      if (!src) return;
+      try {
+        nodes.push(JSON.parse(JSON.stringify(src)));
+      } catch {
+        /* битую ноду в буфер не кладём */
+      }
+    });
+    if (!nodes.length) return null;
+    const links = (bp.links || [])
+      .filter((link) => idSet.has(link.from) || idSet.has(link.to))
+      .map((link) => ({ from: link.from, fromPort: link.fromPort, to: link.to, toPort: link.toPort }));
+    return { nodes, links, fromBp: bp.id };
+  }
+
+  function placeNodeCopies(sources, links, shiftX, shiftY) {
+    const bp = activeBlueprint();
+    if (!bp || !sources?.length) return;
     const map = new Map();
     const portMap = new Map();
     const clones = [];
-    ids.forEach((srcId) => {
-      const src = (bp.nodes || []).find((node) => node.id === srcId);
-      if (!src || map.has(srcId)) return;
+    const have = new Set((bp.nodes || []).map((node) => node.id));
+    sources.forEach((src) => {
       let clone;
       try {
         clone = JSON.parse(JSON.stringify(src));
       } catch {
         return;
       }
+      const prev = src.id;
       clone.id = uid();
-      clone.x = (Number(src.x) || 0) + 48;
-      clone.y = (Number(src.y) || 0) + 48;
+      clone.x = (Number(src.x) || 0) + (shiftX || 0);
+      clone.y = (Number(src.y) || 0) + (shiftY || 0);
       const ports = {};
       if (clone.type === "formula") {
         (clone.inputs || []).forEach((port) => {
@@ -1091,8 +1118,8 @@
           port.id = next;
         });
       }
-      map.set(srcId, clone.id);
-      portMap.set(srcId, ports);
+      map.set(prev, clone.id);
+      portMap.set(prev, ports);
       clones.push(clone);
     });
     if (!clones.length) return;
@@ -1105,10 +1132,10 @@
     (bp.links || []).forEach((link) => takenPort.add(`${link.to}|${link.toPort}`));
     const remapPort = (nodeId, portId) => portMap.get(nodeId)?.[portId] || portId;
     const extra = [];
-    (bp.links || []).forEach((link) => {
+    (links || []).forEach((link) => {
       if (!map.has(link.from) && !map.has(link.to)) return;
-      const from = map.get(link.from) || link.from;
-      const to = map.get(link.to) || link.to;
+      const from = map.get(link.from) || (have.has(link.from) ? link.from : "");
+      const to = map.get(link.to) || (have.has(link.to) ? link.to : "");
       if (!from || !to || from === to) return;
       const fromPort = remapPort(link.from, link.fromPort);
       const toPort = remapPort(link.to, link.toPort);
@@ -1132,6 +1159,50 @@
     dirty();
     render();
     if (extra.some((link) => (bp.nodes || []).some((node) => node.id === link.to && node.type === "order"))) api?.refreshOrders?.();
+  }
+
+  function duplicateNode(id) {
+    const picked = [...selectionIds()];
+    const ids = picked.length && (!id || picked.includes(id)) ? picked : id ? [id] : [];
+    const snap = nodeSnapshot(ids);
+    if (!snap) return;
+    placeNodeCopies(snap.nodes, snap.links, 48, 48);
+  }
+
+  function copyNodes(cut) {
+    const snap = nodeSnapshot([...selectionIds()]);
+    if (!snap) return;
+    nodeClip = { ...snap, sameGen: 0, crossBp: "", crossGen: 0, cross: null };
+    if (cut) removeNodes(snap.nodes.map((node) => node.id));
+  }
+
+  function pasteNodes() {
+    const clip = nodeClip;
+    const bp = activeBlueprint();
+    if (!clip?.nodes?.length || !bp) return;
+    let shiftX = 0;
+    let shiftY = 0;
+    if (clip.fromBp === bp.id) {
+      clip.sameGen += 1;
+      shiftX = 48 * clip.sameGen;
+      shiftY = shiftX;
+    } else {
+      if (clip.crossBp !== bp.id) {
+        const xs = clip.nodes.map((node) => Number(node.x) || 0);
+        const ys = clip.nodes.map((node) => Number(node.y) || 0);
+        const center = viewCenter(bp);
+        clip.cross = {
+          x: center.x - (Math.min(...xs) + Math.max(...xs)) / 2,
+          y: center.y - (Math.min(...ys) + Math.max(...ys)) / 2,
+        };
+        clip.crossBp = bp.id;
+        clip.crossGen = 0;
+      }
+      clip.crossGen += 1;
+      shiftX = clip.cross.x + 48 * (clip.crossGen - 1);
+      shiftY = clip.cross.y + 48 * (clip.crossGen - 1);
+    }
+    placeNodeCopies(clip.nodes, clip.links, shiftX, shiftY);
   }
 
   function pruneOrphanNodes() {
@@ -1257,7 +1328,7 @@
     if (!fromHit) return false;
     const port = resolveToPort(dst, toPort, bp.links);
     if (!port) return false;
-    if (portSignal(src, fromHit) !== portSignal(dst, port)) {
+    if (!passSignalOk(src, fromHit, dst, port, bp.links)) {
       api?.toast?.("Чертёж соединяется только с чертежом");
       return false;
     }
@@ -1291,6 +1362,7 @@
     bp.links = bp.links.filter((link) => !(link.to === to && link.toPort === port));
     bp.links.push({ id: uid(), from, fromPort: fromHit, to, toPort: port });
     replaced.forEach((link) => releaseOrderField(bp, link.from, link.fromPort));
+    syncPassNodes(bp);
     dirty();
     render();
     if (dst.type === "order") api?.refreshOrders?.();
@@ -1346,6 +1418,7 @@
         releaseOrderField(bp, gone.from, gone.fromPort);
         releaseOrderInputField(bp, gone.to, gone.toPort);
       }
+      syncPassNodes(bp);
       dirty();
       render();
       api?.refreshOrders?.();
@@ -1369,6 +1442,7 @@
         releaseOrderField(bp, link.from, link.fromPort);
         releaseOrderInputField(bp, link.to, link.toPort);
       });
+      syncPassNodes(bp);
       dirty();
       render();
       api?.refreshOrders?.();
@@ -1427,8 +1501,289 @@
     return String(order?.created_at || "").slice(0, 10);
   }
 
-  function calcToolButton(type, label, icon) {
-    return `<button type="button" class="btn calc-tool" data-add-node="${type}" draggable="true"><svg class="calc-tool-ico" viewBox="0 0 16 16" aria-hidden="true">${icon}</svg>${label}</button>`;
+  function calcToolButton(type, label, icon, peek) {
+    return `<button type="button" class="btn calc-tool" data-add-node="${esc(type)}" data-peek="${esc(peek || type)}"><svg class="calc-tool-ico" viewBox="0 0 16 16" aria-hidden="true">${icon}</svg>${label}</button>`;
+  }
+
+  function calcGroupButton(id, label, icon) {
+    return `<button type="button" class="btn calc-tool calc-group-btn" data-palette="${esc(id)}"><svg class="calc-tool-ico" viewBox="0 0 16 16" aria-hidden="true">${icon}</svg>${label}</button>`;
+  }
+
+  const PALETTE_ICONS = {
+    logic: `<path d="M4 4.2h3.2M8.8 4.2H12M8 4.2v3.2M4.6 11.2h2.4M9 11.2h2.4M8 7.4 5.8 11.2M8 7.4l2.2 3.8"/>`,
+    summary: `<path d="M3 13V8.4M8 13V3.6M13 13V6.4M2.2 13h11.6"/>`,
+    plan: `<path d="M3 3.2h10v9.6H3zM3 7.4h4.2"/>`,
+    marks: `<rect x="3" y="3.2" width="10" height="9.6" rx="1.6" stroke-dasharray="2.2 1.4"/>`,
+    schemes: `<path d="M12.6 3.2H3.6L8.4 8 3.6 12.8h9"/>`,
+    present: `<path d="M3 3.2h10v9.6H3zM5.2 10.2V7.4M8 10.2V5.2M10.8 10.2V8"/>`,
+    week: `<circle cx="8" cy="8" r="4.8"/><path d="M8 5.6V8l1.8 1.2"/>`,
+    month: `<path d="M3.2 4.2h9.6v8.6H3.2zM3.2 7h9.6M6 3v2.2M10 3v2.2"/>`,
+    quarter: `<path d="M3 3.2h4.4v4.4H3zM8.6 3.2H13v4.4H8.6zM3 8.4h4.4V12.8H3zM8.6 8.4H13v4.4H8.6z"/>`,
+    year: `<path d="M3.2 4.2h9.6v8.6H3.2zM3.2 7h9.6M6 3v2.2M10 3v2.2M8 9.2v2"/>`,
+  };
+
+  let paletteKey = "";
+  let paletteModel = { nodes: [], orders: [] };
+
+  function dayStart(date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+
+  function orderBuckets(orders) {
+    const today = dayStart(new Date());
+    const week = new Date(today);
+    week.setDate(week.getDate() - 6);
+    const month = new Date(today);
+    month.setDate(month.getDate() - 29);
+    const quarter = new Date(today);
+    quarter.setDate(quarter.getDate() - 89);
+    const buckets = [
+      { id: "order:week", name: "Недавние", icon: PALETTE_ICONS.week, items: [] },
+      { id: "order:month", name: "За месяц", icon: PALETTE_ICONS.month, items: [] },
+      { id: "order:quarter", name: "За квартал", icon: PALETTE_ICONS.quarter, items: [] },
+    ];
+    const years = new Map();
+    orders.forEach((order) => {
+      const stamp = orderStamp(order);
+      const day = stamp ? dayStart(new Date(`${stamp}T00:00:00`)) : null;
+      const ok = day && !Number.isNaN(day.getTime());
+      if (ok && day >= week) buckets[0].items.push(order);
+      else if (ok && day >= month) buckets[1].items.push(order);
+      else if (ok && day >= quarter) buckets[2].items.push(order);
+      else {
+        const key = ok ? String(day.getFullYear()) : "none";
+        if (!years.has(key)) years.set(key, []);
+        years.get(key).push(order);
+      }
+    });
+    const named = [...years.keys()].sort((a, b) => {
+      if (a === "none") return 1;
+      if (b === "none") return -1;
+      return b.localeCompare(a);
+    });
+    return [
+      ...buckets.filter((bucket) => bucket.items.length),
+      ...named.map((key) => ({
+        id: `order:${key}`,
+        name: key === "none" ? "Без даты" : `${key} г`,
+        icon: PALETTE_ICONS.year,
+        items: years.get(key),
+      })),
+    ];
+  }
+
+  function paletteItemButton(item) {
+    if (item.orderId) {
+      return `<button type="button" class="calc-order${item.used ? " is-used" : ""}" data-order="${esc(item.orderId)}" data-peek="order:${esc(item.orderId)}" title="${esc(item.tip)}"><b>${esc(item.number)}</b><span>${esc(item.sub)}</span><small>${esc(item.meta)}</small></button>`;
+    }
+    if (item.blueprintId) {
+      return `<button type="button" class="calc-order" data-blueprint="${esc(item.blueprintId)}" data-peek="scheme:${esc(item.blueprintId)}"><b>${esc(item.name)}</b><span>${esc(item.meta)}</span></button>`;
+    }
+    if (item.presentBlock) {
+      return `<button type="button" class="calc-order${item.used ? " is-used" : ""}" data-present-block="${esc(item.presentBlock)}" data-present-page="${esc(item.presentPage || "")}" data-present-used="${item.onScheme ? "1" : "0"}" data-peek="present:${esc(item.presentBlock)}" title="${esc(item.tip || "")}"><b>${esc(item.name)}</b><span>${esc(item.sub || "")}</span><small>${esc(item.meta || "")}</small></button>`;
+    }
+    return calcToolButton(item.type, item.label, item.icon, item.type);
+  }
+
+  function nodePeekHtml(kind, ref) {
+    const bp = activeBlueprint() || { links: [], nodes: [] };
+    const graph = { values: {}, errors: new Set() };
+    const presentItem = kind === "present"
+      ? (paletteModel.nodes.find((group) => group.id === "present")?.items || []).find((entry) => entry.presentBlock === ref)
+      : null;
+    const extra = kind === "order" ? { orderId: ref } : kind === "scheme" ? { blueprintId: ref } : kind === "present" ? { pageId: presentItem?.presentPage || "", blockId: ref, blockType: presentItem?.blockType || "metric", title: presentItem?.name || "Блок" } : null;
+    const node = blankNode(kind, extra);
+    if (!node) return "";
+    node.id = "peek";
+    node.x = 0;
+    node.y = 0;
+    if (kind === "math") return mathNodeHtml(node, bp, graph);
+    if (kind === "percent") return percentNodeHtml(node, bp, graph);
+    if (kind === "const") return constNodeHtml(node, graph);
+    if (kind === "result") return resultNodeHtml(node, bp, graph);
+    if (kind === "formula") return formulaNodeHtml(node, bp, graph);
+    if (kind === "comment") return commentNodeHtml(node);
+    if (kind === "joint") return jointNodeHtml(node);
+    if (kind === "bus") return busNodeHtml(node, bp, graph);
+    if (kind === "scheme") return schemeNodeHtml(node, graph);
+    if (kind === "filter") return filterNodeHtml(node, graph);
+    if (kind === "dashboard") return dashboardNodeHtml(node, bp, graph);
+    if (kind === "planner") return plannerNodeHtml(node, bp, graph);
+    if (kind === "openings") return openingsNodeHtml(node, bp, graph);
+    if (kind === "electrics") return electricsNodeHtml(node, bp, graph);
+    if (kind === "group") {
+      const w = Math.max(160, node.w || 320);
+      const h = Math.max(120, node.h || 220);
+      return `<div class="calc-peek-group" style="width:${w}px;height:${h}px">${groupNodeHtml(node, 1)}${groupChromeHtml(node, 2)}</div>`;
+    }
+    if (kind === "order") return orderNodeHtml(node, api.findOrder(ref), graph, bp);
+    if (kind === "present") return presentNodeHtml(node, bp, graph);
+    return "";
+  }
+
+  function ensureFlyout() {
+    let fly = document.getElementById("calc-palette");
+    if (fly) return fly;
+    fly = document.createElement("div");
+    fly.id = "calc-palette";
+    fly.className = "calc-palette";
+    fly.hidden = true;
+    document.body.appendChild(fly);
+    return fly;
+  }
+
+  function ensurePeek() {
+    let peek = document.getElementById("calc-peek");
+    if (peek) return peek;
+    peek = document.createElement("div");
+    peek.id = "calc-peek";
+    peek.className = "calc-peek";
+    peek.hidden = true;
+    document.body.appendChild(peek);
+    return peek;
+  }
+
+  function hidePeek() {
+    const peek = document.getElementById("calc-peek");
+    if (!peek) return;
+    peek.hidden = true;
+    peek.classList.remove("is-on", "is-glide", "is-follow");
+    peek.style.transform = "";
+  }
+
+  function placePeekRest() {
+    const peek = document.getElementById("calc-peek");
+    const fly = document.getElementById("calc-palette");
+    if (!peek || peek.hidden || peek.classList.contains("is-follow") || peek.classList.contains("is-glide")) return;
+    const anchor = fly && !fly.hidden ? fly.getBoundingClientRect() : $("calc-side")?.getBoundingClientRect();
+    if (!anchor) return;
+    const width = peek.offsetWidth || 230;
+    let left = anchor.right + 14;
+    if (left + width > window.innerWidth - 8) left = Math.max(8, anchor.left - width - 14);
+    peek.style.left = `${Math.round(left)}px`;
+    peek.style.top = `${Math.round(Math.max(8, Math.min(anchor.top, window.innerHeight - peek.offsetHeight - 8)))}px`;
+  }
+
+  function showPeek(token) {
+    if (session.palette?.moved) return;
+    const text = String(token || "");
+    const split = text.indexOf(":");
+    const kind = split < 0 ? text : text.slice(0, split);
+    const ref = split < 0 ? "" : text.slice(split + 1);
+    const html = nodePeekHtml(kind, ref);
+    if (!html) {
+      hidePeek();
+      return;
+    }
+    const peek = ensurePeek();
+    const card = peek.querySelector(".calc-node");
+    const prev = card ? { w: card.offsetWidth, h: card.offsetHeight } : null;
+    const first = peek.hidden;
+    peek.hidden = false;
+    peek.classList.add("is-on");
+    peek.innerHTML = html;
+    placePeekRest();
+    const next = peek.querySelector(".calc-node");
+    if (prev && next) {
+      requestAnimationFrame(() => {
+        const w = next.offsetWidth;
+        const h = next.offsetHeight;
+        if (prev.w === w && prev.h === h) return;
+        next.animate(
+          [
+            { width: `${prev.w}px`, height: `${prev.h}px` },
+            { width: `${w}px`, height: `${h}px` },
+          ],
+          { duration: 180, easing: "cubic-bezier(.2,.8,.2,1)" }
+        );
+      });
+    } else if (first) {
+      peek.animate(
+        [
+          { opacity: 0, transform: "translateX(-8px) scale(0.96)" },
+          { opacity: 1, transform: "none" },
+        ],
+        { duration: 180, easing: "cubic-bezier(.2,.8,.2,1)" }
+      );
+    }
+  }
+
+  function closePalette() {
+    paletteKey = "";
+    const fly = document.getElementById("calc-palette");
+    if (fly) {
+      fly.hidden = true;
+      fly.classList.remove("is-on");
+    }
+    document.querySelectorAll(".calc-group-btn.is-open").forEach((btn) => btn.classList.remove("is-open"));
+    if (!session.palette?.moved) hidePeek();
+  }
+
+  function paletteGroup(key) {
+    return [...paletteModel.nodes, ...paletteModel.orders].find((group) => group.id === key) || null;
+  }
+
+  function layoutFlyout(btn) {
+    const fly = ensureFlyout();
+    const rect = btn.getBoundingClientRect();
+    const prevH = fly.offsetHeight || rect.height;
+    const prevTop = fly.getBoundingClientRect().top || rect.top;
+    fly.style.transition = "none";
+    fly.style.overflowY = "hidden";
+    fly.style.height = "auto";
+    const natural = fly.offsetHeight;
+    const max = window.innerHeight - 16;
+    const want = Math.min(natural, max);
+    fly.dataset.scroll = natural > max + 1 ? "1" : "";
+    const top = Math.max(8, Math.min(rect.top - 6, window.innerHeight - want - 8));
+    fly.style.height = `${prevH}px`;
+    fly.style.top = `${prevTop}px`;
+    fly.style.left = `${Math.round(rect.right + 8)}px`;
+    void fly.offsetHeight;
+    fly.style.transition = "";
+    fly.hidden = false;
+    fly.classList.add("is-on");
+    fly.style.overflowY = fly.dataset.scroll ? "auto" : "hidden";
+    fly.style.height = `${want}px`;
+    fly.style.top = `${Math.round(top)}px`;
+  }
+
+  function openPalette(btn) {
+    const key = btn?.dataset.palette || "";
+    const group = paletteGroup(key);
+    if (!group) {
+      closePalette();
+      return;
+    }
+    const fly = ensureFlyout();
+    const same = paletteKey === key && fly.classList.contains("is-on") && !fly.hidden;
+    paletteKey = key;
+    document.querySelectorAll(".calc-group-btn.is-open").forEach((el) => el.classList.toggle("is-open", el === btn));
+    if (same) return;
+    fly.innerHTML = group.items.map(paletteItemButton).join("");
+    const rect = btn.getBoundingClientRect();
+    if (fly.hidden || !fly.classList.contains("is-on")) {
+      fly.hidden = false;
+      fly.style.left = `${Math.round(rect.right + 8)}px`;
+      fly.style.top = `${Math.round(rect.top)}px`;
+      fly.style.height = `${Math.round(rect.height)}px`;
+      fly.classList.add("is-on");
+    }
+    requestAnimationFrame(() => layoutFlyout(btn));
+  }
+
+  function syncPalette() {
+    if (!paletteKey) return;
+    const btn = document.querySelector(`.calc-group-btn[data-palette="${paletteKey}"]`);
+    const group = paletteGroup(paletteKey);
+    if (!btn || !group) {
+      closePalette();
+      return;
+    }
+    const fly = ensureFlyout();
+    fly.innerHTML = group.items.map(paletteItemButton).join("");
+    document.querySelectorAll(".calc-group-btn.is-open").forEach((el) => el.classList.toggle("is-open", el === btn));
+    layoutFlyout(btn);
   }
 
   function renderSide(bp) {
@@ -1455,42 +1810,122 @@
       (bp?.nodes || []).filter((node) => node.type === "order" && node.orderId).map((node) => node.orderId)
     );
     const schemes = (calc?.blueprints || []).filter((item) => item.id !== bp?.id);
+    const nodeGroups = [
+      {
+        id: "logic",
+        name: "Логика",
+        icon: PALETTE_ICONS.logic,
+        items: [
+          { type: "math", label: "Оператор", icon: `<path d="M8 3.2v9.6M3.2 8h9.6"/>` },
+          { type: "formula", label: "Формула", icon: `<path d="M5.6 3.2c-1.7.3-2.4 1.3-2.4 2.3 0 1.5 1.1 2.1 2.3 2.3-1.5.5-2.5 1.5-2.5 3 0 1.4 1.1 2.2 2.6 2.2M9.1 4.4l3.8 7.2M9.4 8.2h3.2"/>` },
+          { type: "percent", label: "Процент", icon: `<circle cx="5" cy="4.8" r="1.45" fill="currentColor" stroke="none"/><circle cx="11" cy="11.2" r="1.45" fill="currentColor" stroke="none"/><path d="M12.3 3.4 3.7 12.6"/>` },
+          { type: "const", label: "Константа", icon: `<rect x="3" y="3" width="10" height="10" rx="2"/><path d="M8 5.4v5.2"/>` },
+        ],
+      },
+      {
+        id: "summary",
+        name: "Сводка",
+        icon: PALETTE_ICONS.summary,
+        items: [
+          { type: "filter", label: "Фильтр", icon: `<path d="M2.6 3.2h10.8L9.4 8.2v4.2l-2.8 1.2V8.2z"/>` },
+          { type: "dashboard", label: "Дашборд", icon: `<path d="M3 13V8.4M8 13V3.6M13 13V6.4M2.2 13h11.6"/>` },
+        ],
+      },
+      {
+        id: "plan",
+        name: "Планировка",
+        icon: PALETTE_ICONS.plan,
+        items: [
+          { type: "planner", label: "Планировщик", icon: `<path d="M3 3.2h10v9.6H3zM3 7.4h4.2"/>` },
+          { type: "openings", label: "Проёмы", icon: `<path d="M3 3.2h10v9.6H3zM6.2 12.8V7.2h3.6v5.6M4.2 6.2h2.2v2.4H4.2z"/>` },
+          { type: "electrics", label: "Электрика", icon: `<path d="M8 2.8v3.2M6.2 6h3.6v2.4L8 13.2 6.2 8.4V6z"/>` },
+        ],
+      },
+      {
+        id: "marks",
+        name: "Разметка",
+        icon: PALETTE_ICONS.marks,
+        items: [
+          { type: "result", label: "Результат", icon: `<path d="M2.6 5.2h6.4M2.6 10.8h6.4M10.2 8h3.4M11.6 6.2 13.8 8l-2.2 1.8"/>` },
+          { type: "group", label: "Группа", icon: `<rect x="3" y="3" width="10" height="10" rx="1.5" stroke-dasharray="2.2 1.5"/>` },
+          { type: "comment", label: "Комментарий", icon: `<path d="M3 2.8h6.6L13 6.2v7H3zM9.4 2.9V6h3.2M5 8.2h6M5 10.6h4"/>` },
+          { type: "joint", label: "Точка", icon: `<circle cx="8" cy="8" r="3.1"/>` },
+          { type: "bus", label: "Канал", icon: `<circle cx="3.2" cy="8" r="1.45" fill="currentColor" stroke="none"/><circle cx="12.8" cy="8" r="1.45" fill="currentColor" stroke="none"/><path d="M5 8h6"/>` },
+        ],
+      },
+    ];
+    if (schemes.length) {
+      nodeGroups.push({
+        id: "schemes",
+        name: "Схемы",
+        icon: PALETTE_ICONS.schemes,
+        items: schemes.map((item) => {
+          const n = (item.nodes || []).filter((node) => node.type === "result" && resultVisible(node)).length;
+          return { blueprintId: item.id, name: item.name || "Схема", meta: n ? `${n} рез.` : "нет результатов" };
+        }),
+      });
+    }
+    const presentSkip = new Set(["title", "note", "spacer"]);
+    const presentItems = [];
+    (window.FinPresent?.pages?.() || []).forEach((page) => {
+      (page.blocks || []).forEach((block) => {
+        if (presentSkip.has(block.type)) return;
+        const meta = window.FinPresent?.blockMeta?.(block.type) || { name: block.type, ports: [] };
+        const usage = presentUsage(block.id);
+        const onScheme = usage.onActive > 0;
+        const onOther = !onScheme && usage.onOther > 0;
+        let metaText = "Не на схеме";
+        let tip = "Добавить ноду на схему";
+        if (onScheme) {
+          metaText = "На схеме";
+          tip = "Уже на этой схеме — наведите, чтобы подсветить";
+        } else if (onOther) {
+          metaText = "Другая схема";
+          tip = `Есть на: ${usage.otherNames.slice(0, 3).join(", ") || "другой схеме"}`;
+        }
+        presentItems.push({
+          presentBlock: block.id,
+          presentPage: page.id,
+          blockType: block.type,
+          name: block.title || meta.name || "Блок",
+          sub: `${page.name || "Страница"} · ${meta.name || block.type}`,
+          meta: metaText,
+          tip,
+          used: onScheme || onOther,
+          onScheme,
+        });
+      });
+    });
+    if (presentItems.length) {
+      nodeGroups.push({
+        id: "present",
+        name: "Презентация",
+        icon: PALETTE_ICONS.present,
+        items: presentItems,
+      });
+    }
+    const orderGroups = orderBuckets(orders).map((bucket) => ({
+      ...bucket,
+      items: bucket.items.map((order) => {
+        const n = orderLines(order).length;
+        const used = usedOrders.has(order.id);
+        const label = `${order.number || "—"} — ${order.name || order.customer || "Без названия"}`;
+        return {
+          orderId: order.id,
+          used,
+          number: order.number || "—",
+          sub: order.name || order.customer || "Без названия",
+          meta: used ? "на схеме" : `${n} поз.`,
+          tip: used ? `${label} · на схеме` : label,
+        };
+      }),
+    }));
+    paletteModel = { nodes: nodeGroups, orders: orderGroups };
     host.innerHTML = `
       <details class="calc-fold" data-fold="nodes" ${foldOpen("nodes") ? "open" : ""}>
         <summary class="calc-tools-label">Ноды</summary>
         <div class="calc-tools">
-          ${calcToolButton("math", "Оператор", `<path d="M8 3.2v9.6M3.2 8h9.6"/>`)}
-          ${calcToolButton("formula", "Формула", `<path d="M5.6 3.2c-1.7.3-2.4 1.3-2.4 2.3 0 1.5 1.1 2.1 2.3 2.3-1.5.5-2.5 1.5-2.5 3 0 1.4 1.1 2.2 2.6 2.2M9.1 4.4l3.8 7.2M9.4 8.2h3.2"/>`)}
-          ${calcToolButton("percent", "Процент", `<circle cx="5" cy="4.8" r="1.45" fill="currentColor" stroke="none"/><circle cx="11" cy="11.2" r="1.45" fill="currentColor" stroke="none"/><path d="M12.3 3.4 3.7 12.6"/>`)}
-          ${calcToolButton("const", "Константа", `<rect x="3" y="3" width="10" height="10" rx="2"/><path d="M8 5.4v5.2"/>`)}
-          ${calcToolButton("filter", "Фильтр", `<path d="M2.6 3.2h10.8L9.4 8.2v4.2l-2.8 1.2V8.2z"/>`)}
-          ${calcToolButton("dashboard", "Дашборд", `<path d="M3 13V8.4M8 13V3.6M13 13V6.4M2.2 13h11.6"/>`)}
-          ${calcToolButton("planner", "Планировщик", `<path d="M3 3.2h10v9.6H3zM3 7.4h4.2"/>`)}
-          ${calcToolButton("openings", "Проёмы", `<path d="M3 3.2h10v9.6H3zM6.2 12.8V7.2h3.6v5.6M4.2 6.2h2.2v2.4H4.2z"/>`)}
-          ${calcToolButton("electrics", "Электрика", `<path d="M8 2.8v3.2M6.2 6h3.6v2.4L8 13.2 6.2 8.4V6z"/>`)}
-          ${calcToolButton("result", "Результат", `<path d="M2.6 5.2h6.4M2.6 10.8h6.4M10.2 8h3.4M11.6 6.2 13.8 8l-2.2 1.8"/>`)}
-          ${calcToolButton("group", "Группа", `<rect x="3" y="3" width="10" height="10" rx="1.5" stroke-dasharray="2.2 1.5"/>`)}
-          ${calcToolButton("comment", "Комментарий", `<path d="M3 2.8h6.6L13 6.2v7H3zM9.4 2.9V6h3.2M5 8.2h6M5 10.6h4"/>`)}
-        </div>
-      </details>
-      <details class="calc-fold" data-fold="schemes" ${foldOpen("schemes") ? "open" : ""}>
-        <summary class="calc-tools-label">Схемы</summary>
-        <div class="calc-orders calc-schemes">
-          <div class="calc-order-list calc-scheme-list">
-            ${
-              schemes.length
-                ? schemes
-                    .map((item) => {
-                      const n = (item.nodes || []).filter((node) => node.type === "result" && resultVisible(node)).length;
-                      return `<button type="button" class="calc-order" draggable="true" data-blueprint="${esc(item.id)}">
-                        <b>${esc(item.name || "Схема")}</b>
-                        <span>${n ? `${n} рез.` : "нет результатов"}</span>
-                      </button>`;
-                    })
-                    .join("")
-                : `<div class="calc-empty">Другая схема станет нодой: её выходы — ноды «Результат»</div>`
-            }
-          </div>
+          ${nodeGroups.map((group) => calcGroupButton(group.id, group.name, group.icon)).join("")}
         </div>
       </details>
       <details class="calc-fold" data-fold="orders" ${foldOpen("orders") ? "open" : ""}>
@@ -1500,27 +1935,16 @@
             <input type="search" id="calc-order-search" placeholder="Номер, название…" value="${esc(session.search)}" autocomplete="off" />
             <button type="button" class="search-clear" data-search-clear="calc-order-search" title="Очистить" aria-label="Очистить поиск">×</button>
           </div>
-          <div class="calc-order-list">
+          <div class="calc-tools calc-order-groups">
             ${
-              orders.length
-                ? orders
-                    .map((order) => {
-                      const n = orderLines(order).length;
-                      const used = usedOrders.has(order.id);
-                      const label = `${order.number || "—"} — ${order.name || order.customer || "Без названия"}`;
-                      const tip = used ? `${label} · на схеме` : label;
-                      return `<button type="button" class="calc-order${used ? " is-used" : ""}" draggable="true" data-order="${esc(order.id)}" title="${esc(tip)}">
-                        <b>${esc(order.number || "—")}</b>
-                        <span>${esc(order.name || order.customer || "Без названия")}</span>
-                        <small>${used ? "на схеме" : `${n} поз.`}</small>
-                      </button>`;
-                    })
-                    .join("")
-                : `<div class="calc-empty">Нет заказов</div>`
+              orderGroups.length
+                ? orderGroups.map((group) => calcGroupButton(group.id, group.name, group.icon)).join("")
+                : `<div class="calc-empty">${orders.length ? "Нет заказов в группах" : "Нет заказов"}</div>`
             }
           </div>
         </div>
       </details>`;
+    syncPalette();
   }
 
   function hidePortMenu() {
@@ -2358,6 +2782,224 @@
       </header>
       <i class="calc-resize" data-resize-group="${esc(node.id)}" title="Изменить размер"></i>
     </div>`;
+  }
+
+  function busLanes(node) {
+    if (!node) return [];
+    if (!Array.isArray(node.lanes) || !node.lanes.length) node.lanes = [{ id: uid(), signal: "num", tone: "" }];
+    return node.lanes;
+  }
+
+  function laneIdOf(portId) {
+    const id = String(portId || "");
+    if (id.startsWith("in:")) return id.slice(3);
+    if (id.startsWith("out:")) return id.slice(4);
+    return "";
+  }
+
+  function laneOf(node, portId) {
+    const id = laneIdOf(portId);
+    return (node?.lanes || []).find((item) => item.id === id) || null;
+  }
+
+  function laneIncoming(bp, node, lane) {
+    return (bp.links || []).find((link) => link.to === node.id && link.toPort === `in:${lane.id}`) || null;
+  }
+
+  function passSignalOk(src, fromPort, dst, toPort, links) {
+    if (portSignal(src, fromPort) === portSignal(dst, toPort)) return true;
+    const list = links || [];
+    if (dst?.type === "joint" && String(toPort) === "in") return true;
+    if (src?.type === "joint" && String(fromPort) === "out") {
+      const incoming = list.some((link) => link.to === src.id && link.toPort === "in");
+      return !incoming && !src.tone;
+    }
+    if (dst?.type === "bus") {
+      const lane = laneOf(dst, toPort);
+      return !!lane && String(toPort).startsWith("in:");
+    }
+    if (src?.type === "bus") {
+      const lane = laneOf(src, fromPort);
+      if (!lane) return false;
+      const incoming = list.some((link) => link.to === src.id && link.toPort === `in:${lane.id}`);
+      return !incoming && !lane.tone;
+    }
+    return false;
+  }
+
+  function applyPassTone(node, lane, signal, tone) {
+    const target = lane || node;
+    const nextSignal = signal === "plan" ? "plan" : "num";
+    const nextTone = nextSignal === "plan" ? "plan" : (tone || "");
+    const changed = target.signal !== nextSignal || target.tone !== nextTone;
+    target.signal = nextSignal;
+    target.tone = nextTone;
+    return changed;
+  }
+
+  function dropMismatchedOuts(bp, nodeId, portId, signal) {
+    bp.links = (bp.links || []).filter((link) => {
+      if (link.from !== nodeId || link.fromPort !== portId) return true;
+      const dst = (bp.nodes || []).find((item) => item.id === link.to);
+      if (!dst) return false;
+      if (dst.type === "joint" || (dst.type === "bus" && !laneOf(dst, link.toPort)?.tone)) return true;
+      return portSignal(dst, link.toPort) === signal;
+    });
+  }
+
+  function syncPassNodes(bp) {
+    if (!bp) return;
+    for (let pass = 0; pass < 2; pass += 1) syncPassNodesOnce(bp);
+  }
+
+  function syncPassNodesOnce(bp) {
+    (bp.nodes || []).forEach((node) => {
+      if (node.type === "joint") {
+        const incoming = (bp.links || []).find((link) => link.to === node.id && link.toPort === "in");
+        if (incoming) {
+          const src = (bp.nodes || []).find((item) => item.id === incoming.from);
+          if (src) {
+            const signal = portSignal(src, incoming.fromPort) === "plan" ? "plan" : "num";
+            if (applyPassTone(node, null, signal, wireKind(src, incoming.fromPort))) dropMismatchedOuts(bp, node.id, "out", signal);
+          }
+          return;
+        }
+        const outgoing = (bp.links || []).find((link) => link.from === node.id && link.fromPort === "out");
+        if (!outgoing) {
+          node.signal = "num";
+          node.tone = "";
+          return;
+        }
+        if (!node.tone) {
+          const dst = (bp.nodes || []).find((item) => item.id === outgoing.to);
+          if (portSignal(dst, outgoing.toPort) === "plan") applyPassTone(node, null, "plan", "plan");
+        }
+        return;
+      }
+      if (node.type !== "bus") return;
+      const lanes = busLanes(node);
+      lanes.forEach((lane) => {
+        const incoming = laneIncoming(bp, node, lane);
+        if (incoming) {
+          const src = (bp.nodes || []).find((item) => item.id === incoming.from);
+          if (src) {
+            const signal = portSignal(src, incoming.fromPort) === "plan" ? "plan" : "num";
+            if (applyPassTone(node, lane, signal, wireKind(src, incoming.fromPort))) dropMismatchedOuts(bp, node.id, `out:${lane.id}`, signal);
+          }
+          return;
+        }
+        if (!lane.tone) {
+          const outgoing = (bp.links || []).find((link) => link.from === node.id && link.fromPort === `out:${lane.id}`);
+          if (!outgoing) return;
+          const dst = (bp.nodes || []).find((item) => item.id === outgoing.to);
+          if (portSignal(dst, outgoing.toPort) === "plan") applyPassTone(node, lane, "plan", "plan");
+        }
+      });
+      const used = new Set();
+      (bp.links || []).forEach((link) => {
+        if (link.to === node.id) used.add(laneIdOf(link.toPort));
+        if (link.from === node.id) used.add(laneIdOf(link.fromPort));
+      });
+      const kept = lanes.filter((lane) => used.has(lane.id));
+      if (kept.length >= 30) {
+        node.lanes = kept.slice(0, 30);
+        return;
+      }
+      const spare = lanes.find((lane) => !used.has(lane.id)) || { id: uid(), signal: "num", tone: "" };
+      spare.signal = "num";
+      spare.tone = "";
+      node.lanes = kept.concat(spare);
+    });
+  }
+
+  const TONE_COLOR = {
+    order: "#0d9488",
+    income: "#0d9488",
+    total: "#0d9488",
+    tax: "#d97706",
+    cost: "#e11d48",
+    frozen: "#64748b",
+    "field-qty": "#0ea5e9",
+    "field-price": "#8b5cf6",
+    "field-discount": "#eab308",
+    "field-paid": "#22c55e",
+    "field-unpaid": "#f97316",
+    "field-percent": "#ec4899",
+    math: "#f97316",
+    formula: "#a855f7",
+    percent: "#f43f5e",
+    const: "#64748b",
+    result: "#06b6d4",
+    scheme: "#eab308",
+    filter: "#0ea5e9",
+    dashboard: "#14b8a6",
+    planner: "#65a30d",
+    plan: "#7c3aed",
+    openings: "#0284c7",
+    electrics: "#d97706",
+    present: "#8b5cf6",
+  };
+
+  function toneColor(tone) {
+    return TONE_COLOR[tone] || "";
+  }
+
+  function planCaption(bp, link, seen) {
+    if (!bp || !link) return "";
+    const guard = seen || new Set();
+    if (guard.has(link.id)) return "";
+    guard.add(link.id);
+    const src = (bp.nodes || []).find((item) => item.id === link.from);
+    if (!src) return "";
+    if (src.type === "joint") return planCaption(bp, (bp.links || []).find((item) => item.to === src.id && item.toPort === "in"), guard);
+    if (src.type === "bus") return planCaption(bp, (bp.links || []).find((item) => item.to === src.id && item.toPort === `in:${laneIdOf(link.fromPort)}`), guard);
+    const ports = nodeOutputs(src, api.findOrder?.(src.orderId), bp.links);
+    return ports.find((port) => port.id === link.fromPort)?.name || "";
+  }
+
+  function jointNodeHtml(node) {
+    const color = toneColor(node.tone);
+    const signal = node.signal === "plan" ? ` data-signal="plan"` : "";
+    const pass = node.tone ? "" : ` data-pass="any"`;
+    return `<article class="calc-node is-joint ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px${color ? `;--joint:${color}` : ""}">
+      <i class="calc-port in" data-port="in" data-io="in"${signal} data-pass="any" title="Вход"></i>
+      <i class="calc-grip calc-joint-dot" data-drag-node="${esc(node.id)}" title="Точка"></i>
+      <i class="calc-port out" data-port="out" data-io="out"${signal}${pass} title="Выход"></i>
+      <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
+    </article>`;
+  }
+
+  function busLaneText(node, lane, bp, graph) {
+    if (lane.signal === "plan") {
+      const link = (bp?.links || []).find((item) => item.to === node.id && item.toPort === `in:${lane.id}`)
+        || (bp?.links || []).find((item) => item.from === node.id && item.fromPort === `out:${lane.id}`);
+      const name = planCaption(bp, link);
+      return name && name !== "Чертёж" ? `Чертёж ${name}` : "Чертёж";
+    }
+    const value = graph?.values?.[`${node.id}:out:${lane.id}`];
+    return value == null ? "" : formatCalcNumber(value);
+  }
+
+  function busNodeHtml(node, bp, graph) {
+    const rows = busLanes(node).map((lane) => {
+      const signal = lane.signal === "plan" ? ` data-signal="plan"` : "";
+      const pass = lane.tone ? "" : ` data-pass="any"`;
+      const color = toneColor(lane.tone);
+      const paint = color && lane.signal !== "plan" ? ` style="background:${color}"` : "";
+      return `<div class="calc-row bus">
+        <i class="calc-port in" data-port="in:${esc(lane.id)}" data-io="in"${signal} data-pass="any"${paint} title="Вход"></i>
+        <span>${esc(busLaneText(node, lane, bp, graph))}</span>
+        <i class="calc-port out" data-port="out:${esc(lane.id)}" data-io="out"${signal}${pass}${paint} title="Выход"></i>
+      </div>`;
+    }).join("");
+    return `<article class="calc-node is-bus ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+      <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
+      <header class="calc-node-h">
+        <span>Канал</span>
+        <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
+      </header>
+      <div class="calc-ports">${rows}</div>
+    </article>`;
   }
 
   function commentNodeHtml(node) {

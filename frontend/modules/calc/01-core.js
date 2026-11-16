@@ -65,6 +65,9 @@
     tabDrag: "",
     tabMoved: false,
     moveChain: false,
+    wireRoute: "curve",
+    wireAvoid: false,
+    wireSnap: false,
     mini: null,
     miniDrag: null,
     miniHidden: false,
@@ -1101,6 +1104,8 @@
       return Array.from({ length: n }, (_, i) => ({ id: `in${i + 1}`, name: String(i + 1) }));
     }
     if (node.type === "result") return [{ id: "in", name: "вход" }];
+    if (node.type === "joint") return [{ id: "in", name: "вход" }];
+    if (node.type === "bus") return busLanes(node).map((lane) => ({ id: `in:${lane.id}`, name: "" }));
     if (node.type === "percent") return [
       { id: "in1", name: "число" },
       { id: "in2", name: "%" },
@@ -1231,7 +1236,8 @@
   }
 
   function nodeOutputs(node, order, links) {
-    if (node.type === "math" || node.type === "result" || node.type === "percent" || node.type === "const") return [{ id: "out", name: "out" }];
+    if (node.type === "math" || node.type === "result" || node.type === "percent" || node.type === "const" || node.type === "joint") return [{ id: "out", name: "out" }];
+    if (node.type === "bus") return busLanes(node).map((lane) => ({ id: `out:${lane.id}`, name: "" }));
     if (node.type === "formula") return node.outputs || [];
     if (node.type === "scheme") return schemeOutputs(findBlueprint(node.blueprintId));
     if (node.type === "filter") {
@@ -1495,6 +1501,23 @@
         }
         setVal(nodeId, "in", value);
         setVal(nodeId, "out", value);
+      } else if (node.type === "joint") {
+        const link = (incoming[nodeId] || []).find((item) => item.toPort === "in");
+        if (link) {
+          walk(link.from);
+          const found = values[`${link.from}:${link.fromPort}`];
+          setVal(nodeId, "in", found);
+          setVal(nodeId, "out", found);
+        }
+      } else if (node.type === "bus") {
+        busLanes(node).forEach((lane) => {
+          const link = (incoming[nodeId] || []).find((item) => item.toPort === `in:${lane.id}`);
+          if (!link) return;
+          walk(link.from);
+          const found = values[`${link.from}:${link.fromPort}`];
+          setVal(nodeId, `in:${lane.id}`, found);
+          setVal(nodeId, `out:${lane.id}`, found);
+        });
       } else if (node.type === "formula") {
         const badFields = formulaFieldErrors(node);
         if (badFields.size) {
@@ -1612,6 +1635,7 @@
     const world = $("calc-world");
     if (!world || !bp) return;
     world.style.transform = `translate(${bp.x || 0}px, ${bp.y || 0}px) scale(${bp.zoom || 1})`;
+    syncSnapGrid(bp);
   }
 
   function frameBlueprintPoint(bp, x, y) {
@@ -1654,6 +1678,8 @@
     if (el) return { w: Math.max(40, el.offsetWidth), h: Math.max(28, el.offsetHeight) };
     if (node.type === "formula") return { w: formulaWidth(node), h: 160 };
     if (node.type === "comment") return { w: 260, h: 150 };
+    if (node.type === "joint") return { w: 36, h: 36 };
+    if (node.type === "bus") return { w: 220, h: 46 + busLanes(node).length * 28 };
     if (node.type === "order") return { w: 230, h: 140 };
     if (node.type === "scheme") return { w: 220, h: 100 };
     if (node.type === "result") return { w: 376, h: 120 };

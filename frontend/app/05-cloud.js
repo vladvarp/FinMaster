@@ -2418,15 +2418,14 @@
 
     function migrateTitle(el) {
       if (!el || el.nodeType !== 1) return "";
-      const existing = String(el.getAttribute("data-tip") || "").trim();
       const title = el.getAttribute("title");
       if (title != null && String(title).trim()) {
         const text = String(title).trim();
-        if (!existing) el.setAttribute("data-tip", text);
+        el.setAttribute("data-tip", text);
         el.removeAttribute("title");
-        return existing || text;
+        return text;
       }
-      return existing;
+      return String(el.getAttribute("data-tip") || "").trim();
     }
 
     function topLayer() {
@@ -2528,10 +2527,23 @@
         if (!active || !tipEl || tipEl.hidden) return;
         lastX = e.clientX;
         lastY = e.clientY;
+        const text = tipText(active);
+        if (text && text !== lastText && tipEl) {
+          tipEl.textContent = text;
+          lastText = text;
+        }
         place(e.clientX, e.clientY);
       },
       true
     );
+    document.addEventListener("click", () => {
+      if (!active || !tipEl || tipEl.hidden) return;
+      const text = tipText(active);
+      if (!text || text === lastText) return;
+      tipEl.textContent = text;
+      lastText = text;
+      place(lastX, lastY);
+    });
 
     document.addEventListener(
       "pointerout",

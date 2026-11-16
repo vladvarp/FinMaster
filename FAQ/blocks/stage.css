@@ -140,11 +140,12 @@ body {
   max-height: none;
 }
 
-.stage .cal-filter-menu,
-.stage .cal-filter-menu[hidden] {
+.stage > .cal-filter-menu,
+.stage > .cal-filter-menu[hidden] {
   position: static !important;
   display: grid !important;
 }
+.stage .cal-title:empty { display: none; }
 
 .stage .cal-color-menu {
   width: min(770px, 100%);
