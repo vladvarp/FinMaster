@@ -1020,9 +1020,18 @@
       node.h = 220;
     }
     if (type === "comment") node.text = "";
-    if (type === "joint") {
+    if (type === "joint" || type === "teleport") {
       node.signal = "num";
       node.tone = "";
+    }
+    if (type === "teleport") {
+      node.label = "";
+      node.labelSet = false;
+      node.title = "";
+    }
+    if (type === "teleout") {
+      node.title = "";
+      node.ports = extra?.source ? [{ id: uid(), source: extra.source }] : [];
     }
     if (type === "bus") node.lanes = [{ id: uid(), signal: "num", tone: "" }];
     return node;
@@ -1070,6 +1079,7 @@
   function addNode(type, point, extra) {
     const bp = activeBlueprint();
     if (!bp) return;
+    if (type === "teleout" && !teleportHost(bp, extra?.source)) return;
     const at = point || viewCenter(bp);
     session.place += 1;
     const node = blankNode(type, extra);
@@ -1133,11 +1143,35 @@
     return true;
   }
 
-  function removeNodes(ids) {
-    const bp = activeBlueprint();
-    const drop = new Set((ids || []).filter(Boolean));
-    if (!bp || !drop.size) return;
-    if (drop.size === 1 && takeJointDelete(bp, [...drop][0])) return;
+  function teleportSourcesIn(bp, drop) {
+    const sources = new Set();
+    (bp.nodes || []).forEach((node) => {
+      if (drop.has(node.id) && node.type === "teleport") teleportEntries(node).forEach((port) => sources.add(port.id));
+    });
+    return sources;
+  }
+
+  function teleportHasOutlets(bp, sources) {
+    if (!sources.size) return false;
+    return (bp.nodes || []).some((node) => node.type === "teleout" && (node.ports || []).some((port) => sources.has(port.source)));
+  }
+
+  function stripTeleportPorts(bp, drop) {
+    const sources = teleportSourcesIn(bp, drop);
+    if (!sources.size) return;
+    (bp.nodes || []).forEach((node) => {
+      if (node.type !== "teleout" || drop.has(node.id)) return;
+      const gone = (node.ports || []).filter((port) => sources.has(port.source));
+      if (!gone.length) return;
+      const ids = new Set(gone.map((port) => `out:${port.id}`));
+      node.ports = (node.ports || []).filter((port) => !sources.has(port.source));
+      bp.links = (bp.links || []).filter((link) => !(link.from === node.id && ids.has(link.fromPort)));
+      if (!node.ports.length) drop.add(node.id);
+    });
+  }
+
+  function finishRemove(bp, drop) {
+    stripTeleportPorts(bp, drop);
     if (session.jointCut) session.jointCut = "";
     bp.nodes = (bp.nodes || []).filter((node) => !drop.has(node.id));
     bp.links = (bp.links || []).filter((link) => !drop.has(link.from) && !drop.has(link.to));
@@ -1146,6 +1180,32 @@
     if (!session.selected) session.picked = new Set();
     dirty();
     render();
+  }
+
+  function removeNodes(ids) {
+    const bp = activeBlueprint();
+    const drop = new Set((ids || []).filter(Boolean));
+    if (!bp || !drop.size) return;
+    if (drop.size === 1 && takeJointDelete(bp, [...drop][0])) return;
+    const sources = teleportSourcesIn(bp, drop);
+    if (teleportHasOutlets(bp, sources)) {
+      const ask = api?.confirm || api?.askConfirm;
+      if (!ask) {
+        finishRemove(bp, drop);
+        return;
+      }
+      void ask({
+        title: "Удалить телепорт?",
+        text: "Вместе с ним пропадут его выходы на этой схеме.",
+        ok: "Удалить",
+        danger: true,
+      }).then((ok) => {
+        if (!ok || activeBlueprint() !== bp) return;
+        finishRemove(bp, drop);
+      });
+      return;
+    }
+    finishRemove(bp, drop);
   }
 
   let nodeClip = null;
@@ -1176,6 +1236,7 @@
     if (!bp || !sources?.length) return;
     const map = new Map();
     const portMap = new Map();
+    const sourceMap = new Map();
     const clones = [];
     const have = new Set((bp.nodes || []).map((node) => node.id));
     sources.forEach((src) => {
@@ -1202,13 +1263,39 @@
           port.id = next;
         });
       }
+      if (clone.type === "teleport") {
+        if (Array.isArray(clone.ports) && clone.ports.length) {
+          clone.ports.forEach((port) => {
+            const next = port.id === prev ? clone.id : uid();
+            sourceMap.set(port.id, next);
+            ports[`in:${port.id}`] = `in:${next}`;
+            if (port.id === prev) ports.in = `in:${next}`;
+            port.id = next;
+          });
+        } else sourceMap.set(prev, clone.id);
+      }
+      if (clone.type === "teleout") {
+        (clone.ports || []).forEach((port) => {
+          const next = uid();
+          ports[`out:${port.id}`] = `out:${next}`;
+          port.id = next;
+        });
+      }
       map.set(prev, clone.id);
       portMap.set(prev, ports);
       clones.push(clone);
     });
-    if (!clones.length) return;
-    bp.nodes.push(...clones);
     clones.forEach((clone) => {
+      if (clone.type !== "teleout") return;
+      clone.ports = (clone.ports || []).map((port) => ({
+        ...port,
+        source: sourceMap.get(port.source) || map.get(port.source) || (have.has(port.source) ? port.source : ""),
+      })).filter((port) => port.source);
+    });
+    const kept = clones.filter((clone) => clone.type !== "teleout" || (clone.ports || []).length);
+    if (!kept.length) return;
+    bp.nodes.push(...kept);
+    kept.forEach((clone) => {
       if (clone.type === "result") clone.priority = nextResultPriority(bp);
     });
     const takenOrder = new Set();
@@ -1238,8 +1325,9 @@
       takenPort.add(portKey);
       extra.push({ id: uid(), from, fromPort, to, toPort });
     });
-    bp.links.push(...extra);
-    selectNodes(clones.map((node) => node.id), clones[0].id);
+    const liveIds = new Set((bp.nodes || []).map((node) => node.id));
+    bp.links.push(...extra.filter((link) => liveIds.has(link.from) && liveIds.has(link.to)));
+    selectNodes(kept.map((node) => node.id), kept[0].id);
     dirty();
     render();
     if (extra.some((link) => (bp.nodes || []).some((node) => node.id === link.to && node.type === "order"))) api?.refreshOrders?.();
@@ -1298,7 +1386,7 @@
       if (link.to) linked.add(link.to);
     });
     const before = (bp.nodes || []).length;
-    bp.nodes = (bp.nodes || []).filter((node) => node.type === "scheme" || node.type === "group" || node.type === "comment" || linked.has(node.id));
+    bp.nodes = (bp.nodes || []).filter((node) => node.type === "scheme" || node.type === "group" || node.type === "comment" || node.type === "teleport" || linked.has(node.id));
     const removed = before - bp.nodes.length;
     if (!removed) return 0;
     const keep = new Set(bp.nodes.map((node) => node.id));
@@ -1511,6 +1599,7 @@
 
   function finishLink(from, fromPort, to, toPort) {
     session.linking = null;
+    session.busy = false;
     setLinkingClass();
     return connect(from, fromPort, to, toPort);
   }
@@ -1671,6 +1760,9 @@
     if (item.presentBlock) {
       return `<button type="button" class="calc-order${item.used ? " is-used" : ""}" data-present-block="${esc(item.presentBlock)}" data-present-page="${esc(item.presentPage || "")}" data-present-used="${item.onScheme ? "1" : "0"}" data-peek="present:${esc(item.presentBlock)}" title="${esc(item.tip || "")}"><b>${esc(item.name)}</b><span>${esc(item.sub || "")}</span><small>${esc(item.meta || "")}</small></button>`;
     }
+    if (item.teleportId) {
+      return `<button type="button" class="calc-order" data-teleport="${esc(item.teleportId)}" data-peek="teleout:${esc(item.teleportId)}" title="Поставить выход телепорта"><b>${esc(item.name)}</b><span>${esc(item.meta || "")}</span></button>`;
+    }
     return calcToolButton(item.type, item.label, item.icon, item.type);
   }
 
@@ -1693,6 +1785,11 @@
     if (kind === "formula") return formulaNodeHtml(node, bp, graph);
     if (kind === "comment") return commentNodeHtml(node);
     if (kind === "joint") return jointNodeHtml(node);
+    if (kind === "teleport") return teleportNodeHtml(node, bp);
+    if (kind === "teleout") {
+      node.ports = [{ id: "peek", source: ref }];
+      return teleoutNodeHtml(node, bp);
+    }
     if (kind === "bus") return busNodeHtml(node, bp, graph);
     if (kind === "scheme") return schemeNodeHtml(node, graph);
     if (kind === "filter") return filterNodeHtml(node, graph);
@@ -1947,10 +2044,26 @@
           { type: "group", label: "Группа", icon: `<rect x="3" y="3" width="10" height="10" rx="1.5" stroke-dasharray="2.2 1.5"/>` },
           { type: "comment", label: "Комментарий", icon: `<path d="M3 2.8h6.6L13 6.2v7H3zM9.4 2.9V6h3.2M5 8.2h6M5 10.6h4"/>` },
           { type: "joint", label: "Точка", icon: `<circle cx="8" cy="8" r="3.1"/>` },
+          { type: "teleport", label: "Телепорт", icon: `<path d="M3.2 4.2c2.4 1.6 2.4 6 0 7.6M12.8 4.2c-2.4 1.6-2.4 6 0 7.6M6.4 8h3.2"/>` },
           { type: "bus", label: "Канал", icon: `<circle cx="3.2" cy="8" r="1.45" fill="currentColor" stroke="none"/><circle cx="12.8" cy="8" r="1.45" fill="currentColor" stroke="none"/><path d="M5 8h6"/>` },
         ],
       },
     ];
+    const teleportItems = [];
+    (bp?.nodes || []).forEach((node) => {
+      if (node.type !== "teleport") return;
+      teleportEntries(node).forEach((port) => {
+        teleportItems.push({ teleportId: port.id, name: teleportPortName(bp, node, port) || "Без названия", meta: "выход" });
+      });
+    });
+    if (teleportItems.length) {
+      nodeGroups.push({
+        id: "teleports",
+        name: "Телепорты",
+        icon: `<path d="M3.2 4.2c2.4 1.6 2.4 6 0 7.6M12.8 4.2c-2.4 1.6-2.4 6 0 7.6M6.4 8h3.2"/>`,
+        items: teleportItems,
+      });
+    }
     if (schemes.length) {
       nodeGroups.push({
         id: "schemes",
@@ -2938,9 +3051,18 @@
     if (portSignal(src, fromPort) === portSignal(dst, toPort)) return true;
     const list = links || [];
     if (dst?.type === "joint" && String(toPort) === "in") return true;
+    if (dst?.type === "teleport" && (String(toPort) === "in" || String(toPort).startsWith("in:"))) return true;
     if (src?.type === "joint" && String(fromPort) === "out") {
       const incoming = list.some((link) => link.to === src.id && link.toPort === "in");
       return !incoming && !src.tone;
+    }
+    if (src?.type === "teleport" && String(fromPort) === "out") {
+      const incoming = list.some((link) => link.to === src.id && link.toPort === "in");
+      return !incoming && !src.tone;
+    }
+    if (src?.type === "teleout") {
+      const row = teleoutPort(src, fromPort);
+      return !!row && !row.tone;
     }
     if (dst?.type === "bus") {
       const lane = laneOf(dst, toPort);
@@ -2970,7 +3092,7 @@
       if (link.from !== nodeId || link.fromPort !== portId) return true;
       const dst = (bp.nodes || []).find((item) => item.id === link.to);
       if (!dst) return false;
-      if (dst.type === "joint" || (dst.type === "bus" && !laneOf(dst, link.toPort)?.tone)) return true;
+      if (dst.type === "joint" || dst.type === "teleport" || (dst.type === "bus" && !laneOf(dst, link.toPort)?.tone)) return true;
       return portSignal(dst, link.toPort) === signal;
     });
   }
@@ -2978,6 +3100,11 @@
   function syncPassNodes(bp) {
     if (!bp) return;
     for (let pass = 0; pass < 32; pass += 1) syncPassNodesOnce(bp);
+    const empty = (bp.nodes || []).filter((node) => node.type === "teleout" && !(node.ports || []).length).map((node) => node.id);
+    if (!empty.length) return;
+    const drop = new Set(empty);
+    bp.nodes = (bp.nodes || []).filter((node) => !drop.has(node.id));
+    bp.links = (bp.links || []).filter((link) => !drop.has(link.from) && !drop.has(link.to));
   }
 
   function syncPassNodesOnce(bp) {
@@ -3002,6 +3129,39 @@
           const dst = (bp.nodes || []).find((item) => item.id === outgoing.to);
           if (portSignal(dst, outgoing.toPort) === "plan") applyPassTone(node, null, "plan", "plan");
         }
+        return;
+      }
+      if (node.type === "teleport") {
+        teleportEntries(node).forEach((port) => {
+          const stored = teleportWritable(node, port.id) || node;
+          const lane = stored !== node ? stored : null;
+          const incoming = (bp.links || []).find((link) => link.to === node.id && (link.toPort === teleportInId(node, port) || link.toPort === `in:${port.id}` || (link.toPort === "in" && port.id === node.id)));
+          if (incoming) {
+            const src = (bp.nodes || []).find((item) => item.id === incoming.from);
+            if (src) {
+              const signal = portSignal(src, incoming.fromPort) === "plan" ? "plan" : "num";
+              if (applyPassTone(node, lane, signal, wireKind(src, incoming.fromPort))) dropTeleportOuts(bp, port.id, signal);
+            }
+            return;
+          }
+          stored.signal = "num";
+          stored.tone = "";
+        });
+        return;
+      }
+      if (node.type === "teleout") {
+        const live = (node.ports || []).filter((port) => teleportHost(bp, port.source));
+        if (live.length !== (node.ports || []).length) {
+          const gone = new Set((node.ports || []).filter((port) => !live.includes(port)).map((port) => `out:${port.id}`));
+          node.ports = live;
+          bp.links = (bp.links || []).filter((link) => !(link.from === node.id && gone.has(link.fromPort)));
+        }
+        (node.ports || []).forEach((port) => {
+          const host = teleportHost(bp, port.source);
+          const entry = host && teleportEntry(host, port.source);
+          port.signal = entry?.signal === "plan" ? "plan" : "num";
+          port.tone = entry?.tone || "";
+        });
         return;
       }
       if (node.type !== "bus") return;
@@ -3079,10 +3239,333 @@
     guard.add(link.id);
     const src = (bp.nodes || []).find((item) => item.id === link.from);
     if (!src) return "";
-    if (src.type === "joint") return planCaption(bp, (bp.links || []).find((item) => item.to === src.id && item.toPort === "in"), guard);
+    if (src.type === "joint" || src.type === "teleport") {
+      const port = src.type === "teleport" ? (teleportPortOf(src, link.fromPort) || teleportEntries(src)[0]) : null;
+      const incoming = port
+        ? (bp.links || []).find((item) => item.to === src.id && (item.toPort === teleportInId(src, port) || item.toPort === `in:${port.id}` || (item.toPort === "in" && port.id === src.id)))
+        : (bp.links || []).find((item) => item.to === src.id && item.toPort === "in");
+      return planCaption(bp, incoming, guard);
+    }
+    if (src.type === "teleout") {
+      const row = teleoutPort(src, link.fromPort);
+      const host = teleportHost(bp, row?.source);
+      const entry = host && teleportEntry(host, row.source);
+      if (!host || !entry) return "";
+      return planCaption(bp, (bp.links || []).find((item) => item.to === host.id && (item.toPort === teleportInId(host, entry) || item.toPort === `in:${entry.id}` || (item.toPort === "in" && entry.id === host.id))), guard);
+    }
     if (src.type === "bus") return planCaption(bp, (bp.links || []).find((item) => item.to === src.id && item.toPort === `in:${laneIdOf(link.fromPort)}`), guard);
     const ports = nodeOutputs(src, api.findOrder?.(src.orderId), bp.links);
     return ports.find((port) => port.id === link.fromPort)?.name || "";
+  }
+
+  function teleoutPort(node, portId) {
+    const id = String(portId || "");
+    const pid = id.startsWith("out:") ? id.slice(4) : id;
+    return (node?.ports || []).find((port) => port.id === pid) || null;
+  }
+
+  function dropTeleportOuts(bp, sourceId, signal) {
+    bp.links = (bp.links || []).filter((link) => {
+      const src = (bp.nodes || []).find((item) => item.id === link.from);
+      if (src?.type !== "teleout") return true;
+      const row = teleoutPort(src, link.fromPort);
+      if (!row || row.source !== sourceId) return true;
+      const dst = (bp.nodes || []).find((item) => item.id === link.to);
+      if (!dst) return false;
+      if (dst.type === "joint" || dst.type === "teleport") return true;
+      if (dst.type === "bus" && !laneOf(dst, link.toPort)?.tone) return true;
+      return portSignal(dst, link.toPort) === signal;
+    });
+  }
+
+  function teleportEntries(node) {
+    if (!node || node.type !== "teleport") return [];
+    if (Array.isArray(node.ports) && node.ports.length) return node.ports;
+    return [{
+      id: node.id,
+      signal: node.signal === "plan" ? "plan" : "num",
+      tone: node.tone || "",
+      label: node.label || "",
+      labelSet: !!node.labelSet,
+    }];
+  }
+
+  function teleportWritable(node, portId) {
+    if (!node || node.type !== "teleport") return null;
+    if (Array.isArray(node.ports) && node.ports.length) return node.ports.find((port) => port.id === portId) || null;
+    return portId === node.id ? node : null;
+  }
+
+  function teleportHost(bp, sourceId) {
+    if (!bp || !sourceId) return null;
+    return (bp.nodes || []).find((node) => node.type === "teleport" && teleportEntries(node).some((port) => port.id === sourceId)) || null;
+  }
+
+  function teleportEntry(node, sourceId) {
+    return teleportEntries(node).find((port) => port.id === sourceId) || null;
+  }
+
+  function teleportInId(node, port) {
+    if (!port) return "in";
+    if (!(node?.ports || []).length && port.id === node.id) return "in";
+    return `in:${port.id}`;
+  }
+
+  function teleportLinkHits(node, port, toPort) {
+    const id = String(toPort || "");
+    if (!port) return false;
+    if (id === teleportInId(node, port) || id === `in:${port.id}`) return true;
+    return id === "in" && port.id === node.id;
+  }
+
+  function teleportPortOf(node, portId) {
+    const id = String(portId || "");
+    const entries = teleportEntries(node);
+    if (id.startsWith("in:")) return entries.find((port) => port.id === id.slice(3)) || null;
+    if (id.startsWith("out:")) return entries.find((port) => port.id === id.slice(4)) || null;
+    if (id === "in" || id === "out") return entries.find((port) => port.id === node.id) || entries[0] || null;
+    return entries.find((port) => port.id === id) || null;
+  }
+
+  function teleportTitle(node) {
+    const text = String(node?.title || "").trim().slice(0, 48);
+    return text || "Телепорт";
+  }
+
+  function teleportPencil(portId) {
+    return `<button type="button" class="calc-tele-pencil" data-tele-rename="${esc(portId)}" title="Переименовать" aria-label="Переименовать"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M9.1 2.9 13.1 6.9 5.6 14.4H1.6v-4z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 4 12 8" stroke="currentColor" stroke-width="1.4"/></svg></button>`;
+  }
+
+  function teleportHeadHtml(node) {
+    const title = teleportTitle(node);
+    return `<header class="calc-node-h"><input class="calc-pname calc-tele-title" data-tele-head="${esc(node.id)}" value="${esc(title)}" maxlength="48" spellcheck="false" title="${esc(title)}" aria-label="Заголовок" /><button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button></header>`;
+  }
+
+  function materializeTeleport(bp, node) {
+    if (!node || node.type !== "teleport") return [];
+    if (Array.isArray(node.ports) && node.ports.length) return node.ports;
+    node.ports = [{
+      id: node.id,
+      signal: node.signal === "plan" ? "plan" : "num",
+      tone: node.tone || "",
+      label: node.label || "",
+      labelSet: !!node.labelSet,
+    }];
+    (bp?.links || []).forEach((link) => {
+      if (link.to === node.id && link.toPort === "in") link.toPort = `in:${node.id}`;
+    });
+    return node.ports;
+  }
+
+  function paintTeleportNames(bp, node, portId) {
+    if (!bp || !node || node.type !== "teleport") return;
+    const entry = teleportEntry(node, portId) || teleportEntries(node)[0];
+    if (!entry) return;
+    const name = teleportPortName(bp, node, entry);
+    const menu = name || "Без названия";
+    const port = name || "Выход";
+    const listed = paletteModel?.nodes?.find((group) => group.id === "teleports")?.items?.find((item) => item.teleportId === entry.id);
+    if (listed) listed.name = menu;
+    document.querySelectorAll(`[data-teleport="${cssEsc(entry.id)}"] > b`).forEach((el) => {
+      el.textContent = menu;
+    });
+    document.querySelectorAll(`[data-tele-source="${cssEsc(entry.id)}"]`).forEach((el) => {
+      el.textContent = port;
+    });
+  }
+
+  function teleportPortName(bp, node, port, seen) {
+    if (!node || node.type !== "teleport") return "";
+    let entry = port;
+    let guard = seen;
+    if (port instanceof Set) {
+      entry = null;
+      guard = port;
+    }
+    entry = entry?.id ? entry : teleportEntries(node)[0];
+    if (!entry) return "";
+    const stored = teleportWritable(node, entry.id) || entry;
+    if (stored.labelSet) return String(stored.label || "").trim().slice(0, 48);
+    return teleportAutoName(bp, node, entry, guard);
+  }
+
+  function teleportAutoName(bp, node, port, seen) {
+    const entry = port?.id ? port : teleportEntries(node)[0];
+    const guard = seen instanceof Set ? seen : new Set();
+    const key = `${node?.id || ""}:${entry?.id || ""}`;
+    if (!bp || !node || !entry || guard.has(key)) return "";
+    guard.add(key);
+    const link = (bp.links || []).find((item) => item.to === node.id && teleportLinkHits(node, entry, item.toPort));
+    if (!link) return "";
+    const src = (bp.nodes || []).find((item) => item.id === link.from);
+    if (!src) return "";
+    if (src.type === "teleport") return teleportPortName(bp, src, teleportPortOf(src, link.fromPort), guard);
+    if (src.type === "teleout") {
+      const originId = teleoutPort(src, link.fromPort)?.source;
+      const host = teleportHost(bp, originId);
+      const origin = host && teleportEntry(host, originId);
+      return origin ? teleportPortName(bp, host, origin, guard) : "";
+    }
+    if (portSignal(src, link.fromPort) === "plan") {
+      const name = planCaption(bp, link);
+      return name && name !== "Чертёж" ? `Чертёж ${name}` : "Чертёж";
+    }
+    const ports = nodeOutputs(src, api.findOrder?.(src.orderId), bp.links);
+    const hit = ports.find((item) => item.id === link.fromPort);
+    const raw = String(hit?.name || "").trim();
+    if (raw && raw !== "out") return raw.slice(0, 48);
+    return String(src.name || "").trim().slice(0, 48);
+  }
+
+  function teleportNodeHtml(node, bp) {
+    const rows = teleportEntries(node).map((port) => {
+      const signal = port.signal === "plan" ? ` data-signal="plan"` : "";
+      const name = teleportPortName(bp, node, port);
+      return `<div class="calc-row tele">
+        <i class="calc-port in" data-port="${esc(teleportInId(node, port))}" data-io="in"${signal} data-pass="any" title="Вход"></i>
+        <span class="calc-tele-name" data-tele-in="${esc(port.id)}" title="Потянуть, чтобы перенести">${esc(name)}</span>
+        ${teleportPencil(port.id)}
+      </div>`;
+    }).join("");
+    return `<article class="calc-node is-teleport ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+      <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
+      ${teleportHeadHtml(node)}
+      <div class="calc-ports">${rows}</div>
+    </article>`;
+  }
+
+  function teleoutNodeHtml(node, bp) {
+    const rows = (node.ports || []).map((port) => {
+      const host = teleportHost(bp, port.source);
+      const entry = host && teleportEntry(host, port.source);
+      const signal = port.signal === "plan" ? ` data-signal="plan"` : "";
+      const pass = port.tone ? "" : ` data-pass="any"`;
+      const color = toneColor(port.tone);
+      const paint = color && port.signal !== "plan" ? ` style="background:${color}"` : "";
+      const name = (host && entry && teleportPortName(bp, host, entry)) || "Выход";
+      return `<div class="calc-row tele out">
+        <span class="calc-tele-name" data-tele-split="${esc(port.id)}" data-tele-source="${esc(port.source || "")}" title="Потянуть, чтобы отделить">${esc(name)}</span>
+        <i class="calc-port out" data-port="out:${esc(port.id)}" data-io="out"${signal}${pass}${paint} title="Выход"></i>
+      </div>`;
+    }).join("");
+    return `<article class="calc-node is-teleout ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+      <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
+      ${teleportHeadHtml(node)}
+      <div class="calc-ports">${rows}</div>
+    </article>`;
+  }
+
+  function splitTeleout(bp, nodeId, portId) {
+    const node = (bp.nodes || []).find((item) => item.id === nodeId && item.type === "teleout");
+    if (!node || (node.ports || []).length < 2) return "";
+    const port = (node.ports || []).find((item) => item.id === portId);
+    if (!port) return "";
+    const born = { id: uid(), type: "teleout", x: node.x || 0, y: node.y || 0, title: node.title || "", ports: [port] };
+    node.ports = (node.ports || []).filter((item) => item.id !== port.id);
+    (bp.links || []).forEach((link) => {
+      if (link.from === node.id && link.fromPort === `out:${port.id}`) link.from = born.id;
+    });
+    bp.nodes.push(born);
+    return born.id;
+  }
+
+  function mergeTeleout(bp, fromId) {
+    const from = (bp.nodes || []).find((item) => item.id === fromId && item.type === "teleout");
+    if (!from || !(from.ports || []).length) return false;
+    const box = nodeRect(from);
+    let host = null;
+    let best = 0;
+    (bp.nodes || []).forEach((item) => {
+      if (item.type !== "teleout" || item.id === from.id) return;
+      const area = overlapArea(box, nodeRect(item));
+      if (area > best) {
+        best = area;
+        host = item;
+      }
+    });
+    if (!host) return false;
+    const room = 30 - (host.ports || []).length;
+    if (room <= 0) return false;
+    const moving = (from.ports || []).slice(0, room);
+    const stay = (from.ports || []).slice(room);
+    moving.forEach((port) => {
+      host.ports = (host.ports || []).concat(port);
+      (bp.links || []).forEach((link) => {
+        if (link.from === from.id && link.fromPort === `out:${port.id}`) link.from = host.id;
+      });
+    });
+    from.ports = stay;
+    if (!stay.length) {
+      bp.nodes = (bp.nodes || []).filter((item) => item.id !== from.id);
+      bp.links = (bp.links || []).filter((link) => link.from !== from.id && link.to !== from.id);
+    }
+    session.selected = host.id;
+    session.picked = new Set([host.id]);
+    return true;
+  }
+
+  function splitTeleport(bp, nodeId, portId) {
+    const node = (bp.nodes || []).find((item) => item.id === nodeId && item.type === "teleport");
+    if (!node || teleportEntries(node).length < 2) return "";
+    materializeTeleport(bp, node);
+    const port = (node.ports || []).find((item) => item.id === portId);
+    if (!port) return "";
+    const born = {
+      id: uid(),
+      type: "teleport",
+      x: node.x || 0,
+      y: node.y || 0,
+      title: node.title || "",
+      signal: port.signal === "plan" ? "plan" : "num",
+      tone: port.tone || "",
+      label: port.label || "",
+      labelSet: !!port.labelSet,
+      ports: [port],
+    };
+    node.ports = (node.ports || []).filter((item) => item.id !== port.id);
+    (bp.links || []).forEach((link) => {
+      if (link.to === node.id && link.toPort === `in:${port.id}`) link.to = born.id;
+    });
+    bp.nodes.push(born);
+    return born.id;
+  }
+
+  function mergeTeleport(bp, fromId) {
+    const from = (bp.nodes || []).find((item) => item.id === fromId && item.type === "teleport");
+    if (!from) return false;
+    materializeTeleport(bp, from);
+    if (!(from.ports || []).length) return false;
+    const box = nodeRect(from);
+    let host = null;
+    let best = 0;
+    (bp.nodes || []).forEach((item) => {
+      if (item.type !== "teleport" || item.id === from.id) return;
+      const area = overlapArea(box, nodeRect(item));
+      if (area > best) {
+        best = area;
+        host = item;
+      }
+    });
+    if (!host) return false;
+    materializeTeleport(bp, host);
+    const room = 30 - (host.ports || []).length;
+    if (room <= 0) return false;
+    const moving = (from.ports || []).slice(0, room);
+    const stay = (from.ports || []).slice(room);
+    moving.forEach((port) => {
+      host.ports = (host.ports || []).concat(port);
+      (bp.links || []).forEach((link) => {
+        if (link.to === from.id && link.toPort === `in:${port.id}`) link.to = host.id;
+      });
+    });
+    from.ports = stay;
+    if (!stay.length) {
+      bp.nodes = (bp.nodes || []).filter((item) => item.id !== from.id);
+      bp.links = (bp.links || []).filter((link) => link.from !== from.id && link.to !== from.id);
+    }
+    session.selected = host.id;
+    session.picked = new Set([host.id]);
+    return true;
   }
 
   function jointNodeHtml(node) {

@@ -103,7 +103,7 @@
     let src = (host.nodes || []).find((item) => item.id === link.from);
     if (!src) return "Чертёж";
     let fromPort = link.fromPort;
-    if (src.type === "joint" || src.type === "bus") {
+    if (src.type === "joint" || src.type === "bus" || src.type === "teleport" || src.type === "teleout") {
       const origin = planSource(src, host, fromPort);
       if (!origin) return "Чертёж";
       src = origin.node;
@@ -119,7 +119,7 @@
       const srcFeed = (src.feeds || []).find((item) => feedPort(item) === fromPort);
       const up = srcFeed && (host.links || []).find((item) => item.to === src.id && item.toPort === feedPort(srcFeed));
       const upNode = up && (host.nodes || []).find((item) => item.id === up.from);
-      const origin = upNode && (upNode.type === "joint" || upNode.type === "bus") ? planSource(upNode, host, up.fromPort) : (upNode ? { node: upNode, port: up.fromPort } : null);
+      const origin = upNode && (upNode.type === "joint" || upNode.type === "bus" || upNode.type === "teleport" || upNode.type === "teleout") ? planSource(upNode, host, up.fromPort) : (upNode ? { node: upNode, port: up.fromPort } : null);
       if (origin?.node?.type === "planner") {
         ensurePlanner(origin.node);
         const layout = (origin.node.layouts || []).find((item) => plannerPort(item, "plan") === origin.port);
@@ -633,6 +633,15 @@
     if (node.type === "planner" && (id === "plan" || id.startsWith("plan:"))) return "plan";
     if ((node.type === "openings" || node.type === "electrics") && (id === PLAN_PORT || id.startsWith("plan:"))) return "plan";
     if (node.type === "joint") return node.signal === "plan" ? "plan" : "num";
+    if (node.type === "teleport") {
+      const entry = teleportPortOf(node, id) || teleportEntries(node)[0];
+      return entry?.signal === "plan" ? "plan" : "num";
+    }
+    if (node.type === "teleout") {
+      const pid = id.startsWith("out:") ? id.slice(4) : "";
+      const port = (node.ports || []).find((item) => item.id === pid);
+      return port?.signal === "plan" ? "plan" : "num";
+    }
     if (node.type === "bus") {
       const laneId = id.startsWith("in:") ? id.slice(3) : id.startsWith("out:") ? id.slice(4) : "";
       const lane = (node.lanes || []).find((item) => item.id === laneId);
@@ -830,7 +839,7 @@
     const chain = stack || [];
     if (chain.includes(node.id)) return null;
     const next = chain.concat(node.id);
-    if (node.type === "joint" || node.type === "bus") {
+    if (node.type === "joint" || node.type === "bus" || node.type === "teleport" || node.type === "teleout") {
       const origin = planSource(node, bp, fromPort);
       if (!origin || origin.node.id === node.id) return null;
       return emitPlan(origin.node, bp, next, values, origin.port);
@@ -881,6 +890,21 @@
       if (!link) return null;
       const src = (bp.nodes || []).find((item) => item.id === link.from);
       return planSource(src, bp, link.fromPort, guard);
+    }
+    if (node.type === "teleport") {
+      const port = teleportPortOf(node, fromPort) || teleportEntries(node)[0];
+      if (!port) return null;
+      const link = (bp?.links || []).find((item) => item.to === node.id && teleportLinkHits(node, port, item.toPort));
+      if (!link) return null;
+      const src = (bp.nodes || []).find((item) => item.id === link.from);
+      return planSource(src, bp, link.fromPort, guard);
+    }
+    if (node.type === "teleout") {
+      const pid = String(fromPort || "").startsWith("out:") ? String(fromPort).slice(4) : "";
+      const port = (node.ports || []).find((item) => item.id === pid);
+      const host = teleportHost(bp, port?.source);
+      if (!host) return null;
+      return planSource(host, bp, `in:${port.source}`, guard);
     }
     if (node.type === "bus") {
       const link = (bp?.links || []).find((item) => item.to === node.id && item.toPort === `in:${laneIdOf(fromPort)}`);

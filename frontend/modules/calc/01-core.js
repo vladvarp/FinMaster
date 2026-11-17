@@ -76,6 +76,7 @@
     presentPanel: false,
     presentDrag: null,
     presentHover: "",
+    teleportHover: "",
     searchOpen: false,
     jump: null,
     pendingFocus: null,
@@ -1118,6 +1119,7 @@
     }
     if (node.type === "result") return [{ id: "in", name: "вход" }];
     if (node.type === "joint") return [{ id: "in", name: "вход" }];
+    if (node.type === "teleport") return teleportEntries(node).map((port) => ({ id: teleportInId(node, port), name: "вход" }));
     if (node.type === "bus") return busLanes(node).map((lane) => ({ id: `in:${lane.id}`, name: "" }));
     if (node.type === "percent") return [
       { id: "in1", name: "число" },
@@ -1250,6 +1252,7 @@
 
   function nodeOutputs(node, order, links) {
     if (node.type === "math" || node.type === "result" || node.type === "percent" || node.type === "const" || node.type === "joint") return [{ id: "out", name: "out" }];
+    if (node.type === "teleout") return (node.ports || []).map((port) => ({ id: `out:${port.id}`, name: "" }));
     if (node.type === "bus") return busLanes(node).map((lane) => ({ id: `out:${lane.id}`, name: "" }));
     if (node.type === "formula") return node.outputs || [];
     if (node.type === "scheme") return schemeOutputs(findBlueprint(node.blueprintId));
@@ -1522,6 +1525,22 @@
           setVal(nodeId, "in", found);
           setVal(nodeId, "out", found);
         }
+      } else if (node.type === "teleport") {
+        teleportEntries(node).forEach((port) => {
+          const link = (incoming[nodeId] || []).find((item) => teleportLinkHits(node, port, item.toPort));
+          if (!link) return;
+          walk(link.from);
+          const found = values[`${link.from}:${link.fromPort}`];
+          setVal(nodeId, teleportInId(node, port), found);
+          values[`${port.id}:out`] = found;
+          if (port.id === node.id) setVal(nodeId, "out", found);
+        });
+      } else if (node.type === "teleout") {
+        (node.ports || []).forEach((port) => {
+          const host = teleportHost(bp, port.source);
+          if (host) walk(host.id);
+          setVal(nodeId, `out:${port.id}`, values[`${port.source}:out`]);
+        });
       } else if (node.type === "bus") {
         busLanes(node).forEach((lane) => {
           const link = (incoming[nodeId] || []).find((item) => item.toPort === `in:${lane.id}`);
@@ -1692,6 +1711,8 @@
     if (node.type === "formula") return { w: formulaWidth(node), h: 160 };
     if (node.type === "comment") return { w: 260, h: 150 };
     if (node.type === "joint") return { w: 36, h: 36 };
+    if (node.type === "teleport") return { w: 220, h: 46 + Math.max(1, teleportEntries(node).length) * 28 };
+    if (node.type === "teleout") return { w: 220, h: 46 + Math.max(1, (node.ports || []).length) * 28 };
     if (node.type === "bus") return { w: 220, h: 46 + busLanes(node).length * 28 };
     if (node.type === "order") return { w: 230, h: 140 };
     if (node.type === "scheme") return { w: 220, h: 100 };

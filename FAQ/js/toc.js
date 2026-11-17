@@ -111,7 +111,7 @@ window.FAQ_TOC = [
         { id: "pauzy", title: "Паузы" },
         { id: "pravaya-panel-i-svodka", title: "Правая панель и сводка" },
       ] },
-      { id: "calculator", title: "Калькулятор", keys: "нода схема формула связь блюпринт пример оператор константа результат провод итог планировщик проёмы проемы электрика чертёж чертеж розетка дверь окно", subs: [
+      { id: "calculator", title: "Калькулятор", keys: "нода схема формула связь блюпринт пример оператор константа результат провод итог планировщик проёмы проемы электрика чертёж чертеж розетка дверь окно телепорт", subs: [
         { id: "chto-takoe-noda", title: "Что такое нода" },
         { id: "zachem-shema-a-ne-odna-formula", title: "Зачем схема, а не одна формула" },
         { id: "primer", title: "Пример" },
@@ -132,6 +132,7 @@ window.FAQ_TOC = [
         { id: "noda-kommentarij", title: "Комментарий" },
         { id: "noda-tochka", title: "Точка" },
         { id: "noda-kanal", title: "Канал" },
+        { id: "noda-teleport", title: "Телепорт" },
         { id: "noda-shema", title: "Схема" },
         { id: "noda-prezentaciya", title: "Презентация" },
         { id: "svyazi-i-pole", title: "Связи и поле" },

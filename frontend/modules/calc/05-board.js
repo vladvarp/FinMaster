@@ -9,7 +9,7 @@
     const focusHost = host.contains(focus) || groups?.contains(focus) || groupUi?.contains(focus) ? focus : null;
     const keep = focusHost
       ? {
-          name: focus.dataset.inName || focus.dataset.outName || focus.dataset.outExpr || focus.dataset.resultName || focus.dataset.resultPrio || focus.dataset.constValue || focus.dataset.groupName || focus.dataset.plannerTitle || focus.dataset.markTitle || focus.dataset.filterField,
+          name: focus.dataset.inName || focus.dataset.outName || focus.dataset.outExpr || focus.dataset.resultName || focus.dataset.resultPrio || focus.dataset.constValue || focus.dataset.groupName || focus.dataset.plannerTitle || focus.dataset.markTitle || focus.dataset.filterField || focus.dataset.teleLabel || focus.dataset.teleHead,
           start: focus.selectionStart,
           end: focus.selectionEnd,
           filterField: focus.dataset.filterField || "",
@@ -40,6 +40,8 @@
         if (node.type === "formula") return formulaNodeHtml(node, bp, graph);
         if (node.type === "comment") return commentNodeHtml(node);
         if (node.type === "joint") return jointNodeHtml(node);
+        if (node.type === "teleport") return teleportNodeHtml(node, bp);
+        if (node.type === "teleout") return teleoutNodeHtml(node, bp);
         if (node.type === "bus") return busNodeHtml(node, bp, graph);
         if (node.type === "scheme") return schemeNodeHtml(node, graph);
         if (node.type === "filter") return filterNodeHtml(node, graph);
@@ -62,7 +64,7 @@
     if (keep?.name || keep?.filterField) {
       const again = keep.filterField && keep.nodeId
         ? host.querySelector(`[data-node="${cssEsc(keep.nodeId)}"] [data-filter-field="${cssEsc(keep.filterField)}"]`)
-          : host.querySelector(`[data-in-name="${cssEsc(keep.name)}"], [data-out-name="${cssEsc(keep.name)}"], [data-out-expr="${cssEsc(keep.name)}"], [data-result-name="${cssEsc(keep.name)}"], [data-result-prio="${cssEsc(keep.name)}"], [data-const-value="${cssEsc(keep.name)}"], [data-planner-title="${cssEsc(keep.name)}"], [data-mark-title="${cssEsc(keep.name)}"]`) ||
+          : host.querySelector(`[data-in-name="${cssEsc(keep.name)}"], [data-out-name="${cssEsc(keep.name)}"], [data-out-expr="${cssEsc(keep.name)}"], [data-result-name="${cssEsc(keep.name)}"], [data-result-prio="${cssEsc(keep.name)}"], [data-const-value="${cssEsc(keep.name)}"], [data-planner-title="${cssEsc(keep.name)}"], [data-mark-title="${cssEsc(keep.name)}"], [data-tele-label="${cssEsc(keep.name)}"], [data-tele-head="${cssEsc(keep.name)}"]`) ||
           groupUi?.querySelector(`[data-group-name="${cssEsc(keep.name)}"]`);
       if (again) {
         again.focus({ preventScroll: true });
@@ -917,6 +919,8 @@
       return "order";
     }
     if (type === "joint") return node.tone || "order";
+    if (type === "teleport") return teleportPortOf(node, portId)?.tone || node.tone || "order";
+    if (type === "teleout") return teleoutPort(node, fromPort)?.tone || "order";
     if (type === "bus") {
       const laneId = String(fromPort || "").startsWith("out:") ? String(fromPort).slice(4) : "";
       const lane = (node.lanes || []).find((item) => item.id === laneId);
@@ -952,6 +956,58 @@
     }
     walk(nodeId);
     return { linkIds, outPorts, inPorts, nodeIds };
+  }
+
+  function teleportSourcesOf(bp, id) {
+    const sources = new Set();
+    const node = (bp?.nodes || []).find((item) => item.id === id);
+    if (node?.type === "teleport") teleportEntries(node).forEach((port) => sources.add(port.id));
+    else if (node?.type === "teleout") (node.ports || []).forEach((port) => sources.add(port.source));
+    else if (teleportHost(bp, id)) sources.add(id);
+    return sources;
+  }
+
+  function teleportFamily(bp, nodeId) {
+    const sources = teleportSourcesOf(bp, nodeId);
+    if (!sources.size) return [];
+    return (bp.nodes || []).filter((item) => {
+      if (item.type === "teleport") return teleportEntries(item).some((port) => sources.has(port.id));
+      if (item.type === "teleout") return (item.ports || []).some((port) => sources.has(port.source));
+      return false;
+    });
+  }
+
+  function teleportFlow(bp, nodeId) {
+    const flow = upstreamFlow(bp, nodeId);
+    const family = teleportFamily(bp, nodeId);
+    const sources = teleportSourcesOf(bp, nodeId);
+    family.forEach((node) => flow.nodeIds.add(node.id));
+    family.forEach((node) => {
+      if (node.type !== "teleport" || node.id === nodeId) return;
+      (bp.links || []).forEach((link) => {
+        if (link.to !== node.id) return;
+        const entry = teleportPortOf(node, link.toPort);
+        if (!entry || !sources.has(entry.id)) return;
+        flow.linkIds.add(link.id);
+        flow.nodeIds.add(link.from);
+        flow.nodeIds.add(link.to);
+        const extra = upstreamFlow(bp, link.from);
+        extra.linkIds.forEach((id) => flow.linkIds.add(id));
+        extra.nodeIds.forEach((id) => flow.nodeIds.add(id));
+        extra.outPorts.forEach((id) => flow.outPorts.add(id));
+        extra.inPorts.forEach((id) => flow.inPorts.add(id));
+      });
+    });
+    return flow;
+  }
+
+  function setTeleportHover(id) {
+    const next = id || "";
+    if (session.teleportHover === next) return;
+    session.teleportHover = next;
+    const bp = activeBlueprint();
+    if (!bp) return;
+    drawWires(bp, computeGraph(bp));
   }
 
   function downstreamNodeIds(bp, nodeId) {
@@ -1325,6 +1381,8 @@
     const signal = link ? portSignal(owner, portId) : "";
     const openPass = !!(owner && (
       (owner.type === "joint" && !owner.tone)
+      || (owner.type === "teleport" && !teleportPortOf(owner, portId)?.tone)
+      || (owner.type === "teleout" && teleoutPort(owner, portId) && !teleoutPort(owner, portId).tone)
       || (owner.type === "bus" && laneOf(owner, portId) && !laneOf(owner, portId).tone)
     ));
     board.classList.toggle("is-link-plan", !openPass && signal === "plan");
@@ -1348,7 +1406,12 @@
     };
     const hostButtons = [];
     const byId = Object.fromEntries((bp.nodes || []).map((node) => [node.id, node]));
-    const flow = upstreamFlow(bp, session.selected);
+    const flow = teleportFlow(bp, session.selected);
+    if (session.teleportHover) {
+      const hover = teleportFlow(bp, session.teleportHover);
+      hover.linkIds.forEach((id) => flow.linkIds.add(id));
+      hover.nodeIds.forEach((id) => flow.nodeIds.add(id));
+    }
     const picked = session.selectedLink
       ? (bp.links || []).find((link) => link.id === session.selectedLink) || null
       : null;
@@ -1538,6 +1601,67 @@
     }
     setLinkingClass();
     drawMinimap(bp);
+    paintTeleportArrows(bp);
+  }
+
+  function paintTeleportArrows(bp) {
+    const board = $("calc-board");
+    if (!board) return;
+    let layer = board.querySelector(".calc-tele-arrows");
+    if (!layer) {
+      layer = document.createElement("div");
+      layer.className = "calc-tele-arrows";
+      board.appendChild(layer);
+    }
+    layer.replaceChildren();
+    if (!bp) return;
+    const seen = new Set();
+    const family = [];
+    [session.selected, session.teleportHover].forEach((id) => {
+      teleportFamily(bp, id).forEach((node) => {
+        if (seen.has(node.id)) return;
+        seen.add(node.id);
+        family.push(node);
+      });
+    });
+    if (!family.length) return;
+    const box = board.getBoundingClientRect();
+    const pad = 16;
+    const spots = [];
+    family.forEach((node) => {
+      const el = findNodeEl(node.id);
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      if (cx >= box.left + pad && cx <= box.right - pad && cy >= box.top + pad && cy <= box.bottom - pad) return;
+      const vx = cx - (box.left + box.width / 2);
+      const vy = cy - (box.top + box.height / 2);
+      const hw = Math.max(8, box.width / 2 - pad);
+      const hh = Math.max(8, box.height / 2 - pad);
+      const tx = vx === 0 ? Infinity : hw / Math.abs(vx);
+      const ty = vy === 0 ? Infinity : hh / Math.abs(vy);
+      const t = Math.min(tx, ty);
+      let x = box.width / 2 + vx * t;
+      let y = box.height / 2 + vy * t;
+      spots.forEach((spot) => {
+        if (Math.hypot(spot.x - x, spot.y - y) < 18) {
+          x += vx === 0 ? 16 : 0;
+          y += vy === 0 ? 16 : 0;
+        }
+      });
+      spots.push({ x, y });
+      const arrow = document.createElement("i");
+      arrow.className = "calc-tele-arrow";
+      arrow.style.left = `${Math.round(x)}px`;
+      arrow.style.top = `${Math.round(y)}px`;
+      arrow.style.transform = `translate(-50%, -50%) rotate(${Math.atan2(vy, vx) * 180 / Math.PI}deg)`;
+      const host = node.type === "teleport" ? node : teleportHost(bp, node.ports?.[0]?.source);
+      const entry = host && (node.type === "teleport" ? teleportEntries(host)[0] : teleportEntry(host, node.ports?.[0]?.source));
+      arrow.title = (host && entry && teleportPortName(bp, host, entry)) || "Телепорт";
+      arrow.innerHTML = `<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2.2 8.2 6 4 9.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      layer.appendChild(arrow);
+    });
   }
 
   function rebuildPresentValues() {
@@ -1838,9 +1962,56 @@
     render();
   }
 
+  function closeTeleportLabel(input) {
+    if (!input?.dataset?.teleLabel || input.dataset.teleDone) return;
+    input.dataset.teleDone = "1";
+    const nodeEl = input.closest("[data-node]");
+    const bp = activeBlueprint();
+    const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node && item.type === "teleport") : null;
+    const stored = node && teleportWritable(node, input.dataset.teleLabel);
+    if (stored) {
+      const text = String(input.value || "").trim().slice(0, 48);
+      stored.label = text;
+      stored.labelSet = !!text;
+      dirty();
+    }
+    render();
+  }
+
+  function beginTeleportEdit(el) {
+    if (!el?.dataset?.teleIn) return;
+    const input = document.createElement("input");
+    input.className = "calc-pname";
+    input.maxLength = 48;
+    input.spellcheck = false;
+    input.value = el.textContent || "";
+    input.placeholder = "Название";
+    input.dataset.teleLabel = el.dataset.teleIn;
+    input.setAttribute("aria-label", "Название порта");
+    el.closest(".calc-row")?.querySelector("[data-tele-rename]")?.remove();
+    el.replaceWith(input);
+    input.addEventListener("blur", () => closeTeleportLabel(input));
+    input.focus();
+    input.select();
+  }
+
   function onBoardPointerDown(e) {
     const bp = activeBlueprint();
     if (!bp) return;
+    const naming = document.querySelector("#calc-nodes input[data-tele-label]");
+    if (naming && e.target !== naming) {
+      const nextPort = e.target.closest("[data-tele-rename]")?.dataset.teleRename || "";
+      const headId = e.target.closest("[data-tele-head]")?.dataset.teleHead || "";
+      closeTeleportLabel(naming);
+      if (nextPort) {
+        const name = document.querySelector(`#calc-nodes [data-tele-in="${cssEsc(nextPort)}"]`);
+        if (name) beginTeleportEdit(name);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (headId) document.querySelector(`#calc-nodes [data-tele-head="${cssEsc(headId)}"]`)?.focus();
+    }
     if (session.jump) {
       session.jump = null;
       document.querySelectorAll(".calc-row.is-jump").forEach((el) => el.classList.remove("is-jump"));
@@ -1862,6 +2033,14 @@
         dirty();
         render();
       }
+      return;
+    }
+    const rename = e.target.closest("[data-tele-rename]");
+    if (rename) {
+      e.preventDefault();
+      e.stopPropagation();
+      const name = rename.closest(".calc-row")?.querySelector("[data-tele-in]");
+      if (name) beginTeleportEdit(name);
       return;
     }
     const del = e.target.closest("[data-del-node]");
@@ -1946,6 +2125,8 @@
     const port = e.target.closest(".calc-port");
     const node = e.target.closest(".calc-node, .calc-group-chrome");
     const drag = e.target.closest("[data-drag-node]");
+    const teleSplit = e.target.closest("[data-tele-split]");
+    const teleIn = e.target.closest("[data-tele-in]");
     if (port) {
       e.preventDefault();
       e.stopPropagation();
@@ -2041,11 +2222,13 @@
         y: e.clientY,
         ctrl: e.ctrlKey,
         shift: e.shiftKey,
-        grip: !!drag,
+        grip: !!(drag || teleSplit || teleIn),
+        teleSplit: teleSplit?.dataset.teleSplit || "",
+        teleIn: teleIn?.dataset.teleIn || "",
         group: kind === "group",
       };
       session.selectedLink = "";
-      if (drag) {
+      if (drag || teleSplit || teleIn) {
         e.preventDefault();
         $("calc-board").setPointerCapture(e.pointerId);
       }
@@ -2078,6 +2261,7 @@
       bp.x = session.pan.ox + (e.clientX - session.pan.x);
       bp.y = session.pan.oy + (e.clientY - session.pan.y);
       applyWorld(bp);
+      paintTeleportArrows(bp);
       if (session.linking) {
         const at = screenToWorld(e.clientX, e.clientY, bp);
         session.linking.x = at.x;
@@ -2104,7 +2288,21 @@
       const dist = Math.hypot(e.clientX - press.x, e.clientY - press.y);
       if (dist < 4) return;
       if (press.grip && !press.ctrl && (!press.shift || press.group)) {
-        beginNodeDrag(bp, press.id, { clientX: press.x, clientY: press.y }, press.shift && press.group);
+        let dragId = press.id;
+        if (press.teleIn) {
+          const born = splitTeleport(bp, press.id, press.teleIn);
+          if (born) {
+            dragId = born;
+            render();
+          }
+        } else if (press.teleSplit) {
+          const born = splitTeleout(bp, press.id, press.teleSplit);
+          if (born) {
+            dragId = born;
+            render();
+          }
+        }
+        beginNodeDrag(bp, dragId, { clientX: press.x, clientY: press.y }, press.shift && press.group);
         session.press = null;
         $("calc-board").setPointerCapture(e.pointerId);
       } else return;
@@ -2263,6 +2461,14 @@
       return;
     }
     if (movedNode) {
+      if (bp && (movedNode.origins || []).length === 1) {
+        const moved = (bp.nodes || []).find((item) => item.id === movedNode.id);
+        if ((moved?.type === "teleout" && mergeTeleout(bp, moved.id)) || (moved?.type === "teleport" && mergeTeleport(bp, moved.id))) {
+          dirty();
+          render();
+          return;
+        }
+      }
       if (bp && !movedNode.isGroup) {
         const byId = Object.fromEntries((bp.nodes || []).map((item) => [item.id, item]));
         (movedNode.origins || []).forEach((origin) => {
@@ -2319,6 +2525,7 @@
     bp.y = cy - (cy - (bp.y || 0)) * k;
     bp.zoom = next;
     applyWorld(bp);
+    paintTeleportArrows(bp);
     drawMinimap(bp);
     clearTimeout(onBoardWheel.t);
     onBoardWheel.t = setTimeout(() => dirty(), 280);
@@ -2332,10 +2539,12 @@
     const blueprintId = e.dataTransfer?.getData("text/finmaster-blueprint");
     const presentBlock = e.dataTransfer?.getData("text/finmaster-present");
     const presentPage = e.dataTransfer?.getData("text/finmaster-present-page");
+    const teleportId = e.dataTransfer?.getData("text/finmaster-teleport");
     e.preventDefault();
     const at = worldPoint(bp, e.clientX, e.clientY);
     if (presentBlock) addPresentNode(presentPage, presentBlock, at);
-    else if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "comment" || kind === "filter" || kind === "dashboard" || kind === "planner" || kind === "openings" || kind === "electrics" || kind === "joint" || kind === "bus") addNode(kind, at);
+    else if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "comment" || kind === "filter" || kind === "dashboard" || kind === "planner" || kind === "openings" || kind === "electrics" || kind === "joint" || kind === "bus" || kind === "teleport") addNode(kind, at);
+    else if (teleportId) addNode("teleout", at, { source: teleportId });
     else if (blueprintId && blueprintId !== bp.id) addNode("scheme", at, { blueprintId });
     else if (orderId && api.findOrder(orderId)) addNode("order", at, { orderId });
   }
@@ -2674,6 +2883,11 @@
         addNode(add.dataset.addNode);
         return;
       }
+      const teleport = e.target.closest("[data-teleport]");
+      if (teleport) {
+        addNode("teleout", null, { source: teleport.dataset.teleport });
+        return;
+      }
       const scheme = e.target.closest("[data-blueprint]");
       if (scheme) {
         addNode("scheme", null, { blueprintId: scheme.dataset.blueprint });
@@ -2702,6 +2916,7 @@
     let paletteCloseTimer = 0;
     const placeFromPalette = (spec, point) => {
       if (spec.presentBlock) addPresentNode(spec.presentPage, spec.presentBlock, point);
+      else if (spec.teleportId) addNode("teleout", point, { source: spec.teleportId });
       else if (spec.orderId) addNode("order", point, { orderId: spec.orderId });
       else if (spec.blueprintId) addNode("scheme", point, { blueprintId: spec.blueprintId });
       else if (spec.kind) addNode(spec.kind, point);
@@ -2754,6 +2969,8 @@
         showPeek(item.dataset.peek);
         if (item.dataset.presentUsed === "1") setPresentHover(item.dataset.presentBlock || "");
         else if (session.presentHover) setPresentHover("");
+        if (item.dataset.teleport) setTeleportHover(item.dataset.teleport);
+        else if (session.teleportHover) setTeleportHover("");
         return;
       }
       if (e.target.closest?.("#calc-palette")) clearTimeout(paletteCloseTimer);
@@ -2762,10 +2979,11 @@
       if (session.palette?.moved || !e.target.closest?.("#calc-palette")) return;
       if (e.relatedTarget?.closest?.("#calc-palette, [data-palette]")) return;
       if (session.presentHover) setPresentHover("");
+      if (session.teleportHover) setTeleportHover("");
       armPaletteClose();
     });
     document.addEventListener("pointerdown", (e) => {
-      const item = e.target.closest?.("#calc-palette [data-add-node], #calc-palette [data-order], #calc-palette [data-blueprint], #calc-palette [data-present-block]");
+      const item = e.target.closest?.("#calc-palette [data-add-node], #calc-palette [data-order], #calc-palette [data-blueprint], #calc-palette [data-present-block], #calc-palette [data-teleport]");
       if (!item || e.button !== 0 || api?.view?.() !== "calculator") return;
       e.preventDefault();
       item.setPointerCapture?.(e.pointerId);
@@ -2777,6 +2995,7 @@
         blueprintId: item.dataset.blueprint || "",
         presentBlock: item.dataset.presentBlock || "",
         presentPage: item.dataset.presentPage || "",
+        teleportId: item.dataset.teleport || "",
         moved: false,
       };
       showPeek(item.dataset.peek);
@@ -2880,6 +3099,7 @@
       const order = e.target.closest("[data-order]");
       const tool = e.target.closest("[data-add-node]");
       const scheme = e.target.closest("[data-blueprint]");
+      const teleport = e.target.closest("[data-teleport]");
       if (order) {
         e.dataTransfer.setData("text/finmaster-order", order.dataset.order);
         e.dataTransfer.setData("text/plain", order.dataset.order);
@@ -2889,6 +3109,9 @@
         e.dataTransfer.effectAllowed = "copy";
       } else if (scheme) {
         e.dataTransfer.setData("text/finmaster-blueprint", scheme.dataset.blueprint);
+        e.dataTransfer.effectAllowed = "copy";
+      } else if (teleport) {
+        e.dataTransfer.setData("text/finmaster-teleport", teleport.dataset.teleport);
         e.dataTransfer.effectAllowed = "copy";
       }
     });
@@ -3109,6 +3332,29 @@
       }
     });
     root.addEventListener("input", (e) => {
+      if (e.target.dataset?.teleHead) {
+        const nodeEl = e.target.closest("[data-node]");
+        const bp = activeBlueprint();
+        const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node) : null;
+        if (node && (node.type === "teleport" || node.type === "teleout")) {
+          node.title = String(e.target.value || "").slice(0, 48);
+          dirty();
+        }
+        return;
+      }
+      if (e.target.dataset?.teleLabel) {
+        const nodeEl = e.target.closest("[data-node]");
+        const bp = activeBlueprint();
+        const node = nodeEl && bp ? bp.nodes.find((item) => item.id === nodeEl.dataset.node && item.type === "teleport") : null;
+        const stored = node && teleportWritable(node, e.target.dataset.teleLabel);
+        if (stored) {
+          stored.label = String(e.target.value || "").slice(0, 48);
+          stored.labelSet = !!stored.label.trim();
+          paintTeleportNames(bp, node, e.target.dataset.teleLabel);
+          dirty();
+        }
+        return;
+      }
       if (e.target.dataset?.plannerColor) {
         const nodeEl = e.target.closest("[data-node]");
         const bp = activeBlueprint();
@@ -3346,6 +3592,14 @@
         render();
         return;
       }
+      if (e.target.dataset.teleHead && (node.type === "teleport" || node.type === "teleout")) {
+        const text = String(e.target.value || "").trim().slice(0, 48);
+        node.title = text && text !== "Телепорт" ? text : "";
+        dirty();
+        render();
+        return;
+      }
+      if (e.target.dataset.teleLabel && node.type === "teleport") return;
       if (e.target.dataset.groupName && node.type === "group") {
         node.name = String(e.target.value || "").trim().slice(0, 48) || "Группа";
         e.target.value = node.name;

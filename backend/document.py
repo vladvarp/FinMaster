@@ -243,7 +243,7 @@ def _line_series_ui(raw: Any) -> dict[str, Any]:
 
 
 CALC_OPS = ("+", "-", "*", "/")
-CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group", "filter", "dashboard", "planner", "openings", "electrics", "present", "comment")
+CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group", "filter", "dashboard", "planner", "openings", "electrics", "present", "comment", "joint", "bus", "teleport", "teleout")
 CALC_MAX_BLUEPRINTS = 24
 CALC_MAX_NODES = 120
 CALC_MAX_LINKS = 400
@@ -965,6 +965,85 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         text = _clip_text(raw.get("text"), 2000)
         if text:
             node["text"] = text
+    elif kind == "joint":
+        node["signal"] = "plan" if raw.get("signal") == "plan" else "num"
+        tone = _clip_text(raw.get("tone"), 32)
+        if tone:
+            node["tone"] = tone
+    elif kind == "bus":
+        lanes: list[dict[str, Any]] = []
+        seen_lanes: set[str] = set()
+        raw_lanes = raw.get("lanes") if isinstance(raw.get("lanes"), list) else []
+        for item in raw_lanes[:30]:
+            if not isinstance(item, dict):
+                continue
+            lane_id = _clip_text(item.get("id"), 80)
+            if not lane_id or lane_id in seen_lanes:
+                continue
+            seen_lanes.add(lane_id)
+            lane: dict[str, Any] = {
+                "id": lane_id,
+                "signal": "plan" if item.get("signal") == "plan" else "num",
+            }
+            lane_tone = _clip_text(item.get("tone"), 32)
+            if lane_tone:
+                lane["tone"] = lane_tone
+            lanes.append(lane)
+        node["lanes"] = lanes or [{"id": "lane", "signal": "num"}]
+    elif kind == "teleport":
+        title = _clip_text(raw.get("title"), 48)
+        if title and title != "Телепорт":
+            node["title"] = title
+        ports: list[dict[str, Any]] = []
+        seen_ports: set[str] = set()
+        raw_ports = raw.get("ports") if isinstance(raw.get("ports"), list) else []
+        for item in raw_ports[:30]:
+            if not isinstance(item, dict):
+                continue
+            port_id = _clip_text(item.get("id"), 80)
+            if not port_id or port_id in seen_ports:
+                continue
+            seen_ports.add(port_id)
+            port: dict[str, Any] = {
+                "id": port_id,
+                "signal": "plan" if item.get("signal") == "plan" else "num",
+            }
+            port_tone = _clip_text(item.get("tone"), 32)
+            if port_tone:
+                port["tone"] = port_tone
+            port_label = _clip_text(item.get("label"), 48)
+            if port_label:
+                port["label"] = port_label
+            port["labelSet"] = bool(item.get("labelSet")) and bool(port_label)
+            ports.append(port)
+        if ports:
+            node["ports"] = ports
+        else:
+            node["signal"] = "plan" if raw.get("signal") == "plan" else "num"
+            tone = _clip_text(raw.get("tone"), 32)
+            if tone:
+                node["tone"] = tone
+            label = _clip_text(raw.get("label"), 48)
+            if label:
+                node["label"] = label
+            node["labelSet"] = bool(raw.get("labelSet")) and bool(label)
+    elif kind == "teleout":
+        title = _clip_text(raw.get("title"), 48)
+        if title and title != "Телепорт":
+            node["title"] = title
+        ports: list[dict[str, Any]] = []
+        seen_ports: set[str] = set()
+        raw_ports = raw.get("ports") if isinstance(raw.get("ports"), list) else []
+        for item in raw_ports[:30]:
+            if not isinstance(item, dict):
+                continue
+            port_id = _clip_text(item.get("id"), 80)
+            source = _clip_text(item.get("source"), 80)
+            if not port_id or not source or port_id in seen_ports:
+                continue
+            seen_ports.add(port_id)
+            ports.append({"id": port_id, "source": source})
+        node["ports"] = ports
     elif kind == "formula":
         letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         inputs = _calc_ports(
