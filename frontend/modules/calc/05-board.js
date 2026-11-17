@@ -245,7 +245,7 @@
     world.querySelectorAll(".calc-node").forEach((el) => {
       if (el.classList.contains("is-group")) return;
       const id = el.dataset.node || "";
-      if (skip?.has(id)) return;
+      if (skip?.has(id) || (session.spliceSkip && id === session.spliceSkip)) return;
       const r = el.getBoundingClientRect();
       if (r.width < 2 || r.height < 2) return;
       boxes.push({
@@ -1112,6 +1112,164 @@
     session.busy = true;
   }
 
+  let wireProbe = null;
+
+  function wireProbePath() {
+    if (wireProbe) return wireProbe;
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    wireProbe = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    svg.appendChild(wireProbe);
+    return wireProbe;
+  }
+
+  function distToPathD(d, x, y) {
+    const path = wireProbePath();
+    path.setAttribute("d", d || "");
+    const len = path.getTotalLength();
+    if (!len) return Infinity;
+    const step = Math.max(6, len / 48);
+    let best = Infinity;
+    for (let at = 0; at <= len; at += step) {
+      const p = path.getPointAtLength(Math.min(at, len));
+      const dist = Math.hypot(p.x - x, p.y - y);
+      if (dist < best) best = dist;
+    }
+    return best;
+  }
+
+  function jointBox(bp, node) {
+    const el = findNodeEl(node.id);
+    const world = $("calc-world");
+    const zoom = bp?.zoom || 1;
+    const pad = 6;
+    if (!el || !world) {
+      const x = node.x || 0;
+      const y = node.y || 0;
+      return { x: x - pad, y: y - pad, r: x + 36 + pad, b: y + 36 + pad };
+    }
+    const wr = world.getBoundingClientRect();
+    const nr = el.getBoundingClientRect();
+    return {
+      x: (nr.left - wr.left) / zoom - pad,
+      y: (nr.top - wr.top) / zoom - pad,
+      r: (nr.right - wr.left) / zoom + pad,
+      b: (nr.bottom - wr.top) / zoom + pad,
+    };
+  }
+
+  function pathGap(d, box) {
+    const path = wireProbePath();
+    path.setAttribute("d", d || "");
+    const len = path.getTotalLength();
+    if (!len) return Infinity;
+    const step = Math.max(4, len / 72);
+    let best = Infinity;
+    for (let at = 0; at <= len; at += step) {
+      const p = path.getPointAtLength(Math.min(at, len));
+      const dx = p.x < box.x ? box.x - p.x : p.x > box.r ? p.x - box.r : 0;
+      const dy = p.y < box.y ? box.y - p.y : p.y > box.b ? p.y - box.b : 0;
+      const dist = Math.hypot(dx, dy);
+      if (dist < best) best = dist;
+    }
+    return best;
+  }
+
+  function paintJoint(node) {
+    const el = findNodeEl(node?.id);
+    if (!el) return;
+    const color = toneColor(node.tone);
+    if (color) el.style.setProperty("--joint", color);
+    else el.style.removeProperty("--joint");
+    el.querySelectorAll(".calc-port").forEach((port) => {
+      if (node.signal === "plan") port.dataset.signal = "plan";
+      else port.removeAttribute("data-signal");
+      if (port.dataset.io === "out") {
+        if (node.tone) port.removeAttribute("data-pass");
+        else port.dataset.pass = "any";
+      }
+    });
+  }
+
+  function jointPortsFree(bp, id) {
+    return !(bp.links || []).some((link) => link.from === id || link.to === id);
+  }
+
+  function spliceHolderId(holder) {
+    return holder?.nodeId || holder?.id || "";
+  }
+
+  function clearJointSplice(bp, holder) {
+    const snap = holder?.splice;
+    if (!snap || !bp) return;
+    bp.links = (bp.links || []).filter((link) => link.id !== snap.inId && link.id !== snap.outId);
+    if (!bp.links.some((link) => link.id === snap.original.id)) bp.links.push({ ...snap.original });
+    holder.splice = null;
+    syncPassNodes(bp);
+    const node = (bp.nodes || []).find((item) => item.id === spliceHolderId(holder));
+    if (node) paintJoint(node);
+  }
+
+  function applyJointSplice(bp, holder, node, hit) {
+    const link = hit.link;
+    const original = { id: link.id, from: link.from, fromPort: link.fromPort, to: link.to, toPort: link.toPort };
+    const inId = uid();
+    const outId = uid();
+    bp.links = (bp.links || []).filter((item) => item.id !== link.id);
+    bp.links.push(
+      { id: inId, from: original.from, fromPort: original.fromPort, to: node.id, toPort: "in" },
+      { id: outId, from: node.id, fromPort: "out", to: original.to, toPort: original.toPort }
+    );
+    holder.splice = { original, inId, outId, d: hit.d };
+    syncPassNodes(bp);
+    const kept = bp.links.some((item) => item.id === inId) && bp.links.some((item) => item.id === outId);
+    if (!kept) {
+      bp.links = bp.links.filter((item) => item.id !== inId && item.id !== outId);
+      bp.links.push(original);
+      holder.splice = null;
+      syncPassNodes(bp);
+    }
+    paintJoint(node);
+  }
+
+  function closestJointWire(bp, nodeId, box) {
+    const svg = $("calc-wires");
+    if (!svg) return null;
+    let best = null;
+    let bestDist = 1;
+    svg.querySelectorAll("path.calc-wire").forEach((path) => {
+      const id = path.getAttribute("data-link");
+      const link = (bp.links || []).find((item) => item.id === id);
+      if (!link || link.from === nodeId || link.to === nodeId) return;
+      const dist = pathGap(path.getAttribute("d"), box);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = { link, d: path.getAttribute("d") || "" };
+      }
+    });
+    return best;
+  }
+
+  function updateJointSplice(bp, holder) {
+    const nodeId = spliceHolderId(holder);
+    const node = nodeId && (bp.nodes || []).find((item) => item.id === nodeId);
+    if (!holder || node?.type !== "joint") {
+      clearJointSplice(bp, holder);
+      return;
+    }
+    const box = jointBox(bp, node);
+    if (holder.splice && pathGap(holder.splice.d, box) <= 14) return;
+    clearJointSplice(bp, holder);
+    if (!jointPortsFree(bp, node.id)) return;
+    session.spliceSkip = node.id;
+    try {
+      drawWires(bp, computeGraph(bp));
+    } finally {
+      session.spliceSkip = "";
+    }
+    const hit = closestJointWire(bp, node.id, box);
+    if (hit) applyJointSplice(bp, holder, node, hit);
+  }
+
   function upstreamNodeIds(bp, nodeId) {
     const ids = new Set();
     if (!bp || !nodeId) return ids;
@@ -1275,10 +1433,11 @@
       const src = byId[link.from];
       const onFlow = flow.linkIds.has(link.id);
       const onPick = !!(picked && picked.id === link.id);
+      const onCut = session.jointCut === link.from && link.fromPort === "out";
       const err = graph.errors.has(link.from) || graph.errors.has(link.to);
       const wire = addPath(
         d,
-        `calc-wire is-${wireKind(src, link.fromPort)}${onFlow ? " is-flow" : ""}${onPick ? " is-pick" : ""}${err ? " is-error" : ""}`,
+        `calc-wire is-${wireKind(src, link.fromPort)}${onFlow ? " is-flow" : ""}${onPick ? " is-pick" : ""}${onCut ? " is-cut" : ""}${err ? " is-error" : ""}`,
         {
           "pointer-events": "none",
           "data-link": link.id,
@@ -1294,6 +1453,8 @@
         hostButtons.push({ id: link.id, x: mid.x, y: mid.y, wire, hit });
       }
     });
+    document.querySelectorAll(".calc-node.is-joint.is-cut").forEach((el) => el.classList.remove("is-cut"));
+    if (session.jointCut) findNodeEl(session.jointCut)?.classList.add("is-cut");
     ui.querySelectorAll(".calc-unlink-wire").forEach((el) => el.remove());
     hostButtons.forEach((item) => {
       const btn = document.createElement("button");
@@ -1331,6 +1492,13 @@
           return;
         }
         if (e.button !== 0) return;
+        const cut = (bp.links || []).find((row) => row.id === item.id);
+        if (session.jointCut && cut?.from === session.jointCut && cut.fromPort === "out") {
+          e.preventDefault();
+          e.stopPropagation();
+          bridgeJoint(bp, session.jointCut, cut);
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
         session.selectedLink = item.id;
@@ -1971,6 +2139,7 @@
         item.y = origin.y + dy;
         applyNodeEl(item);
       });
+      updateJointSplice(bp, session.drag);
       drawWires(bp, computeGraph(bp));
       drawMinimap(bp);
       return;
@@ -1980,6 +2149,8 @@
   function onBoardPointerUp(e) {
     const bp = activeBlueprint();
     const movedNode = session.drag;
+    const spliced = !!movedNode?.splice;
+    if (movedNode?.splice) movedNode.splice = null;
     const movedPan = session.pan;
     const resized = session.resize;
     const linking = session.linking;
@@ -2037,7 +2208,14 @@
       if (bp) drawMinimap(bp);
       return;
     }
-    if (e.target.closest?.("input, textarea, select, .calc-bp-name, .calc-refresh, .calc-chain-move, .calc-wire-route, .calc-wire-avoid, .calc-board-tools")) return;
+    if (e.target.closest?.("input, textarea, select, .calc-bp-name, .calc-refresh, .calc-chain-move, .calc-wire-route, .calc-wire-avoid, .calc-board-tools")) {
+      if (spliced && bp) {
+        dirty();
+        drawWires(bp, computeGraph(bp));
+        drawMinimap(bp);
+      }
+      return;
+    }
     if (linking) {
       const over = document.elementFromPoint(e.clientX, e.clientY)?.closest?.(".calc-port");
       const nodeId = over?.closest?.(".calc-node")?.dataset.node;
@@ -2610,12 +2788,66 @@
       const start = !drag.moved;
       drag.moved = true;
       if (start) closePalette();
+      if (drag.kind === "joint") {
+        const bp = activeBlueprint();
+        const board = $("calc-board")?.getBoundingClientRect();
+        const inside = board && e.clientX >= board.left && e.clientX <= board.right && e.clientY >= board.top && e.clientY <= board.bottom;
+        if (!bp || !inside) {
+          clearJointSplice(bp, drag);
+          if (drag.nodeId && bp) {
+            bp.nodes = (bp.nodes || []).filter((item) => item.id !== drag.nodeId);
+            findNodeEl(drag.nodeId)?.remove();
+            drag.nodeId = "";
+            drawWires(bp, computeGraph(bp));
+          }
+          followPeek(e.clientX, e.clientY, start);
+          return;
+        }
+        const at = screenToWorld(e.clientX, e.clientY, bp);
+        let node = (bp.nodes || []).find((item) => item.id === drag.nodeId);
+        if (!node) {
+          node = blankNode("joint");
+          node.x = at.x - 18;
+          node.y = at.y - 18;
+          bp.nodes.push(node);
+          drag.nodeId = node.id;
+          nodesRoot()?.insertAdjacentHTML("beforeend", jointNodeHtml(node));
+          hidePeek();
+        } else {
+          node.x = at.x - 18;
+          node.y = at.y - 18;
+          applyNodeEl(node);
+        }
+        updateJointSplice(bp, drag);
+        drawWires(bp, computeGraph(bp));
+        return;
+      }
       followPeek(e.clientX, e.clientY, start);
     });
     document.addEventListener("pointerup", (e) => {
       const drag = session.palette;
       if (!drag) return;
       session.palette = null;
+      if (drag.kind === "joint" && drag.nodeId) {
+        const bp = activeBlueprint();
+        const rect = $("calc-board")?.getBoundingClientRect();
+        const inside = rect && e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+        if (!inside) {
+          clearJointSplice(bp, drag);
+          if (bp) bp.nodes = (bp.nodes || []).filter((item) => item.id !== drag.nodeId);
+          findNodeEl(drag.nodeId)?.remove();
+          if (bp) drawWires(bp, computeGraph(bp));
+          hidePeek();
+          return;
+        }
+        drag.splice = null;
+        session.selected = drag.nodeId;
+        session.picked = new Set([drag.nodeId]);
+        hidePeek();
+        dirty();
+        render();
+        return;
+      }
       const peek = document.getElementById("calc-peek");
       peek?.classList.remove("is-glide", "is-follow");
       if (!drag.moved) {
@@ -2772,7 +3004,7 @@
       const nodeEl = e.target.closest(".calc-node");
       const bp = activeBlueprint();
       if (e.target.closest("[data-del-node]")) {
-        removeNode(e.target.closest("[data-del-node]").dataset.delNode);
+        if (!e.detail) removeNode(e.target.closest("[data-del-node]").dataset.delNode);
         return;
       }
       const dropLink = e.target.closest("[data-del-link]");
@@ -3303,6 +3535,10 @@
         }
         if (session.selectedLink) {
           session.selectedLink = "";
+          redraw = true;
+        }
+        if (session.jointCut) {
+          session.jointCut = "";
           redraw = true;
         }
         if (redraw) {

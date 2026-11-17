@@ -1051,10 +1051,52 @@
     removeNodes(id ? [id] : []);
   }
 
+  function jointOuts(bp, id) {
+    return (bp.links || []).filter((link) => link.from === id && link.fromPort === "out");
+  }
+
+  function bridgeJoint(bp, id, keep) {
+    const incoming = (bp.links || []).find((link) => link.to === id && link.toPort === "in");
+    bp.links = (bp.links || []).filter((link) => link.from !== id && link.to !== id);
+    if (incoming && keep) {
+      const same = bp.links.some((link) => link.from === incoming.from && link.fromPort === incoming.fromPort && link.to === keep.to && link.toPort === keep.toPort);
+      if (!same) bp.links.push({ id: uid(), from: incoming.from, fromPort: incoming.fromPort, to: keep.to, toPort: keep.toPort });
+    }
+    bp.nodes = (bp.nodes || []).filter((node) => node.id !== id);
+    session.picked?.delete(id);
+    if (session.selected === id) {
+      session.selected = "";
+      session.picked = new Set();
+    }
+    session.jointCut = "";
+    session.busy = false;
+    session.linking = null;
+    syncPassNodes(bp);
+    dirty();
+    render();
+  }
+
+  function takeJointDelete(bp, id) {
+    const node = (bp.nodes || []).find((item) => item.id === id);
+    if (!node || node.type !== "joint") return false;
+    const outs = jointOuts(bp, id);
+    if (outs.length > 1 && session.jointCut !== id) {
+      session.jointCut = id;
+      session.selected = id;
+      session.selectedLink = "";
+      drawWires(bp, computeGraph(bp));
+      return true;
+    }
+    bridgeJoint(bp, id, outs[0] || null);
+    return true;
+  }
+
   function removeNodes(ids) {
     const bp = activeBlueprint();
     const drop = new Set((ids || []).filter(Boolean));
     if (!bp || !drop.size) return;
+    if (drop.size === 1 && takeJointDelete(bp, [...drop][0])) return;
+    if (session.jointCut) session.jointCut = "";
     bp.nodes = (bp.nodes || []).filter((node) => !drop.has(node.id));
     bp.links = (bp.links || []).filter((link) => !drop.has(link.from) && !drop.has(link.to));
     drop.forEach((nid) => session.picked?.delete(nid));
@@ -2893,7 +2935,7 @@
 
   function syncPassNodes(bp) {
     if (!bp) return;
-    for (let pass = 0; pass < 2; pass += 1) syncPassNodesOnce(bp);
+    for (let pass = 0; pass < 32; pass += 1) syncPassNodesOnce(bp);
   }
 
   function syncPassNodesOnce(bp) {

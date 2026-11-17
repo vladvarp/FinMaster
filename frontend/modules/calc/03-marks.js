@@ -100,21 +100,29 @@
     const host = bp || blueprintOf(node);
     const link = (host?.links || []).find((item) => item.to === node.id && item.toPort === feedPort(feed));
     if (!link) return "Чертёж";
-    const src = (host.nodes || []).find((item) => item.id === link.from);
+    let src = (host.nodes || []).find((item) => item.id === link.from);
     if (!src) return "Чертёж";
+    let fromPort = link.fromPort;
+    if (src.type === "joint" || src.type === "bus") {
+      const origin = planSource(src, host, fromPort);
+      if (!origin) return "Чертёж";
+      src = origin.node;
+      fromPort = origin.port;
+    }
     if (src.type === "planner") {
       ensurePlanner(src);
-      const layout = (src.layouts || []).find((item) => plannerPort(item, "plan") === link.fromPort);
+      const layout = (src.layouts || []).find((item) => plannerPort(item, "plan") === fromPort);
       return layout?.name || plannerName(src);
     }
     if (src.type === "openings") {
       ensureOpenings(src);
-      const srcFeed = (src.feeds || []).find((item) => feedPort(item) === link.fromPort);
+      const srcFeed = (src.feeds || []).find((item) => feedPort(item) === fromPort);
       const up = srcFeed && (host.links || []).find((item) => item.to === src.id && item.toPort === feedPort(srcFeed));
       const upNode = up && (host.nodes || []).find((item) => item.id === up.from);
-      if (upNode?.type === "planner") {
-        ensurePlanner(upNode);
-        const layout = (upNode.layouts || []).find((item) => plannerPort(item, "plan") === up.fromPort);
+      const origin = upNode && (upNode.type === "joint" || upNode.type === "bus") ? planSource(upNode, host, up.fromPort) : (upNode ? { node: upNode, port: up.fromPort } : null);
+      if (origin?.node?.type === "planner") {
+        ensurePlanner(origin.node);
+        const layout = (origin.node.layouts || []).find((item) => plannerPort(item, "plan") === origin.port);
         if (layout?.name) return layout.name;
       }
       return src.name || "Проёмы";
@@ -822,6 +830,11 @@
     const chain = stack || [];
     if (chain.includes(node.id)) return null;
     const next = chain.concat(node.id);
+    if (node.type === "joint" || node.type === "bus") {
+      const origin = planSource(node, bp, fromPort);
+      if (!origin || origin.node.id === node.id) return null;
+      return emitPlan(origin.node, bp, next, values, origin.port);
+    }
     if (node.type === "planner") {
       ensurePlanner(node);
       const layout = (node.layouts || []).find((item) => plannerPort(item, "plan") === fromPort) || plannerActive(node);
@@ -856,6 +869,26 @@
       };
     }
     return null;
+  }
+
+  function planSource(node, bp, fromPort, seen) {
+    const guard = seen || new Set();
+    const key = `${node?.id || ""}:${fromPort || ""}`;
+    if (!node || guard.has(key)) return null;
+    guard.add(key);
+    if (node.type === "joint") {
+      const link = (bp?.links || []).find((item) => item.to === node.id && item.toPort === "in");
+      if (!link) return null;
+      const src = (bp.nodes || []).find((item) => item.id === link.from);
+      return planSource(src, bp, link.fromPort, guard);
+    }
+    if (node.type === "bus") {
+      const link = (bp?.links || []).find((item) => item.to === node.id && item.toPort === `in:${laneIdOf(fromPort)}`);
+      if (!link) return null;
+      const src = (bp.nodes || []).find((item) => item.id === link.from);
+      return planSource(src, bp, link.fromPort, guard);
+    }
+    return { node, port: fromPort };
   }
 
   function upstreamPlan(node, bp, stack, values, portId) {

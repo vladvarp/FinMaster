@@ -443,6 +443,36 @@
     <p>Записка на поле. Портов нет, в сумму не входит. Кнопка ∅ её не удаляет: иначе текст без линий пропал бы при первой же чистке.</p>
   </section>
 
+  <section class="kind" data-kind="joint">
+    <h2>Точка</h2>
+    <article class="calc-node is-joint">
+      <i class="calc-port in" title="Вход"></i>
+      <i class="calc-grip calc-joint-dot" title="Точка"></i>
+      <i class="calc-port out" title="Выход"></i>
+    </article>
+    <p>Перевалочный пункт линии. Число и чертёж проходят дальше без изменения. Пустая точка принимает любую линию. Пустую точку можно поставить на связь: линия рвётся на вход и выход. Удаление склеивает вход с выходом. Если выходов несколько, первое удаление их подсвечивает: клик оставляет выбранный, повторное удаление — первый.</p>
+  </section>
+
+  <section class="kind" data-kind="bus">
+    <h2>Канал</h2>
+    <article class="calc-node is-bus">
+      <header class="calc-node-h"><span>Канал</span></header>
+      <div class="calc-ports">
+        <div class="calc-row bus">
+          <i class="calc-port in" title="Вход"></i>
+          <span>1 500</span>
+          <i class="calc-port out" title="Выход"></i>
+        </div>
+        <div class="calc-row bus">
+          <i class="calc-port in" data-signal="plan" title="Вход"></i>
+          <span>Чертёж Кухня</span>
+          <i class="calc-port out" data-signal="plan" title="Выход"></i>
+        </div>
+      </div>
+    </article>
+    <p>Пары входа и выхода, до 30. Число и чертёж проходят в ту же пару. Занятая пара открывает следующую снизу. Посередине — число линии или «Чертёж» с названием.</p>
+  </section>
+
   <section class="kind" data-kind="scheme">
     <h2>Схема</h2>
     <article class="calc-node is-scheme">

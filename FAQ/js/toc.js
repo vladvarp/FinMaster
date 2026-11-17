@@ -130,6 +130,8 @@ window.FAQ_TOC = [
         { id: "noda-elektrika", title: "Электрика" },
         { id: "noda-gruppa", title: "Группа" },
         { id: "noda-kommentarij", title: "Комментарий" },
+        { id: "noda-tochka", title: "Точка" },
+        { id: "noda-kanal", title: "Канал" },
         { id: "noda-shema", title: "Схема" },
         { id: "noda-prezentaciya", title: "Презентация" },
         { id: "svyazi-i-pole", title: "Связи и поле" },
