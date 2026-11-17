@@ -794,17 +794,83 @@
     return parts.join(" · ") || "все заказы";
   }
 
+  const DASH_PERIOD_IDS = ["all", "month", "quarter", "half", "roll366"];
+
+  function dashIso(date) {
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  }
+
+  function dashPeriod() {
+    let id = "all";
+    try {
+      id = localStorage.getItem("finmaster.dash.period") || "all";
+    } catch {
+      id = "all";
+    }
+    if (id.startsWith("y")) return dashYears().includes(id.slice(1)) ? id : "all";
+    return DASH_PERIOD_IDS.includes(id) ? id : "all";
+  }
+
+  function dashYears() {
+    const field = dashDateField();
+    const years = new Set();
+    allRows().forEach(({ line }) => {
+      const dt = rowDateIso(line, field);
+      if (dt.length >= 4) years.add(dt.slice(0, 4));
+    });
+    return [...years].sort((a, b) => b.localeCompare(a));
+  }
+
+  function dashPeriodWindow() {
+    const id = dashPeriod();
+    if (!id || id === "all") return null;
+    const today = new Date();
+    const end = dashIso(today);
+    if (id.startsWith("y")) return { from: `${id.slice(1)}-01-01`, to: `${id.slice(1)}-12-31` };
+    const from = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    if (id === "month") from.setMonth(from.getMonth() - 1);
+    else if (id === "quarter") from.setMonth(from.getMonth() - 3);
+    else if (id === "half") from.setMonth(from.getMonth() - 6);
+    else if (id === "roll366") from.setDate(from.getDate() - 366);
+    else return null;
+    return { from: dashIso(from), to: end };
+  }
+
+  function dashPeriodName(id = dashPeriod()) {
+    if (id === "month") return "последний месяц";
+    if (id === "quarter") return "последний квартал";
+    if (id === "half") return "последние полгода";
+    if (id === "roll366") return "366 дней";
+    if (id.startsWith("y")) return id.slice(1);
+    return "";
+  }
+
+  function rowsInDashPeriod(rows) {
+    const win = dashPeriodWindow();
+    if (!win) return rows;
+    const field = dashDateField();
+    return rows.filter(({ line }) => {
+      const dt = rowDateIso(line, field);
+      if (!dt) return false;
+      if (win.from && dt < win.from) return false;
+      if (win.to && dt > win.to) return false;
+      return true;
+    });
+  }
+
   function dashRows() {
     const order = focusedOrder();
     let rows = order
       ? (order.lines || []).filter((line) => !isFrozenLine(line)).map((line) => ({ order, line, totals: lineTotals(line, order) }))
       : allRows();
     const f = state.remoteStats;
-    if (!f || focusedOrder()) return rows;
-    if (f.filter && f.filter !== "all") rows = rows.filter(({ order: o }) => orderFilterMatch(o, f.filter));
-    if (f.status) rows = rows.filter(({ line }) => line.status === f.status);
-    if (f.period && f.period !== "all") rows = rows.filter(({ line }) => dashPeriodMatch(rowDateIso(line, dashDateField()), f.period));
-    return rows;
+    if (f && !focusedOrder()) {
+      if (f.filter && f.filter !== "all") rows = rows.filter(({ order: o }) => orderFilterMatch(o, f.filter));
+      if (f.status) rows = rows.filter(({ line }) => line.status === f.status);
+      if (f.period && f.period !== "all") rows = rows.filter(({ line }) => dashPeriodMatch(rowDateIso(line, dashDateField()), f.period));
+    }
+    return rowsInDashPeriod(rows);
   }
 
   function matchesSearch(order, line, q) {
@@ -2540,8 +2606,10 @@
   }
 
   function dashScopeNote() {
-    const win = dashChartWindow();
-    const range = win?.from && win?.to ? `${win.from} — ${win.to}` : "";
+    const chart = dashChartWindow();
+    const period = dashPeriodWindow();
+    const range = chart?.from && chart?.to ? `${chart.from} — ${chart.to}` : period ? `${period.from} — ${period.to}` : "";
+    const name = dashPeriodName();
     const order = focusedOrder();
     let text;
     if (order) {
@@ -2550,7 +2618,8 @@
     } else if (remoteStatsActive()) {
       const base = `фильтры сводки: ${remoteStatsLabel()}`;
       text = range ? `${base} · ${range}` : base;
-    } else text = range || "считаются по всем заказам отчёта";
+    } else if (name) text = range ? `${name} · ${range}` : name;
+    else text = range || "считаются по всем заказам отчёта";
     return payFactOn("dashboard") ? `${text} · по дате оплаты` : text;
   }
 
@@ -2765,8 +2834,91 @@
     modal.classList.add("open");
   }
 
+  let dashPeriodBound = false;
+
+  function paintDashPeriods() {
+    const id = dashPeriod();
+    const years = dashYears();
+    const host = $("dash-year");
+    const menu = $("dash-year-menu");
+    const yearBtn = document.querySelector("[data-dash-years]");
+    if (host) host.hidden = !years.length;
+    if (menu) {
+      if (!years.length) menu.hidden = true;
+      menu.innerHTML = years
+        .map((year) => `<button type="button" class="dash-year-item${id === `y${year}` ? " on" : ""}" data-dash-year="${year}" role="menuitem">${year}</button>`)
+        .join("");
+    }
+    document.querySelectorAll("[data-dash-period]").forEach((btn) => {
+      const on = btn.dataset.dashPeriod === id;
+      btn.classList.toggle("on", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    const yearOn = id.startsWith("y");
+    if (yearBtn) {
+      yearBtn.classList.toggle("on", yearOn);
+      yearBtn.title = yearOn ? id.slice(1) : "Годы";
+      yearBtn.setAttribute("aria-label", yearOn ? id.slice(1) : "Годы");
+      yearBtn.setAttribute("aria-pressed", yearOn ? "true" : "false");
+      yearBtn.setAttribute("aria-expanded", menu && !menu.hidden ? "true" : "false");
+    }
+    const label = $("dash-year-now");
+    if (label) label.textContent = yearOn ? id.slice(1) : "";
+  }
+
+  function setDashPeriod(id) {
+    const next = id || "all";
+    try {
+      localStorage.setItem("finmaster.dash.period", next);
+    } catch {
+      /* ignore */
+    }
+    if (lineZoom.dash) {
+      lineZoom.dash.preset = "all";
+      lineZoom.dash.fromKey = "";
+      lineZoom.dash.toKey = "";
+    }
+    const menu = $("dash-year-menu");
+    if (menu) menu.hidden = true;
+    if (state.view === "dashboard") renderDashboard();
+  }
+
+  function bindDashPeriod() {
+    if (dashPeriodBound) return;
+    dashPeriodBound = true;
+    document.addEventListener("click", (e) => {
+      const preset = e.target.closest?.("[data-dash-period]");
+      if (preset) {
+        setDashPeriod(preset.dataset.dashPeriod);
+        return;
+      }
+      const year = e.target.closest?.("[data-dash-year]");
+      if (year) {
+        setDashPeriod(`y${year.dataset.dashYear}`);
+        return;
+      }
+      const toggle = e.target.closest?.("[data-dash-years]");
+      if (toggle) {
+        const menu = $("dash-year-menu");
+        if (!menu || $("dash-year")?.hidden) return;
+        menu.hidden = !menu.hidden;
+        toggle.setAttribute("aria-expanded", menu.hidden ? "false" : "true");
+        return;
+      }
+      if (!e.target.closest?.("#dash-year-menu")) {
+        const menu = $("dash-year-menu");
+        if (menu && !menu.hidden) {
+          menu.hidden = true;
+          document.querySelector("[data-dash-years]")?.setAttribute("aria-expanded", "false");
+        }
+      }
+    });
+  }
+
   function renderDashboard() {
+    bindDashPeriod();
     paintPayFact("dashboard");
+    paintDashPeriods();
     const title = $("dash-line-title");
     if (title) title.textContent = payFactOn("dashboard") ? "По дате оплаты" : "Выручка по дням";
     renderDashFocus();

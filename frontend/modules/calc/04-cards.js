@@ -1506,8 +1506,13 @@
   }
 
   function calcGroupButton(id, label, icon) {
-    return `<button type="button" class="btn calc-tool calc-group-btn" data-palette="${esc(id)}"><svg class="calc-tool-ico" viewBox="0 0 16 16" aria-hidden="true">${icon}</svg>${label}</button>`;
+    return `<button type="button" class="btn calc-tool calc-group-btn" data-palette="${esc(id)}" title="${esc(label)}"><svg class="calc-tool-ico" viewBox="0 0 16 16" aria-hidden="true">${icon}</svg><span class="calc-tool-name">${esc(label)}</span></button>`;
   }
+
+  const FOLD_ICONS = {
+    nodes: `<rect x="2.2" y="2.2" width="4.8" height="4.8" rx="1"/><rect x="9" y="2.2" width="4.8" height="4.8" rx="1"/><rect x="2.2" y="9" width="4.8" height="4.8" rx="1"/><rect x="9" y="9" width="4.8" height="4.8" rx="1"/>`,
+    orders: `<path d="M3.2 2.6h6.2L12.6 5.6v7.8H3.2z"/><path d="M5 7.4h5M5 9.6h3.4"/>`,
+  };
 
   const PALETTE_ICONS = {
     logic: `<path d="M4 4.2h3.2M8.8 4.2H12M8 4.2v3.2M4.6 11.2h2.4M9 11.2h2.4M8 7.4 5.8 11.2M8 7.4l2.2 3.8"/>`,
@@ -1786,11 +1791,19 @@
     layoutFlyout(btn);
   }
 
+  function foldSummary(key, label, extra = "") {
+    return `<summary class="calc-tools-label"><svg class="calc-fold-ico" viewBox="0 0 16 16" aria-hidden="true">${FOLD_ICONS[key] || ""}</svg><span class="calc-fold-name">${esc(label)}</span>${extra}</summary>`;
+  }
+
   function renderSide(bp) {
     const host = $("calc-side");
     if (!host) return;
     const calc = ensureState();
+    const rail = !sideOpen();
+    host.classList.toggle("is-rail", rail);
+    host.closest(".calc-layout")?.classList.toggle("is-rail", rail);
     const q = session.search.trim().toLowerCase();
+    const searchPop = rail && session.searchOpen;
     const src = api.orders() || [];
     const orders = src
       .map((order, index) => ({ order, index }))
@@ -1921,20 +1934,27 @@
       }),
     }));
     paletteModel = { nodes: nodeGroups, orders: orderGroups };
+    const railBtn = `<button type="button" class="calc-rail-btn" data-calc-rail title="${rail ? "Развернуть меню нодов" : "Свернуть меню нодов"}" aria-label="${rail ? "Развернуть меню нодов" : "Свернуть меню нодов"}" aria-pressed="${rail ? "true" : "false"}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M9.2 4.5v15" stroke="currentColor" stroke-width="1.8"/></svg></button>`;
     host.innerHTML = `
+      ${rail ? railBtn : ""}
       <details class="calc-fold" data-fold="nodes" ${foldOpen("nodes") ? "open" : ""}>
-        <summary class="calc-tools-label">Ноды</summary>
+        ${foldSummary("nodes", "Ноды", rail ? "" : railBtn)}
         <div class="calc-tools">
           ${nodeGroups.map((group) => calcGroupButton(group.id, group.name, group.icon)).join("")}
         </div>
       </details>
       <details class="calc-fold" data-fold="orders" ${foldOpen("orders") ? "open" : ""}>
-        <summary class="calc-tools-label">Заказы</summary>
+        ${foldSummary("orders", "Заказы")}
         <div class="calc-orders">
-          <div class="calc-search${session.search ? " has-value" : ""}">
+          ${
+            rail
+              ? `<button type="button" class="calc-search-btn${session.search ? " has-value" : ""}" data-search-open title="Поиск заказов" aria-label="Поиск заказов" aria-expanded="${searchPop ? "true" : "false"}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5" stroke="currentColor" stroke-width="1.8"/><path d="M15 15l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>`
+              : `<div class="calc-search is-field${session.search ? " has-value" : ""}">
+            <svg class="calc-search-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5" stroke="currentColor" stroke-width="1.8"/><path d="M15 15l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
             <input type="search" id="calc-order-search" placeholder="Номер, название…" value="${esc(session.search)}" autocomplete="off" />
             <button type="button" class="search-clear" data-search-clear="calc-order-search" title="Очистить" aria-label="Очистить поиск">×</button>
-          </div>
+          </div>`
+          }
           <div class="calc-tools calc-order-groups">
             ${
               orderGroups.length
@@ -1944,7 +1964,31 @@
           </div>
         </div>
       </details>`;
+    syncRailSearch();
     syncPalette();
+  }
+
+  function syncRailSearch() {
+    const host = $("calc-side");
+    const btn = host?.classList.contains("is-rail") && session.searchOpen ? host.querySelector("[data-search-open]") : null;
+    let pop = document.getElementById("calc-order-pop");
+    if (!btn) {
+      pop?.remove();
+      return;
+    }
+    if (!pop) {
+      pop = document.createElement("div");
+      pop.id = "calc-order-pop";
+      pop.className = "calc-search";
+      pop.innerHTML = `<input type="search" id="calc-order-search" placeholder="Номер, название…" autocomplete="off" /><button type="button" class="search-clear" data-search-clear="calc-order-search" title="Очистить" aria-label="Очистить поиск">×</button>`;
+      document.body.appendChild(pop);
+    }
+    pop.classList.toggle("has-value", !!session.search);
+    const input = pop.querySelector("input");
+    if (input && document.activeElement !== input && input.value !== session.search) input.value = session.search;
+    const rect = btn.getBoundingClientRect();
+    pop.style.top = `${Math.round(rect.top)}px`;
+    pop.style.left = `${Math.round(rect.right + 8)}px`;
   }
 
   function hidePortMenu() {

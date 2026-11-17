@@ -190,30 +190,49 @@
   const WIRE_STUB = 18;
   const WIRE_GAP = 14;
 
+  function applyWireRaw(raw) {
+    if (!raw || typeof raw !== "object") return;
+    if (raw.route === "curve" || raw.route === "ortho" || raw.route === "diag") session.wireRoute = raw.route;
+    if (typeof raw.avoid === "boolean") session.wireAvoid = raw.avoid;
+    if (typeof raw.snap === "boolean") session.wireSnap = raw.snap;
+    if (raw.chain === "off" || raw.chain === "in" || raw.chain === "out") session.moveChain = raw.chain;
+  }
+
   function loadWirePrefs() {
     if (session.wirePrefsLoaded) return;
-    session.wirePrefsLoaded = true;
+    let stored = null;
     try {
-      const raw = JSON.parse(localStorage.getItem("finmaster.calc.wires") || "null");
-      if (raw?.route === "curve" || raw?.route === "ortho" || raw?.route === "diag") session.wireRoute = raw.route;
-      if (typeof raw?.avoid === "boolean") session.wireAvoid = raw.avoid;
-      if (typeof raw?.snap === "boolean") session.wireSnap = raw.snap;
+      stored = JSON.parse(localStorage.getItem("finmaster.calc.wires") || "null");
     } catch {
-      /* ignore */
+      stored = null;
     }
+    const doc = api?.doc?.();
+    if (!stored && !doc) return;
+    const file = doc?.ui?.calculator?.tools;
+    applyWireRaw(Object.assign({}, file || {}, stored || {}));
+    session.wirePrefsLoaded = true;
   }
 
   function saveWirePrefs() {
     const route = session.wireRoute === "ortho" || session.wireRoute === "diag" ? session.wireRoute : "curve";
+    const chain = chainMode();
+    const prefs = {
+      chain,
+      route,
+      avoid: !!session.wireAvoid,
+      snap: !!session.wireSnap,
+    };
     try {
-      localStorage.setItem("finmaster.calc.wires", JSON.stringify({
-        route,
-        avoid: !!session.wireAvoid,
-        snap: !!session.wireSnap,
-      }));
+      localStorage.setItem("finmaster.calc.wires", JSON.stringify(prefs));
     } catch {
       /* ignore */
     }
+    const calc = ensureState();
+    if (!calc) return;
+    const prev = calc.tools || {};
+    if (prev.chain === prefs.chain && prev.route === prefs.route && prev.avoid === prefs.avoid && prev.snap === prefs.snap) return;
+    calc.tools = prefs;
+    dirtyLive();
   }
 
   function nodeObstacles(skip) {
@@ -1430,6 +1449,8 @@
     btn?.classList.toggle("is-on", session.presentPanel);
     btn?.setAttribute("aria-pressed", session.presentPanel ? "true" : "false");
     renderPresentPanel();
+    syncChainMoveBtn();
+    syncWireBtns();
     requestAnimationFrame(() => {
       drawWires(bp, graph);
       revealPendingFocus(bp);
@@ -2272,6 +2293,7 @@
       const order = ["off", "in", "out"];
       const at = order.indexOf(chainMode());
       session.moveChain = order[(at + 1) % order.length];
+      saveWirePrefs();
       syncChainMoveBtn();
     });
     $("calc-wire-route")?.addEventListener("click", (e) => {
@@ -2379,9 +2401,23 @@
       e.preventDefault();
       e.target.blur();
     });
-    $("calc-side")?.addEventListener("input", (e) => {
+    $("calc-screen")?.addEventListener("click", () => {
+      const view = $("view-calculator");
+      if (!view) return;
+      const on = view.classList.toggle("is-screen");
+      const btn = $("calc-screen");
+      const title = on ? "Свернуть калькулятор" : "Калькулятор на весь экран";
+      if (btn) {
+        btn.title = title;
+        btn.setAttribute("aria-label", title);
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+      }
+    });
+    $("calc-side")?.addEventListener("scroll", () => syncRailSearch(), { passive: true });
+    document.addEventListener("input", (e) => {
       if (e.target.id !== "calc-order-search") return;
       session.search = e.target.value;
+      session.searchOpen = true;
       const start = e.target.selectionStart;
       const end = e.target.selectionEnd;
       const list = document.querySelector("#calc-side .calc-order-list");
@@ -2402,12 +2438,55 @@
       const nextList = document.querySelector("#calc-side .calc-order-list");
       if (nextList) nextList.scrollTop = listScroll;
     });
+    document.addEventListener("keydown", (e) => {
+      if (e.target?.id !== "calc-order-search" || e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      session.search = "";
+      session.searchOpen = false;
+      renderSide(activeBlueprint());
+    });
+    document.addEventListener("click", (e) => {
+      const clear = e.target.closest?.("#calc-order-pop [data-search-clear]");
+      if (!clear) return;
+      e.preventDefault();
+      e.stopPropagation();
+      session.search = "";
+      session.searchOpen = true;
+      renderSide(activeBlueprint());
+      $("calc-order-search")?.focus();
+    });
+    document.addEventListener("pointerdown", (e) => {
+      if (!session.searchOpen || session.search.trim()) return;
+      if (e.target.closest?.(".calc-search, #calc-order-pop, [data-search-open]")) return;
+      session.searchOpen = false;
+      if ($("calc-side")?.classList.contains("is-rail")) renderSide(activeBlueprint());
+    });
     $("calc-side")?.addEventListener("click", (e) => {
+      const rail = e.target.closest("[data-calc-rail]");
+      if (rail) {
+        e.preventDefault();
+        e.stopPropagation();
+        const wasOpen = sideOpen();
+        setFold("side", !wasOpen);
+        if (wasOpen && session.search.trim()) session.searchOpen = true;
+        renderSide(activeBlueprint());
+        if (!sideOpen() && session.searchOpen) $("calc-order-search")?.focus();
+        return;
+      }
+      const openSearch = e.target.closest("[data-search-open]");
+      if (openSearch) {
+        session.searchOpen = !session.searchOpen;
+        renderSide(activeBlueprint());
+        if (session.searchOpen) $("calc-order-search")?.focus();
+        return;
+      }
       const clear = e.target.closest("[data-search-clear]");
       if (clear) {
         e.preventDefault();
         e.stopPropagation();
         session.search = "";
+        session.searchOpen = true;
         renderSide(activeBlueprint());
         $("calc-order-search")?.focus();
         return;
@@ -2478,6 +2557,7 @@
       }, 140);
     };
     $("calc-side")?.addEventListener("pointerover", (e) => {
+      if (session.palette?.moved) return;
       const btn = e.target.closest("[data-palette]");
       if (!btn) return;
       clearTimeout(paletteCloseTimer);
@@ -2489,7 +2569,7 @@
       armPaletteClose();
     });
     document.addEventListener("pointerover", (e) => {
-      if (api?.view?.() !== "calculator") return;
+      if (api?.view?.() !== "calculator" || session.palette?.moved) return;
       const item = e.target.closest?.("#calc-palette [data-peek]");
       if (item) {
         clearTimeout(paletteCloseTimer);
@@ -2501,7 +2581,7 @@
       if (e.target.closest?.("#calc-palette")) clearTimeout(paletteCloseTimer);
     });
     document.addEventListener("pointerout", (e) => {
-      if (!e.target.closest?.("#calc-palette")) return;
+      if (session.palette?.moved || !e.target.closest?.("#calc-palette")) return;
       if (e.relatedTarget?.closest?.("#calc-palette, [data-palette]")) return;
       if (session.presentHover) setPresentHover("");
       armPaletteClose();
@@ -2529,6 +2609,7 @@
       if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 5) return;
       const start = !drag.moved;
       drag.moved = true;
+      if (start) closePalette();
       followPeek(e.clientX, e.clientY, start);
     });
     document.addEventListener("pointerup", (e) => {

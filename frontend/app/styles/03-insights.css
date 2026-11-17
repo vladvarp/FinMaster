@@ -1,4 +1,69 @@
 /* ==== Инсайты ==== */
+.dash-periods {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.dash-period-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+}
+.dash-period-btn svg { display: block; pointer-events: none; }
+.dash-period-btn:hover,
+.dash-period-btn.on {
+  border-color: var(--accent-2);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--card));
+}
+.dash-year { position: relative; }
+.dash-year[hidden] { display: none; }
+.dash-year-now:empty { display: none; }
+.dash-year-now { font-size: 11px; font-weight: 800; line-height: 1; }
+.dash-year-btn:has(.dash-year-now:not(:empty)) { width: auto; padding: 0 8px; }
+.dash-year-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  min-width: 92px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dash-year-menu[hidden] { display: none; }
+.dash-year-item {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.dash-year-item:hover,
+.dash-year-item.on {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
 .dash-focus {
   margin-bottom: 14px;
   border-color: var(--accent-2);

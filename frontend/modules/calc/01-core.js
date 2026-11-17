@@ -76,6 +76,7 @@
     presentPanel: false,
     presentDrag: null,
     presentHover: "",
+    searchOpen: false,
     jump: null,
     pendingFocus: null,
     presentListScroll: 0,
@@ -828,13 +829,13 @@
     const merged = {};
     const calc = ensureState();
     if (calc?.folds && typeof calc.folds === "object") {
-      ["nodes", "schemes", "orders"].forEach((key) => {
+      ["nodes", "schemes", "orders", "side"].forEach((key) => {
         if (typeof calc.folds[key] === "boolean") merged[key] = calc.folds[key];
       });
     }
     try {
       const raw = JSON.parse(localStorage.getItem("finmaster.calc.folds") || "{}") || {};
-      ["nodes", "schemes", "orders"].forEach((key) => {
+      ["nodes", "schemes", "orders", "side"].forEach((key) => {
         if (typeof raw[key] === "boolean") merged[key] = raw[key];
       });
     } catch {
@@ -849,6 +850,16 @@
     return folds[key] !== false;
   }
 
+  function sideOpen() {
+    try {
+      const rail = localStorage.getItem("finmaster.calc.rail");
+      if (rail === "0" || rail === "1") return rail === "1";
+    } catch {
+      /* ignore */
+    }
+    return foldOpen("side");
+  }
+
   function setFold(key, open) {
     if (!key) return;
     const folds = loadFolds();
@@ -856,6 +867,7 @@
     session.folds = folds;
     try {
       localStorage.setItem("finmaster.calc.folds", JSON.stringify(folds));
+      if (key === "side") localStorage.setItem("finmaster.calc.rail", open ? "1" : "0");
     } catch {
       /* ignore */
     }
@@ -865,6 +877,7 @@
         nodes: folds.nodes !== false,
         schemes: folds.schemes !== false,
         orders: folds.orders !== false,
+        side: folds.side !== false,
       };
     }
   }

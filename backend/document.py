@@ -1083,7 +1083,12 @@ def _calc_blueprint(raw: Any, index: int) -> dict[str, Any] | None:
 
 def _calculator_ui(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
-        return {"active": "", "blueprints": [], "folds": {"nodes": True, "schemes": True, "orders": True}}
+        return {
+            "active": "",
+            "blueprints": [],
+            "folds": {"nodes": True, "schemes": True, "orders": True, "side": True},
+            "tools": {"chain": "off", "route": "curve", "avoid": False, "snap": False},
+        }
     blueprints: list[dict[str, Any]] = []
     seen: set[str] = set()
     for i, item in enumerate(raw.get("blueprints") if isinstance(raw.get("blueprints"), list) else []):
@@ -1104,8 +1109,18 @@ def _calculator_ui(raw: Any) -> dict[str, Any]:
         "nodes": False if folds_raw.get("nodes") is False else True,
         "schemes": False if folds_raw.get("schemes") is False else True,
         "orders": False if folds_raw.get("orders") is False else True,
+        "side": False if folds_raw.get("side") is False else True,
     }
-    data = {"active": active, "blueprints": blueprints, "folds": folds}
+    tools_raw = raw.get("tools") if isinstance(raw.get("tools"), dict) else {}
+    chain = tools_raw.get("chain")
+    route = tools_raw.get("route")
+    tools = {
+        "chain": chain if chain in ("off", "in", "out") else "off",
+        "route": route if route in ("curve", "ortho", "diag") else "curve",
+        "avoid": tools_raw.get("avoid") is True,
+        "snap": tools_raw.get("snap") is True,
+    }
+    data = {"active": active, "blueprints": blueprints, "folds": folds, "tools": tools}
     labels = _calc_labels(raw.get("labels"))
     sockets = _calc_socket_types(raw.get("socketTypes"))
     lights = _calc_light_types(raw.get("lightTypes"))
@@ -1446,7 +1461,12 @@ def empty_document(title: str = "Новый отчёт") -> dict[str, Any]:
             "cash_horizon": DEFAULT_CASH_HORIZON,
             "cloud": {},
             "line_series": {},
-            "calculator": {"active": "", "blueprints": [], "folds": {"nodes": True, "schemes": True, "orders": True}},
+            "calculator": {
+                "active": "",
+                "blueprints": [],
+                "folds": {"nodes": True, "schemes": True, "orders": True, "side": True},
+                "tools": {"chain": "off", "route": "curve", "avoid": False, "snap": False},
+            },
             "presentation": {"active": "", "pages": [], "inspectorOpen": True, "canvasLocked": False},
             "vault": {"active": "", "pages": []},
         },
