@@ -2010,6 +2010,7 @@
 
   let updateLogMode = "ahead";
   let updateLogData = null;
+  let updateLogToken = 0;
 
   function shortCode(value) {
     const text = String(value || "").trim();
@@ -2080,11 +2081,98 @@
       return;
     }
     const rows = (all ? updateLogData.commits : updateLogData.ahead) || [];
+    const top = log.scrollTop;
+    if (!rows.length && updateLogData.loading) {
+      log.innerHTML = '<p class="update-wait">Смотрю историю коммитов…</p>';
+      return;
+    }
     if (!rows.length) {
       log.innerHTML = `<p class="update-wait">${all ? "История коммитов пуста." : "От установленной версии до последней изменений нет."}</p>`;
       return;
     }
-    log.innerHTML = `<ol class="update-path">${rows.map(updateCommitItem).join("")}</ol>`;
+    const tail = updateLogData.loading
+      ? '<p class="update-wait">Догружаю остальные коммиты…</p>'
+      : (updateLogData.partial ? `<p class="update-wait">${esc(updateLogData.error || "Часть истории не загрузилась.")} <button type="button" class="btn small" id="update-log-more">Догрузить</button></p>` : "");
+    log.innerHTML = `<ol class="update-path">${rows.map(updateCommitItem).join("")}</ol>${tail}`;
+    log.scrollTop = top;
+    log.querySelector("#update-log-more")?.addEventListener("click", () => pullUpdateLog(updateLogToken));
+  }
+
+  function takeUpdatePage(data) {
+    const seen = new Set((updateLogData.commits || []).map((row) => row.sha));
+    (data.commits || []).forEach((row) => {
+      if (!row?.sha || seen.has(row.sha)) return;
+      seen.add(row.sha);
+      updateLogData.commits.push(row);
+    });
+    if (!updateLogData.reached) {
+      const seenAhead = new Set((updateLogData.ahead || []).map((row) => row.sha));
+      (data.ahead || []).forEach((row) => {
+        if (!row?.sha || seenAhead.has(row.sha)) return;
+        seenAhead.add(row.sha);
+        updateLogData.ahead.push(row);
+      });
+      if (data.reached) updateLogData.reached = true;
+    }
+    updateLogData.more = !!data.more;
+    updateLogData.page = data.page || updateLogData.page;
+    if (data.current_sha) {
+      state.updateCurrentSha = data.current_sha;
+      state.updateCurrentCode = String(data.current_sha).slice(0, 7);
+    }
+    if (data.latest_sha) {
+      state.updateLatestSha = data.latest_sha;
+      state.updateLatestCode = String(data.latest_sha).slice(0, 7);
+    }
+  }
+
+  async function pullUpdateLog(token) {
+    if (!updateLogData) return;
+    updateLogData.loading = true;
+    updateLogData.partial = false;
+    paintUpdateLog();
+    let fails = 0;
+    while (token === updateLogToken) {
+      const page = (updateLogData.page || 0) + 1;
+      try {
+        const data = await apiGet(`/api/update/log?page=${page}`);
+        if (token !== updateLogToken) return;
+        if ((data.page || page) !== page) {
+          updateLogData.loading = false;
+          updateLogData.more = false;
+          paintUpdateLog();
+          return;
+        }
+        fails = 0;
+        takeUpdatePage(data);
+        if (!data.more) {
+          updateLogData.loading = false;
+          paintUpdateVersions();
+          paintUpdateLog();
+          return;
+        }
+        paintUpdateVersions();
+        paintUpdateLog();
+      } catch (err) {
+        if (token !== updateLogToken) return;
+        fails += 1;
+        const message = err && err.message ? err.message : "Не удалось получить историю";
+        if (!updateLogData.commits.length) {
+          updateLogData = null;
+          const log = $("update-log");
+          if (log) log.innerHTML = `<p class="update-wait">${esc(message)}</p>`;
+          return;
+        }
+        if (fails >= 3) {
+          updateLogData.loading = false;
+          updateLogData.partial = true;
+          updateLogData.error = message;
+          paintUpdateLog();
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
+    }
   }
 
   async function toggleUpdateDiff(btn) {
@@ -2166,24 +2254,11 @@
     }
     $("update-diff")?.classList.remove("open");
     paintUpdateVersions();
+    updateLogToken += 1;
+    updateLogData = { commits: [], ahead: [], more: true, loading: true, partial: false, reached: false, page: 0 };
     paintUpdateLog();
     $("update-modal")?.classList.add("open");
-    try {
-      updateLogData = await apiGet("/api/update/log");
-      if (updateLogData.current_sha) {
-        state.updateCurrentSha = updateLogData.current_sha;
-        state.updateCurrentCode = String(updateLogData.current_sha).slice(0, 7);
-      }
-      if (updateLogData.latest_sha) {
-        state.updateLatestSha = updateLogData.latest_sha;
-        state.updateLatestCode = String(updateLogData.latest_sha).slice(0, 7);
-      }
-      paintUpdateVersions();
-      paintUpdateLog();
-    } catch (err) {
-      const log = $("update-log");
-      if (log) log.innerHTML = `<p class="update-wait">${esc(err && err.message ? err.message : "Не удалось получить историю")}</p>`;
-    }
+    pullUpdateLog(updateLogToken);
   }
 
   async function acceptProgramUpdate() {

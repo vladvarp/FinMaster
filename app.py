@@ -3173,7 +3173,12 @@ def api_update_log():
     try:
         from backend.setup import update_log
 
-        return jsonify(update_log(ROOT))
+        raw = request.args.get("page", "1")
+        try:
+            page = int(raw)
+        except (TypeError, ValueError):
+            page = 1
+        return jsonify(update_log(ROOT, page))
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
 

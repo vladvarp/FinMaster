@@ -1706,9 +1706,6 @@ def update_status(root: str) -> dict[str, Any]:
     })
 
 
-_LOG_CACHE: tuple[float, list[dict[str, Any]]] | None = None
-
-
 def _commit_row(item: dict[str, Any]) -> dict[str, Any] | None:
     sha = str(item.get("sha") or "").strip().lower()
     if not _sha_ok(sha):
@@ -1733,48 +1730,58 @@ def _commit_row(item: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _remote_commits(timeout: float, *, fresh: bool = False) -> list[dict[str, Any]]:
-    global _LOG_CACHE
-    now = time.time()
-    if not fresh and _LOG_CACHE and now - _LOG_CACHE[0] < 120:
-        return [dict(item) for item in _LOG_CACHE[1]]
+def _remote_commit_page(page: int, timeout: float) -> tuple[list[dict[str, Any]], bool]:
+    payload = _read_api(f"{API}/commits?per_page=100&page={page}", timeout)
+    if not isinstance(payload, list) or not payload:
+        return [], False
     found: list[dict[str, Any]] = []
-    for page in range(1, 4):
-        payload = _read_api(f"{API}/commits?per_page=100&page={page}", timeout)
-        if not isinstance(payload, list) or not payload:
-            break
-        for item in payload:
-            if not isinstance(item, dict):
-                continue
-            row = _commit_row(item)
-            if row:
-                found.append(row)
-        if len(payload) < 100:
-            break
-    _LOG_CACHE = (now, found)
-    return [dict(item) for item in found]
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        row = _commit_row(item)
+        if row:
+            found.append(row)
+    return found, len(payload) >= 100
 
 
-def update_log(root: str) -> dict[str, Any]:
-    """Коммиты GitHub: весь путь и отрезок от установленной версии до последней."""
+def update_log(root: str, page: int = 1) -> dict[str, Any]:
+    """Одна страница коммитов GitHub. Следующие страницы догружает окно обновления."""
     root = os.path.abspath(root)
-    commits = _remote_commits(12, fresh=True)
+    try:
+        page = int(page)
+    except (TypeError, ValueError):
+        page = 1
+    page = max(1, min(page, 500))
+    commits, more = _remote_commit_page(page, 12)
     current = _read_sha(root)
     local = _parse_when(_read_stamp(root))
-    latest = commits[0]["sha"] if commits else ""
+    latest = commits[0]["sha"] if page == 1 and commits else ""
     for row in commits:
         row["current"] = bool(current) and row["sha"] == current
-        row["latest"] = row["sha"] == latest
-    index = next((i for i, row in enumerate(commits) if row["current"]), -1)
-    if index >= 0:
-        ahead = [dict(row) for row in commits[: index + 1]]
-    elif local is not None:
-        ahead = []
+        row["latest"] = bool(latest) and row["sha"] == latest
+    ahead: list[dict[str, Any]] = []
+    reached = False
+    if current or local is not None:
         for row in commits:
             moment = _parse_when(str(row.get("when") or ""))
-            if moment is None or moment < local:
+            if current and row["sha"] == current:
+                ahead.append(dict(row))
+                reached = True
+                break
+            if local is not None and (moment is None or moment < local):
+                reached = True
                 break
             ahead.append(dict(row))
+        if not more:
+            reached = True
     else:
-        ahead = []
-    return {"commits": commits, "ahead": ahead, "current_sha": current, "latest_sha": latest}
+        reached = True
+    return {
+        "commits": commits,
+        "ahead": ahead,
+        "more": more,
+        "reached": reached,
+        "page": page,
+        "current_sha": current,
+        "latest_sha": latest,
+    }
