@@ -1028,6 +1028,45 @@
     return node;
   }
 
+  function fitGroupAroundSelection(node) {
+    const bp = activeBlueprint();
+    const nodes = (bp?.nodes || []).filter((item) => selectionIds().has(item.id));
+    if (!nodes.length) return false;
+    const padX = 24;
+    const padTop = 48;
+    const padBottom = 24;
+    let x1 = Infinity;
+    let y1 = Infinity;
+    let x2 = -Infinity;
+    let y2 = -Infinity;
+    nodes.forEach((item) => {
+      const rect = nodeRect(item);
+      x1 = Math.min(x1, rect.x);
+      y1 = Math.min(y1, rect.y);
+      x2 = Math.max(x2, rect.x + rect.w);
+      y2 = Math.max(y2, rect.y + rect.h);
+    });
+    let x = x1 - padX;
+    let y = y1 - padTop;
+    let w = Math.max(160, x2 - x1 + padX * 2);
+    let h = Math.max(120, y2 - y1 + padTop + padBottom);
+    if (w > x2 - x1 + padX * 2) x -= (w - (x2 - x1 + padX * 2)) / 2;
+    if (h > y2 - y1 + padTop + padBottom) y -= (h - (y2 - y1 + padTop + padBottom)) / 2;
+    if (session.wireSnap) {
+      const right = x + w;
+      const bottom = y + h;
+      x = Math.floor(x / SNAP) * SNAP;
+      y = Math.floor(y / SNAP) * SNAP;
+      w = Math.max(160, Math.ceil(right / SNAP) * SNAP - x);
+      h = Math.max(120, Math.ceil(bottom / SNAP) * SNAP - y);
+    }
+    node.x = x;
+    node.y = y;
+    node.w = w;
+    node.h = h;
+    return true;
+  }
+
   function addNode(type, point, extra) {
     const bp = activeBlueprint();
     if (!bp) return;
@@ -1035,8 +1074,11 @@
     session.place += 1;
     const node = blankNode(type, extra);
     loadWirePrefs();
-    node.x = session.wireSnap ? snapCoord(at.x) : at.x;
-    node.y = session.wireSnap ? snapCoord(at.y) : at.y;
+    const wrapped = type === "group" && !point && fitGroupAroundSelection(node);
+    if (!wrapped) {
+      node.x = session.wireSnap ? snapCoord(at.x) : at.x;
+      node.y = session.wireSnap ? snapCoord(at.y) : at.y;
+    }
     if (type === "result") node.priority = nextResultPriority(bp);
     if (type === "planner" || type === "openings" || type === "electrics" || type === "group") {
       node.color = GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
