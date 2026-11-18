@@ -1799,7 +1799,7 @@
     return false;
   }
 
-  function tilePack(parts, width, height, tolW, tolH) {
+  function tilePack(parts, width, height, tolW, tolH, allowPairs = true) {
     let count = 0;
     let cuts = 0;
     const rest = [];
@@ -1821,7 +1821,7 @@
       if (used[i]) continue;
       let best = -1;
       let bestArea = -1;
-      for (let j = i + 1; j < rest.length; j += 1) {
+      for (let j = i + 1; allowPairs && j < rest.length; j += 1) {
         if (used[j] || !fits(rest[i], rest[j])) continue;
         const area = rest[j].w * rest[j].h;
         if (area > bestArea) {
@@ -2421,6 +2421,7 @@
         gap: plannerRound(plannerClamp(raw.gap == null ? 0.001 : plannerNum(raw.gap, 0.001), 0, 0.03)),
         bond: plannerRound(plannerClamp(plannerNum(raw.bond, 0), 0, 1)),
         bondRows: Math.round(plannerClamp(plannerNum(raw.bondRows, 1), 1, 30)),
+        noPairs: raw.noPairs === true,
         grout: markHex(raw.grout, "#a8a29e"),
       });
     });
@@ -2499,7 +2500,7 @@
     if (!tile) return { count: 0, tile: null, lay, bag: null };
     const geom = tileGeom(plan, face.surface, face.wall, lay);
     const bag = tileBag(tile, lay, geom, false);
-    const packed = bag.rough != null ? { count: bag.rough, cuts: 0 } : tilePack(bag.pieces, tile.w, tile.h, lay.tolW, lay.tolH);
+    const packed = bag.rough != null ? { count: bag.rough, cuts: 0 } : tilePack(bag.pieces, tile.w, tile.h, lay.tolW, lay.tolH, !tile.noPairs);
     return { count: packed.count, cuts: packed.cuts, tile, lay, bag };
   }
 
@@ -2934,6 +2935,7 @@
       <div class="tile-row">
         <label class="planner-len">Шов <input data-tile-gap="${esc(tile.id)}" inputmode="decimal" value="${esc(plannerInput((tile.gap || 0) * 1000))}" /> мм</label>
       </div>
+      <label class="planner-on"><input type="checkbox" data-tile-no-pairs="${esc(tile.id)}" ${tile.noPairs ? "checked" : ""} /> Не объединять обрезки в пары</label>
       <div class="tile-row">
         <label class="planner-len">Цвет <input data-tile-color="${esc(tile.id)}" type="color" value="${esc(tile.color)}" aria-label="Цвет плитки" /></label>
         <label class="planner-len">Затирка <input data-tile-grout="${esc(tile.id)}" type="color" value="${esc(tile.grout || "#a8a29e")}" aria-label="Цвет затирки" /></label>
