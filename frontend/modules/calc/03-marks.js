@@ -3736,23 +3736,62 @@
       g.fill();
     } else {
       g.globalAlpha = 0.92;
+      const polygons = [];
       preview.bag.polys.forEach((piece) => {
         const fragments = Array.isArray(piece.cuts) && piece.cuts.length ? piece.cuts : [piece.poly || piece];
-        const picked = session.mark.tileSel && (piece.id === session.mark.tileSel || piece.pair === session.mark.tileSel);
         fragments.forEach((poly) => {
-          trace(poly);
-          paintFill(poly);
-          g.fill();
-          g.stroke();
-          if (picked) {
-            g.save();
-            g.strokeStyle = "#2563eb";
-            g.lineWidth = 2.5;
-            g.stroke();
-            g.restore();
-          }
+          if (Array.isArray(poly) && poly.length >= 3) polygons.push({ poly, piece });
         });
       });
+      // Сначала заливаем все фрагменты без обводки: иначе общие рёбра
+      // соседних частей Г-образного выреза превращаются в лишние линии.
+      polygons.forEach(({ poly }) => {
+        trace(poly);
+        paintFill(poly);
+        g.fill();
+      });
+      const edgeKey = (a, b) => {
+        const point = (p) => `${Math.round(p.x * 10000)},${Math.round(p.y * 10000)}`;
+        const pa = point(a);
+        const pb = point(b);
+        return pa < pb ? `${pa}|${pb}` : `${pb}|${pa}`;
+      };
+      const edges = new Map();
+      polygons.forEach(({ poly, piece }) => {
+        poly.forEach((a, index) => {
+          const b = poly[(index + 1) % poly.length];
+          const key = edgeKey(a, b);
+          const item = edges.get(key);
+          if (item) item.count += 1;
+          else edges.set(key, { a, b, count: 1, piece });
+        });
+      });
+      g.beginPath();
+      edges.forEach(({ a, b, count }) => {
+        if (count !== 1) return;
+        const p = spot(a);
+        const q = spot(b);
+        g.moveTo(p.x, p.y);
+        g.lineTo(q.x, q.y);
+      });
+      g.stroke();
+      const pickedIds = new Set();
+      polygons.forEach(({ piece }) => {
+        if (session.mark.tileSel && (piece.id === session.mark.tileSel || piece.pair === session.mark.tileSel)) {
+          pickedIds.add(piece.id || piece.pair);
+        }
+      });
+      if (pickedIds.size) {
+        g.save();
+        g.strokeStyle = "#2563eb";
+        g.lineWidth = 2.5;
+        polygons.forEach(({ poly, piece }) => {
+          if (!pickedIds.has(piece.id || piece.pair)) return;
+          trace(poly);
+          g.stroke();
+        });
+        g.restore();
+      }
     }
     g.restore();
     tileDrawDims(g, view, ctx);
