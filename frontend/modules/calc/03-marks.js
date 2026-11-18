@@ -1942,7 +1942,17 @@
           cuts: rects.map(toPoly),
           poly: toPoly(hit),
         };
-        bag.pieces.push(piece);
+        // Каждый фрагмент после выреза проёма учитывается отдельно:
+        // два подходящих остатка могут составить одну плитку.
+        rects.forEach((rect, index) => {
+          bag.pieces.push({
+            id: `${piece.id}:cut:${index}`,
+            w: rect.w,
+            h: rect.h,
+            full: full && rects.length === 1,
+            pair: "",
+          });
+        });
         if (bag.polys && bag.polys.length < 1400) bag.polys.push(piece);
         else bag.solid = true;
       }
@@ -2092,7 +2102,18 @@
       const full = area >= polyArea(cell) * 0.985 && span.w >= tile.w - 0.002 && span.h >= tile.h - 0.002;
       const piece = { id: `p${seq}`, w: span.w, h: span.h, full, pair: "", pattern: tile.pattern, tileW: tile.w, tileH: tile.h, cell, face: clipped, cuts: parts, poly: tile.gap > 0 ? tileInset(clipped, tile.gap) : clipped };
       seq += 1;
-      bag.pieces.push(piece);
+      // Остатки от вырезов считаются самостоятельными заготовками для подбора пары.
+      parts.forEach((part, index) => {
+        const fragment = tileSpan(part, toLocal, tile);
+        if (fragment.w < 0.003 || fragment.h < 0.003) return;
+        bag.pieces.push({
+          id: `${piece.id}:cut:${index}`,
+          w: fragment.w,
+          h: fragment.h,
+          full: full && parts.length === 1,
+          pair: "",
+        });
+      });
       if (bag.polys && bag.polys.length < 1400) bag.polys.push(piece);
       else bag.solid = true;
     };
