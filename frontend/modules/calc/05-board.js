@@ -900,6 +900,7 @@
   function wireKind(node, fromPort) {
     const portId = String(fromPort || "");
     if (portId === "plan" || portId.startsWith("plan:")) return "plan";
+    if ((node?.type === "result" || node?.type === "scheme") && portSignal(node, portId) === "plan") return "plan";
     const type = node?.type || "";
     if (type === "order") {
       if (fromPort === "total") return "order";
@@ -1384,6 +1385,7 @@
       || (owner.type === "teleport" && !teleportPortOf(owner, portId)?.tone)
       || (owner.type === "teleout" && teleoutPort(owner, portId) && !teleoutPort(owner, portId).tone)
       || (owner.type === "bus" && laneOf(owner, portId) && !laneOf(owner, portId).tone)
+      || (owner.type === "result" && !(activeBlueprint()?.links || []).some((item) => item.to === owner.id && item.toPort === "in"))
     ));
     board.classList.toggle("is-link-plan", !openPass && signal === "plan");
     board.classList.toggle("is-link-num", !openPass && !!link && signal !== "plan");

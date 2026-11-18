@@ -627,9 +627,32 @@
     { id: "line", name: "Линейный", shape: "line", color: "#fef08a", size: 40 },
   ];
 
-  function portSignal(node, portId) {
+  function portSignal(node, portId, seen) {
     if (!node) return "num";
     const id = String(portId || "");
+    const guard = seen || new Set();
+    if (node.type === "result") {
+      const key = `result:${node.id}`;
+      if (guard.has(key)) return "num";
+      guard.add(key);
+      const home = blueprintOf(node);
+      const link = (home?.links || []).find((item) => item.to === node.id && item.toPort === "in");
+      if (!link) return "num";
+      const src = (home.nodes || []).find((item) => item.id === link.from);
+      return src && portSignal(src, link.fromPort, guard) === "plan" ? "plan" : "num";
+    }
+    if (node.type === "scheme") {
+      if (!id.startsWith("result:")) return "num";
+      const key = `scheme:${node.id}:${id}`;
+      if (guard.has(key)) return "num";
+      guard.add(key);
+      const other = findBlueprint(node.blueprintId);
+      const home = blueprintOf(node);
+      if (!other || (home && other.id === home.id)) return "num";
+      const result = (other.nodes || []).find((item) => item.id === id.slice(7) && item.type === "result");
+      if (!result || result.visible === false) return "num";
+      return portSignal(result, "out", guard);
+    }
     if (node.type === "planner" && (id === "plan" || id.startsWith("plan:"))) return "plan";
     if ((node.type === "openings" || node.type === "electrics") && (id === PLAN_PORT || id.startsWith("plan:"))) return "plan";
     if (node.type === "joint") return node.signal === "plan" ? "plan" : "num";
@@ -876,6 +899,23 @@
         wallNames: base.wallNames,
         openings: (base.openings || []).concat(holes),
       };
+    }
+    if (node.type === "result") {
+      const link = (bp.links || []).find((item) => item.to === node.id && item.toPort === "in");
+      if (!link) return null;
+      const src = (bp.nodes || []).find((item) => item.id === link.from);
+      if (!src || portSignal(src, link.fromPort) !== "plan") return null;
+      return emitPlan(src, bp, next, values, link.fromPort);
+    }
+    if (node.type === "scheme") {
+      const mark = `bp:${node.blueprintId}`;
+      if (next.includes(mark) || node.blueprintId === bp.id) return null;
+      const other = findBlueprint(node.blueprintId);
+      if (!other) return null;
+      const resultId = String(fromPort || "").startsWith("result:") ? fromPort.slice(7) : "";
+      const result = (other.nodes || []).find((item) => item.id === resultId && item.type === "result");
+      if (!result || result.visible === false) return null;
+      return emitPlan(result, other, next.concat(mark), values, "out");
     }
     return null;
   }

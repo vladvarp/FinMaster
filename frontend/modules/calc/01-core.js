@@ -1090,6 +1090,7 @@
         id: `result:${node.id}`,
         name: resultName(node),
         resultId: node.id,
+        signal: portSignal(node, "out") === "plan" ? "plan" : "num",
       }));
   }
 

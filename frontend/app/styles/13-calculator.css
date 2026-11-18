@@ -1288,6 +1288,18 @@ html[data-theme="dark"] .calc-mini-toggle {
 .calc-node.is-electrics .calc-port.out { background: #38bdf8; box-shadow: 0 0 0 1px #0369a1; }
 .calc-node.is-electrics .calc-port.out { background: #fbbf24; box-shadow: 0 0 0 1px #b45309; }
 .calc-port[data-signal="plan"] { background: #c4b5fd !important; box-shadow: 0 0 0 1px #6d28d9 !important; }
+.calc-node.is-result .calc-film { margin: 0 0 6px; }
+.calc-node.is-result .calc-film-card { cursor: default; }
+.calc-port-thumb {
+  display: block;
+  width: 44px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-2);
+}
+.calc-port-thumb .calc-film-thumb { width: 44px; height: 32px; border-radius: 0; }
 .calc-plan-tag { color: #7c3aed; font-size: 11px; letter-spacing: 0.02em; }
 .calc-row.is-idle > span { color: var(--muted); }
 .calc-node.is-openings .calc-node-sub,

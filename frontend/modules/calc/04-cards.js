@@ -2915,12 +2915,23 @@
     </article>`;
   }
 
+  function resultFilmHtml(plan) {
+    const tones = markTones(null, plan.color);
+    const cards = filmItems(plan)
+      .map((item) => `<div class="calc-film-card" title="${esc(item.name)}"><span class="calc-film-name">${esc(item.name)}</span>${surfaceThumb(plan, item, plan.openings || [], [], tones)}</div>`)
+      .join("");
+    return `<div class="calc-film calc-film-top">${cards}</div>`;
+  }
+
   function resultNodeHtml(node, bp, graph) {
     const value = graph.values[`${node.id}:out`];
     const linked = usedInputPorts(node.id, bp.links);
+    const plan = upstreamPlan(node, bp, [], graph.values, "in");
     const prio = Number.isFinite(Number(node.priority)) ? Number(node.priority) : nextResultPriority(bp);
     const shown = resultVisible(node);
-    return `<article class="calc-node is-result ${shown ? "" : "is-scheme-off"} ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
+    const signal = plan ? ` data-signal="plan"` : "";
+    const pass = linked.has("in") ? "" : ` data-pass="any"`;
+    return `<article class="calc-node is-result ${plan ? "is-plan" : ""} ${shown ? "" : "is-scheme-off"} ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <input class="calc-result-prio" data-result-prio="${esc(node.id)}" type="number" min="0" max="9999" step="1" value="${prio}" title="Приоритет на схеме (меньше — выше)" aria-label="Приоритет" />
@@ -2928,16 +2939,16 @@
         <button type="button" class="calc-eye ${shown ? "" : "is-off"}" data-result-eye="${esc(node.id)}" title="${shown ? "Скрыть из ноды схемы" : "Показать в ноде схемы"}" aria-label="${shown ? "Скрыть из ноды схемы" : "Показать в ноде схемы"}" aria-pressed="${shown ? "true" : "false"}">${resultEyeIcon(shown)}</button>
         <button type="button" class="calc-x" data-del-node="${esc(node.id)}" title="Удалить">×</button>
       </header>
-      ${screenHtml(value, "Значение связи")}
+      ${plan ? resultFilmHtml(plan) : screenHtml(value, "Значение связи")}
       <div class="calc-ports">
         <div class="calc-row in">
-          <i class="calc-port in" data-port="in" data-io="in"></i>
+          <i class="calc-port in" data-port="in" data-io="in"${signal}${pass}></i>
           <span>вход</span>
           ${linked.has("in") ? `<button type="button" class="calc-mini" data-del-in-link="in" title="Удалить связь">×</button>` : ""}
         </div>
         <div class="calc-row out">
           <span>выход</span>
-          <i class="calc-port out" data-port="out" data-io="out" title="Выход"></i>
+          <i class="calc-port out" data-port="out" data-io="out"${signal}${pass} title="${plan ? "Чертёж" : "Выход"}"></i>
         </div>
       </div>
     </article>`;
@@ -2987,6 +2998,17 @@
             ? ports
                 .map((port) => {
                   const value = graph.values[`${node.id}:${port.id}`];
+                  if (port.signal === "plan") {
+                    const drawn = emitPlan(node, blueprintOf(node) || activeBlueprint(), [], graph.values, port.id);
+                    const thumb = drawn
+                      ? surfaceThumb(drawn, { id: "floor", name: "Пол" }, drawn.openings || [], [], markTones(null, drawn.color))
+                      : "";
+                    return `<div class="calc-row">
+                    <span class="calc-row-name" title="${esc(port.name)}">${esc(port.name)}</span>
+                    <span class="calc-port-thumb" title="Чертёж">${thumb}</span>
+                    <i class="calc-port out" data-port="${esc(port.id)}" data-io="out" data-signal="plan" title="Чертёж"></i>
+                  </div>`;
+                  }
                   return `<div class="calc-row">
                     <span class="calc-row-name" title="${esc(port.name)}">${esc(port.name)}</span>
                     <b>${esc(fmtShort(value))}</b>
@@ -3050,6 +3072,12 @@
   function passSignalOk(src, fromPort, dst, toPort, links) {
     if (portSignal(src, fromPort) === portSignal(dst, toPort)) return true;
     const list = links || [];
+    if (dst?.type === "result" && String(toPort) === "in") return true;
+    if (src?.type === "result" && String(fromPort) === "out") {
+      const home = blueprintOf(src);
+      const fed = (home?.links || []).some((link) => link.to === src.id && link.toPort === "in");
+      if (!fed) return true;
+    }
     if (dst?.type === "joint" && String(toPort) === "in") return true;
     if (dst?.type === "teleport" && (String(toPort) === "in" || String(toPort).startsWith("in:"))) return true;
     if (src?.type === "joint" && String(fromPort) === "out") {
@@ -3092,7 +3120,7 @@
       if (link.from !== nodeId || link.fromPort !== portId) return true;
       const dst = (bp.nodes || []).find((item) => item.id === link.to);
       if (!dst) return false;
-      if (dst.type === "joint" || dst.type === "teleport" || (dst.type === "bus" && !laneOf(dst, link.toPort)?.tone)) return true;
+      if (dst.type === "joint" || dst.type === "teleport" || dst.type === "result" || (dst.type === "bus" && !laneOf(dst, link.toPort)?.tone)) return true;
       return portSignal(dst, link.toPort) === signal;
     });
   }
@@ -3105,6 +3133,18 @@
     const drop = new Set(empty);
     bp.nodes = (bp.nodes || []).filter((node) => !drop.has(node.id));
     bp.links = (bp.links || []).filter((link) => !drop.has(link.from) && !drop.has(link.to));
+  }
+
+  function syncResultOuts(bp) {
+    (bp.nodes || []).forEach((node) => {
+      if (node.type !== "result") return;
+      const incoming = (bp.links || []).find((link) => link.to === node.id && link.toPort === "in");
+      if (!incoming) return;
+      const src = (bp.nodes || []).find((item) => item.id === incoming.from);
+      if (!src) return;
+      const signal = portSignal(src, incoming.fromPort) === "plan" ? "plan" : "num";
+      dropMismatchedOuts(bp, node.id, "out", signal);
+    });
   }
 
   function syncPassNodesOnce(bp) {
@@ -3198,6 +3238,7 @@
       spare.tone = "";
       node.lanes = kept.concat(spare);
     });
+    syncResultOuts(bp);
   }
 
   const TONE_COLOR = {
@@ -3254,6 +3295,14 @@
       return planCaption(bp, (bp.links || []).find((item) => item.to === host.id && (item.toPort === teleportInId(host, entry) || item.toPort === `in:${entry.id}` || (item.toPort === "in" && entry.id === host.id))), guard);
     }
     if (src.type === "bus") return planCaption(bp, (bp.links || []).find((item) => item.to === src.id && item.toPort === `in:${laneIdOf(link.fromPort)}`), guard);
+    if (src.type === "result") return planCaption(bp, (bp.links || []).find((item) => item.to === src.id && item.toPort === "in"), guard);
+    if (src.type === "scheme") {
+      const other = findBlueprint(src.blueprintId);
+      const resultId = String(link.fromPort || "").startsWith("result:") ? link.fromPort.slice(7) : "";
+      const result = (other?.nodes || []).find((item) => item.id === resultId && item.type === "result");
+      if (!other || !result) return "";
+      return planCaption(other, (other.links || []).find((item) => item.to === result.id && item.toPort === "in"), guard);
+    }
     const ports = nodeOutputs(src, api.findOrder?.(src.orderId), bp.links);
     return ports.find((port) => port.id === link.fromPort)?.name || "";
   }
@@ -3272,7 +3321,7 @@
       if (!row || row.source !== sourceId) return true;
       const dst = (bp.nodes || []).find((item) => item.id === link.to);
       if (!dst) return false;
-      if (dst.type === "joint" || dst.type === "teleport") return true;
+      if (dst.type === "joint" || dst.type === "teleport" || dst.type === "result") return true;
       if (dst.type === "bus" && !laneOf(dst, link.toPort)?.tone) return true;
       return portSignal(dst, link.toPort) === signal;
     });
