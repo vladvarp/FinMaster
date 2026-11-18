@@ -1706,12 +1706,36 @@
 
   function tileInset(poly, gap) {
     if (!gap || poly.length < 3) return poly;
-    const c = poly.reduce((sum, p) => ({ x: sum.x + p.x, y: sum.y + p.y }), { x: 0, y: 0 });
-    c.x /= poly.length;
-    c.y /= poly.length;
-    const reach = Math.min(...poly.map((p) => Math.hypot(p.x - c.x, p.y - c.y))) || 1;
-    const keep = Math.max(0.25, (reach - gap / 2) / reach);
-    return poly.map((p) => ({ x: c.x + (p.x - c.x) * keep, y: c.y + (p.y - c.y) * keep }));
+    let area = 0;
+    poly.forEach((p, i) => {
+      const next = poly[(i + 1) % poly.length];
+      area += p.x * next.y - next.x * p.y;
+    });
+    const direction = area >= 0 ? 1 : -1;
+    const offset = gap / 2;
+    const edges = poly.map((p, i) => {
+      const next = poly[(i + 1) % poly.length];
+      const dx = next.x - p.x;
+      const dy = next.y - p.y;
+      const length = Math.hypot(dx, dy) || 1;
+      const normal = direction > 0
+        ? { x: -dy / length, y: dx / length }
+        : { x: dy / length, y: -dx / length };
+      return { point: { x: p.x + normal.x * offset, y: p.y + normal.y * offset }, direction: { x: dx, y: dy }, normal };
+    });
+    const inset = poly.map((_, i) => {
+      const previous = edges[(i + edges.length - 1) % edges.length];
+      const current = edges[i];
+      const cross = previous.direction.x * current.direction.y - previous.direction.y * current.direction.x;
+      if (Math.abs(cross) < 1e-10) {
+        return { x: poly[i].x + (previous.normal.x + current.normal.x) * offset / 2, y: poly[i].y + (previous.normal.y + current.normal.y) * offset / 2 };
+      }
+      const dx = current.point.x - previous.point.x;
+      const dy = current.point.y - previous.point.y;
+      const t = (dx * current.direction.y - dy * current.direction.x) / cross;
+      return { x: previous.point.x + previous.direction.x * t, y: previous.point.y + previous.direction.y * t };
+    });
+    return inset.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)) && polyArea(inset) > 1e-8 ? inset : poly;
   }
 
   function tileSpan(part, toLocal, tile) {
@@ -1732,7 +1756,50 @@
     };
   }
 
-  function tilePack(parts, width, height, tolW, tolH) {
+  function tileHoleSplitsCell(cell, hole) {
+    const xs = cell.map((p) => p.x);
+    const ys = cell.map((p) => p.y);
+    const x0 = Math.min(...xs);
+    const x1 = Math.max(...xs);
+    const y0 = Math.min(...ys);
+    const y1 = Math.max(...ys);
+    const eps = 0.002;
+    const overlapX = Math.min(x1, hole.x + hole.w) - Math.max(x0, hole.x);
+    const overlapY = Math.min(y1, hole.y + hole.h) - Math.max(y0, hole.y);
+    if (overlapX <= eps || overlapY <= eps) return false;
+    // Проём должен пересечь плитку насквозь, от одного её края до противоположного.
+    const throughHeight = hole.y <= y0 + eps && hole.y + hole.h >= y1 - eps;
+    const throughWidth = hole.x <= x0 + eps && hole.x + hole.w >= x1 - eps;
+    return throughHeight || throughWidth;
+  }
+
+  function tileHasFactoryEdge(part, cell) {
+    const eps = 0.002;
+    const cross = (a, b) => a.x * b.y - a.y * b.x;
+    const dot = (a, b) => a.x * b.x + a.y * b.y;
+    for (let i = 0; i < cell.length; i += 1) {
+      const ca = cell[i];
+      const cb = cell[(i + 1) % cell.length];
+      const edge = { x: cb.x - ca.x, y: cb.y - ca.y };
+      const edgeLen = Math.hypot(edge.x, edge.y);
+      if (edgeLen < 0.003) continue;
+      for (let j = 0; j < part.length; j += 1) {
+        const pa = part[j];
+        const pb = part[(j + 1) % part.length];
+        const side = { x: pb.x - pa.x, y: pb.y - pa.y };
+        const sideLen = Math.hypot(side.x, side.y);
+        if (sideLen < 0.003 || Math.abs(cross(edge, side)) > eps * edgeLen * sideLen) continue;
+        if (Math.abs(cross(edge, { x: pa.x - ca.x, y: pa.y - ca.y })) > eps * edgeLen) continue;
+        const axis = { x: edge.x / edgeLen, y: edge.y / edgeLen };
+        const a0 = dot({ x: pa.x - ca.x, y: pa.y - ca.y }, axis);
+        const a1 = dot({ x: pb.x - ca.x, y: pb.y - ca.y }, axis);
+        if (Math.min(edgeLen, Math.max(a0, a1)) - Math.max(0, Math.min(a0, a1)) > 0.003) return true;
+      }
+    }
+    return false;
+  }
+
+  function tilePack(parts, width, height, tolW, tolH, allowPairs = true) {
     let count = 0;
     let cuts = 0;
     const rest = [];
@@ -1745,6 +1812,7 @@
     const halfW = width / 2;
     const halfH = height / 2;
     const fits = (a, b) => {
+      if (!a.cleanEdge || !b.cleanEdge || (a.parentId && a.parentId === b.parentId)) return false;
       const alongW = a.w + b.w <= width + tolW + 1e-9 && a.h <= height + tolH + 1e-9 && b.h <= height + tolH + 1e-9 && (a.w < halfW - 1e-9 || b.w < halfW - 1e-9);
       const alongH = a.h + b.h <= height + tolH + 1e-9 && a.w <= width + tolW + 1e-9 && b.w <= width + tolW + 1e-9 && (a.h < halfH - 1e-9 || b.h < halfH - 1e-9);
       return alongW || alongH;
@@ -1753,7 +1821,7 @@
       if (used[i]) continue;
       let best = -1;
       let bestArea = -1;
-      for (let j = i + 1; j < rest.length; j += 1) {
+      for (let j = i + 1; allowPairs && j < rest.length; j += 1) {
         if (used[j] || !fits(rest[i], rest[j])) continue;
         const area = rest[j].w * rest[j].h;
         if (area > bestArea) {
@@ -1763,8 +1831,8 @@
       }
       if (best >= 0) {
         used[best] = true;
-        rest[i].pair = rest[best].id;
-        rest[best].pair = rest[i].id;
+        rest[i].pair = rest[best].parentId || rest[best].id;
+        rest[best].pair = rest[i].parentId || rest[i].id;
       }
       used[i] = true;
       count += 1;
@@ -1774,13 +1842,16 @@
   }
 
   function tileFrame(geom, dir, shiftX, shiftY, turn) {
-    const back = dir === 180 || dir === 270;
     const span = geom.span || { w: 0, h: 0 };
-    const origin = back
-      ? { x: geom.anchor.x + span.w, y: geom.anchor.y + span.h }
-      : geom.anchor;
+    // «Вдоль · справа» разворачивает ряд только по горизонтали.
+    // Вертикальная опора остаётся у пола, чтобы раскладка не начиналась от потолка.
+    const origin = dir === 180
+      ? { x: geom.anchor.x + span.w, y: geom.anchor.y }
+      : dir === 270
+        ? { x: geom.anchor.x + span.w, y: geom.anchor.y + span.h }
+        : geom.anchor;
     let ux = dir === 90 ? { x: 0, y: 1 } : dir === 270 ? { x: 0, y: -1 } : dir === 180 ? { x: -1, y: 0 } : { x: 1, y: 0 };
-    let uy = dir === 90 ? { x: 1, y: 0 } : dir === 270 ? { x: -1, y: 0 } : dir === 180 ? { x: 0, y: -1 } : { x: 0, y: 1 };
+    let uy = dir === 90 ? { x: 1, y: 0 } : dir === 270 ? { x: -1, y: 0 } : { x: 0, y: 1 };
     const rad = ((Number(turn) || 0) * Math.PI) / 180;
     if (rad) {
       const c = Math.cos(rad);
@@ -1886,7 +1957,8 @@
     };
     for (let i = i0; i < i1; i += 1) {
       for (let j = j0; j < j1; j += 1) {
-        const rowShift = (Math.abs(j) % 2) * tile.w * plannerClamp(tile.bond || 0, 0, 1);
+        const shiftStep = Math.abs(j) % (Math.max(1, Math.round(tile.bondRows || 1)) + 1);
+        const rowShift = tile.w * plannerClamp(tile.bond || 0, 0, 1) * shiftStep;
         const cell = { x: i * pitchX + rowShift, y: j * pitchY, w: tile.w, h: tile.h };
         const hit = overlap(cell, region);
         if (!hit) continue;
@@ -1915,7 +1987,28 @@
           cuts: rects.map(toPoly),
           poly: toPoly(hit),
         };
-        bag.pieces.push(piece);
+        const throughCut = holes.some((hole) => tileHoleSplitsCell(
+          [{ x: cell.x, y: cell.y }, { x: cell.x + cell.w, y: cell.y }, { x: cell.x + cell.w, y: cell.y + cell.h }, { x: cell.x, y: cell.y + cell.h }],
+          hole,
+        ));
+        // Внутреннее отверстие или вырез от одного края не делит плитку на заготовки.
+        // Геометрия реза нужна предпросмотру всегда, даже если вырез не делит плитку насквозь.
+        piece.cuts = rects.map(toPoly);
+        if (throughCut) {
+          rects.forEach((rect, index) => {
+            bag.pieces.push({
+              id: `${piece.id}:cut:${index}`,
+              parentId: piece.id,
+              w: rect.w,
+              h: rect.h,
+              full: false,
+              cleanEdge: tileHasFactoryEdge(toPoly(rect), toPoly(cell)),
+              pair: "",
+            });
+          });
+        } else {
+          bag.pieces.push({ id: piece.id, w: piece.w, h: piece.h, full, pair: "" });
+        }
         if (bag.polys && bag.polys.length < 1400) bag.polys.push(piece);
         else bag.solid = true;
       }
@@ -2065,7 +2158,28 @@
       const full = area >= polyArea(cell) * 0.985 && span.w >= tile.w - 0.002 && span.h >= tile.h - 0.002;
       const piece = { id: `p${seq}`, w: span.w, h: span.h, full, pair: "", pattern: tile.pattern, tileW: tile.w, tileH: tile.h, cell, face: clipped, cuts: parts, poly: tile.gap > 0 ? tileInset(clipped, tile.gap) : clipped };
       seq += 1;
-      bag.pieces.push(piece);
+      const throughCut = holes.some((hole) => tileHoleSplitsCell(cell, hole));
+      if (throughCut) {
+        // Только сквозной проём образует отдельные фрагменты для подбора пары.
+        parts.forEach((part, index) => {
+          const fragment = tileSpan(part, toLocal, tile);
+          if (fragment.w < 0.003 || fragment.h < 0.003) return;
+          bag.pieces.push({
+            id: `${piece.id}:cut:${index}`,
+            parentId: piece.id,
+            w: fragment.w,
+            h: fragment.h,
+            full: false,
+            cleanEdge: tileHasFactoryEdge(part, cell),
+            pair: "",
+          });
+        });
+      } else {
+        // Внутренние отверстия и краевые вырезы не дробят плитку в расчёте.
+        bag.pieces.push({ id: piece.id, w: span.w, h: span.h, full, pair: "" });
+      }
+      // Для предпросмотра всегда сохраняем реальный контур после выреза.
+      piece.cuts = parts;
       if (bag.polys && bag.polys.length < 1400) bag.polys.push(piece);
       else bag.solid = true;
     };
@@ -2082,7 +2196,8 @@
       }
       for (let i = i0; i < i1; i += 1) {
         for (let j = j0; j < j1; j += 1) {
-          const rowShift = (Math.abs(j) % 2) * tile.w * plannerClamp(tile.bond || 0, 0, 1);
+          const shiftStep = Math.abs(j) % (Math.max(1, Math.round(tile.bondRows || 1)) + 1);
+          const rowShift = tile.w * plannerClamp(tile.bond || 0, 0, 1) * shiftStep;
           const x = i * pitchX + rowShift;
           const y = j * pitchY;
           emit(
@@ -2207,6 +2322,8 @@
     const holes = [];
     if (lay.openings) {
       (plan.openings || []).forEach((hole) => {
+        // Круглые отверстия (трубы и проходки) не вырезают плитку в этом расчёте.
+        if (hole.shape === "circle") return;
         if (hole.surface !== surface) return;
         if (surface === "wall" && hole.wallId !== wall?.id) return;
         if (hole.shape === "circle") {
@@ -2303,6 +2420,8 @@
         color: markHex(raw.color, "#d6c4a8"),
         gap: plannerRound(plannerClamp(raw.gap == null ? 0.001 : plannerNum(raw.gap, 0.001), 0, 0.03)),
         bond: plannerRound(plannerClamp(plannerNum(raw.bond, 0), 0, 1)),
+        bondRows: Math.round(plannerClamp(plannerNum(raw.bondRows, 1), 1, 30)),
+        noPairs: raw.noPairs === true,
         grout: markHex(raw.grout, "#a8a29e"),
       });
     });
@@ -2381,7 +2500,7 @@
     if (!tile) return { count: 0, tile: null, lay, bag: null };
     const geom = tileGeom(plan, face.surface, face.wall, lay);
     const bag = tileBag(tile, lay, geom, false);
-    const packed = bag.rough != null ? { count: bag.rough, cuts: 0 } : tilePack(bag.pieces, tile.w, tile.h, lay.tolW, lay.tolH);
+    const packed = bag.rough != null ? { count: bag.rough, cuts: 0 } : tilePack(bag.pieces, tile.w, tile.h, lay.tolW, lay.tolH, !tile.noPairs);
     return { count: packed.count, cuts: packed.cuts, tile, lay, bag };
   }
 
@@ -2391,7 +2510,14 @@
     if (!tile) return null;
     const geom = tileGeom(plan, face.surface, face.wall, lay);
     const bag = tileBag(tile, lay, geom, true);
-    const packed = bag.rough != null ? { count: bag.rough, cuts: 0 } : tilePack(bag.pieces, tile.w, tile.h, lay.tolW, lay.tolH);
+    const packed = bag.rough != null ? { count: bag.rough, cuts: 0 } : tilePack(bag.pieces, tile.w, tile.h, lay.tolW, lay.tolH, !tile.noPairs);
+    if (bag.polys) {
+      const paired = new Map();
+      bag.pieces.forEach((part) => {
+        if (part.parentId && part.pair && !paired.has(part.parentId)) paired.set(part.parentId, part.pair);
+      });
+      bag.polys.forEach((piece) => { piece.pair = paired.get(piece.id) || ""; });
+    }
     return { tile, lay, geom, bag, count: packed.count, cuts: packed.cuts };
   }
 
@@ -2797,7 +2923,8 @@
         : `<label class="planner-len">Ширина <input data-tile-w="${esc(tile.id)}" inputmode="decimal" value="${esc(tileCm(tile.w))}" /> см</label>
         <label class="planner-len">Высота <input data-tile-h="${esc(tile.id)}" inputmode="decimal" value="${esc(tileCm(tile.h))}" /> см</label>`;
       const bond = tile.pattern === "rect"
-        ? `<label class="planner-len">Сдвиг второго ряда <input data-tile-bond="${esc(tile.id)}" inputmode="decimal" value="${esc(plannerInput((tile.bond || 0) * tile.w * 100))}" /> см</label>`
+        ? `<label class="planner-len">Сдвиг <input data-tile-bond="${esc(tile.id)}" inputmode="decimal" value="${esc(plannerInput((tile.bond || 0) * tile.w * 100))}" /> см</label>
+          <label class="planner-len">Сдвигаемых рядов <input data-tile-bond-rows="${esc(tile.id)}" type="number" min="1" max="30" step="1" value="${esc(tile.bondRows || 1)}" /></label>`
         : "";
       return `<div class="planner-metric is-tile">
       <button type="button" class="calc-mini" data-tile-del="${esc(tile.id)}" title="Удалить">×</button>
@@ -2808,6 +2935,7 @@
       <div class="tile-row">
         <label class="planner-len">Шов <input data-tile-gap="${esc(tile.id)}" inputmode="decimal" value="${esc(plannerInput((tile.gap || 0) * 1000))}" /> мм</label>
       </div>
+      <label class="planner-on"><input type="checkbox" data-tile-no-pairs="${esc(tile.id)}" ${tile.noPairs ? "checked" : ""} /> Не объединять обрезки в пары</label>
       <div class="tile-row">
         <label class="planner-len">Цвет <input data-tile-color="${esc(tile.id)}" type="color" value="${esc(tile.color)}" aria-label="Цвет плитки" /></label>
         <label class="planner-len">Затирка <input data-tile-grout="${esc(tile.id)}" type="color" value="${esc(tile.grout || "#a8a29e")}" aria-label="Цвет затирки" /></label>
@@ -3425,7 +3553,8 @@
     const px = world.along != null ? world.along : world.x;
     const py = world.rise != null ? world.rise : world.y;
     for (let i = pieces.length - 1; i >= 0; i -= 1) {
-      if (pieces[i].poly && polyHit(pieces[i].poly, px, py)) return pieces[i];
+      const fragments = Array.isArray(pieces[i].cuts) && pieces[i].cuts.length ? pieces[i].cuts : [pieces[i].poly];
+      if (fragments.some((poly) => poly?.length >= 3 && polyHit(poly, px, py))) return pieces[i];
     }
     return null;
   }
@@ -3465,13 +3594,16 @@
     const pattern = piece.pattern || "rect";
     const cell = piece.cell?.length >= 3 ? piece.cell : piece.poly;
     const face = piece.face?.length >= 3 ? piece.face : piece.poly;
+    const fragments = Array.isArray(piece.cuts) && piece.cuts.length
+      ? piece.cuts.filter((poly) => Array.isArray(poly) && poly.length >= 3)
+      : [face];
     const svg = tip.querySelector("svg");
     const note = tip.querySelector("p");
     if (svg) {
       const pad = 78;
       const maxW = 300;
       const maxH = 360;
-      const pts = cell.concat(face);
+      const pts = cell.concat(...fragments);
       const minX = Math.min(...pts.map((p) => p.x));
       const minY = Math.min(...pts.map((p) => p.y));
       const spanX = Math.max(0.02, Math.max(...pts.map((p) => p.x)) - minX);
@@ -3514,54 +3646,32 @@
         const mx = (A.x + B.x) / 2;
         const my = (A.y + B.y) / 2;
         const C = { x: sx(away.x), y: sy(away.y) };
-        if ((C.x - mx) * nx + (C.y - my) * ny > 0) {
-          nx = -nx;
-          ny = -ny;
-        }
-        if (inward) {
-          nx = -nx;
-          ny = -ny;
-        }
+        if ((C.x - mx) * nx + (C.y - my) * ny > 0) { nx = -nx; ny = -ny; }
+        if (inward) { nx = -nx; ny = -ny; }
         const px = mx + nx * dist;
         const py = my + ny * dist;
         let ang = Math.atan2(dy, dx) * 180 / Math.PI;
         if (ang > 90 || ang < -90) ang += 180;
         const text = tileTipText(meters);
-        const busy = placed.some((item) => {
-          const near = Math.hypot(item.x - px, item.y - py) < 44;
-          const same = item.text === text && Math.hypot(item.x - px, item.y - py) < 78;
-          return near || same;
-        });
-        if (busy) return "";
+        if (placed.some((item) => Math.hypot(item.x - px, item.y - py) < 44)) return "";
         placed.push({ x: px, y: py, text });
         return `<text x="${px.toFixed(1)}" y="${py.toFixed(1)}" font-size="22" font-weight="700" fill="#c2410c" text-anchor="middle" dominant-baseline="middle" transform="rotate(${ang.toFixed(1)} ${px.toFixed(1)} ${py.toFixed(1)})">${text}</text>`;
       };
-      const cut = polyArea(face) < polyArea(cell) * 0.985;
-      const hostOf = (a, b) => cellEdges.find(([c, d]) => onEdge(a, b, c, d));
+      const outline = `<path d="${pathOf(cell)}" fill="none" stroke="#a8a29e" stroke-width="1.6" stroke-dasharray="6 4"/>`;
+      const fills = fragments.map((poly) => `<path d="${pathOf(poly)}" fill="#d6c4a8" stroke="#44403c" stroke-width="2"/>`).join("");
       const fresh = [];
       const rest = [];
-      if (cut) {
-        edgesOf(face).forEach(([a, b]) => {
-          const host = hostOf(a, b);
-          if (!host) fresh.push([a, b, face]);
-          else if (edgeLen(host[0], host[1]) - edgeLen(a, b) > 0.02) rest.push([a, b, face]);
-        });
-      }
-      const outline = cut ? `<path d="${pathOf(cell)}" fill="none" stroke="#a8a29e" stroke-width="1.6" stroke-dasharray="6 4"/>` : "";
-      const fills = `<path d="${pathOf(face)}" fill="#d6c4a8" stroke="${cut ? "none" : "#44403c"}" stroke-width="2"/>`;
+      fragments.forEach((poly) => edgesOf(poly).forEach(([a, b]) => {
+        const host = cellEdges.find(([c, d]) => onEdge(a, b, c, d));
+        if (!host) fresh.push([a, b, poly]);
+        else if (edgeLen(host[0], host[1]) - edgeLen(a, b) > 0.02) rest.push([a, b, poly]);
+      }));
       const seams = fresh.map(([a, b]) => `M${sx(a.x).toFixed(1)} ${sy(a.y).toFixed(1)} L${sx(b.x).toFixed(1)} ${sy(b.y).toFixed(1)}`).join(" ");
       const seamPath = seams ? `<path d="${seams}" fill="none" stroke="#44403c" stroke-width="2"/>` : "";
-      const whole = cellEdges.map(([a, b]) => label(a, b, cellMid, cut ? 40 : 30, false)).join("");
-      const slices = fresh.map(([a, b, poly]) => {
-        const local = mid(poly);
-        local.x /= poly.length;
-        local.y /= poly.length;
+      const whole = cellEdges.map(([a, b]) => label(a, b, cellMid, 40, false)).join("");
+      const slices = fresh.concat(rest).map(([a, b, poly]) => {
+        const local = mid(poly); local.x /= poly.length; local.y /= poly.length;
         return label(a, b, local, 22, false);
-      }).join("") + rest.map(([a, b, poly]) => {
-        const local = mid(poly);
-        local.x /= poly.length;
-        local.y /= poly.length;
-        return label(a, b, local, 22, true);
       }).join("");
       svg.setAttribute("viewBox", `0 0 ${boxW + pad * 2} ${boxH + pad * 2}`);
       svg.innerHTML = `${outline}${fills}${seamPath}${whole}${slices}`;
@@ -3632,21 +3742,91 @@
       g.fill();
     } else {
       g.globalAlpha = 0.92;
+      const polygons = [];
       preview.bag.polys.forEach((piece) => {
-        const poly = piece.poly || piece;
+        const fragments = Array.isArray(piece.cuts) && piece.cuts.length ? piece.cuts : [piece.poly || piece];
+        fragments.forEach((poly) => {
+          if (Array.isArray(poly) && poly.length >= 3) polygons.push({ poly, piece });
+        });
+      });
+      // Сначала заливаем все фрагменты без обводки: иначе общие рёбра
+      // соседних частей Г-образного выреза превращаются в лишние линии.
+      polygons.forEach(({ poly }) => {
         trace(poly);
         paintFill(poly);
         g.fill();
-        g.stroke();
-        const picked = session.mark.tileSel && (piece.id === session.mark.tileSel || piece.pair === session.mark.tileSel);
-        if (picked) {
-          g.save();
-          g.strokeStyle = "#2563eb";
-          g.lineWidth = 2.5;
-          g.stroke();
-          g.restore();
-        }
       });
+      // Объединяем контуры фрагментов отдельно для каждой плитки.
+      // Вырезы могут разбивать Г-образный остаток на прямоугольники с Т-образными
+      // стыками: сравнения только целых рёбер недостаточно, поэтому сначала
+      // разбиваем рёбра по всем вершинам, лежащим на них.
+      const boundaryOf = (items) => {
+        const points = items.flatMap(({ poly }) => poly);
+        const edges = new Map();
+        const keyOf = (a, b) => {
+          const point = (p) => `${Math.round(p.x * 10000)},${Math.round(p.y * 10000)}`;
+          const pa = point(a);
+          const pb = point(b);
+          return pa < pb ? `${pa}|${pb}` : `${pb}|${pa}`;
+        };
+        items.forEach(({ poly }) => {
+          poly.forEach((a, index) => {
+            const b = poly[(index + 1) % poly.length];
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const len2 = dx * dx + dy * dy;
+            if (len2 < 1e-12) return;
+            const split = [0, 1];
+            points.forEach((p) => {
+              const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+              if (t <= 1e-7 || t >= 1 - 1e-7) return;
+              const px = a.x + t * dx;
+              const py = a.y + t * dy;
+              if (Math.hypot(p.x - px, p.y - py) <= 1e-5) split.push(t);
+            });
+            split.sort((x, y) => x - y);
+            for (let i = 1; i < split.length; i += 1) {
+              const t0 = split[i - 1];
+              const t1 = split[i];
+              if (t1 - t0 < 1e-7) continue;
+              const p = { x: a.x + t0 * dx, y: a.y + t0 * dy };
+              const q = { x: a.x + t1 * dx, y: a.y + t1 * dy };
+              const key = keyOf(p, q);
+              const edge = edges.get(key);
+              if (edge) edge.count += 1;
+              else edges.set(key, { a: p, b: q, count: 1 });
+            }
+          });
+        });
+        return [...edges.values()].filter((edge) => edge.count === 1);
+      };
+      const groups = new Map();
+      polygons.forEach((item) => {
+        if (!groups.has(item.piece)) groups.set(item.piece, []);
+        groups.get(item.piece).push(item);
+      });
+      const drawBoundaries = (items) => {
+        const edges = boundaryOf(items);
+        g.beginPath();
+        edges.forEach(({ a, b }) => {
+          const p = spot(a);
+          const q = spot(b);
+          g.moveTo(p.x, p.y);
+          g.lineTo(q.x, q.y);
+        });
+        g.stroke();
+      };
+      groups.forEach((items) => drawBoundaries(items));
+      const pickedGroups = [...groups.entries()].filter(([piece]) =>
+        session.mark.tileSel && (piece.id === session.mark.tileSel || piece.pair === session.mark.tileSel)
+      );
+      if (pickedGroups.length) {
+        g.save();
+        g.strokeStyle = "#2563eb";
+        g.lineWidth = 2.5;
+        pickedGroups.forEach(([, items]) => drawBoundaries(items));
+        g.restore();
+      }
     }
     g.restore();
     tileDrawDims(g, view, ctx);

@@ -715,7 +715,7 @@
         const n = node.tiles.length + 1;
         const colors = ["#d6c4a8", "#94a3b8", "#c4b5a0", "#a8a29e", "#d6d3d1", "#e7e5e4"];
         const id = uid();
-        node.tiles.push({ id, name: `Плитка ${n}`, pattern: "rect", w: 0.6, h: 0.6, color: colors[(n - 1) % colors.length], gap: 0.001, bond: 0, grout: "#a8a29e" });
+        node.tiles.push({ id, name: `Плитка ${n}`, pattern: "rect", w: 0.6, h: 0.6, color: colors[(n - 1) % colors.length], gap: 0.001, bond: 0, bondRows: 1, noPairs: false, grout: "#a8a29e" });
         if (!node.outOn || typeof node.outOn !== "object") node.outOn = {};
         (node.feeds || []).forEach((feed) => { node.outOn[feedKey(feed, "tile", id)] = true; });
         markCommit(true);
@@ -988,7 +988,17 @@
         if (named) {
           const tile = node.tiles.find((item) => item.id === named);
           const value = String(e.target.value || "").trim().slice(0, 48);
-          if (tile && value) tile.name = value;
+          if (tile && value) {
+            tile.name = value;
+            $("mark-side")?.querySelectorAll(".mark-opt[data-tile-use]").forEach((option) => {
+              if (option.dataset.opt !== named) return;
+              option.textContent = value;
+              if (option.classList.contains("is-on")) {
+                const button = option.closest(".mark-select")?.querySelector(".mark-select-btn");
+                if (button) button.textContent = value;
+              }
+            });
+          }
           markCommit(false);
           return;
         }
@@ -1027,6 +1037,13 @@
           markCommit(false);
           return;
         }
+        const noPairsId = e.target.dataset?.tileNoPairs;
+        if (noPairsId) {
+          const tile = node.tiles.find((item) => item.id === noPairsId);
+          if (tile) tile.noPairs = !!e.target.checked;
+          markCommit(false);
+          return;
+        }
         const bondId = e.target.dataset?.tileBond;
         if (bondId) {
           const tile = node.tiles.find((item) => item.id === bondId);
@@ -1035,6 +1052,14 @@
             const offset = ((cm / 100) % tile.w + tile.w) % tile.w;
             tile.bond = plannerRound(offset / tile.w);
           }
+          markCommit(false);
+          return;
+        }
+        const bondRowsId = e.target.dataset?.tileBondRows;
+        if (bondRowsId) {
+          const tile = node.tiles.find((item) => item.id === bondRowsId);
+          const rows = plannerDraft(e.target.value);
+          if (tile && rows != null) tile.bondRows = Math.round(plannerClamp(rows, 1, 30));
           markCommit(false);
           return;
         }
