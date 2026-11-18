@@ -197,7 +197,7 @@
     if (raw.route === "curve" || raw.route === "ortho" || raw.route === "diag") session.wireRoute = raw.route;
     if (typeof raw.avoid === "boolean") session.wireAvoid = raw.avoid;
     if (typeof raw.snap === "boolean") session.wireSnap = raw.snap;
-    if (raw.chain === "off" || raw.chain === "in" || raw.chain === "out") session.moveChain = raw.chain;
+    if (raw.chain === "off" || raw.chain === "in" || raw.chain === "out" || raw.chain === "all") session.moveChain = raw.chain;
   }
 
   function loadWirePrefs() {
@@ -876,6 +876,8 @@
       snap.title = title;
       snap.setAttribute("aria-label", title);
     }
+    const align = $("calc-snap-align");
+    if (align) align.hidden = !session.wireSnap;
     syncSnapGrid(activeBlueprint());
   }
 
@@ -883,6 +885,26 @@
 
   function snapCoord(value) {
     return Math.round((Number(value) || 0) / SNAP) * SNAP;
+  }
+
+  function alignNodesToSnap() {
+    const bp = activeBlueprint();
+    if (!bp || !session.wireSnap) return;
+    let moved = false;
+    (bp.nodes || []).forEach((node) => {
+      if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
+      const x = snapCoord(node.x);
+      const y = snapCoord(node.y);
+      if (x === node.x && y === node.y) return;
+      node.x = x;
+      node.y = y;
+      applyNodeEl(node);
+      moved = true;
+    });
+    if (!moved) return;
+    dirty();
+    drawWires(bp, computeGraph(bp));
+    drawMinimap(bp);
   }
 
   function syncSnapGrid(bp) {
@@ -1033,7 +1055,38 @@
   function chainMode() {
     if (session.moveChain === true || session.moveChain === "in") return "in";
     if (session.moveChain === "out") return "out";
+    if (session.moveChain === "all") return "all";
     return "off";
+  }
+
+  function connectedNodeIds(bp, nodeId, frameOnly) {
+    const ids = new Set();
+    if (!bp || !nodeId) return ids;
+    const next = new Map();
+    const add = (a, b) => {
+      if (!a || !b) return;
+      if (!next.has(a)) next.set(a, []);
+      next.get(a).push(b);
+    };
+    (bp.links || []).forEach((link) => {
+      add(link.from, link.to);
+      add(link.to, link.from);
+    });
+    const byId = Object.fromEntries((bp.nodes || []).map((item) => [item.id, item]));
+    const seen = new Set();
+    const queue = [nodeId];
+    while (queue.length) {
+      const cur = queue.shift();
+      if (!cur || seen.has(cur)) continue;
+      seen.add(cur);
+      if (cur !== nodeId) ids.add(cur);
+      (next.get(cur) || []).forEach((nid) => queue.push(nid));
+      const item = byId[cur];
+      if (item?.type === "group" && !(frameOnly && cur === nodeId)) {
+        nodesInsideGroup(bp, item).forEach((child) => queue.push(child.id));
+      }
+    }
+    return ids;
   }
 
   function chainBetween(bp, fromId, toId) {
@@ -1142,7 +1195,7 @@
     const moveIds = new Set([id]);
     const dragged = byId[id];
     const mode = chainMode();
-    const along = mode === "in" ? upstreamNodeIds(bp, id) : mode === "out" ? downstreamNodeIds(bp, id) : null;
+    const along = mode === "in" ? upstreamNodeIds(bp, id) : mode === "out" ? downstreamNodeIds(bp, id) : mode === "all" ? connectedNodeIds(bp, id, frameOnly) : null;
     if (dragged?.type === "group") {
       if (!frameOnly) nodesInsideGroup(bp, dragged).forEach((item) => moveIds.add(item.id));
       if (along) along.forEach((nid) => moveIds.add(nid));
@@ -1350,7 +1403,7 @@
     const btn = $("calc-chain-move");
     if (!btn) return;
     const mode = chainMode();
-    const title = mode === "in" ? "Тянуть цепочку входов" : mode === "out" ? "Тянуть цепочку выходов" : "Выключен";
+    const title = mode === "in" ? "Тянуть цепочку входов" : mode === "out" ? "Тянуть цепочку выходов" : mode === "all" ? "Тянуть всю связь" : "Выключен";
     btn.dataset.chain = mode;
     btn.classList.toggle("is-on", mode !== "off");
     btn.setAttribute("aria-pressed", mode === "off" ? "false" : "true");
@@ -2679,7 +2732,7 @@
     $("calc-chain-move")?.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const order = ["off", "in", "out"];
+      const order = ["off", "in", "out", "all"];
       const at = order.indexOf(chainMode());
       session.moveChain = order[(at + 1) % order.length];
       saveWirePrefs();
@@ -2711,6 +2764,11 @@
       session.wireSnap = !session.wireSnap;
       saveWirePrefs();
       syncWireBtns();
+    });
+    $("calc-snap-align")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      alignNodesToSnap();
     });
     $("calc-prune")?.addEventListener("click", (e) => {
       e.preventDefault();
