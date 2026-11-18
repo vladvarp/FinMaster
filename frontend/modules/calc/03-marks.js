@@ -1756,6 +1756,23 @@
     };
   }
 
+  function tileHoleSplitsCell(cell, hole) {
+    const xs = cell.map((p) => p.x);
+    const ys = cell.map((p) => p.y);
+    const x0 = Math.min(...xs);
+    const x1 = Math.max(...xs);
+    const y0 = Math.min(...ys);
+    const y1 = Math.max(...ys);
+    const eps = 0.002;
+    const overlapX = Math.min(x1, hole.x + hole.w) - Math.max(x0, hole.x);
+    const overlapY = Math.min(y1, hole.y + hole.h) - Math.max(y0, hole.y);
+    if (overlapX <= eps || overlapY <= eps) return false;
+    // Проём должен пересечь плитку насквозь, от одного её края до противоположного.
+    const throughHeight = hole.y <= y0 + eps && hole.y + hole.h >= y1 - eps;
+    const throughWidth = hole.x <= x0 + eps && hole.x + hole.w >= x1 - eps;
+    return throughHeight || throughWidth;
+  }
+
   function tileHasFactoryEdge(part, cell) {
     const eps = 0.002;
     const cross = (a, b) => a.x * b.y - a.y * b.x;
@@ -1969,19 +1986,28 @@
           cuts: rects.map(toPoly),
           poly: toPoly(hit),
         };
-        // Каждый фрагмент после выреза проёма учитывается отдельно:
-        // два подходящих остатка могут составить одну плитку.
-        rects.forEach((rect, index) => {
-          bag.pieces.push({
-            id: `${piece.id}:cut:${index}`,
-            parentId: piece.id,
-            w: rect.w,
-            h: rect.h,
-            full: full && rects.length === 1,
-            cleanEdge: tileHasFactoryEdge(toPoly(rect), toPoly(cell)),
-            pair: "",
+        const throughCut = holes.some((hole) => tileHoleSplitsCell(
+          [{ x: cell.x, y: cell.y }, { x: cell.x + cell.w, y: cell.y }, { x: cell.x + cell.w, y: cell.y + cell.h }, { x: cell.x, y: cell.y + cell.h }],
+          hole,
+        ));
+        // Внутреннее отверстие или вырез от одного края не делит плитку на заготовки.
+        if (throughCut) {
+          rects.forEach((rect, index) => {
+            bag.pieces.push({
+              id: `${piece.id}:cut:${index}`,
+              parentId: piece.id,
+              w: rect.w,
+              h: rect.h,
+              full: false,
+              cleanEdge: tileHasFactoryEdge(toPoly(rect), toPoly(cell)),
+              pair: "",
+            });
           });
-        });
+          piece.cuts = rects.map(toPoly);
+        } else {
+          bag.pieces.push({ id: piece.id, w: piece.w, h: piece.h, full, pair: "" });
+          piece.cuts = [piece.face];
+        }
         if (bag.polys && bag.polys.length < 1400) bag.polys.push(piece);
         else bag.solid = true;
       }
@@ -2131,20 +2157,28 @@
       const full = area >= polyArea(cell) * 0.985 && span.w >= tile.w - 0.002 && span.h >= tile.h - 0.002;
       const piece = { id: `p${seq}`, w: span.w, h: span.h, full, pair: "", pattern: tile.pattern, tileW: tile.w, tileH: tile.h, cell, face: clipped, cuts: parts, poly: tile.gap > 0 ? tileInset(clipped, tile.gap) : clipped };
       seq += 1;
-      // Остатки от вырезов считаются самостоятельными заготовками для подбора пары.
-      parts.forEach((part, index) => {
-        const fragment = tileSpan(part, toLocal, tile);
-        if (fragment.w < 0.003 || fragment.h < 0.003) return;
-        bag.pieces.push({
-          id: `${piece.id}:cut:${index}`,
-          parentId: piece.id,
-          w: fragment.w,
-          h: fragment.h,
-          full: full && parts.length === 1,
-          cleanEdge: tileHasFactoryEdge(part, cell),
-          pair: "",
+      const throughCut = holes.some((hole) => tileHoleSplitsCell(cell, hole));
+      if (throughCut) {
+        // Только сквозной проём образует отдельные фрагменты для подбора пары.
+        parts.forEach((part, index) => {
+          const fragment = tileSpan(part, toLocal, tile);
+          if (fragment.w < 0.003 || fragment.h < 0.003) return;
+          bag.pieces.push({
+            id: `${piece.id}:cut:${index}`,
+            parentId: piece.id,
+            w: fragment.w,
+            h: fragment.h,
+            full: false,
+            cleanEdge: tileHasFactoryEdge(part, cell),
+            pair: "",
+          });
         });
-      });
+        piece.cuts = parts;
+      } else {
+        // Внутренние отверстия и краевые вырезы не дробят плитку в расчёте.
+        bag.pieces.push({ id: piece.id, w: span.w, h: span.h, full, pair: "" });
+        piece.cuts = [clipped];
+      }
       if (bag.polys && bag.polys.length < 1400) bag.polys.push(piece);
       else bag.solid = true;
     };
