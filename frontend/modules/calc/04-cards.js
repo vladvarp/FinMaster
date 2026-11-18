@@ -1052,7 +1052,7 @@
         if (bondRowsId) {
           const tile = node.tiles.find((item) => item.id === bondRowsId);
           const rows = plannerDraft(e.target.value);
-          if (tile && rows != null) tile.bondRows = Math.round(plannerClamp(rows, 1, 32));
+          if (tile && rows != null) tile.bondRows = Math.round(plannerClamp(rows, 1, 30));
           markCommit(false);
           return;
         }
