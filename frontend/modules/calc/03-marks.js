@@ -1783,7 +1783,7 @@
         ? { x: geom.anchor.x + span.w, y: geom.anchor.y + span.h }
         : geom.anchor;
     let ux = dir === 90 ? { x: 0, y: 1 } : dir === 270 ? { x: 0, y: -1 } : dir === 180 ? { x: -1, y: 0 } : { x: 1, y: 0 };
-    let uy = dir === 90 ? { x: 1, y: 0 } : dir === 270 ? { x: -1, y: 0 } : dir === 180 ? { x: 0, y: -1 } : { x: 0, y: 1 };
+    let uy = dir === 90 ? { x: 1, y: 0 } : dir === 270 ? { x: -1, y: 0 } : { x: 0, y: 1 };
     const rad = ((Number(turn) || 0) * Math.PI) / 180;
     if (rad) {
       const c = Math.cos(rad);
