@@ -1788,14 +1788,14 @@
     const rest = [];
     parts.forEach((part) => {
       if (part.full) count += 1;
-      else if (part.cleanEdge && part.w > 0.003 && part.h > 0.003) rest.push(part);
+      else if (part.w > 0.003 && part.h > 0.003) rest.push(part);
     });
     rest.sort((a, b) => b.w * b.h - a.w * a.h);
     const used = new Array(rest.length).fill(false);
     const halfW = width / 2;
     const halfH = height / 2;
     const fits = (a, b) => {
-      if (a.parentId && a.parentId === b.parentId) return false;
+      if (!a.cleanEdge || !b.cleanEdge || (a.parentId && a.parentId === b.parentId)) return false;
       const alongW = a.w + b.w <= width + tolW + 1e-9 && a.h <= height + tolH + 1e-9 && b.h <= height + tolH + 1e-9 && (a.w < halfW - 1e-9 || b.w < halfW - 1e-9);
       const alongH = a.h + b.h <= height + tolH + 1e-9 && a.w <= width + tolW + 1e-9 && b.w <= width + tolW + 1e-9 && (a.h < halfH - 1e-9 || b.h < halfH - 1e-9);
       return alongW || alongH;
