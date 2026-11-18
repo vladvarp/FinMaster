@@ -988,7 +988,17 @@
         if (named) {
           const tile = node.tiles.find((item) => item.id === named);
           const value = String(e.target.value || "").trim().slice(0, 48);
-          if (tile && value) tile.name = value;
+          if (tile && value) {
+            tile.name = value;
+            $("mark-side")?.querySelectorAll(".mark-opt[data-tile-use]").forEach((option) => {
+              if (option.dataset.opt !== named) return;
+              option.textContent = value;
+              if (option.classList.contains("is-on")) {
+                const button = option.closest(".mark-select")?.querySelector(".mark-select-btn");
+                if (button) button.textContent = value;
+              }
+            });
+          }
           markCommit(false);
           return;
         }
