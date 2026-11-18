@@ -1957,7 +1957,8 @@
     };
     for (let i = i0; i < i1; i += 1) {
       for (let j = j0; j < j1; j += 1) {
-        const rowShift = (Math.abs(j) % 2) * tile.w * plannerClamp(tile.bond || 0, 0, 1);
+        const shifted = Math.abs(j) % (Math.max(1, Math.round(tile.bondRows || 1)) + 1) !== 0;
+        const rowShift = shifted ? tile.w * plannerClamp(tile.bond || 0, 0, 1) : 0;
         const cell = { x: i * pitchX + rowShift, y: j * pitchY, w: tile.w, h: tile.h };
         const hit = overlap(cell, region);
         if (!hit) continue;
@@ -2195,7 +2196,8 @@
       }
       for (let i = i0; i < i1; i += 1) {
         for (let j = j0; j < j1; j += 1) {
-          const rowShift = (Math.abs(j) % 2) * tile.w * plannerClamp(tile.bond || 0, 0, 1);
+          const shifted = Math.abs(j) % (Math.max(1, Math.round(tile.bondRows || 1)) + 1) !== 0;
+          const rowShift = shifted ? tile.w * plannerClamp(tile.bond || 0, 0, 1) : 0;
           const x = i * pitchX + rowShift;
           const y = j * pitchY;
           emit(
@@ -2418,6 +2420,7 @@
         color: markHex(raw.color, "#d6c4a8"),
         gap: plannerRound(plannerClamp(raw.gap == null ? 0.001 : plannerNum(raw.gap, 0.001), 0, 0.03)),
         bond: plannerRound(plannerClamp(plannerNum(raw.bond, 0), 0, 1)),
+        bondRows: Math.round(plannerClamp(plannerNum(raw.bondRows, 1), 1, 32)),
         grout: markHex(raw.grout, "#a8a29e"),
       });
     });
@@ -2919,7 +2922,8 @@
         : `<label class="planner-len">Ширина <input data-tile-w="${esc(tile.id)}" inputmode="decimal" value="${esc(tileCm(tile.w))}" /> см</label>
         <label class="planner-len">Высота <input data-tile-h="${esc(tile.id)}" inputmode="decimal" value="${esc(tileCm(tile.h))}" /> см</label>`;
       const bond = tile.pattern === "rect"
-        ? `<label class="planner-len">Сдвиг второго ряда <input data-tile-bond="${esc(tile.id)}" inputmode="decimal" value="${esc(plannerInput((tile.bond || 0) * tile.w * 100))}" /> см</label>`
+        ? `<label class="planner-len">Сдвиг <input data-tile-bond="${esc(tile.id)}" inputmode="decimal" value="${esc(plannerInput((tile.bond || 0) * tile.w * 100))}" /> см</label>
+          <label class="planner-len">Сдвигаемых рядов <input data-tile-bond-rows="${esc(tile.id)}" type="number" min="1" max="32" step="1" value="${esc(tile.bondRows || 1)}" /></label>`
         : "";
       return `<div class="planner-metric is-tile">
       <button type="button" class="calc-mini" data-tile-del="${esc(tile.id)}" title="Удалить">×</button>
