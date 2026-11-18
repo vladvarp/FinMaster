@@ -1769,6 +1769,7 @@
     const halfW = width / 2;
     const halfH = height / 2;
     const fits = (a, b) => {
+      if (a.parentId && a.parentId === b.parentId) return false;
       const alongW = a.w + b.w <= width + tolW + 1e-9 && a.h <= height + tolH + 1e-9 && b.h <= height + tolH + 1e-9 && (a.w < halfW - 1e-9 || b.w < halfW - 1e-9);
       const alongH = a.h + b.h <= height + tolH + 1e-9 && a.w <= width + tolW + 1e-9 && b.w <= width + tolW + 1e-9 && (a.h < halfH - 1e-9 || b.h < halfH - 1e-9);
       return alongW || alongH;
@@ -1787,8 +1788,8 @@
       }
       if (best >= 0) {
         used[best] = true;
-        rest[i].pair = rest[best].id;
-        rest[best].pair = rest[i].id;
+        rest[i].pair = rest[best].parentId || rest[best].id;
+        rest[best].pair = rest[i].parentId || rest[i].id;
       }
       used[i] = true;
       count += 1;
@@ -1947,6 +1948,7 @@
         rects.forEach((rect, index) => {
           bag.pieces.push({
             id: `${piece.id}:cut:${index}`,
+            parentId: piece.id,
             w: rect.w,
             h: rect.h,
             full: full && rects.length === 1,
@@ -2108,6 +2110,7 @@
         if (fragment.w < 0.003 || fragment.h < 0.003) return;
         bag.pieces.push({
           id: `${piece.id}:cut:${index}`,
+          parentId: piece.id,
           w: fragment.w,
           h: fragment.h,
           full: full && parts.length === 1,
@@ -2440,6 +2443,13 @@
     const geom = tileGeom(plan, face.surface, face.wall, lay);
     const bag = tileBag(tile, lay, geom, true);
     const packed = bag.rough != null ? { count: bag.rough, cuts: 0 } : tilePack(bag.pieces, tile.w, tile.h, lay.tolW, lay.tolH);
+    if (bag.polys) {
+      const paired = new Map();
+      bag.pieces.forEach((part) => {
+        if (part.parentId && part.pair && !paired.has(part.parentId)) paired.set(part.parentId, part.pair);
+      });
+      bag.polys.forEach((piece) => { piece.pair = paired.get(piece.id) || ""; });
+    }
     return { tile, lay, geom, bag, count: packed.count, cuts: packed.cuts };
   }
 
