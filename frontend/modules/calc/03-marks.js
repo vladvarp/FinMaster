@@ -1991,6 +1991,8 @@
           hole,
         ));
         // Внутреннее отверстие или вырез от одного края не делит плитку на заготовки.
+        // Геометрия реза нужна предпросмотру всегда, даже если вырез не делит плитку насквозь.
+        piece.cuts = rects.map(toPoly);
         if (throughCut) {
           rects.forEach((rect, index) => {
             bag.pieces.push({
@@ -2003,10 +2005,8 @@
               pair: "",
             });
           });
-          piece.cuts = rects.map(toPoly);
         } else {
           bag.pieces.push({ id: piece.id, w: piece.w, h: piece.h, full, pair: "" });
-          piece.cuts = [piece.face];
         }
         if (bag.polys && bag.polys.length < 1400) bag.polys.push(piece);
         else bag.solid = true;
@@ -2173,12 +2173,12 @@
             pair: "",
           });
         });
-        piece.cuts = parts;
       } else {
         // Внутренние отверстия и краевые вырезы не дробят плитку в расчёте.
         bag.pieces.push({ id: piece.id, w: span.w, h: span.h, full, pair: "" });
-        piece.cuts = [clipped];
       }
+      // Для предпросмотра всегда сохраняем реальный контур после выреза.
+      piece.cuts = parts;
       if (bag.polys && bag.polys.length < 1400) bag.polys.push(piece);
       else bag.solid = true;
     };
@@ -2320,6 +2320,8 @@
     const holes = [];
     if (lay.openings) {
       (plan.openings || []).forEach((hole) => {
+        // Круглые отверстия (трубы и проходки) не вырезают плитку в этом расчёте.
+        if (hole.shape === "circle") return;
         if (hole.surface !== surface) return;
         if (surface === "wall" && hole.wallId !== wall?.id) return;
         if (hole.shape === "circle") {
