@@ -715,7 +715,7 @@
         const n = node.tiles.length + 1;
         const colors = ["#d6c4a8", "#94a3b8", "#c4b5a0", "#a8a29e", "#d6d3d1", "#e7e5e4"];
         const id = uid();
-        node.tiles.push({ id, name: `Плитка ${n}`, pattern: "rect", w: 0.6, h: 0.6, color: colors[(n - 1) % colors.length], gap: 0.001, bond: 0, bondRows: 1, grout: "#a8a29e" });
+        node.tiles.push({ id, name: `Плитка ${n}`, pattern: "rect", w: 0.6, h: 0.6, color: colors[(n - 1) % colors.length], gap: 0.001, bond: 0, bondRows: 1, noPairs: false, grout: "#a8a29e" });
         if (!node.outOn || typeof node.outOn !== "object") node.outOn = {};
         (node.feeds || []).forEach((feed) => { node.outOn[feedKey(feed, "tile", id)] = true; });
         markCommit(true);
@@ -1034,6 +1034,13 @@
             if (colorId) tile.color = markHex(e.target.value, tile.color);
             else tile.grout = markHex(e.target.value, tile.grout || "#a8a29e");
           }
+          markCommit(false);
+          return;
+        }
+        const noPairsId = e.target.dataset?.tileNoPairs;
+        if (noPairsId) {
+          const tile = node.tiles.find((item) => item.id === noPairsId);
+          if (tile) tile.noPairs = !!e.target.checked;
           markCommit(false);
           return;
         }
