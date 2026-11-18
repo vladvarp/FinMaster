@@ -49,6 +49,7 @@
         if (node.type === "planner") return plannerNodeHtml(node, bp, graph);
         if (node.type === "openings") return openingsNodeHtml(node, bp, graph);
         if (node.type === "electrics") return electricsNodeHtml(node, bp, graph);
+        if (node.type === "tiles") return tilesNodeHtml(node, bp, graph);
         if (node.type === "present") return presentNodeHtml(node, bp, graph);
         return orderNodeHtml(node, api.findOrder(node.orderId), graph, bp);
       })
@@ -949,7 +950,7 @@
       const lane = (node.lanes || []).find((item) => item.id === laneId);
       return lane?.tone || "order";
     }
-    if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme" || type === "group" || type === "filter" || type === "dashboard" || type === "planner" || type === "openings" || type === "electrics" || type === "present" || type === "comment") return type;
+    if (type === "math" || type === "formula" || type === "percent" || type === "const" || type === "result" || type === "scheme" || type === "group" || type === "filter" || type === "dashboard" || type === "planner" || type === "openings" || type === "electrics" || type === "tiles" || type === "present" || type === "comment") return type;
     return "order";
   }
 
@@ -2598,7 +2599,7 @@
     e.preventDefault();
     const at = worldPoint(bp, e.clientX, e.clientY);
     if (presentBlock) addPresentNode(presentPage, presentBlock, at);
-    else if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "comment" || kind === "filter" || kind === "dashboard" || kind === "planner" || kind === "openings" || kind === "electrics" || kind === "joint" || kind === "bus" || kind === "teleport") addNode(kind, at);
+    else if (kind === "math" || kind === "formula" || kind === "percent" || kind === "const" || kind === "result" || kind === "group" || kind === "comment" || kind === "filter" || kind === "dashboard" || kind === "planner" || kind === "openings" || kind === "electrics" || kind === "tiles" || kind === "joint" || kind === "bus" || kind === "teleport") addNode(kind, at);
     else if (teleportId) addNode("teleout", at, { source: teleportId });
     else if (blueprintId && blueprintId !== bp.id) addNode("scheme", at, { blueprintId });
     else if (orderId && api.findOrder(orderId)) addNode("order", at, { orderId });
@@ -3200,7 +3201,7 @@
       e.preventDefault();
       e.stopPropagation();
       if (node.type === "planner") openPlanner(node.id);
-      else if (node.type === "openings" || node.type === "electrics") {
+      else if (node.type === "openings" || node.type === "electrics" || node.type === "tiles") {
         openMark(node.id, card.dataset.markSurface || "", card.closest("[data-mark-feed]")?.dataset.markFeed || "");
       }
     });
@@ -3304,7 +3305,7 @@
       const node = bp.nodes.find((item) => item.id === nodeEl.dataset.node);
       if (!node) return;
       const films = e.target.closest("[data-films-toggle]");
-      if (films && (node.type === "openings" || node.type === "electrics")) {
+      if (films && (node.type === "openings" || node.type === "electrics" || node.type === "tiles")) {
         node.filmsOff = !node.filmsOff;
         session.selected = node.id;
         dirty();
@@ -3432,7 +3433,7 @@
           // Обновление выполняется без render(), чтобы не закрывать системный выбор цвета.
           const graph = computeGraph(bp);
           (bp.nodes || []).forEach((target) => {
-            if (target.type !== "openings" && target.type !== "electrics") return;
+            if (target.type !== "openings" && target.type !== "electrics" && target.type !== "tiles") return;
             const plan = upstreamPlan(target, bp, [], graph.values);
             if (!plan) return;
             const tones = markTones(target, plan.color);
@@ -3454,7 +3455,7 @@
             });
           });
           dirty();
-        } else if (node?.type === "openings" || node?.type === "electrics") {
+        } else if (node?.type === "openings" || node?.type === "electrics" || node?.type === "tiles") {
           node.color = String(e.target.value || "#65a30d").toLowerCase();
           nodeEl.style.setProperty("--planner-color", node.color);
           const path = nodeEl.querySelector(".calc-planner-thumb path");
@@ -3507,7 +3508,7 @@
         e.target.title = node.name;
         return;
       }
-      if (e.target.dataset?.markTitle && (node.type === "openings" || node.type === "electrics")) {
+      if (e.target.dataset?.markTitle && (node.type === "openings" || node.type === "electrics" || node.type === "tiles")) {
         node.name = String(e.target.value || "").trim().slice(0, 48);
         e.target.title = node.name;
         const title = $("mark-title");
@@ -3628,8 +3629,8 @@
         }
         return;
       }
-      if (e.target.dataset.markTitle && (node.type === "openings" || node.type === "electrics")) {
-        const fallback = node.type === "electrics" ? "Электрика" : "Проёмы";
+      if (e.target.dataset.markTitle && (node.type === "openings" || node.type === "electrics" || node.type === "tiles")) {
+        const fallback = node.type === "electrics" ? "Электрика" : node.type === "tiles" ? "Плитка" : "Проёмы";
         node.name = String(e.target.value || "").trim().slice(0, 48) || fallback;
         e.target.value = node.name;
         e.target.title = node.name;
@@ -3802,6 +3803,7 @@
           const node = markNode();
           const sel = session.mark.sel;
           if (!node || !sel) return;
+          if (node.type === "tiles") return;
           if (node.type === "openings") {
             node.holes = node.holes.filter((hole) => hole.id !== sel);
             const bp = activeBlueprint();

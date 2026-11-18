@@ -484,6 +484,7 @@
       else if (owner.source.type === "planner") src = "Планировщик";
       else if (owner.source.type === "openings") src = "Проёмы";
       else if (owner.source.type === "electrics") src = "Электрика";
+      else if (owner.source.type === "tiles") src = "Плитка";
       else if (owner.source.type === "scheme") src = "Схема";
       else src = owner.source.type || "нода";
     }
@@ -1130,6 +1131,7 @@
     if (node.type === "present") return presentPorts(node);
     if (node.type === "openings") return openingInputs(node);
     if (node.type === "electrics") return electricInputs(node);
+    if (node.type === "tiles") return tileInputs(node);
     if (node.type === "order") {
       const order = api.findOrder(node.orderId);
       const linkedIn = usedInputPorts(node.id, links || []);
@@ -1271,6 +1273,7 @@
     if (node.type === "planner") return plannerOutputs(node, links).map((port) => ({ id: port.id, name: port.name, signal: port.signal || "" }));
     if (node.type === "openings") return openingOutputs(node, activeBlueprint(), null, links);
     if (node.type === "electrics") return electricOutputs(node, activeBlueprint(), null, links);
+    if (node.type === "tiles") return tileOutputs(node, activeBlueprint(), null, links);
     if (node.type === "order") {
       const found = order || api.findOrder(node.orderId);
       const lines = orderLines(found);
@@ -1630,6 +1633,11 @@
         });
       } else if (node.type === "electrics") {
         electricOutputs(node, bp, values, links).forEach((port) => setVal(nodeId, port.id, port.value));
+      } else if (node.type === "tiles") {
+        tileOutputs(node, bp, values, links).forEach((port) => {
+          if (port.signal === "plan") return;
+          setVal(nodeId, port.id, port.value);
+        });
       } else if (node.type === "present") {
         presentPorts(node).forEach((port) => {
           const link = (incoming[nodeId] || []).find((item) => item.toPort === port.id);
@@ -1728,7 +1736,7 @@
       });
       return { w: 300, h: 168 + n * 28 };
     }
-    if (node.type === "openings" || node.type === "electrics") return { w: 300, h: 460 };
+    if (node.type === "openings" || node.type === "electrics" || node.type === "tiles") return { w: 300, h: 460 };
     if (node.type === "present") return { w: 220, h: 160 };
     if (node.type === "group") return { w: Math.max(160, node.w || 320), h: Math.max(120, node.h || 220) };
     return { w: 188, h: 120 };

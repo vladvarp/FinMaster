@@ -347,6 +347,7 @@ html[data-theme] .calc-board.is-snap,
 .calc-wire.is-plan { stroke: #7c3aed; }
 .calc-wire.is-openings { stroke: #0284c7; }
 .calc-wire.is-electrics { stroke: #d97706; }
+.calc-wire.is-tiles { stroke: #c2410c; }
 .calc-wire.is-present { stroke: #8b5cf6; }
 .calc-wire.is-error { stroke: var(--danger); }
 .calc-wire.is-flow {
@@ -988,7 +989,8 @@ html[data-theme="dark"] .calc-mini-toggle {
 .calc-node.is-dashboard,
 .calc-node.is-planner,
 .calc-node.is-openings,
-.calc-node.is-electrics {
+.calc-node.is-electrics,
+.calc-node.is-tiles {
   z-index: 2;
 }
 .calc-node.is-scheme { width: 220px; }
@@ -1282,16 +1284,19 @@ html[data-theme="dark"] .calc-mini-toggle {
 .calc-node.is-films-off .calc-film-label { display: none; }
 .calc-node.is-planner .calc-port.out { background: #84cc16; box-shadow: 0 0 0 1px #4d7c0f; }
 .calc-node.is-openings,
-.calc-node.is-electrics {
+.calc-node.is-electrics,
+.calc-node.is-tiles {
   width: 300px;
   box-sizing: border-box;
   overflow: hidden;
 }
 .calc-node.is-openings .calc-port,
-.calc-node.is-electrics .calc-port { margin-left: 0; margin-right: 0; }
+.calc-node.is-electrics .calc-port,
+.calc-node.is-tiles .calc-port { margin-left: 0; margin-right: 0; }
 .calc-node.is-openings .calc-port.out,
 .calc-node.is-electrics .calc-port.out { background: #38bdf8; box-shadow: 0 0 0 1px #0369a1; }
 .calc-node.is-electrics .calc-port.out { background: #fbbf24; box-shadow: 0 0 0 1px #b45309; }
+.calc-node.is-tiles .calc-port.out { background: #fb923c; box-shadow: 0 0 0 1px #c2410c; }
 .calc-port[data-signal="plan"] { background: #c4b5fd !important; box-shadow: 0 0 0 1px #6d28d9 !important; }
 .calc-node.is-result .calc-film { margin: 0 0 6px; }
 .calc-node.is-result .calc-film-card { cursor: default; }
@@ -1309,8 +1314,10 @@ html[data-theme="dark"] .calc-mini-toggle {
 .calc-row.is-idle > span { color: var(--muted); }
 .calc-node.is-openings .calc-node-sub,
 .calc-node.is-electrics .calc-node-sub,
+.calc-node.is-tiles .calc-node-sub,
 .calc-node.is-openings .calc-row small,
-.calc-node.is-electrics .calc-row small { color: var(--muted); font-size: 11px; }
+.calc-node.is-electrics .calc-row small,
+.calc-node.is-tiles .calc-row small { color: var(--muted); font-size: 11px; }
 .calc-film-label {
   padding: 2px 8px 0;
   font-size: 12px;
@@ -1450,6 +1457,7 @@ html[data-theme="dark"] .calc-mini-toggle {
   box-shadow: var(--shadow);
 }
 .mark-menu.is-plain .mark-menu-card { left: 8px; top: 8px; }
+.mark-menu:not(.is-plain) .mark-menu-card { left: 128px; }
 .mark-menu-card button, .mark-dias button, .mark-orient button {
   border: 1px solid var(--line);
   background: var(--bg-2);
@@ -1773,6 +1781,102 @@ html[data-theme="dark"] .calc-mini-toggle {
   color: var(--muted);
 }
 .planner-plan-wrap { position: relative; flex: 1; min-height: 0; }
+.mark-tile-tip {
+  position: fixed;
+  z-index: 80;
+  width: 420px;
+  padding: 10px 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  color: var(--text);
+}
+.mark-tile-tip svg { width: 100%; height: auto; display: block; }
+.mark-tile-tip p { margin: 6px 0 0; font-size: 16px; text-align: center; }
+.planner-metric.is-tile {
+  position: relative;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 30px 8px 8px;
+}
+.planner-metric.is-tile > .calc-mini {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  margin: 0;
+}
+.planner-metric.is-tile .planner-name { flex: 0 0 auto; width: 100%; min-width: 0; }
+.planner-metric.is-tile .mark-select,
+.planner-metric.is-tile .mark-select-btn { width: 100%; flex: 0 0 auto; }
+.tile-row, .tile-face { display: flex; gap: 6px 12px; }
+.tile-row { flex-wrap: wrap; align-items: center; }
+.tile-face { flex-direction: column; align-items: stretch; }
+.tile-face > .planner-len {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.tile-val { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.tile-rule { border: 0; border-top: 1px solid var(--line); margin: 2px 0; width: 100%; }
+.mark-edge {
+  position: absolute;
+  left: -110px;
+  top: 74px;
+  width: 220px;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 12px;
+}
+.mark-edge[hidden] { display: none !important; }
+.mark-edge label { display: grid; grid-template-columns: 1fr 64px auto; align-items: center; gap: 6px; margin: 0; }
+.mark-edge input:not([type="checkbox"]) {
+  width: 100%;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  padding: 0 6px;
+}
+.mark-edge label.mark-edge-check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.mark-edge label.mark-edge-check input[type="checkbox"] {
+  width: 32px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--line);
+}
+.mark-edge label.mark-edge-check input[type="checkbox"]::after {
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+}
+.mark-edge label.mark-edge-check input[type="checkbox"]:checked { background: var(--accent); }
+.mark-edge label.mark-edge-check input[type="checkbox"]:checked::after { transform: translateX(14px); }
+.mark-edge label.mark-edge-from { grid-template-columns: 1fr auto; }
+.mark-edge .mark-select { min-width: 120px; }
+#mark-nudge-box { top: 292px; }
 .editor-snap-controls {
   position: absolute;
   z-index: 7;

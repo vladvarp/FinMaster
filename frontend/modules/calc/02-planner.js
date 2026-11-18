@@ -487,7 +487,9 @@
     return '<div class="editor-snap-controls" data-snap-controls="' + kind + '">' +
       '<button type="button" class="editor-snap-toggle is-on" data-snap-toggle="' + kind + '" aria-pressed="true" title="Привязка к сетке" aria-label="Включить или выключить привязку">' +
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 13.5 4 11a3.5 3.5 0 0 1 5-5l2 2m1.5 2.5L15 13a3.5 3.5 0 0 1-5 5l-2-2m-1-5 8-8m-3 11 8-8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
-      '<label class="editor-snap-step"><input type="number" min="0.01" max="5" step="0.01" value="0.05" data-snap-step="' + kind + '" aria-label="Шаг привязки" /><span>м</span></label></div>';
+      '<label class="editor-snap-step"><input type="number" min="0.01" max="5" step="0.01" value="0.05" data-snap-step="' + kind + '" aria-label="Шаг привязки" /><span>м</span></label>' +
+      (kind === "mark" ? '<button type="button" class="editor-snap-toggle" data-mark-dims hidden aria-pressed="false" title="Размеры стены и пола" aria-label="Показать размеры стены и пола"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M7 7v3M12 7v4M17 7v3M7 17v-3M12 17v-4M17 17v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>' : "") +
+      "</div>";
   }
   function editorSnapRefresh(kind) {
     const state = kind === "planner" ? session.planner : session.mark;
@@ -511,6 +513,16 @@
       editorSnapRefresh(kind);
       if (kind === "planner") plannerDraw(); else markDraw();
     });
+    if (kind === "mark") {
+      modal.addEventListener("click", (e) => {
+        const dims = e.target.closest("[data-mark-dims]");
+        if (!dims || !session.mark) return;
+        session.mark.dims = !session.mark.dims;
+        dims.classList.toggle("is-on", session.mark.dims);
+        dims.setAttribute("aria-pressed", session.mark.dims ? "true" : "false");
+        markDraw();
+      });
+    }
     modal.addEventListener("change", (e) => {
       const input = e.target.closest('[data-snap-step="' + kind + '"]');
       if (!input) return;

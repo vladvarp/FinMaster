@@ -351,7 +351,7 @@
         </div>
       </div>
     </article>
-    <p>В шапке ноды остаются имя самого планировщика и цвет текущей планировки. Переключение и создание планировок перенесены в редактор: выпадающий список расположен слева от названия открытой планировки. У каждой свой цвет и свой блок выходов: сверху чертёж, ниже числа этой планировки. Плёнка показывает чертежи подряд. Цвет берётся из палитры по числу планировок и меняется палитрой в шапке для текущей. Выход «Чертёж» уходит только в проёмы или электрику. Выход «Высота стен» отдаёт высоту в метрах. В примере комната 4×3 м, высота 2,7 м: пол 12 м², стены суммарно 37,8 м². Стена 1 — 4×2,7 = 10,8 м², её включили отдельно. Для каждой стены можно включить «Погонаж»: вместо площади будет выводиться высота стены в метрах; тумблер рядом переключает значение на длину стены. По умолчанию выбрана высота. «3 стены» — сумма трёх стен из четырёх: 29,7 м². Высота стен появляется среди выходов только при включённой галочке «На ноду» в разделе «Параметры». Развёртка в редакторе строится сама.</p>
+    <p>В шапке ноды остаются имя самого планировщика и цвет текущей планировки. Переключение и создание планировок перенесены в редактор: выпадающий список расположен слева от названия открытой планировки. У каждой свой цвет и свой блок выходов: сверху чертёж, ниже числа этой планировки. Плёнка показывает чертежи подряд. Цвет берётся из палитры по числу планировок и меняется палитрой в шапке для текущей. Выход «Чертёж» уходит только в проёмы, электрику или плитку. Выход «Высота стен» отдаёт высоту в метрах. В примере комната 4×3 м, высота 2,7 м: пол 12 м², стены суммарно 37,8 м². Стена 1 — 4×2,7 = 10,8 м², её включили отдельно. Для каждой стены можно включить «Погонаж»: вместо площади будет выводиться высота стены в метрах; тумблер рядом переключает значение на длину стены. По умолчанию выбрана высота. «3 стены» — сумма трёх стен из четырёх: 29,7 м². Высота стен появляется среди выходов только при включённой галочке «На ноду» в разделе «Параметры». Развёртка в редакторе строится сама.</p>
   </section>
 
   <section class="kind" data-kind="openings">
@@ -417,6 +417,35 @@
       </div>
     </article>
     <p>Чертёж можно взять у планировщика или у проёмов. Занятый вход открывает снизу следующий. Над плёнкой — имя планировки, под ней вход и счётчики этого чертежа. Кнопка в шапке прячет все ленты. Внизу — «Общий вывод». Цвета наследуются от планировщика: пол — исходный цвет, потолок — сдвиг оттенка на 120°, стены — на 240°.</p>
+  </section>
+
+  <section class="kind" data-kind="tiles">
+    <h2>Плитка</h2>
+    <article class="calc-node is-tiles" style="--planner-color:#d6c4a8;--mark-floor:#d6c4a8;--mark-ceiling:#a8d6c4;--mark-wall:#c4a8d6">
+      <header class="calc-node-h">
+        <input class="calc-pname calc-planner-name" value="Плитка" maxlength="48" readonly tabindex="-1" aria-label="Имя плитки" />
+        <button type="button" class="calc-films-toggle" tabindex="-1" title="Скрыть ленты" aria-label="Скрыть ленты" aria-pressed="true">
+          <svg class="is-show" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/><rect x="9" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/><rect x="16" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/></svg>
+          <svg class="is-hide" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/><rect x="9" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/><rect x="16" y="6" width="6" height="12" rx="1.2" stroke="currentColor" stroke-width="1.8"/><path d="M4 20 20 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+        <button type="button" class="calc-text-btn" tabindex="-1">Редактор</button>
+      </header>
+      <div class="calc-node-sub">86 шт.</div>
+      <div class="calc-ports">
+        <div class="calc-plan-group" style="--planner-color:#d6c4a8">
+          <div class="calc-film-label">Кухня</div>
+          <div class="calc-film calc-film-top">
+            <button type="button" class="calc-film-card is-on" tabindex="-1"><span class="calc-film-name">Пол</span><svg class="calc-film-thumb" style="--film-tone:#d6c4a8" viewBox="0 0 64 46" aria-hidden="true"><path d="M8 8H56V38H8Z"/></svg></button>
+            <button type="button" class="calc-film-card" tabindex="-1"><span class="calc-film-name">Стена 1</span><svg class="calc-film-thumb is-wall" style="--film-tone:#c4a8d6" viewBox="0 0 64 46" aria-hidden="true"><rect class="calc-film-wall" x="6" y="8" width="52" height="30"/></svg></button>
+          </div>
+          <div class="calc-row in"><i class="calc-port in" data-signal="plan" title="Чертёж"></i><span>Чертёж</span><b class="calc-plan-tag">Кухня</b></div>
+          <div class="calc-row out"><span class="calc-row-name">Пол · Плитка 1</span><b>34 <small>шт</small></b><i class="calc-port out" title="Пол"></i></div>
+          <div class="calc-row out"><span class="calc-row-name">Плитка 1</span><b>86 <small>шт</small></b><i class="calc-port out" title="Плитка 1"></i></div>
+          <div class="calc-row out"><span class="calc-row-name">Плитка 1 · резка</span><b>14 <small>шт</small></b><i class="calc-port out" title="Резка"></i></div>
+        </div>
+      </div>
+    </article>
+    <p>Чертёж берётся у планировщика или у проёмов и дальше не передаётся. Справа в редакторе задают размер, форму, шов и цвет плитки. Для каждой стены и пола выбирают плитку, откуда начинается ряд, отступы, сдвиг и запас на стык обрезков. Число на ноде — сколько плиток купить. «Резка» — сколько из них резать, её не прибавляют к покупке. Строка типа складывает поверхности, её не суммируют с ними ещё раз.</p>
   </section>
 
   <section class="kind" data-kind="group">

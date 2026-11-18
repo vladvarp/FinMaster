@@ -15,6 +15,9 @@
     if (kind === "own") return primary ? `own:${rest}` : `own:${feed.id}:${rest}`;
     if (kind === "type") return primary ? `type:${rest}` : `type:${feed.id}:${rest}`;
     if (kind === "frame") return primary ? `frame:${rest}` : `frame:${feed.id}:${rest}`;
+    if (kind === "surf") return primary ? `surf:${rest}` : `surf:${feed.id}:${rest}`;
+    if (kind === "tile") return primary ? `tile:${rest}` : `tile:${feed.id}:${rest}`;
+    if (kind === "cut") return primary ? `cut:${rest}` : `cut:${feed.id}:${rest}`;
     return `${kind}:${rest}`;
   }
 
@@ -75,7 +78,7 @@
     const host = bp || blueprintOf(node);
     const links = host?.links || [];
     const linked = (port) => links.some((link) => link.to === node.id && link.toPort === port);
-    const hasContent = (feed) => (node.holes || []).some((hole) => hole.feed === feed.id) || (node.fixtures || []).some((fix) => fix.feed === feed.id);
+    const hasContent = (feed) => (node.holes || []).some((hole) => hole.feed === feed.id) || (node.fixtures || []).some((fix) => fix.feed === feed.id) || (node.lays || []).some((lay) => lay.feed === feed.id);
     node.feeds = node.feeds.filter((feed, index, list) => linked(feedPort(feed)) || hasContent(feed) || index === list.length - 1);
     if (!node.feeds.length) node.feeds = [{ id: "main", port: PLAN_PORT }];
     const last = node.feeds[node.feeds.length - 1];
@@ -282,6 +285,19 @@
         id: feed.id,
         name: feedTitle(node, feed, host),
         rows: openingFeedPorts(node, host, values, links, feed, true).filter((port) => port.signal !== "plan").map((port) => ({
+          id: port.id,
+          name: port.name,
+          value: port.value,
+          unit: port.unit || "",
+        })),
+      }));
+    }
+    if (node.type === "tiles") {
+      ensureTiles(node);
+      return node.feeds.filter((feed) => upstreamPlan(node, host, [], values || {}, feedPort(feed))).map((feed) => ({
+        id: feed.id,
+        name: feedTitle(node, feed, host),
+        rows: tileFeedPorts(node, host, values, links, feed, true).filter((port) => port.signal !== "plan").map((port) => ({
           id: port.id,
           name: port.name,
           value: port.value,
@@ -654,7 +670,7 @@
       return portSignal(result, "out", guard);
     }
     if (node.type === "planner" && (id === "plan" || id.startsWith("plan:"))) return "plan";
-    if ((node.type === "openings" || node.type === "electrics") && (id === PLAN_PORT || id.startsWith("plan:"))) return "plan";
+    if ((node.type === "openings" || node.type === "electrics" || node.type === "tiles") && (id === PLAN_PORT || id.startsWith("plan:"))) return "plan";
     if (node.type === "joint") return node.signal === "plan" ? "plan" : "num";
     if (node.type === "teleport") {
       const entry = teleportPortOf(node, id) || teleportEntries(node)[0];
@@ -885,6 +901,7 @@
         openings: [],
       };
     }
+    if (node.type === "tiles") return null;
     if (node.type === "openings") {
       ensureOpenings(node);
       const feed = (node.feeds || []).find((item) => feedPort(item) === fromPort) || node.feeds?.[0];
@@ -957,8 +974,9 @@
 
   function upstreamPlan(node, bp, stack, values, portId) {
     let port = portId || PLAN_PORT;
-    if (!portId && (node?.type === "openings" || node?.type === "electrics")) {
+    if (!portId && (node?.type === "openings" || node?.type === "electrics" || node?.type === "tiles")) {
       if (node.type === "openings") ensureOpenings(node);
+      else if (node.type === "tiles") ensureTiles(node);
       else ensureElectrics(node);
       const hit = (node.feeds || []).find((feed) => (bp?.links || []).some((link) => link.to === node.id && link.toPort === feedPort(feed)));
       if (hit) port = feedPort(hit);
@@ -1140,6 +1158,8 @@
         picked: raw.picked !== false,
         name: String(raw.name || "").trim().slice(0, 48),
         feed: String(raw.feed || ""),
+        fromCenter: raw.fromCenter === true,
+        edgeFrom: String(raw.edgeFrom || ""),
       });
     });
     node.holes = holes;
@@ -1207,6 +1227,7 @@
   function markShown(node, id, linked, present) {
     if (linked?.has(id)) return true;
     if (node.outOn && Object.prototype.hasOwnProperty.call(node.outOn, id)) return !!node.outOn[id];
+    if (node.type === "tiles") return false;
     return !!present;
   }
 
@@ -1349,6 +1370,7 @@
     if (!node) return "Нода";
     if (node.type === "planner") return plannerName(node);
     if (node.type === "openings") return node.name || "Проёмы";
+    if (node.type === "tiles") return node.name || "Плитка";
     if (node.type === "electrics") return node.name || "Электрика";
     if (node.type === "const") return "Константа";
     if (node.type === "result") return node.name || "Результат";
@@ -1546,12 +1568,908 @@
     return `<div class="calc-sec">Общий вывод</div>${any ? body : `<div class="calc-empty">Соберите в редакторе</div>`}`;
   }
 
+  const TILE_PATTERNS = [
+    ["rect", "Прямоугольник"],
+    ["chevron", "Шеврон"],
+    ["herringbone", "Ёлка"],
+    ["honeycomb", "Соты"],
+    ["quad", "2+2"],
+    ["parquet", "Паркет"],
+  ];
+  const TILE_DIRS = [[0, "Вдоль · слева"], [90, "Поперёк · снизу"], [180, "Вдоль · справа"], [270, "Поперёк · сверху"]];
+
+  function tilePatternName(id) {
+    return TILE_PATTERNS.find((item) => item[0] === id)?.[1] || "Прямоугольник";
+  }
+
+  function tileCm(meters) {
+    return plannerInput(plannerRound(plannerNum(meters, 0) * 100));
+  }
+
+  function tileFromCm(text, fallback, lo, hi) {
+    const n = plannerDraft(text);
+    if (n == null) return null;
+    return plannerRound(plannerClamp(n / 100, lo, hi));
+  }
+
+  function polySigned(pts) {
+    let area = 0;
+    for (let i = 0; i < pts.length; i += 1) {
+      const p = pts[i];
+      const q = pts[(i + 1) % pts.length];
+      area += p.x * q.y - q.x * p.y;
+    }
+    return area / 2;
+  }
+
+  function polyArea(pts) {
+    return Math.abs(polySigned(pts || []));
+  }
+
+  function polyNorm(pts) {
+    const clean = [];
+    (pts || []).forEach((p) => {
+      if (!p) return;
+      const last = clean[clean.length - 1];
+      if (!last || Math.hypot(last.x - p.x, last.y - p.y) > 1e-7) clean.push({ x: p.x, y: p.y });
+    });
+    if (clean.length > 2 && Math.hypot(clean[0].x - clean[clean.length - 1].x, clean[0].y - clean[clean.length - 1].y) < 1e-7) clean.pop();
+    if (clean.length > 2 && polySigned(clean) < 0) clean.reverse();
+    return clean;
+  }
+
+  function polyIsRect(pts) {
+    const poly = polyNorm(pts);
+    if (poly.length !== 4) return false;
+    for (let i = 0; i < 4; i += 1) {
+      const a = poly[i];
+      const b = poly[(i + 1) % 4];
+      const dx = Math.abs(b.x - a.x);
+      const dy = Math.abs(b.y - a.y);
+      if (dx > 1e-4 && dy > 1e-4) return false;
+    }
+    return true;
+  }
+
+  function clipToConvex(subject, clip) {
+    const window = polyNorm(clip);
+    if (window.length < 3) return [];
+    let output = polyNorm(subject);
+    const cross = (a, b, p) => (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    const hit = (p, q, a, b) => {
+      const rx = q.x - p.x;
+      const ry = q.y - p.y;
+      const sx = b.x - a.x;
+      const sy = b.y - a.y;
+      const den = rx * sy - ry * sx;
+      if (Math.abs(den) < 1e-12) return { x: p.x, y: p.y };
+      const t = ((a.x - p.x) * sy - (a.y - p.y) * sx) / den;
+      return { x: p.x + t * rx, y: p.y + t * ry };
+    };
+    for (let i = 0; i < window.length && output.length; i += 1) {
+      const a = window[i];
+      const b = window[(i + 1) % window.length];
+      const input = output;
+      output = [];
+      for (let j = 0; j < input.length; j += 1) {
+        const p = input[j];
+        const q = input[(j + 1) % input.length];
+        const pin = cross(a, b, p) >= -1e-9;
+        const qin = cross(a, b, q) >= -1e-9;
+        if (qin) {
+          if (!pin) output.push(hit(p, q, a, b));
+          output.push(q);
+        } else if (pin) output.push(hit(p, q, a, b));
+      }
+      output = polyNorm(output);
+    }
+    return output.length > 2 ? output : [];
+  }
+
+  function clipHalf(poly, inside, at) {
+    const out = [];
+    if (!poly?.length) return out;
+    for (let i = 0; i < poly.length; i += 1) {
+      const p = poly[i];
+      const q = poly[(i + 1) % poly.length];
+      const pin = inside(p);
+      const qin = inside(q);
+      if (qin) {
+        if (!pin) out.push(at(p, q));
+        out.push(q);
+      } else if (pin) out.push(at(p, q));
+    }
+    return polyNorm(out);
+  }
+
+  function tileSubtract(poly, hole) {
+    const x0 = hole.x;
+    const y0 = hole.y;
+    const x1 = hole.x + hole.w;
+    const y1 = hole.y + hole.h;
+    const vx = (p, q, x) => {
+      const t = Math.abs(q.x - p.x) < 1e-12 ? 0 : (x - p.x) / (q.x - p.x);
+      return { x, y: p.y + t * (q.y - p.y) };
+    };
+    const hy = (p, q, y) => {
+      const t = Math.abs(q.y - p.y) < 1e-12 ? 0 : (y - p.y) / (q.y - p.y);
+      return { x: p.x + t * (q.x - p.x), y };
+    };
+    const left = clipHalf(poly, (p) => p.x <= x0 + 1e-8, (p, q) => vx(p, q, x0));
+    const right = clipHalf(poly, (p) => p.x >= x1 - 1e-8, (p, q) => vx(p, q, x1));
+    let mid = clipHalf(poly, (p) => p.x >= x0 - 1e-8, (p, q) => vx(p, q, x0));
+    mid = clipHalf(mid, (p) => p.x <= x1 + 1e-8, (p, q) => vx(p, q, x1));
+    const bottom = clipHalf(mid, (p) => p.y <= y0 + 1e-8, (p, q) => hy(p, q, y0));
+    const top = clipHalf(mid, (p) => p.y >= y1 - 1e-8, (p, q) => hy(p, q, y1));
+    return [left, right, bottom, top].filter((part) => polyArea(part) > 1e-6);
+  }
+
+  function tileInset(poly, gap) {
+    if (!gap || poly.length < 3) return poly;
+    const c = poly.reduce((sum, p) => ({ x: sum.x + p.x, y: sum.y + p.y }), { x: 0, y: 0 });
+    c.x /= poly.length;
+    c.y /= poly.length;
+    const reach = Math.min(...poly.map((p) => Math.hypot(p.x - c.x, p.y - c.y))) || 1;
+    const keep = Math.max(0.25, (reach - gap / 2) / reach);
+    return poly.map((p) => ({ x: c.x + (p.x - c.x) * keep, y: c.y + (p.y - c.y) * keep }));
+  }
+
+  function tileSpan(part, toLocal, tile) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    part.forEach((p) => {
+      const q = toLocal(p);
+      if (q.x < minX) minX = q.x;
+      if (q.x > maxX) maxX = q.x;
+      if (q.y < minY) minY = q.y;
+      if (q.y > maxY) maxY = q.y;
+    });
+    return {
+      w: plannerClamp(maxX - minX, 0, tile.w),
+      h: plannerClamp(maxY - minY, 0, tile.h),
+    };
+  }
+
+  function tilePack(parts, width, height, tolW, tolH) {
+    let count = 0;
+    let cuts = 0;
+    const rest = [];
+    parts.forEach((part) => {
+      if (part.full) count += 1;
+      else if (part.w > 0.003 && part.h > 0.003) rest.push(part);
+    });
+    rest.sort((a, b) => b.w * b.h - a.w * a.h);
+    const used = new Array(rest.length).fill(false);
+    const halfW = width / 2;
+    const halfH = height / 2;
+    const fits = (a, b) => {
+      const alongW = a.w + b.w <= width + tolW + 1e-9 && a.h <= height + tolH + 1e-9 && b.h <= height + tolH + 1e-9 && (a.w < halfW - 1e-9 || b.w < halfW - 1e-9);
+      const alongH = a.h + b.h <= height + tolH + 1e-9 && a.w <= width + tolW + 1e-9 && b.w <= width + tolW + 1e-9 && (a.h < halfH - 1e-9 || b.h < halfH - 1e-9);
+      return alongW || alongH;
+    };
+    for (let i = 0; i < rest.length; i += 1) {
+      if (used[i]) continue;
+      let best = -1;
+      let bestArea = -1;
+      for (let j = i + 1; j < rest.length; j += 1) {
+        if (used[j] || !fits(rest[i], rest[j])) continue;
+        const area = rest[j].w * rest[j].h;
+        if (area > bestArea) {
+          bestArea = area;
+          best = j;
+        }
+      }
+      if (best >= 0) {
+        used[best] = true;
+        rest[i].pair = rest[best].id;
+        rest[best].pair = rest[i].id;
+      }
+      used[i] = true;
+      count += 1;
+      cuts += 1;
+    }
+    return { count, cuts };
+  }
+
+  function tileFrame(geom, dir, shiftX, shiftY, turn) {
+    const back = dir === 180 || dir === 270;
+    const span = geom.span || { w: 0, h: 0 };
+    const origin = back
+      ? { x: geom.anchor.x + span.w, y: geom.anchor.y + span.h }
+      : geom.anchor;
+    let ux = dir === 90 ? { x: 0, y: 1 } : dir === 270 ? { x: 0, y: -1 } : dir === 180 ? { x: -1, y: 0 } : { x: 1, y: 0 };
+    let uy = dir === 90 ? { x: 1, y: 0 } : dir === 270 ? { x: -1, y: 0 } : dir === 180 ? { x: 0, y: -1 } : { x: 0, y: 1 };
+    const rad = ((Number(turn) || 0) * Math.PI) / 180;
+    if (rad) {
+      const c = Math.cos(rad);
+      const s = Math.sin(rad);
+      const spin = (v) => ({ x: v.x * c - v.y * s, y: v.x * s + v.y * c });
+      ux = spin(ux);
+      uy = spin(uy);
+    }
+    const det = ux.x * uy.y - ux.y * uy.x || 1;
+    return {
+      toSurface(x, y) {
+        const px = x + shiftX;
+        const py = y + shiftY;
+        return { x: origin.x + px * ux.x + py * uy.x, y: origin.y + px * ux.y + py * uy.y };
+      },
+      toPattern(x, y) {
+        const dx = x - origin.x;
+        const dy = y - origin.y;
+        return {
+          x: (dx * uy.y - dy * uy.x) / det - shiftX,
+          y: (dy * ux.x - dx * ux.y) / det - shiftY,
+        };
+      },
+    };
+  }
+
+  function tileRectToPattern(frame, rect) {
+    const pts = [
+      { x: rect.x, y: rect.y },
+      { x: rect.x + rect.w, y: rect.y },
+      { x: rect.x + rect.w, y: rect.y + rect.h },
+      { x: rect.x, y: rect.y + rect.h },
+    ].map((p) => frame.toPattern(p.x, p.y));
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const x = Math.min(...xs);
+    const y = Math.min(...ys);
+    return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+  }
+
+  function tileBBox(pts) {
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const x = Math.min(...xs);
+    const y = Math.min(...ys);
+    return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+  }
+
+  function tileCut(cell, surface, holes) {
+    let parts = [clipToConvex(surface, cell)].filter((part) => polyArea(part) > 1e-6);
+    holes.forEach((hole) => {
+      const next = [];
+      parts.forEach((part) => next.push(...tileSubtract(part, hole)));
+      parts = next;
+    });
+    return parts;
+  }
+
+  function tileRemember(bag, tile, part, cell, toLocal) {
+    const span = tileSpan(part, toLocal, tile);
+    if (span.w < 0.003 || span.h < 0.003) return;
+    const full = polyArea(part) >= polyArea(cell) * 0.985 && span.w >= tile.w - 0.002 && span.h >= tile.h - 0.002;
+    bag.pieces.push({ w: span.w, h: span.h, full });
+    if (bag.polys && bag.polys.length < 1400) bag.polys.push(part);
+    else bag.solid = true;
+  }
+
+  function tileRectRun(tile, frame, region, holes, bag) {
+    const pitchX = tile.w + (tile.gap || 0);
+    const pitchY = tile.h + (tile.gap || 0);
+    const i0 = Math.floor((region.x - tile.w) / pitchX) - 1;
+    const i1 = Math.ceil((region.x + region.w) / pitchX) + 1;
+    const j0 = Math.floor(region.y / pitchY) - 1;
+    const j1 = Math.ceil((region.y + region.h) / pitchY) + 1;
+    if ((i1 - i0) * (j1 - j0) > 24000) {
+      bag.overflow = true;
+      return;
+    }
+    const overlap = (a, b) => {
+      const x = Math.max(a.x, b.x);
+      const y = Math.max(a.y, b.y);
+      const w = Math.min(a.x + a.w, b.x + b.w) - x;
+      const h = Math.min(a.y + a.h, b.y + b.h) - y;
+      return w > 1e-5 && h > 1e-5 ? { x, y, w, h } : null;
+    };
+    const cut = (rects, hole) => {
+      const next = [];
+      rects.forEach((rect) => {
+        const x0 = Math.max(rect.x, hole.x);
+        const y0 = Math.max(rect.y, hole.y);
+        const x1 = Math.min(rect.x + rect.w, hole.x + hole.w);
+        const y1 = Math.min(rect.y + rect.h, hole.y + hole.h);
+        if (x1 <= x0 + 1e-8 || y1 <= y0 + 1e-8) {
+          next.push(rect);
+          return;
+        }
+        if (x0 > rect.x + 1e-6) next.push({ x: rect.x, y: rect.y, w: x0 - rect.x, h: rect.h });
+        if (rect.x + rect.w > x1 + 1e-6) next.push({ x: x1, y: rect.y, w: rect.x + rect.w - x1, h: rect.h });
+        if (y0 > rect.y + 1e-6) next.push({ x: x0, y: rect.y, w: x1 - x0, h: y0 - rect.y });
+        if (rect.y + rect.h > y1 + 1e-6) next.push({ x: x0, y: y1, w: x1 - x0, h: rect.y + rect.h - y1 });
+      });
+      return next.filter((rect) => rect.w > 0.003 && rect.h > 0.003);
+    };
+    for (let i = i0; i < i1; i += 1) {
+      for (let j = j0; j < j1; j += 1) {
+        const rowShift = (Math.abs(j) % 2) * tile.w * plannerClamp(tile.bond || 0, 0, 1);
+        const cell = { x: i * pitchX + rowShift, y: j * pitchY, w: tile.w, h: tile.h };
+        const hit = overlap(cell, region);
+        if (!hit) continue;
+        let rects = [hit];
+        holes.forEach((hole) => { rects = cut(rects, hole); });
+        const area = rects.reduce((sum, rect) => sum + rect.w * rect.h, 0);
+        if (area < 1e-4) continue;
+        const full = area >= tile.w * tile.h - 1e-4 && hit.w >= tile.w - 0.002 && hit.h >= tile.h - 0.002 && Math.abs(hit.x - cell.x) < 0.002 && Math.abs(hit.y - cell.y) < 0.002;
+        const toPoly = (rect) => polyNorm([
+          frame.toSurface(rect.x, rect.y),
+          frame.toSurface(rect.x + rect.w, rect.y),
+          frame.toSurface(rect.x + rect.w, rect.y + rect.h),
+          frame.toSurface(rect.x, rect.y + rect.h),
+        ]);
+        const piece = {
+          id: `r${i}:${j}`,
+          w: Math.min(tile.w, hit.w),
+          h: Math.min(tile.h, hit.h),
+          full,
+          pair: "",
+          pattern: tile.pattern,
+          tileW: tile.w,
+          tileH: tile.h,
+          cell: toPoly(cell),
+          face: toPoly(hit),
+          cuts: rects.map(toPoly),
+          poly: toPoly(hit),
+        };
+        bag.pieces.push(piece);
+        if (bag.polys && bag.polys.length < 1400) bag.polys.push(piece);
+        else bag.solid = true;
+      }
+    }
+  }
+
+  function tileQuadCells(tile) {
+    const w = tile.w;
+    const h = tile.h;
+    const long = Math.max(w, h);
+    const short = Math.min(w, h);
+    if (long - short < 0.004) {
+      return {
+        cells: [
+          { x: 0, y: 0, w, h, swap: false },
+          { x: w, y: 0, w, h, swap: false },
+          { x: 0, y: h, w, h, swap: false },
+          { x: w, y: h, w, h, swap: false },
+        ],
+        groupW: w * 2,
+        groupH: h * 2,
+      };
+    }
+    const flat = { w: long, h: short, swap: h > w };
+    const tall = { w: short, h: long, swap: w > h };
+    return {
+      cells: [
+        { x: 0, y: 0, w: flat.w, h: flat.h, swap: flat.swap },
+        { x: 0, y: short, w: flat.w, h: flat.h, swap: flat.swap },
+        { x: long, y: 0, w: tall.w, h: tall.h, swap: tall.swap },
+        { x: long + short, y: 0, w: tall.w, h: tall.h, swap: tall.swap },
+      ],
+      groupW: long + short * 2,
+      groupH: Math.max(short * 2, long),
+    };
+  }
+
+  function tileHerringCells(tile) {
+    const long = tile.w;
+    const short = tile.h;
+    const k = Math.max(1, Math.round(long / Math.max(short, 0.02)));
+    const cells = [];
+    for (let i = 0; i < k; i += 1) cells.push({ x: 0, y: i * short, w: long, h: short, swap: false });
+    cells.push({ x: long, y: 0, w: short, h: long, swap: true });
+    const stack = k * short;
+    if (stack < long - 0.004) cells.push({ x: 0, y: stack, w: long, h: long - stack, swap: false, gap: true });
+    if (stack > long + 0.004) cells.push({ x: long, y: long, w: short, h: stack - long, swap: true, gap: true });
+    return { cells, groupW: long + short, groupH: Math.max(long, stack) };
+  }
+
+  function tileShape(tile, kind, ox, oy) {
+    const w = tile.w;
+    const h = tile.h;
+    if (kind === "hex") {
+      return [
+        { x: ox + w / 2, y: oy },
+        { x: ox, y: oy + h * 0.25 },
+        { x: ox, y: oy + h * 0.75 },
+        { x: ox + w / 2, y: oy + h },
+        { x: ox + w, y: oy + h * 0.75 },
+        { x: ox + w, y: oy + h * 0.25 },
+      ];
+    }
+    if (kind === "honeycomb") {
+      return [
+        { x: ox + w * 0.25, y: oy },
+        { x: ox, y: oy + h / 2 },
+        { x: ox + w * 0.25, y: oy + h },
+        { x: ox + w * 0.75, y: oy + h },
+        { x: ox + w, y: oy + h / 2 },
+        { x: ox + w * 0.75, y: oy },
+      ];
+    }
+    return [
+      { x: ox, y: oy },
+      { x: ox + w, y: oy },
+      { x: ox + w, y: oy + h },
+      { x: ox, y: oy + h },
+    ];
+  }
+
+  function tileChevron(tile, side, ox, oy) {
+    const L = tile.w * Math.SQRT1_2;
+    const T = tile.h * Math.SQRT2;
+    const local = side
+      ? [
+        { x: L, y: L },
+        { x: 2 * L, y: 0 },
+        { x: 2 * L, y: T },
+        { x: L, y: L + T },
+      ]
+      : [
+        { x: 0, y: 0 },
+        { x: L, y: L },
+        { x: L, y: L + T },
+        { x: 0, y: T },
+      ];
+    return local.map((p) => ({ x: p.x + ox, y: p.y + oy }));
+  }
+
+  function tileChevronLocal(tile, side, x, y) {
+    const L = tile.w * Math.SQRT1_2;
+    const T = tile.h * Math.SQRT2;
+    if (!side) return { x: (x / L) * tile.w, y: ((y - x) / T) * tile.h };
+    const u = (x - L) / L;
+    const v = (y - (2 * L - x)) / T;
+    return { x: u * tile.w, y: v * tile.h };
+  }
+
+  function tileParquetLayout(tile) {
+    const L = tile.w;
+    const W = tile.h;
+    const c = Math.SQRT1_2;
+    const rot = (x, y) => ({ x: (x - y) * c, y: (x + y) * c });
+    const board = (x, y, rw, rh, alongY) => ({
+      alongY,
+      x,
+      y,
+      pts: [rot(x, y), rot(x + rw, y), rot(x + rw, y + rh), rot(x, y + rh)],
+    });
+    return {
+      boards: [board(0, 0, L, W, false), board(0, W, W, L, true)],
+      vx: rot(-L, L),
+      vy: rot(W, W),
+    };
+  }
+
+  function tilePatternRun(tile, frame, surface, holes, bag) {
+    const pattern = tile.pattern;
+    const poly = surface.map((p) => frame.toPattern(p.x, p.y));
+    const box = tileBBox(poly);
+    let seq = 0;
+    const emit = (pts, toLocal) => {
+      const cell = polyNorm(pts.map((p) => frame.toSurface(p.x, p.y)));
+      if (cell.length < 3) return;
+      const clipped = clipToConvex(surface, cell);
+      if (polyArea(clipped) < 1e-6) return;
+      let parts = [clipped];
+      holes.forEach((hole) => {
+        const next = [];
+        parts.forEach((part) => next.push(...tileSubtract(part, hole)));
+        parts = next;
+      });
+      const area = parts.reduce((sum, part) => sum + polyArea(part), 0);
+      if (area < 1e-4) return;
+      const span = tileSpan(clipped, toLocal, tile);
+      const full = area >= polyArea(cell) * 0.985 && span.w >= tile.w - 0.002 && span.h >= tile.h - 0.002;
+      const piece = { id: `p${seq}`, w: span.w, h: span.h, full, pair: "", pattern: tile.pattern, tileW: tile.w, tileH: tile.h, cell, face: clipped, cuts: parts, poly: tile.gap > 0 ? tileInset(clipped, tile.gap) : clipped };
+      seq += 1;
+      bag.pieces.push(piece);
+      if (bag.polys && bag.polys.length < 1400) bag.polys.push(piece);
+      else bag.solid = true;
+    };
+    if (pattern === "rect") {
+      const pitchX = tile.w + (tile.gap || 0);
+      const pitchY = tile.h + (tile.gap || 0);
+      const i0 = Math.floor((box.x - tile.w) / pitchX) - 1;
+      const i1 = Math.ceil((box.x + box.w) / pitchX) + 1;
+      const j0 = Math.floor((box.y - tile.h) / pitchY) - 1;
+      const j1 = Math.ceil((box.y + box.h) / pitchY) + 1;
+      if ((i1 - i0) * (j1 - j0) > 24000) {
+        bag.overflow = true;
+        return;
+      }
+      for (let i = i0; i < i1; i += 1) {
+        for (let j = j0; j < j1; j += 1) {
+          const rowShift = (Math.abs(j) % 2) * tile.w * plannerClamp(tile.bond || 0, 0, 1);
+          const x = i * pitchX + rowShift;
+          const y = j * pitchY;
+          emit(
+            [{ x, y }, { x: x + tile.w, y }, { x: x + tile.w, y: y + tile.h }, { x, y: y + tile.h }],
+            (p) => {
+              const q = frame.toPattern(p.x, p.y);
+              return { x: q.x - x, y: q.y - y };
+            },
+          );
+        }
+      }
+      return;
+    }
+    if (pattern === "chevron") {
+      const L = tile.w * Math.SQRT1_2;
+      const T = tile.h * Math.SQRT2;
+      const i0 = Math.floor(box.x / (2 * L)) - 2;
+      const i1 = Math.ceil((box.x + box.w) / (2 * L)) + 2;
+      const j0 = Math.floor((box.y - L) / T) - 2;
+      const j1 = Math.ceil((box.y + box.h) / T) + 2;
+      if ((i1 - i0) * (j1 - j0) > 8000) {
+        bag.overflow = true;
+        return;
+      }
+      for (let i = i0; i < i1; i += 1) {
+        for (let j = j0; j < j1; j += 1) {
+          const ox = i * 2 * L;
+          const oy = j * T;
+          [0, 1].forEach((side) => {
+            const pts = tileChevron(tile, side, ox, oy);
+            emit(pts, (p) => {
+              const q = frame.toPattern(p.x, p.y);
+              return tileChevronLocal(tile, side, q.x - ox, q.y - oy);
+            });
+          });
+        }
+      }
+      return;
+    }
+    if (pattern === "parquet") {
+      const lay = tileParquetLayout(tile);
+      const { vx, vy, boards } = lay;
+      const det = vx.x * vy.y - vx.y * vy.x || 1;
+      const at = (x, y) => ({ i: (x * vy.y - y * vy.x) / det, j: (y * vx.x - x * vx.y) / det });
+      const corners = [at(box.x, box.y), at(box.x + box.w, box.y), at(box.x, box.y + box.h), at(box.x + box.w, box.y + box.h)];
+      const i0 = Math.floor(Math.min(...corners.map((p) => p.i))) - 1;
+      const i1 = Math.ceil(Math.max(...corners.map((p) => p.i))) + 1;
+      const j0 = Math.floor(Math.min(...corners.map((p) => p.j))) - 1;
+      const j1 = Math.ceil(Math.max(...corners.map((p) => p.j))) + 1;
+      if ((i1 - i0) * (j1 - j0) * boards.length > 12000) {
+        bag.overflow = true;
+        return;
+      }
+      const unrot = (x, y) => ({ x: (x + y) * Math.SQRT1_2, y: (-x + y) * Math.SQRT1_2 });
+      for (let i = i0; i < i1; i += 1) {
+        for (let j = j0; j < j1; j += 1) {
+          const ox = i * vx.x + j * vy.x;
+          const oy = i * vx.y + j * vy.y;
+          boards.forEach((board) => {
+            const pts = board.pts.map((p) => ({ x: p.x + ox, y: p.y + oy }));
+            emit(pts, (p) => {
+              const q = frame.toPattern(p.x, p.y);
+              const u = unrot(q.x - ox, q.y - oy);
+              const lx = u.x - board.x;
+              const ly = u.y - board.y;
+              return board.alongY ? { x: ly, y: lx } : { x: lx, y: ly };
+            });
+          });
+        }
+      }
+      return;
+    }
+    if (pattern === "herringbone" || pattern === "quad") {
+      const group = pattern === "quad" ? tileQuadCells(tile) : tileHerringCells(tile);
+      const i0 = Math.floor(box.x / group.groupW) - 1;
+      const i1 = Math.ceil((box.x + box.w) / group.groupW) + 1;
+      const j0 = Math.floor(box.y / group.groupH) - 1;
+      const j1 = Math.ceil((box.y + box.h) / group.groupH) + 1;
+      if ((i1 - i0) * (j1 - j0) * group.cells.length > 12000) {
+        bag.overflow = true;
+        return;
+      }
+      for (let i = i0; i < i1; i += 1) {
+        for (let j = j0; j < j1; j += 1) {
+          group.cells.forEach((cell) => {
+            const ox = i * group.groupW + cell.x;
+            const oy = j * group.groupH + cell.y;
+            const pts = tileShape(tile, "rect", 0, 0).map((p) => ({ x: ox + (cell.swap ? (p.y / tile.h) * cell.w : (p.x / tile.w) * cell.w), y: oy + (cell.swap ? (p.x / tile.w) * cell.h : (p.y / tile.h) * cell.h) }));
+            emit(pts, (p) => {
+              const q = frame.toPattern(p.x, p.y);
+              return cell.swap ? { x: q.y - oy, y: q.x - ox } : { x: q.x - ox, y: q.y - oy };
+            });
+          });
+        }
+      }
+      return;
+    }
+    const stepX = pattern === "honeycomb" ? tile.w * 0.75 : tile.w;
+    const stepY = tile.h;
+    const i0 = Math.floor(box.x / stepX) - 2;
+    const i1 = Math.ceil((box.x + box.w) / stepX) + 2;
+    const j0 = Math.floor(box.y / stepY) - 2;
+    const j1 = Math.ceil((box.y + box.h) / stepY) + 2;
+    if ((i1 - i0) * (j1 - j0) > 12000) {
+      bag.overflow = true;
+      return;
+    }
+    for (let i = i0; i < i1; i += 1) {
+      for (let j = j0; j < j1; j += 1) {
+        const ox = i * stepX;
+        const oy = j * stepY + (pattern === "honeycomb" && i % 2 ? tile.h / 2 : 0);
+        const pts = tileShape(tile, pattern, ox, oy);
+        emit(pts, (p) => {
+          const q = frame.toPattern(p.x, p.y);
+          return { x: q.x - ox, y: q.y - oy };
+        });
+      }
+    }
+  }
+
+  function tileGeom(plan, surface, wall, lay) {
+    const holes = [];
+    if (lay.openings) {
+      (plan.openings || []).forEach((hole) => {
+        if (hole.surface !== surface) return;
+        if (surface === "wall" && hole.wallId !== wall?.id) return;
+        if (hole.shape === "circle") {
+          const r = hole.d / 2;
+          holes.push(surface === "wall"
+            ? { x: hole.along - r, y: hole.rise - r, w: hole.d, h: hole.d }
+            : { x: hole.x - r, y: hole.y - r, w: hole.d, h: hole.d });
+        } else if (surface === "wall") holes.push({ x: hole.along, y: hole.rise, w: hole.w, h: hole.h });
+        else holes.push({ x: hole.x, y: hole.y, w: hole.w, h: hole.h });
+      });
+    }
+    if (surface === "wall") {
+      const x0 = lay.left;
+      const y0 = lay.bottom;
+      const x1 = wall.len - lay.right;
+      const y1 = plan.height - lay.top;
+      if (x1 - x0 < 0.01 || y1 - y0 < 0.01) return null;
+      return {
+        poly: [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }],
+        holes,
+        anchor: { x: x0, y: y0 },
+        span: { w: x1 - x0, h: y1 - y0 },
+        rect: true,
+      };
+    }
+    const pts = (plan.points || []).map((p) => ({ x: p.x, y: p.y }));
+    if (pts.length < 3) return null;
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const minX = Math.min(...xs) + lay.left;
+    const maxX = Math.max(...xs) - lay.right;
+    const minY = Math.min(...ys) + lay.bottom;
+    const maxY = Math.max(...ys) - lay.top;
+    if (maxX - minX < 0.01 || maxY - minY < 0.01) return null;
+    const box = [{ x: minX, y: minY }, { x: maxX, y: minY }, { x: maxX, y: maxY }, { x: minX, y: maxY }];
+    const poly = clipToConvex(pts, box);
+    if (polyArea(poly) < 1e-4) return null;
+    return { poly, holes, anchor: { x: minX, y: minY }, span: { w: maxX - minX, h: maxY - minY }, rect: polyIsRect(poly) };
+  }
+
+  function tileBag(tile, lay, geom, draw) {
+    const bag = { pieces: [], polys: draw ? [] : null, solid: false, overflow: false };
+    if (!geom) return bag;
+    const frame = tileFrame(geom, lay.dir, lay.shiftX, lay.shiftY, lay.turn);
+    const axis = ((Math.round(lay.turn || 0) % 90) + 90) % 90 === 0;
+    if (tile.pattern === "rect" && geom.rect && axis) {
+      const region = tileBBox(geom.poly.map((p) => frame.toPattern(p.x, p.y)));
+      const holes = geom.holes.map((hole) => tileRectToPattern(frame, hole));
+      tileRectRun(tile, frame, region, holes, bag);
+    } else tilePatternRun(tile, frame, geom.poly, geom.holes, bag);
+    if (bag.overflow) {
+      let area = polyArea(geom.poly);
+      geom.holes.forEach((hole) => { area -= hole.w * hole.h; });
+      const one = tile.w * tile.h;
+      bag.pieces = [{ w: tile.w, h: tile.h, full: true }];
+      bag.rough = one > 0 ? Math.max(0, Math.ceil(Math.max(0, area) / one)) : 0;
+    }
+    return bag;
+  }
+
+  function tileLayDefaults(node, surface) {
+    return {
+      tileId: "",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      top: 0,
+      shiftX: 0,
+      shiftY: 0,
+      dir: 0,
+      turn: 0,
+      tolW: 0.02,
+      tolH: 0.02,
+      openings: true,
+    };
+  }
+
+  function ensureTiles(node) {
+    delete node.tones;
+    delete node.color;
+    if (!Array.isArray(node.tiles)) node.tiles = [];
+    const tiles = [];
+    node.tiles.forEach((raw) => {
+      if (!raw || typeof raw !== "object" || tiles.length >= 16) return;
+      let id = String(raw.id || "").trim();
+      if (!id || tiles.some((item) => item.id === id)) id = uid();
+      const pattern = TILE_PATTERNS.some((item) => item[0] === raw.pattern) ? raw.pattern : "rect";
+      tiles.push({
+        id,
+        name: String(raw.name || "").trim().slice(0, 48) || `Плитка ${tiles.length + 1}`,
+        pattern,
+        w: plannerRound(plannerClamp(plannerNum(raw.w, 0.6), 0.02, 3)),
+        h: plannerRound(plannerClamp(plannerNum(raw.h, 0.6), 0.02, 3)),
+        color: markHex(raw.color, "#d6c4a8"),
+        gap: plannerRound(plannerClamp(raw.gap == null ? 0.001 : plannerNum(raw.gap, 0.001), 0, 0.03)),
+        bond: plannerRound(plannerClamp(plannerNum(raw.bond, 0), 0, 1)),
+        grout: markHex(raw.grout, "#a8a29e"),
+      });
+    });
+    node.tiles = tiles;
+    const known = new Set(tiles.map((item) => item.id));
+    if (!Array.isArray(node.lays)) node.lays = [];
+    const lays = [];
+    node.lays.forEach((raw) => {
+      if (!raw || typeof raw !== "object" || lays.length >= 160) return;
+      const surface = raw.surface === "floor" || raw.surface === "ceiling" ? raw.surface : "wall";
+      let tileId = String(raw.tileId || "");
+      if (tileId && !known.has(tileId)) tileId = "";
+      const dir = [0, 90, 180, 270].includes(Number(raw.dir)) ? Number(raw.dir) : 0;
+      lays.push({
+        feed: String(raw.feed || ""),
+        surface,
+        wallId: surface === "wall" ? String(raw.wallId || "") : "",
+        tileId,
+        left: plannerRound(plannerClamp(plannerNum(raw.left, 0), 0, 5)),
+        right: plannerRound(plannerClamp(plannerNum(raw.right, 0), 0, 5)),
+        bottom: plannerRound(plannerClamp(plannerNum(raw.bottom, 0), 0, 5)),
+        top: plannerRound(plannerClamp(plannerNum(raw.top, 0), 0, 5)),
+        shiftX: plannerRound(plannerClamp(plannerNum(raw.shiftX, 0), -5, 5)),
+        shiftY: plannerRound(plannerClamp(plannerNum(raw.shiftY, 0), -5, 5)),
+        dir,
+        turn: plannerRound(((plannerNum(raw.turn, 0) % 360) + 360) % 360),
+        tolW: plannerRound(plannerClamp(plannerNum(raw.tolW, 0.02), 0, 0.3)),
+        tolH: plannerRound(plannerClamp(plannerNum(raw.tolH, 0.02), 0, 0.3)),
+        openings: raw.openings !== false,
+      });
+    });
+    node.lays = lays;
+    ensureFeeds(node);
+    const feedIds = new Set(node.feeds.map((feed) => feed.id));
+    const firstFeed = node.feeds[0].id;
+    node.lays.forEach((lay) => {
+      if (!feedIds.has(lay.feed)) lay.feed = firstFeed;
+    });
+    if (!node.outOn || typeof node.outOn !== "object" || Array.isArray(node.outOn)) node.outOn = {};
+    node.name = String(node.name || "").trim().slice(0, 48) || "Плитка";
+    return node;
+  }
+
+  function tileLayRead(node, feedId, surface, wallId) {
+    const kind = surface === "floor" || surface === "ceiling" ? surface : "wall";
+    const wall = kind === "wall" ? String(wallId || "") : "";
+    const found = (node.lays || []).find((lay) => lay.feed === feedId && lay.surface === kind && lay.wallId === wall);
+    const base = tileLayDefaults(node, kind);
+    return found ? { ...base, ...found, feed: feedId, surface: kind, wallId: wall } : { ...base, feed: feedId, surface: kind, wallId: wall };
+  }
+
+  function tileLayWrite(node, feedId, surface, wallId, patch) {
+    ensureTiles(node);
+    const kind = surface === "floor" || surface === "ceiling" ? surface : "wall";
+    const wall = kind === "wall" ? String(wallId || "") : "";
+    let lay = node.lays.find((item) => item.feed === feedId && item.surface === kind && item.wallId === wall);
+    if (!lay) {
+      lay = { ...tileLayDefaults(node, kind), feed: feedId, surface: kind, wallId: wall };
+      node.lays.push(lay);
+    }
+    Object.assign(lay, patch);
+    return lay;
+  }
+
+  function tileFaces(plan) {
+    const faces = [{ surface: "floor", wall: null, name: "Пол" }, { surface: "ceiling", wall: null, name: "Потолок" }];
+    plannerWalls(plan).forEach((wall, index) => {
+      faces.push({ surface: "wall", wall, name: planWallName(plan, wall, index) });
+    });
+    return faces;
+  }
+
+  function tileFaceCount(node, plan, feed, face) {
+    const lay = tileLayRead(node, feed.id, face.surface, face.wall?.id || "");
+    const tile = node.tiles.find((item) => item.id === lay.tileId);
+    if (!tile) return { count: 0, tile: null, lay, bag: null };
+    const geom = tileGeom(plan, face.surface, face.wall, lay);
+    const bag = tileBag(tile, lay, geom, false);
+    const packed = bag.rough != null ? { count: bag.rough, cuts: 0 } : tilePack(bag.pieces, tile.w, tile.h, lay.tolW, lay.tolH);
+    return { count: packed.count, cuts: packed.cuts, tile, lay, bag };
+  }
+
+  function tilePreview(node, plan, feed, face) {
+    const lay = tileLayRead(node, feed.id, face.surface, face.wall?.id || "");
+    const tile = node.tiles.find((item) => item.id === lay.tileId);
+    if (!tile) return null;
+    const geom = tileGeom(plan, face.surface, face.wall, lay);
+    const bag = tileBag(tile, lay, geom, true);
+    const packed = bag.rough != null ? { count: bag.rough, cuts: 0 } : tilePack(bag.pieces, tile.w, tile.h, lay.tolW, lay.tolH);
+    return { tile, lay, geom, bag, count: packed.count, cuts: packed.cuts };
+  }
+
+  function tileInputs(node) {
+    ensureTiles(node);
+    return node.feeds.map((feed) => ({ id: feedPort(feed), name: "Чертёж", signal: "plan", feed: feed.id }));
+  }
+
+  function tileFeedPorts(node, bp, values, links, feed, all) {
+    const host = bp || blueprintOf(node);
+    const plan = host ? upstreamPlan(node, host, [], values || {}, feedPort(feed)) : null;
+    if (!plan) return [];
+    const linked = linkedFromPorts(node.id, links || host?.links || []);
+    const ports = [];
+    const byTile = new Map();
+    tileFaces(plan).forEach((face) => {
+      const row = tileFaceCount(node, plan, feed, face);
+      const key = face.surface === "wall" ? face.wall.id : face.surface;
+      const id = feedKey(feed, "surf", key);
+      if (all || markShown(node, id, linked, row.count > 0)) {
+        ports.push({
+          id,
+          name: row.tile ? `${face.name} · ${row.tile.name}` : face.name,
+          value: row.count,
+          unit: "шт",
+          feed: feed.id,
+        });
+      }
+      if (!row.tile) return;
+      if (!byTile.has(row.tile.id)) byTile.set(row.tile.id, { name: row.tile.name, value: 0, cuts: 0 });
+      const acc = byTile.get(row.tile.id);
+      acc.value += row.count;
+      acc.cuts += row.cuts || 0;
+    });
+    byTile.forEach((row, tileId) => {
+      const id = feedKey(feed, "tile", tileId);
+      if (all || markShown(node, id, linked, row.value > 0)) {
+        ports.push({ id, name: row.name, value: row.value, unit: "шт", feed: feed.id });
+      }
+      const cutId = feedKey(feed, "cut", tileId);
+      if (all || markShown(node, cutId, linked, row.cuts > 0)) {
+        ports.push({ id: cutId, name: `${row.name} · резка`, value: row.cuts, unit: "шт", feed: feed.id });
+      }
+    });
+    return ports;
+  }
+
+  function tileOutputs(node, bp, values, links) {
+    ensureTiles(node);
+    const host = bp || blueprintOf(node);
+    const ports = [];
+    const catalog = [];
+    node.feeds.forEach((feed) => {
+      if (!upstreamPlan(node, host, [], values || {}, feedPort(feed))) return;
+      ports.push(...tileFeedPorts(node, host, values, links, feed, false));
+      catalog.push(...tileFeedPorts(node, host, values, links, feed, true));
+    });
+    appendCommons(node, ports, linkedFromPorts(node.id, links || host?.links || []), catalog);
+    return ports;
+  }
+
+  function tileFaceOf(plan, surface) {
+    if (!plan) return null;
+    if (surface === "floor" || surface === "ceiling") return tileFaces(plan).find((face) => face.surface === surface) || null;
+    const walls = plannerWalls(plan);
+    const wall = walls.find((item) => item.id === surface);
+    if (!wall) return null;
+    return { surface: "wall", wall, name: planWallName(plan, wall, Math.max(0, walls.indexOf(wall))) };
+  }
+
   function markCardHtml(node, bp, graph) {
     const electrics = node.type === "electrics";
+    const tiles = node.type === "tiles";
     if (electrics) ensureElectrics(node);
+    else if (tiles) ensureTiles(node);
     else ensureOpenings(node);
-    const outputs = electrics ? electricOutputs(node, bp, graph.values, bp.links) : openingOutputs(node, bp, graph.values, bp.links);
-    const inputs = electrics ? electricInputs(node) : openingInputs(node);
+    const outputs = electrics ? electricOutputs(node, bp, graph.values, bp.links) : tiles ? tileOutputs(node, bp, graph.values, bp.links) : openingOutputs(node, bp, graph.values, bp.links);
+    const inputs = electrics ? electricInputs(node) : tiles ? tileInputs(node) : openingInputs(node);
     const ready = node.feeds.filter((feed) => upstreamPlan(node, bp, [], graph.values, feedPort(feed)));
     const first = ready[0] ? upstreamPlan(node, bp, [], graph.values, feedPort(ready[0])) : null;
     const tones = markTones(node, first?.color);
@@ -1561,6 +2479,9 @@
       const mine = node.fixtures.filter((item) => item.feed === ready[0].id && item.kind !== "light");
       const sockets = mine.reduce((sum, item) => sum + (item.cells || []).length, 0);
       sub = `${sockets} шт. · ${mine.length} рамок`;
+    } else if (first && tiles) {
+      const qty = tileFaces(first).reduce((sum, face) => sum + tileFaceCount(node, first, ready[0], face).count, 0);
+      sub = `${qty} шт.`;
     } else if (first) {
       const drawn = emitPlan(node, bp, [], graph.values, feedPort(ready[0]));
       sub = `${plannerWalls(first).length} стен · ${(drawn?.openings || []).length} проёмов`;
@@ -1576,9 +2497,9 @@
       const feedPorts = outputs.filter((port) => port.feed === feed.id && !port.common);
       const caption = plan ? `<div class="calc-film-label">${esc(feedTitle(node, feed, bp))}</div>` : "";
       const film = plan
-        ? `${caption}<div class="calc-film calc-film-top" data-mark-feed="${esc(feed.id)}">${filmStrip(plan, node.id, "", electrics ? (plan.openings || []) : (emitPlan(node, bp, [], graph.values, feedPort(feed))?.openings || []), electrics ? node.fixtures.filter((fix) => fix.feed === feed.id) : [], feedTones)}</div>`
+        ? `${caption}<div class="calc-film calc-film-top" data-mark-feed="${esc(feed.id)}">${filmStrip(plan, node.id, "", electrics || tiles ? (plan.openings || []) : (emitPlan(node, bp, [], graph.values, feedPort(feed))?.openings || []), electrics ? node.fixtures.filter((fix) => fix.feed === feed.id) : [], feedTones)}</div>`
         : "";
-      const binds = electrics ? "" : inputs.filter((port) => {
+      const binds = electrics || tiles ? "" : inputs.filter((port) => {
         const hole = node.holes.find((item) => port.id.startsWith(`b:${item.id}:`));
         return hole && hole.feed === feed.id;
       }).map((port) => {
@@ -1596,10 +2517,11 @@
       return `<div class="calc-plan-group" style="--planner-color:${esc(feedTones.floor)}">${film}${planPairRow(feedPort(feed), linked, plans[0] || null)}${binds}${nums}</div>`;
     }).join("");
     const commons = outputs.filter((port) => port.common);
-    const title = electrics ? "Имя электрики" : "Имя проёмов";
-    const edit = electrics ? "Розетки и свет" : "Проёмы на чертеже";
+    const title = tiles ? "Имя плитки" : electrics ? "Имя электрики" : "Имя проёмов";
+    const edit = tiles ? "Плитка на чертеже" : electrics ? "Розетки и свет" : "Проёмы на чертеже";
     const filmsTitle = node.filmsOff ? "Показать ленты" : "Скрыть ленты";
-    return `<article class="calc-node ${electrics ? "is-electrics" : "is-openings"} ${node.filmsOff ? "is-films-off" : ""} ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(tones.floor)};--mark-floor:${esc(tones.floor)};--mark-ceiling:${esc(tones.ceiling)};--mark-wall:${esc(tones.wall)}">
+    const kindClass = tiles ? "is-tiles" : electrics ? "is-electrics" : "is-openings";
+    return `<article class="calc-node ${kindClass} ${node.filmsOff ? "is-films-off" : ""} ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(tones.floor)};--mark-floor:${esc(tones.floor)};--mark-ceiling:${esc(tones.ceiling)};--mark-wall:${esc(tones.wall)}">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
         <input class="calc-pname calc-planner-name" data-mark-title="${esc(node.id)}" value="${esc(node.name)}" maxlength="48" spellcheck="false" title="${esc(node.name)}" aria-label="${title}" />
@@ -1623,6 +2545,10 @@
     return markCardHtml(node, bp, graph);
   }
 
+  function tilesNodeHtml(node, bp, graph) {
+    return markCardHtml(node, bp, graph);
+  }
+
   function electricsNodeHtml(node, bp, graph) {
     return markCardHtml(node, bp, graph);
   }
@@ -1630,7 +2556,7 @@
   function markNode() {
     const id = session.mark?.id;
     if (!id) return null;
-    const node = (activeBlueprint()?.nodes || []).find((item) => item.id === id && (item.type === "openings" || item.type === "electrics")) || null;
+    const node = (activeBlueprint()?.nodes || []).find((item) => item.id === id && (item.type === "openings" || item.type === "electrics" || item.type === "tiles")) || null;
     if (!node) {
       session.mark = null;
       $("mark-modal")?.classList.remove("open");
@@ -1644,6 +2570,7 @@
     if (!node || !bp) return null;
     const graph = computeGraph(bp);
     if (node.type === "openings") ensureOpenings(node);
+    else if (node.type === "tiles") ensureTiles(node);
     else ensureElectrics(node);
     const feed = activeFeed(node);
     const base = feed ? upstreamPlan(node, bp, [], graph.values, feedPort(feed)) : null;
@@ -1659,11 +2586,12 @@
 
   function openMark(nodeId, surface, feedId) {
     const bp = activeBlueprint();
-    const node = bp?.nodes.find((item) => item.id === nodeId && (item.type === "openings" || item.type === "electrics"));
+    const node = bp?.nodes.find((item) => item.id === nodeId && (item.type === "openings" || item.type === "electrics" || item.type === "tiles"));
     if (!node) return;
     if (session.planner?.id) closePlanner();
     ensureMarkModal();
     if (node.type === "openings") ensureOpenings(node);
+    else if (node.type === "tiles") ensureTiles(node);
     else ensureElectrics(node);
     const linked = node.feeds.find((feed) => (bp.links || []).some((link) => link.to === node.id && link.toPort === feedPort(feed)));
     const feed = node.feeds.find((item) => item.id === feedId) || linked || node.feeds[0];
@@ -1692,7 +2620,7 @@
 
   function closeMark() {
     const node = markNode();
-    if (node) node.name = node.type === "electrics" ? ensureElectrics(node).name : ensureOpenings(node).name;
+    if (node) node.name = node.type === "electrics" ? ensureElectrics(node).name : node.type === "tiles" ? ensureTiles(node).name : ensureOpenings(node).name;
     editorEnd();
     session.mark = null;
     markHideMenu();
@@ -1706,6 +2634,8 @@
     if (menu) menu.hidden = true;
     const box = $("mark-nudge-box");
     if (box) box.hidden = true;
+    const edge = $("mark-edge");
+    if (edge) edge.hidden = true;
     if (session.mark) session.mark.menu = null;
   }
 
@@ -1713,10 +2643,10 @@
     const bp = activeBlueprint();
     if (!bp || !node) return;
     const graph = computeGraph(bp);
-    const ports = node.type === "openings" ? openingOutputs(node, bp, graph.values, bp.links) : electricOutputs(node, bp, graph.values, bp.links);
+    const ports = node.type === "openings" ? openingOutputs(node, bp, graph.values, bp.links) : node.type === "tiles" ? tileOutputs(node, bp, graph.values, bp.links) : electricOutputs(node, bp, graph.values, bp.links);
     const ids = new Set(ports.map((port) => port.id));
     bp.links = (bp.links || []).filter((link) => link.from !== node.id || ids.has(link.fromPort));
-    const inputs = new Set((node.type === "openings" ? openingInputs(node) : electricInputs(node)).map((port) => port.id));
+    const inputs = new Set((node.type === "openings" ? openingInputs(node) : node.type === "tiles" ? tileInputs(node) : electricInputs(node)).map((port) => port.id));
     bp.links = bp.links.filter((link) => link.to !== node.id || inputs.has(link.toPort));
   }
 
@@ -1745,7 +2675,8 @@
     if (node.type === "openings") {
       ensureOpenings(node);
       fitOpenings(node);
-    } else ensureElectrics(node);
+    } else if (node.type === "tiles") ensureTiles(node);
+    else ensureElectrics(node);
     pruneMarkLinks(node);
     if ($("mark-modal")?.classList.contains("open")) editorPush();
     else dirty();
@@ -1757,6 +2688,36 @@
     }
     if (rebuild) markFill();
     else markDraw();
+    if (node.type === "tiles") tileSyncOuts(node);
+  }
+
+  function tileSyncOuts(node) {
+    const side = $("mark-side");
+    const ctx = markContext();
+    const feed = ctx?.feed || node.feeds?.[0];
+    const base = ctx?.base;
+    if (!side || !feed || !base) return;
+    const setCount = (id, text) => {
+      const box = side.querySelector(`[data-mark-out="${CSS.escape(id)}"]`);
+      const em = box?.closest("label")?.querySelector("em");
+      if (em) em.textContent = text;
+    };
+    const totals = new Map();
+    tileFaces(base).forEach((item) => {
+      const row = tileFaceCount(node, base, feed, item);
+      const key = item.surface === "wall" ? item.wall.id : item.surface;
+      setCount(feedKey(feed, "surf", key), `${row.count} шт.`);
+      if (!row.tile) return;
+      const bag = totals.get(row.tile.id) || { buy: 0, cuts: 0 };
+      bag.buy += row.count;
+      bag.cuts += row.cuts || 0;
+      totals.set(row.tile.id, bag);
+    });
+    node.tiles.forEach((tile) => {
+      const bag = totals.get(tile.id) || { buy: 0, cuts: 0 };
+      setCount(feedKey(feed, "tile", tile.id), `${bag.buy} шт.`);
+      setCount(feedKey(feed, "cut", tile.id), `${bag.cuts} шт.`);
+    });
   }
 
   function numericFeeds(exceptId, graph, bp) {
@@ -1809,6 +2770,101 @@
     return item.surface === "wall" && item.wallId === surface;
   }
 
+  function tileField(label, field, value) {
+    return `<label class="planner-len"><span>${label}</span><span class="tile-val"><input data-tile-field="${field}" inputmode="decimal" value="${esc(tileCm(value))}" /> см</span></label>`;
+  }
+
+  function tileFitRatio(tile) {
+    if (!tile) return;
+    const fit = (n) => plannerRound(plannerClamp(n, 0.02, 3));
+    if (tile.pattern === "quad") tile.h = fit(tile.w * 2);
+    else if (tile.pattern === "honeycomb") tile.h = fit(tile.w * Math.sqrt(3) / 2);
+  }
+
+  function tileSideHtml(ctx) {
+    const { node, bp, base } = ctx;
+    const feed = ctx.feed || node.feeds[0];
+    const surface = session.mark?.surface || "floor";
+    const face = tileFaceOf(base, surface);
+    if (!feed || !face) return `<div class="planner-block"><div class="planner-block-h">Плитка</div><p class="planner-lead">На этой поверхности считать нечего.</p></div>`;
+    const lay = tileLayRead(node, feed.id, face.surface, face.wall?.id || "");
+    const here = tileFaceCount(node, base, feed, face);
+    const hasHoles = (base.openings || []).some((hole) => hole.surface === face.surface && (face.surface !== "wall" || hole.wallId === face.wall?.id));
+    const types = node.tiles.map((tile) => {
+      const one = tile.pattern === "honeycomb";
+      const size = one
+        ? `<label class="planner-len">Размер <input data-tile-w="${esc(tile.id)}" inputmode="decimal" value="${esc(tileCm(tile.w))}" /> см</label>`
+        : `<label class="planner-len">Ширина <input data-tile-w="${esc(tile.id)}" inputmode="decimal" value="${esc(tileCm(tile.w))}" /> см</label>
+        <label class="planner-len">Высота <input data-tile-h="${esc(tile.id)}" inputmode="decimal" value="${esc(tileCm(tile.h))}" /> см</label>`;
+      const bond = tile.pattern === "rect"
+        ? `<label class="planner-len">Сдвиг второго ряда <input data-tile-bond="${esc(tile.id)}" inputmode="decimal" value="${esc(plannerInput((tile.bond || 0) * tile.w * 100))}" /> см</label>`
+        : "";
+      return `<div class="planner-metric is-tile">
+      <button type="button" class="calc-mini" data-tile-del="${esc(tile.id)}" title="Удалить">×</button>
+      <input class="planner-name" data-tile-name="${esc(tile.id)}" value="${esc(tile.name)}" maxlength="48" aria-label="Имя плитки" />
+      ${markSelect(`data-tile-pattern="${esc(tile.id)}"`, "", TILE_PATTERNS.map(([value, label]) => ({ value, label })), tile.pattern)}
+      <div class="tile-row">${size}</div>
+      ${bond ? `<div class="tile-row">${bond}</div>` : ""}
+      <div class="tile-row">
+        <label class="planner-len">Шов <input data-tile-gap="${esc(tile.id)}" inputmode="decimal" value="${esc(plannerInput((tile.gap || 0) * 1000))}" /> мм</label>
+      </div>
+      <div class="tile-row">
+        <label class="planner-len">Цвет <input data-tile-color="${esc(tile.id)}" type="color" value="${esc(tile.color)}" aria-label="Цвет плитки" /></label>
+        <label class="planner-len">Затирка <input data-tile-grout="${esc(tile.id)}" type="color" value="${esc(tile.grout || "#a8a29e")}" aria-label="Цвет затирки" /></label>
+      </div>
+    </div>`;
+    }).join("");
+    const useOpts = [{ value: "", label: "Не класть" }].concat(node.tiles.map((tile) => ({ value: tile.id, label: tile.name })));
+    const rows = tileFaces(base).map((item) => {
+      const row = tileFaceCount(node, base, feed, item);
+      const key = item.surface === "wall" ? item.wall.id : item.surface;
+      const id = feedKey(feed, "surf", key);
+      const linked = linkedFromPorts(node.id, bp.links).has(id);
+      return `<label class="planner-part"><input type="checkbox" data-mark-out="${esc(id)}" ${markChecked(node, id, false) || linked ? "checked" : ""} ${linked ? "disabled" : ""} /> <span>${esc(row.tile ? `${item.name} · ${row.tile.name}` : item.name)}</span> <em>${row.count} шт.</em></label>`;
+    }).join("");
+    const sums = node.tiles.map((tile) => {
+      const totals = tileFaces(base).reduce((sum, item) => {
+        const row = tileFaceCount(node, base, feed, item);
+        if (row.tile?.id !== tile.id) return sum;
+        return { buy: sum.buy + row.count, cuts: sum.cuts + (row.cuts || 0) };
+      }, { buy: 0, cuts: 0 });
+      const id = feedKey(feed, "tile", tile.id);
+      const cutId = feedKey(feed, "cut", tile.id);
+      const linked = linkedFromPorts(node.id, bp.links).has(id);
+      const cutLinked = linkedFromPorts(node.id, bp.links).has(cutId);
+      return `<label class="planner-part"><input type="checkbox" data-mark-out="${esc(id)}" ${markChecked(node, id, false) || linked ? "checked" : ""} ${linked ? "disabled" : ""} /> <span>${esc(tile.name)}</span> <em>${totals.buy} шт.</em></label>
+        <label class="planner-part"><input type="checkbox" data-mark-out="${esc(cutId)}" ${markChecked(node, cutId, false) || cutLinked ? "checked" : ""} ${cutLinked ? "disabled" : ""} /> <span>${esc(tile.name)} · резка</span> <em>${totals.cuts} шт.</em></label>`;
+    }).join("");
+    return `<div class="planner-block"><div class="planner-block-h">Плитки <button type="button" class="btn" data-tile-add>+ Плитка</button></div>
+      <p class="planner-lead">Ширина и высота — размер плитки, которую покупают. Два обрезка с краёв считаются одной, если вместе не больше плитки плюс запас. Две половинки не склеиваются: каждая уже не меньше половины.</p>
+      ${types}
+    </div>
+    <div class="planner-block"><div class="planner-block-h">${esc(face.name)}</div>
+      <div class="tile-face">
+      <label class="planner-len"><span>Плитка на этой поверхности</span>${markSelect('data-tile-use="1"', "", useOpts, lay.tileId || "")}</label>
+      <label class="planner-len"><span>Откуда начинается ряд</span>${markSelect('data-tile-dir="1"', "", TILE_DIRS.map(([value, label]) => ({ value: String(value), label })), String(lay.dir || 0))}</label>
+      <label class="planner-len"><span>Поворот кладки</span><span class="tile-val"><input data-tile-turn inputmode="decimal" value="${esc(plannerInput(lay.turn || 0))}" /> °</span></label>
+      <hr class="tile-rule">
+      ${tileField("Отступ сверху", "top", lay.top)}
+      ${tileField("Отступ снизу", "bottom", lay.bottom)}
+      ${tileField("Отступ слева", "left", lay.left)}
+      ${tileField("Отступ справа", "right", lay.right)}
+      <hr class="tile-rule">
+      ${tileField("Сдвиг вбок", "shiftX", lay.shiftX)}
+      ${tileField("Сдвиг вверх", "shiftY", lay.shiftY)}
+      <hr class="tile-rule">
+      ${tileField("Запас по ширине", "tolW", lay.tolW)}
+      ${tileField("Запас по высоте", "tolH", lay.tolH)}
+      ${hasHoles ? `<label class="planner-on"><input type="checkbox" data-tile-open="1" ${lay.openings ? "checked" : ""} /> Вырезать проёмы из плитки</label>` : ""}
+      <p class="planner-lead" data-tile-need>Купить: ${here.count} шт. Разрезать: ${here.cuts || 0} шт.</p>
+      </div>
+    </div>
+    <div class="planner-block"><div class="planner-block-h">На ноду</div>
+      <p class="planner-lead">Строка стены, пола или потолка — сколько купить на эту поверхность. Строка плитки складывает такие поверхности. «Резка» — сколько из них придётся резать. Её не прибавляют к покупке.</p>
+      <div class="planner-parts">${rows}${sums}</div>
+    </div>`;
+  }
+
   function markSideHtml(ctx) {
     const { node, bp, graph, base, full } = ctx;
     const feeds = numericFeeds(node.id, graph, bp);
@@ -1819,8 +2875,10 @@
     };
     const surface = session.mark?.surface || "floor";
     if (!base) {
-      return `<div class="planner-block"><div class="planner-block-h">${node.type === "electrics" ? "Электрика" : "Проёмы"}</div><p class="planner-lead">Соедините вход «Чертёж» с выходом «Чертёж» планировщика${node.type === "electrics" ? " или проёмов" : ""}.</p></div>`;
+      const title = node.type === "electrics" ? "Электрика" : node.type === "tiles" ? "Плитка" : "Проёмы";
+      return `<div class="planner-block"><div class="planner-block-h">${title}</div><p class="planner-lead">Соедините вход «Чертёж» с выходом «Чертёж» планировщика${node.type === "openings" ? "" : " или проёмов"}.</p></div>`;
     }
+    if (node.type === "tiles") return tileSideHtml(ctx);
     if (node.type === "openings") {
       const walls = plannerWalls(base);
       const inherited = (base.openings || []).length;
@@ -2028,8 +3086,16 @@
     if (cap) {
       cap.textContent = surface === "ceiling" ? "Потолок" : surface === "floor" ? "Пол" : wallIndex >= 0 ? planWallName(ctx.base, walls[wallIndex], wallIndex) : "План";
     }
+    const dims = $("mark-modal")?.querySelector("[data-mark-dims]");
+    if (dims) {
+      dims.hidden = ctx.node.type !== "tiles";
+      dims.classList.toggle("is-on", !!session.mark?.dims);
+      dims.setAttribute("aria-pressed", session.mark?.dims ? "true" : "false");
+    }
     if (hint) {
-      hint.textContent = ctx.node.type === "electrics"
+      hint.textContent = ctx.node.type === "tiles"
+        ? "Наведите на плитку — размеры. Клик выделяет пару обрезков. Кнопка линейки показывает размеры стены и пола."
+        : ctx.node.type === "electrics"
         ? "Правый клик: розетка, ориентация и число секций. Точка встаёт туда, куда нажали. Стрелки двигают уже стоящую."
         : "Правый клик: прямоугольник, круг или диаметр. У пола прямоугольник становится дверью. Стрелки двигают выбранный проём.";
     }
@@ -2217,6 +3283,411 @@
     g.restore();
   }
 
+  function tileDimText(meters) {
+    const cm = Math.round(Math.abs(meters) * 100);
+    if (cm >= 100) return `${plannerInput(meters)} м`;
+    return `${cm} см`;
+  }
+
+  function tileTipText(meters) {
+    const cm = Math.round(Math.abs(meters) * 1000) / 10;
+    const body = Math.abs(cm - Math.round(cm)) < 0.05 ? String(Math.round(cm)) : cm.toFixed(1).replace(".", ",");
+    return `${body}см`;
+  }
+
+  function tileDimLine(g, a, b, text) {
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len < 32 || !text) return;
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    g.save();
+    g.strokeStyle = "#9a3412";
+    g.fillStyle = "#9a3412";
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(a.x, a.y);
+    g.lineTo(b.x, b.y);
+    g.stroke();
+    g.font = "12px sans-serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    const tw = g.measureText(text).width + 8;
+    g.fillStyle = plannerColors().bg;
+    g.fillRect(mx - tw / 2, my - 8, tw, 16);
+    g.fillStyle = "#9a3412";
+    g.fillText(text, mx, my);
+    g.restore();
+  }
+
+  function tileDimShift(a, b, away, dist) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    let nx = -dy / len;
+    let ny = dx / len;
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    if ((away.x - mx) * nx + (away.y - my) * ny > 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+    return {
+      a: { x: a.x + nx * dist, y: a.y + ny * dist },
+      b: { x: b.x + nx * dist, y: b.y + ny * dist },
+    };
+  }
+
+  function tileDrawDims(g, view, ctx) {
+    if (!session.mark?.dims || !ctx.base) return;
+    const face = tileFaceOf(ctx.base, session.mark.surface || "floor");
+    if (!face) return;
+    if (view.kind === "wall" && view.wall) {
+      const len = view.wall.len;
+      const height = view.height;
+      const mid = view.toAlong(len / 2, height / 2);
+      const bottomA = view.toAlong(0, 0);
+      const bottomB = view.toAlong(len, 0);
+      const sideA = view.toAlong(0, 0);
+      const sideB = view.toAlong(0, height);
+      tileDimLine(g, tileDimShift(bottomA, bottomB, mid, 22).a, tileDimShift(bottomA, bottomB, mid, 22).b, tileDimText(len));
+      tileDimLine(g, tileDimShift(sideA, sideB, mid, 22).a, tileDimShift(sideA, sideB, mid, 22).b, tileDimText(height));
+      const holes = (ctx.base.openings || [])
+        .filter((hole) => hole.surface === "wall" && hole.wallId === view.wall.id && hole.shape !== "circle")
+        .map((hole) => ({ a: hole.along, b: hole.along + hole.w, rise: hole.rise, h: hole.h }))
+        .sort((p, q) => p.a - q.a);
+      let cursor = 0;
+      const segs = [];
+      holes.forEach((hole) => {
+        const a = Math.max(0, hole.a);
+        const b = Math.min(len, hole.b);
+        if (a > cursor + 0.01) segs.push({ a: cursor, b: a, open: false });
+        if (b > a + 0.01) segs.push({ a, b, open: true, rise: hole.rise, h: hole.h });
+        cursor = Math.max(cursor, b);
+      });
+      if (len > cursor + 0.01) segs.push({ a: cursor, b: len, open: false });
+      segs.forEach((seg) => {
+        const p = view.toAlong(seg.a, 0);
+        const q = view.toAlong(seg.b, 0);
+        const line = tileDimShift(p, q, mid, 8);
+        tileDimLine(g, line.a, line.b, tileDimText(seg.b - seg.a));
+        if (seg.open) {
+          const hp = view.toAlong(seg.a, seg.rise);
+          const hq = view.toAlong(seg.a, seg.rise + seg.h);
+          const hline = tileDimShift(hp, hq, mid, 8);
+          tileDimLine(g, hline.a, hline.b, tileDimText(seg.h));
+        }
+      });
+      return;
+    }
+    const pts = ctx.base.points || [];
+    if (pts.length < 3 || !view.view) return;
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const mid = view.view.to({ x: (minX + maxX) / 2, y: (minY + maxY) / 2 });
+    const widthA = view.view.to({ x: minX, y: minY });
+    const widthB = view.view.to({ x: maxX, y: minY });
+    const heightA = view.view.to({ x: minX, y: minY });
+    const heightB = view.view.to({ x: minX, y: maxY });
+    tileDimLine(g, tileDimShift(widthA, widthB, mid, 18).a, tileDimShift(widthA, widthB, mid, 18).b, tileDimText(maxX - minX));
+    tileDimLine(g, tileDimShift(heightA, heightB, mid, 18).a, tileDimShift(heightA, heightB, mid, 18).b, tileDimText(maxY - minY));
+    (ctx.base.openings || []).forEach((hole) => {
+      if (hole.surface !== face.surface || hole.shape === "circle") return;
+      const p = view.view.to({ x: hole.x, y: hole.y });
+      const q = view.view.to({ x: hole.x + hole.w, y: hole.y });
+      const r = view.view.to({ x: hole.x, y: hole.y + hole.h });
+      const line = tileDimShift(p, q, mid, 8);
+      const rise = tileDimShift(p, r, mid, 8);
+      tileDimLine(g, line.a, line.b, tileDimText(hole.w));
+      tileDimLine(g, rise.a, rise.b, tileDimText(hole.h));
+    });
+  }
+
+  function polyHit(poly, x, y) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i, i += 1) {
+      const a = poly[i];
+      const b = poly[j];
+      if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / ((b.y - a.y) || 1e-12) + a.x) inside = !inside;
+    }
+    return inside;
+  }
+
+  function tilePieceAt(x, y) {
+    const view = session.mark?.view;
+    const pieces = session.mark?.tilePieces || [];
+    if (!view) return null;
+    const world = view.kind === "wall" ? view.from(x, y) : view.view?.from(x, y);
+    if (!world) return null;
+    const px = world.along != null ? world.along : world.x;
+    const py = world.rise != null ? world.rise : world.y;
+    for (let i = pieces.length - 1; i >= 0; i -= 1) {
+      if (pieces[i].poly && polyHit(pieces[i].poly, px, py)) return pieces[i];
+    }
+    return null;
+  }
+
+  function tileTone(hex) {
+    const raw = String(hex || "").replace("#", "");
+    const n = parseInt(raw.length === 3 ? raw.replace(/./g, (ch) => ch + ch) : raw, 16);
+    const r = (n >> 16) & 255;
+    const gch = (n >> 8) & 255;
+    const b = n & 255;
+    if (!Number.isFinite(n)) return { base: "#d6c4a8", mid: "#cbb89a" };
+    const lin = (c) => {
+      const s = c / 255;
+      return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    };
+    const lum = 0.2126 * lin(r) + 0.7152 * lin(gch) + 0.0722 * lin(b);
+    const lighten = lum < 0.5;
+    const mix = (c) => Math.round(Math.min(255, Math.max(0, lighten ? c + (255 - c) * 0.05 : c * 0.95)));
+    const byte = (c) => c.toString(16).padStart(2, "0");
+    return { base: `#${byte(r)}${byte(gch)}${byte(b)}`, mid: `#${byte(mix(r))}${byte(mix(gch))}${byte(mix(b))}` };
+  }
+
+  function tileTipHide() {
+    const tip = $("mark-tile-tip");
+    if (tip) tip.hidden = true;
+  }
+
+  function tileTipShow(piece, clientX, clientY) {
+    const tip = $("mark-tile-tip");
+    if (!tip) return;
+    if (!piece?.poly?.length) {
+      tip.hidden = true;
+      return;
+    }
+    const fullW = piece.tileW || piece.w;
+    const fullH = piece.tileH || piece.h;
+    const pattern = piece.pattern || "rect";
+    const cell = piece.cell?.length >= 3 ? piece.cell : piece.poly;
+    const face = piece.face?.length >= 3 ? piece.face : piece.poly;
+    const svg = tip.querySelector("svg");
+    const note = tip.querySelector("p");
+    if (svg) {
+      const pad = 78;
+      const maxW = 300;
+      const maxH = 360;
+      const pts = cell.concat(face);
+      const minX = Math.min(...pts.map((p) => p.x));
+      const minY = Math.min(...pts.map((p) => p.y));
+      const spanX = Math.max(0.02, Math.max(...pts.map((p) => p.x)) - minX);
+      const spanY = Math.max(0.02, Math.max(...pts.map((p) => p.y)) - minY);
+      const scale = Math.min(maxW / spanX, maxH / spanY);
+      const boxW = spanX * scale;
+      const boxH = spanY * scale;
+      const sx = (x) => pad + (x - minX) * scale;
+      const sy = (y) => pad + (y - minY) * scale;
+      const pathOf = (poly) => `${poly.map((p, i) => `${i ? "L" : "M"}${sx(p.x).toFixed(1)} ${sy(p.y).toFixed(1)}`).join(" ")} Z`;
+      const mid = (poly) => poly.reduce((sum, p) => ({ x: sum.x + p.x, y: sum.y + p.y }), { x: 0, y: 0 });
+      const cellMid = mid(cell);
+      cellMid.x /= cell.length;
+      cellMid.y /= cell.length;
+      const onEdge = (a, b, edgeA, edgeB) => {
+        const near = (p, c, d) => {
+          const abx = d.x - c.x;
+          const aby = d.y - c.y;
+          const len2 = abx * abx + aby * aby || 1;
+          const t = Math.max(0, Math.min(1, ((p.x - c.x) * abx + (p.y - c.y) * aby) / len2));
+          return Math.hypot(p.x - (c.x + abx * t), p.y - (c.y + aby * t)) < 0.01;
+        };
+        return near(a, edgeA, edgeB) && near(b, edgeA, edgeB);
+      };
+      const edgeLen = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
+      const edgesOf = (poly) => poly.map((p, i) => [p, poly[(i + 1) % poly.length]]);
+      const cellEdges = edgesOf(cell);
+      const placed = [];
+      const label = (a, b, away, dist, inward) => {
+        const meters = edgeLen(a, b);
+        if (meters < 0.04) return "";
+        const A = { x: sx(a.x), y: sy(a.y) };
+        const B = { x: sx(b.x), y: sy(b.y) };
+        const screen = Math.hypot(B.x - A.x, B.y - A.y);
+        if (screen < 46) return "";
+        const dx = B.x - A.x;
+        const dy = B.y - A.y;
+        let nx = -dy / screen;
+        let ny = dx / screen;
+        const mx = (A.x + B.x) / 2;
+        const my = (A.y + B.y) / 2;
+        const C = { x: sx(away.x), y: sy(away.y) };
+        if ((C.x - mx) * nx + (C.y - my) * ny > 0) {
+          nx = -nx;
+          ny = -ny;
+        }
+        if (inward) {
+          nx = -nx;
+          ny = -ny;
+        }
+        const px = mx + nx * dist;
+        const py = my + ny * dist;
+        let ang = Math.atan2(dy, dx) * 180 / Math.PI;
+        if (ang > 90 || ang < -90) ang += 180;
+        const text = tileTipText(meters);
+        const busy = placed.some((item) => {
+          const near = Math.hypot(item.x - px, item.y - py) < 44;
+          const same = item.text === text && Math.hypot(item.x - px, item.y - py) < 78;
+          return near || same;
+        });
+        if (busy) return "";
+        placed.push({ x: px, y: py, text });
+        return `<text x="${px.toFixed(1)}" y="${py.toFixed(1)}" font-size="22" font-weight="700" fill="#c2410c" text-anchor="middle" dominant-baseline="middle" transform="rotate(${ang.toFixed(1)} ${px.toFixed(1)} ${py.toFixed(1)})">${text}</text>`;
+      };
+      const cut = polyArea(face) < polyArea(cell) * 0.985;
+      const hostOf = (a, b) => cellEdges.find(([c, d]) => onEdge(a, b, c, d));
+      const fresh = [];
+      const rest = [];
+      if (cut) {
+        edgesOf(face).forEach(([a, b]) => {
+          const host = hostOf(a, b);
+          if (!host) fresh.push([a, b, face]);
+          else if (edgeLen(host[0], host[1]) - edgeLen(a, b) > 0.02) rest.push([a, b, face]);
+        });
+      }
+      const outline = cut ? `<path d="${pathOf(cell)}" fill="none" stroke="#a8a29e" stroke-width="1.6" stroke-dasharray="6 4"/>` : "";
+      const fills = `<path d="${pathOf(face)}" fill="#d6c4a8" stroke="${cut ? "none" : "#44403c"}" stroke-width="2"/>`;
+      const seams = fresh.map(([a, b]) => `M${sx(a.x).toFixed(1)} ${sy(a.y).toFixed(1)} L${sx(b.x).toFixed(1)} ${sy(b.y).toFixed(1)}`).join(" ");
+      const seamPath = seams ? `<path d="${seams}" fill="none" stroke="#44403c" stroke-width="2"/>` : "";
+      const whole = cellEdges.map(([a, b]) => label(a, b, cellMid, cut ? 40 : 30, false)).join("");
+      const slices = fresh.map(([a, b, poly]) => {
+        const local = mid(poly);
+        local.x /= poly.length;
+        local.y /= poly.length;
+        return label(a, b, local, 22, false);
+      }).join("") + rest.map(([a, b, poly]) => {
+        const local = mid(poly);
+        local.x /= poly.length;
+        local.y /= poly.length;
+        return label(a, b, local, 22, true);
+      }).join("");
+      svg.setAttribute("viewBox", `0 0 ${boxW + pad * 2} ${boxH + pad * 2}`);
+      svg.innerHTML = `${outline}${fills}${seamPath}${whole}${slices}`;
+    }
+    if (note) {
+      const name = tilePatternName(pattern);
+      const whole = `${tileTipText(fullW)} × ${tileTipText(fullH)}`;
+      const left = piece.w < fullW - 0.004 || piece.h < fullH - 0.004;
+      note.textContent = left
+        ? `${name}: на стене ${tileTipText(piece.w)} × ${tileTipText(piece.h)}, плитка ${whole}`
+        : `${name}: ${whole}`;
+    }
+    tip.hidden = false;
+    const width = tip.offsetWidth || 320;
+    const height = tip.offsetHeight || 160;
+    tip.style.left = `${Math.max(8, Math.min(clientX + 16, window.innerWidth - width - 8))}px`;
+    tip.style.top = `${Math.max(8, Math.min(clientY + 16, window.innerHeight - height - 8))}px`;
+  }
+
+  function tilePaint(g, view, ctx) {
+    if (session.mark) session.mark.tilePieces = [];
+    const face = tileFaceOf(ctx.base, session.mark?.surface || "floor");
+    if (!face || !ctx.feed) return;
+    const preview = tilePreview(ctx.node, ctx.base, ctx.feed, face);
+    const need = $("mark-side")?.querySelector("[data-tile-need]");
+    if (need) need.textContent = `Купить: ${preview?.count || 0} шт. Разрезать: ${preview?.cuts || 0} шт.`;
+    if (!preview?.tile || !preview.geom) return;
+    const spot = (p) => (view.kind === "wall" ? view.toAlong(p.x, p.y) : view.view.to(p));
+    const trace = (poly) => {
+      g.beginPath();
+      poly.forEach((p, index) => {
+        const s = spot(p);
+        if (index) g.lineTo(s.x, s.y);
+        else g.moveTo(s.x, s.y);
+      });
+      g.closePath();
+    };
+    session.mark.tilePieces = preview.bag.solid ? [] : (preview.bag.polys || []);
+    g.save();
+    if ((preview.tile.gap || 0) > 0.0005) {
+      g.fillStyle = preview.tile.grout || "#a8a29e";
+      g.globalAlpha = 1;
+      trace(preview.geom.poly);
+      g.fill();
+    }
+    const tone = tileTone(preview.tile.color);
+    const paintFill = (poly) => {
+      const pts = poly.map((p) => spot(p));
+      if (!pts.length) return;
+      let cx = 0;
+      let cy = 0;
+      pts.forEach((p) => { cx += p.x; cy += p.y; });
+      cx /= pts.length;
+      cy /= pts.length;
+      let radius = 1;
+      pts.forEach((p) => { radius = Math.max(radius, Math.hypot(p.x - cx, p.y - cy)); });
+      const grd = g.createRadialGradient(cx, cy, radius * 0.12, cx, cy, radius);
+      grd.addColorStop(0, tone.mid);
+      grd.addColorStop(1, tone.base);
+      g.fillStyle = grd;
+    };
+    g.strokeStyle = preview.tile.grout || "rgba(15,23,42,0.4)";
+    g.lineWidth = 1;
+    if (preview.bag.solid || !preview.bag.polys?.length) {
+      trace(preview.geom.poly);
+      paintFill(preview.geom.poly);
+      g.globalAlpha = 0.72;
+      g.fill();
+    } else {
+      g.globalAlpha = 0.92;
+      preview.bag.polys.forEach((piece) => {
+        const poly = piece.poly || piece;
+        trace(poly);
+        paintFill(poly);
+        g.fill();
+        g.stroke();
+        const picked = session.mark.tileSel && (piece.id === session.mark.tileSel || piece.pair === session.mark.tileSel);
+        if (picked) {
+          g.save();
+          g.strokeStyle = "#2563eb";
+          g.lineWidth = 2.5;
+          g.stroke();
+          g.restore();
+        }
+      });
+    }
+    g.restore();
+    tileDrawDims(g, view, ctx);
+    (ctx.base.openings || []).forEach((hole) => {
+      const onWall = view.kind === "wall" && hole.surface === "wall" && hole.wallId === view.wall?.id;
+      const onPlan = view.kind === "plan" && hole.surface === face.surface;
+      if (!onWall && !onPlan) return;
+      g.save();
+      g.strokeStyle = "#9a3412";
+      g.lineWidth = 1.5;
+      if (!preview.lay.openings) g.setLineDash([4, 3]);
+      if (preview.lay.openings) g.fillStyle = plannerColors().bg;
+      if (view.kind === "wall") {
+        if (hole.shape === "circle") {
+          const c = view.toAlong(hole.along, hole.rise);
+          g.beginPath();
+          g.arc(c.x, c.y, Math.max(3, (hole.d / 2) * view.scale), 0, Math.PI * 2);
+          if (preview.lay.openings) g.fill();
+          g.stroke();
+        } else {
+          const p = view.toAlong(hole.along, hole.rise + hole.h);
+          const q = view.toAlong(hole.along + hole.w, hole.rise);
+          if (preview.lay.openings) g.fillRect(p.x, p.y, q.x - p.x, q.y - p.y);
+          g.strokeRect(p.x, p.y, q.x - p.x, q.y - p.y);
+        }
+      } else if (hole.shape === "circle") {
+        const c = view.view.to({ x: hole.x, y: hole.y });
+        g.beginPath();
+        g.arc(c.x, c.y, Math.max(3, (hole.d / 2) * view.view.scale), 0, Math.PI * 2);
+        if (preview.lay.openings) g.fill();
+        g.stroke();
+      } else {
+        const p = view.view.to({ x: hole.x, y: hole.y });
+        const q = view.view.to({ x: hole.x + hole.w, y: hole.y + hole.h });
+        if (preview.lay.openings) g.fillRect(p.x, p.y, q.x - p.x, q.y - p.y);
+        g.strokeRect(p.x, p.y, q.x - p.x, q.y - p.y);
+      }
+      g.restore();
+    });
+  }
+
   function markDraw() {
     const ctx = markContext();
     const canvas = $("mark-canvas");
@@ -2302,8 +3773,11 @@
       }
       g.restore();
     };
-    (ctx.base.openings || []).forEach((hole) => drawHole(hole, true));
-    if (ctx.node.type === "openings") markLocals(ctx).forEach((hole) => drawHole(hole, false));
+    if (ctx.node.type === "tiles") tilePaint(g, view, ctx);
+    else {
+      (ctx.base.openings || []).forEach((hole) => drawHole(hole, true));
+      if (ctx.node.type === "openings") markLocals(ctx).forEach((hole) => drawHole(hole, false));
+    }
     if (ctx.node.type === "electrics") {
       ctx.node.fixtures.forEach((fix) => {
         if (ctx.feed && fix.feed !== ctx.feed.id) return;
@@ -2550,6 +4024,7 @@
       }
       return "";
     }
+    if (ctx.node.type !== "electrics") return "";
     for (let i = ctx.node.fixtures.length - 1; i >= 0; i -= 1) {
       const fix = ctx.node.fixtures[i];
       if (ctx.feed && fix.feed !== ctx.feed.id) continue;
@@ -2736,12 +4211,173 @@
     slot.outerHTML = next;
   }
 
+  function markRoomBox(plan) {
+    const pts = plan?.points || [];
+    if (!pts.length) return { l: 0, r: 0, t: 0, b: 0 };
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    return { l: Math.min(...xs), r: Math.max(...xs), t: Math.min(...ys), b: Math.max(...ys) };
+  }
+
+  function markItemSpan(item, plan, kind, outer) {
+    const wall = item.surface === "wall";
+    const circle = kind === "hole" && item.shape === "circle";
+    const fromCenter = kind === "fix" || (!outer && !!item.fromCenter);
+    const r = circle ? item.d / 2 : 0;
+    const cx = wall
+      ? (kind === "fix" || circle ? item.along : item.along + item.w / 2)
+      : (kind === "fix" || circle ? item.x : item.x + item.w / 2);
+    const cy = wall
+      ? (kind === "fix" || circle ? item.rise : item.rise + item.h / 2)
+      : (kind === "fix" || circle ? item.y : item.y + item.h / 2);
+    let l = cx - (fromCenter || kind === "fix" ? 0 : circle ? r : (wall ? item.along + item.w / 2 - item.along : item.w / 2));
+    let ri = cx + (fromCenter || kind === "fix" ? 0 : circle ? r : (wall ? item.w / 2 : item.w / 2));
+    let t;
+    let b;
+    if (fromCenter || kind === "fix") {
+      l = cx;
+      ri = cx;
+      t = cy;
+      b = cy;
+    } else if (wall) {
+      l = circle ? cx - r : item.along;
+      ri = circle ? cx + r : item.along + item.w;
+      b = circle ? cy - r : item.rise;
+      t = circle ? cy + r : item.rise + item.h;
+    } else {
+      l = circle ? cx - r : item.x;
+      ri = circle ? cx + r : item.x + item.w;
+      t = circle ? cy - r : item.y;
+      b = circle ? cy + r : item.y + item.h;
+    }
+    const limit = wall
+      ? { l: 0, r: plannerWalls(plan).find((row) => row.id === item.wallId)?.len || 0, t: plan?.height || 2.7, b: 0 }
+      : markRoomBox(plan);
+    return { wall, up: wall ? 1 : -1, l, r: ri, t, b, cx, cy, limit };
+  }
+
+  function markGaps(span, ref, boundary) {
+    const my = span;
+    if (boundary) {
+      if (span.up > 0) return { top: ref.t - my.t, bottom: my.b - ref.b, left: my.l - ref.l, right: ref.r - my.r };
+      return { top: my.t - ref.t, bottom: ref.b - my.b, left: my.l - ref.l, right: ref.r - my.r };
+    }
+    if (span.up > 0) return { top: ref.b - my.t, bottom: my.b - ref.t, left: my.l - ref.r, right: ref.l - my.r };
+    return { top: my.t - ref.b, bottom: ref.t - my.b, left: my.l - ref.r, right: ref.l - my.r };
+  }
+
+  function markEdgeContext(node, hitId) {
+    const ctx = markContext();
+    const plan = ctx?.base;
+    if (!node || !plan || !hitId) return null;
+    if (node.type === "openings") {
+      const hole = node.holes.find((item) => item.id === hitId);
+      if (!hole) return null;
+      const live = resolveHole(hole, plan, node, ctx.graph?.values);
+      const span = markItemSpan({ ...live, fromCenter: hole.fromCenter }, plan, "hole");
+      const other = hole.edgeFrom ? node.holes.find((item) => item.id === hole.edgeFrom && item.id !== hole.id) : null;
+      const otherLive = other ? resolveHole(other, plan, node, ctx.graph?.values) : null;
+      const same = otherLive && otherLive.surface === live.surface && (live.surface !== "wall" || otherLive.wallId === live.wallId);
+      const ref = same ? markItemSpan(otherLive, plan, "hole", true) : span.limit;
+      return { kind: "hole", item: hole, live, span, gaps: markGaps(span, ref, !same), boundary: !same, plan };
+    }
+    const fix = node.fixtures.find((item) => item.id === hitId);
+    if (!fix) return null;
+    const span = markItemSpan(fix, plan, "fix", true);
+    return { kind: "fix", item: fix, span, gaps: markGaps(span, span.limit, true), boundary: true, plan };
+  }
+
+  function markApplyEdge(node, hitId, side, cm) {
+    const edge = markEdgeContext(node, hitId);
+    if (!edge || cm == null || !["top", "bottom", "left", "right"].includes(side)) return false;
+    const gap = cm / 100;
+    const span = edge.span;
+    const other = edge.boundary ? null : node.holes.find((item) => item.id === edge.item.edgeFrom);
+    if (!edge.boundary && !other) return false;
+    const ref = edge.boundary ? span.limit : markItemSpan(resolveHole(other, edge.plan, node, markContext()?.graph?.values), edge.plan, "hole", true);
+    let target;
+    if (edge.boundary) {
+      if (span.up > 0) {
+        if (side === "top") target = ref.t - gap;
+        else if (side === "bottom") target = ref.b + gap;
+        else if (side === "left") target = ref.l + gap;
+        else target = ref.r - gap;
+      } else if (side === "top") target = ref.t + gap;
+      else if (side === "bottom") target = ref.b - gap;
+      else if (side === "left") target = ref.l + gap;
+      else target = ref.r - gap;
+    } else if (span.up > 0) {
+      if (side === "top") target = ref.b - gap;
+      else if (side === "bottom") target = ref.t + gap;
+      else if (side === "left") target = ref.r + gap;
+      else target = ref.l - gap;
+    } else if (side === "top") target = ref.b + gap;
+    else if (side === "bottom") target = ref.t - gap;
+    else if (side === "left") target = ref.r + gap;
+    else target = ref.l - gap;
+    const item = edge.item;
+    const fromCenter = edge.kind === "fix" || item.fromCenter;
+    const circle = edge.kind === "hole" && item.shape === "circle";
+    const r = circle ? item.d / 2 : 0;
+    const vertical = side === "top" || side === "bottom";
+    if (edge.kind === "fix") {
+      if (span.wall) {
+        if (vertical) item.rise = plannerRound(target);
+        else item.along = plannerRound(target);
+      } else if (vertical) item.y = plannerRound(target);
+      else item.x = plannerRound(target);
+      return true;
+    }
+    if (fromCenter) {
+      if (span.wall) {
+        if (vertical) item.rise = plannerRound(circle ? target : target - item.h / 2);
+        else item.along = plannerRound(circle ? target : target - item.w / 2);
+      } else if (vertical) item.y = plannerRound(circle ? target : target - item.h / 2);
+      else item.x = plannerRound(circle ? target : target - item.w / 2);
+      return true;
+    }
+    if (side === "top") {
+      if (span.wall) item.rise = plannerRound(circle ? target - r : target - item.h);
+      else item.y = plannerRound(circle ? target + r : target);
+    } else if (side === "bottom") {
+      if (span.wall) item.rise = plannerRound(circle ? target + r : target);
+      else item.y = plannerRound(circle ? target - r : target - item.h);
+    } else if (side === "left") {
+      if (span.wall) item.along = plannerRound(circle ? target + r : target);
+      else item.x = plannerRound(circle ? target + r : target);
+    } else if (span.wall) item.along = plannerRound(circle ? target - r : target - item.w);
+    else item.x = plannerRound(circle ? target - r : target - item.w);
+    return true;
+  }
+
+  function markEdgeHtml(node, hitId) {
+    const edge = markEdgeContext(node, hitId);
+    const box = $("mark-edge");
+    if (!box) return;
+    if (!edge) {
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    const field = (side, label) => `<label><span>${label}</span><input data-edge="${side}" inputmode="decimal" value="${esc(plannerInput(edge.gaps[side] * 100))}" /><span>см</span></label>`;
+    let extra = "";
+    if (edge.kind === "hole") {
+      const live = edge.live;
+      const others = node.holes.filter((item) => item.id !== edge.item.id && item.surface === live.surface && (live.surface !== "wall" || item.wallId === live.wallId));
+      const edgeName = live.surface === "wall" ? "Край стены" : live.surface === "ceiling" ? "Край потолка" : "Край пола";
+      const opts = [{ value: "", label: edgeName }].concat(others.map((item, index) => ({ value: item.id, label: item.name || holeLabel(item, index) })));
+      extra = `<label class="mark-edge-check"><input type="checkbox" data-edge-center ${edge.item.fromCenter ? "checked" : ""} /><span>От центра</span></label><label class="mark-edge-from"><span>Считать от</span>${markSelect('data-edge-from="1"', "", opts, edge.item.edgeFrom || "")}</label>`;
+    }
+    box.hidden = false;
+    box.innerHTML = `${field("top", "Сверху")}${field("bottom", "Снизу")}${field("left", "Слева")}${field("right", "Справа")}${extra}`;
+  }
+
   function markShowMenu(clientX, clientY, hitId) {
     const canvas = $("mark-canvas");
     const menu = $("mark-menu");
     const card = $("mark-menu-card");
     const node = markNode();
-    if (!canvas || !menu || !card || !node || !session.mark) return;
+    if (!canvas || !menu || !card || !node || !session.mark || node.type === "tiles") return;
     const rect = canvas.getBoundingClientRect();
     const x = clientX - rect.left;
     const y = clientY - rect.top;
@@ -2796,6 +4432,7 @@
     }
     const box = $("mark-nudge-box");
     if (box) box.hidden = true;
+    markEdgeHtml(node, hitId || "");
   }
 
   function markShift(node, hitId, dir, dist) {
@@ -2927,7 +4564,16 @@
     if (!node || !ctx?.feed) return;
     const walls = ctx.base ? plannerWalls(ctx.base) : [];
     const indexOf = (wallId) => walls.findIndex((wall) => wall.id === wallId);
-    if (node.type === "openings") {
+    if (node.type === "tiles") {
+      editorClip = {
+        kind: "tiles",
+        tiles: JSON.parse(JSON.stringify(node.tiles)),
+        lays: node.lays.filter((lay) => lay.feed === ctx.feed.id).map((lay) => ({
+          ...JSON.parse(JSON.stringify(lay)),
+          wallIndex: indexOf(lay.wallId),
+        })),
+      };
+    } else if (node.type === "openings") {
       const mine = node.holes.filter((hole) => hole.feed === ctx.feed.id);
       const mineIds = mine.map((hole) => hole.id);
       editorClip = {
@@ -2962,7 +4608,29 @@
     const ctx = markContext();
     if (!node || !ctx?.feed || editorClip?.kind !== node.type) return;
     const feedId = ctx.feed.id;
-    if (node.type === "openings") {
+    if (node.type === "tiles") {
+      const map = new Map();
+      (editorClip.tiles || []).forEach((raw) => {
+        const same = node.tiles.find((item) => item.name === raw.name && item.pattern === raw.pattern && item.w === raw.w && item.h === raw.h && item.color === raw.color);
+        if (same) {
+          map.set(raw.id, same.id);
+          return;
+        }
+        if (node.tiles.length >= 16) return;
+        const id = uid();
+        map.set(raw.id, id);
+        node.tiles.push({ ...JSON.parse(JSON.stringify(raw)), id });
+      });
+      if (mode === "replace") node.lays = node.lays.filter((lay) => lay.feed !== feedId);
+      (editorClip.lays || []).forEach((raw) => {
+        const lay = JSON.parse(JSON.stringify(raw));
+        delete lay.wallIndex;
+        lay.feed = feedId;
+        lay.tileId = map.get(lay.tileId) || lay.tileId || "";
+        lay.wallId = lay.surface === "wall" ? clipWallId(raw, ctx.base) : "";
+        node.lays.push(lay);
+      });
+    } else if (node.type === "openings") {
       if (mode === "replace") node.holes = node.holes.filter((hole) => hole.feed !== feedId);
       const room = 80 - node.holes.length;
       const incoming = (editorClip.holes || []).slice(0, Math.max(0, room)).map((raw) => {

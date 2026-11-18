@@ -19,6 +19,7 @@
           <div class="planner-plan-wrap">
             ${editorSnapControls("mark")}
             <canvas id="mark-canvas"></canvas>
+            <div id="mark-tile-tip" class="mark-tile-tip" hidden><svg viewBox="0 0 200 160" aria-hidden="true"></svg><p></p></div>
             <div class="planner-clip">
               <div class="mark-paste-wrap">
                 <button type="button" class="planner-clip-btn" id="mark-paste" title="Вставить" aria-label="Вставить" aria-haspopup="true" aria-expanded="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h8v2h2a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2V5z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 5.5h6V7H9z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button>
@@ -40,9 +41,10 @@
                 <button type="button" class="planner-nudge-dir" data-dir="s" aria-label="Вниз"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
                 <button type="button" class="planner-nudge-dir" data-dir="se" aria-label="Вниз-вправо"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2 12.4 11.2H3.6z"/></svg></button>
               </div>
+              <div id="mark-edge" class="mark-edge" hidden></div>
               <form id="mark-nudge-box" class="planner-nudge-box" hidden>
-                <input id="mark-nudge-input" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="Сдвиг, метры" />
-                <span>м</span>
+                <input id="mark-nudge-input" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="Сдвиг, сантиметры" />
+                <span>см</span>
                 <button type="submit" aria-label="Сдвинуть"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.2 6.4 11.4 12.8 4.6"/></svg></button>
               </form>
               <div id="mark-menu-card" class="mark-menu-card"></div>
@@ -191,7 +193,9 @@
             title: "Сбросить ноду?",
             text: node.type === "openings"
               ? "Все добавленные проёмы и пользовательские счётчики будут удалены."
-              : "Все добавленные розетки, рамки и светильники будут удалены.",
+              : node.type === "tiles"
+                ? "Типы плитки и раскладка этой ноды будут сброшены."
+                : "Все добавленные розетки, рамки и светильники будут удалены.",
             ok: "Сбросить",
             danger: true,
           })
@@ -200,6 +204,10 @@
       if (node.type === "openings") {
         node.holes = [];
         node.owns = [];
+      } else if (node.type === "tiles") {
+        node.tiles = [];
+        node.lays = [];
+        node.outOn = {};
       } else {
         node.fixtures = [];
       }
@@ -310,6 +318,13 @@
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       const hit = markHit(ctx, x, y);
+      if (ctx.node.type === "tiles" && e.button === 0) {
+        const piece = tilePieceAt(x, y);
+        session.mark.tileSel = piece && session.mark.tileSel === piece.id ? "" : (piece?.id || "");
+        tileTipHide();
+        markDraw();
+        if (piece) return;
+      }
       if (e.button === 1 || (!hit && e.button === 0)) {
         const cam = markCamera();
         session.mark.drag = { pan: true, x: e.clientX, y: e.clientY, ox: cam.x, oy: cam.y };
@@ -349,6 +364,13 @@
     });
     $("mark-canvas")?.addEventListener("pointermove", (e) => {
       const drag = session.mark?.drag;
+      if (!drag && markNode()?.type === "tiles") {
+        const canvas = $("mark-canvas");
+        const rect = canvas.getBoundingClientRect();
+        const piece = tilePieceAt(e.clientX - rect.left, e.clientY - rect.top);
+        tileTipShow(piece, e.clientX, e.clientY);
+        canvas.style.cursor = piece ? "pointer" : "";
+      }
       const node = markNode();
       if (drag?.pan && session.mark) {
         const cam = markCamera();
@@ -420,6 +442,11 @@
       if (wasPan) markDraw();
       else markCommit(true);
     });
+    $("mark-canvas")?.addEventListener("pointerleave", () => {
+      tileTipHide();
+      const canvas = $("mark-canvas");
+      if (canvas && !session.mark?.drag) canvas.style.cursor = "";
+    });
     $("mark-menu")?.addEventListener("contextmenu", (e) => e.preventDefault());
     $("mark-arrows")?.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-dir]");
@@ -439,9 +466,49 @@
       const menu = session.mark?.menu;
       const dir = session.mark?.nudgeDir;
       const value = plannerDraft($("mark-nudge-input")?.value);
-      const ok = !!(node && menu?.hitId && dir && value != null && markShift(node, menu.hitId, dir, value));
+      const ok = !!(node && menu?.hitId && dir && value != null && markShift(node, menu.hitId, dir, value / 100));
       $("mark-nudge-box")?.classList.toggle("is-bad", !ok);
-      if (ok) markCommit(true);
+      if (ok) {
+        markCommit(false);
+        markEdgeHtml(node, menu.hitId);
+      }
+    });
+    $("mark-edge")?.addEventListener("click", (e) => {
+      const pickBtn = e.target.closest(".mark-select-btn");
+      if (pickBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        placeMarkList(pickBtn);
+        return;
+      }
+      const opt = e.target.closest(".mark-opt");
+      if (!opt || !("edgeFrom" in opt.dataset)) return;
+      const node = markNode();
+      const hit = session.mark?.menu?.hitId;
+      const hole = node?.holes?.find((item) => item.id === hit);
+      if (!hole) return;
+      hole.edgeFrom = opt.dataset.opt || "";
+      document.querySelectorAll(".mark-select-list").forEach((el) => { el.hidden = true; });
+      markEdgeHtml(node, hit);
+      markCommit(false);
+    });
+    $("mark-edge")?.addEventListener("change", (e) => {
+      const node = markNode();
+      const hit = session.mark?.menu?.hitId;
+      if (!node || !hit) return;
+      if (e.target.matches("[data-edge-center]")) {
+        const hole = node.holes.find((item) => item.id === hit);
+        if (hole) hole.fromCenter = !!e.target.checked;
+        markEdgeHtml(node, hit);
+        markCommit(false);
+        return;
+      }
+      const side = e.target.dataset?.edge;
+      if (!side) return;
+      const cm = plannerDraft(e.target.value);
+      if (cm == null || !markApplyEdge(node, hit, side, cm)) return;
+      markCommit(false);
+      markEdgeHtml(node, hit);
     });
     $("mark-menu-card")?.addEventListener("click", (e) => {
       const delCustom = e.target.closest("[data-del-custom]");
@@ -578,6 +645,30 @@
         box?.querySelectorAll(".mark-select-list").forEach((el) => {
           el.hidden = true;
         });
+        if (node.type === "tiles" && opt.dataset.tilePattern) {
+          const tile = node.tiles.find((item) => item.id === opt.dataset.tilePattern);
+          if (tile && TILE_PATTERNS.some((item) => item[0] === value)) {
+            tile.pattern = value;
+            tileFitRatio(tile);
+          }
+          markCommit(true);
+          return;
+        }
+        if (node.type === "tiles" && opt.dataset.tileUse) {
+          const face = tileFaceOf(markContext()?.base, session.mark?.surface || "floor");
+          const host = markContext();
+          if (host?.feed && face) tileLayWrite(node, host.feed.id, face.surface, face.wall?.id || "", { tileId: value });
+          markCommit(true);
+          return;
+        }
+        if (node.type === "tiles" && opt.dataset.tileDir) {
+          const dir = [0, 90, 180, 270].includes(Number(value)) ? Number(value) : 0;
+          const host = markContext();
+          const face = tileFaceOf(host?.base, session.mark?.surface || "floor");
+          if (host?.feed && face) tileLayWrite(node, host.feed.id, face.surface, face.wall?.id || "", { dir });
+          markCommit(true);
+          return;
+        }
         const variable = opt.dataset.holeVar;
         if (variable && node.type === "openings") {
           const field = opt.dataset.bind;
@@ -617,6 +708,31 @@
         document.querySelectorAll("#mark-side .mark-select-list").forEach((el) => {
           el.hidden = true;
         });
+      }
+      const tileAdd = e.target.closest("[data-tile-add]");
+      if (tileAdd && node.type === "tiles") {
+        if (node.tiles.length >= 16) return;
+        const n = node.tiles.length + 1;
+        const colors = ["#d6c4a8", "#94a3b8", "#c4b5a0", "#a8a29e", "#d6d3d1", "#e7e5e4"];
+        const id = uid();
+        node.tiles.push({ id, name: `Плитка ${n}`, pattern: "rect", w: 0.6, h: 0.6, color: colors[(n - 1) % colors.length], gap: 0.001, bond: 0, grout: "#a8a29e" });
+        if (!node.outOn || typeof node.outOn !== "object") node.outOn = {};
+        (node.feeds || []).forEach((feed) => { node.outOn[feedKey(feed, "tile", id)] = true; });
+        markCommit(true);
+        return;
+      }
+      const tileDel = e.target.closest("[data-tile-del]");
+      if (tileDel && node.type === "tiles") {
+        const id = tileDel.dataset.tileDel;
+        node.tiles = node.tiles.filter((item) => item.id !== id);
+        node.lays.forEach((lay) => {
+          if (lay.tileId === id) lay.tileId = "";
+        });
+        Object.keys(node.outOn || {}).forEach((key) => {
+          if (key.includes(id)) delete node.outOn[key];
+        });
+        markCommit(true);
+        return;
       }
       const bulk = e.target.closest("[data-mark-bulk]");
       if (bulk && node.type === "openings") {
@@ -748,6 +864,13 @@
         markCommit(!!e.target?.dataset?.commonOn);
         return;
       }
+      if (e.target?.dataset && "tileOpen" in e.target.dataset && node.type === "tiles") {
+        const host = markContext();
+        const face = tileFaceOf(host?.base, session.mark?.surface || "floor");
+        if (host?.feed && face) tileLayWrite(node, host.feed.id, face.surface, face.wall?.id || "", { openings: !!e.target.checked });
+        markCommit(true);
+        return;
+      }
       const out = e.target.dataset?.markOut;
       if (out) {
         const linked = linkedFromPorts(node.id, bp.links);
@@ -860,6 +983,94 @@
         return;
       }
       const node = markNode();
+      if (node?.type === "tiles") {
+        const named = e.target.dataset?.tileName;
+        if (named) {
+          const tile = node.tiles.find((item) => item.id === named);
+          const value = String(e.target.value || "").trim().slice(0, 48);
+          if (tile && value) tile.name = value;
+          markCommit(false);
+          return;
+        }
+        const widthId = e.target.dataset?.tileW;
+        const heightId = e.target.dataset?.tileH;
+        if (widthId || heightId) {
+          const tile = node.tiles.find((item) => item.id === (widthId || heightId));
+          const value = tileFromCm(e.target.value, null, 0.02, 3);
+          if (tile && value != null) {
+            const linked = tile.pattern === "quad" || tile.pattern === "honeycomb";
+            if (tile.pattern === "quad") {
+              if (widthId) {
+                tile.w = value;
+                tile.h = plannerRound(plannerClamp(value * 2, 0.02, 3));
+              } else {
+                tile.h = value;
+                tile.w = plannerRound(plannerClamp(value / 2, 0.02, 3));
+              }
+            } else if (tile.pattern === "honeycomb") {
+              tile.w = value;
+              tileFitRatio(tile);
+            } else if (widthId) tile.w = value;
+            else tile.h = value;
+            markCommit(linked);
+          }
+          return;
+        }
+        const colorId = e.target.dataset?.tileColor;
+        const groutId = e.target.dataset?.tileGrout;
+        if (colorId || groutId) {
+          const tile = node.tiles.find((item) => item.id === (colorId || groutId));
+          if (tile) {
+            if (colorId) tile.color = markHex(e.target.value, tile.color);
+            else tile.grout = markHex(e.target.value, tile.grout || "#a8a29e");
+          }
+          markCommit(false);
+          return;
+        }
+        const bondId = e.target.dataset?.tileBond;
+        if (bondId) {
+          const tile = node.tiles.find((item) => item.id === bondId);
+          const cm = plannerDraft(e.target.value);
+          if (tile && cm != null && tile.w > 0) {
+            const offset = ((cm / 100) % tile.w + tile.w) % tile.w;
+            tile.bond = plannerRound(offset / tile.w);
+          }
+          markCommit(false);
+          return;
+        }
+        const gapId = e.target.dataset?.tileGap;
+        if (gapId) {
+          const tile = node.tiles.find((item) => item.id === gapId);
+          const mm = plannerDraft(e.target.value);
+          if (tile && mm != null) tile.gap = plannerRound(plannerClamp(mm / 1000, 0, 0.03));
+          markCommit(false);
+          return;
+        }
+        if ("tileTurn" in (e.target.dataset || {})) {
+          const deg = plannerDraft(e.target.value);
+          if (deg != null) {
+            const host = markContext();
+            const face = tileFaceOf(host?.base, session.mark?.surface || "floor");
+            const turn = plannerRound(((deg % 360) + 360) % 360);
+            if (host?.feed && face) tileLayWrite(node, host.feed.id, face.surface, face.wall?.id || "", { turn });
+            markCommit(false);
+          }
+          return;
+        }
+        const field = e.target.dataset?.tileField;
+        if (field) {
+          const shift = field === "shiftX" || field === "shiftY";
+          const tol = field === "tolW" || field === "tolH";
+          const value = tileFromCm(e.target.value, null, shift ? -5 : 0, shift ? 5 : tol ? 0.3 : 5);
+          if (value != null) {
+            const host = markContext();
+            const face = tileFaceOf(host?.base, session.mark?.surface || "floor");
+            if (host?.feed && face) tileLayWrite(node, host.feed.id, face.surface, face.wall?.id || "", { [field]: value });
+            markCommit(false);
+          }
+        }
+        return;
+      }
       if (!node || node.type !== "openings") return;
       const map = [
         ["holeW", "w", 0.05, 500],
@@ -1007,6 +1218,14 @@
       node.outOn = {};
       node.view = "floor";
     }
+    if (type === "tiles") {
+      node.name = "Плитка";
+      node.color = color;
+      node.tiles = [];
+      node.lays = [];
+      node.outOn = {};
+      node.view = "floor";
+    }
     if (type === "present") {
       node.pageId = extra?.pageId || "";
       node.blockId = extra?.blockId || "";
@@ -1090,7 +1309,7 @@
       node.y = session.wireSnap ? snapCoord(at.y) : at.y;
     }
     if (type === "result") node.priority = nextResultPriority(bp);
-    if (type === "planner" || type === "openings" || type === "electrics" || type === "group") {
+    if (type === "planner" || type === "openings" || type === "electrics" || type === "tiles" || type === "group") {
       node.color = GROUP_COLORS[Math.floor(Math.random() * GROUP_COLORS.length)];
     }
     bp.nodes.push(node);
@@ -2033,6 +2252,7 @@
           { type: "planner", label: "Планировщик", icon: `<path d="M3 3.2h10v9.6H3zM3 7.4h4.2"/>` },
           { type: "openings", label: "Проёмы", icon: `<path d="M3 3.2h10v9.6H3zM6.2 12.8V7.2h3.6v5.6M4.2 6.2h2.2v2.4H4.2z"/>` },
           { type: "electrics", label: "Электрика", icon: `<path d="M8 2.8v3.2M6.2 6h3.6v2.4L8 13.2 6.2 8.4V6z"/>` },
+          { type: "tiles", label: "Плитка", icon: `<path d="M2.4 2.4h5.2v5.2H2.4zM8.4 2.4h5.2v5.2H8.4zM2.4 8.4h5.2v5.2H2.4zM8.4 8.4h5.2v5.2H8.4z"/>` },
         ],
       },
       {

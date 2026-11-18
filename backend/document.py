@@ -243,7 +243,7 @@ def _line_series_ui(raw: Any) -> dict[str, Any]:
 
 
 CALC_OPS = ("+", "-", "*", "/")
-CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group", "filter", "dashboard", "planner", "openings", "electrics", "present", "comment", "joint", "bus", "teleport", "teleout")
+CALC_NODE_TYPES = ("order", "math", "formula", "percent", "const", "result", "scheme", "group", "filter", "dashboard", "planner", "openings", "electrics", "tiles", "present", "comment", "joint", "bus", "teleport", "teleout")
 CALC_MAX_BLUEPRINTS = 24
 CALC_MAX_NODES = 120
 CALC_MAX_LINKS = 400
@@ -688,6 +688,76 @@ def _calc_owns(raw: Any) -> list[dict[str, Any]]:
     return owns
 
 
+def _calc_tiles(raw: Any) -> list[dict[str, Any]]:
+    tiles: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    patterns = {"rect", "chevron", "herringbone", "honeycomb", "quad", "parquet"}
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or len(tiles) >= 16:
+            continue
+        tile_id = _clip_text(item.get("id"), 80)
+        if not tile_id or tile_id in seen:
+            continue
+        seen.add(tile_id)
+        pattern = str(item.get("pattern") or "rect")
+        if pattern not in patterns:
+            pattern = "rect"
+        tiles.append(
+            {
+                "id": tile_id,
+                "name": _clip_text(item.get("name"), 48, f"Плитка {len(tiles) + 1}"),
+                "pattern": pattern,
+                "w": round(_float_in_range(item.get("w"), 0.6, 0.02, 3.0), 4),
+                "h": round(_float_in_range(item.get("h"), 0.6, 0.02, 3.0), 4),
+                "color": _hex_color(item.get("color"), "#d6c4a8"),
+                "gap": round(_float_in_range(item.get("gap"), 0.001, 0.0, 0.03), 4),
+                "bond": round(_float_in_range(item.get("bond"), 0.0, 0.0, 1.0), 4),
+                "grout": _hex_color(item.get("grout"), "#a8a29e"),
+            }
+        )
+    return tiles
+
+
+def _calc_tile_lays(raw: Any) -> list[dict[str, Any]]:
+    lays: list[dict[str, Any]] = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or len(lays) >= 160:
+            continue
+        surface = str(item.get("surface") or "wall")
+        if surface not in ("wall", "floor", "ceiling"):
+            surface = "wall"
+        try:
+            direction = int(item.get("dir"))
+        except (TypeError, ValueError):
+            direction = 0
+        if direction not in (0, 90, 180, 270):
+            direction = 0
+        try:
+            turn = float(item.get("turn") or 0) % 360
+        except (TypeError, ValueError):
+            turn = 0.0
+        lays.append(
+            {
+                "feed": _clip_text(item.get("feed"), 80),
+                "surface": surface,
+                "wallId": _clip_text(item.get("wallId"), 80) if surface == "wall" else "",
+                "tileId": _clip_text(item.get("tileId"), 80),
+                "left": round(_float_in_range(item.get("left"), 0.0, 0.0, 5.0), 4),
+                "right": round(_float_in_range(item.get("right"), 0.0, 0.0, 5.0), 4),
+                "bottom": round(_float_in_range(item.get("bottom"), 0.0, 0.0, 5.0), 4),
+                "top": round(_float_in_range(item.get("top"), 0.0, 0.0, 5.0), 4),
+                "shiftX": round(_float_in_range(item.get("shiftX"), 0.0, -5.0, 5.0), 4),
+                "shiftY": round(_float_in_range(item.get("shiftY"), 0.0, -5.0, 5.0), 4),
+                "dir": direction,
+                "turn": round(turn, 2),
+                "tolW": round(_float_in_range(item.get("tolW"), 0.02, 0.0, 0.3), 4),
+                "tolH": round(_float_in_range(item.get("tolH"), 0.02, 0.0, 0.3), 4),
+                "openings": item.get("openings") is not False,
+            }
+        )
+    return lays
+
+
 def _calc_fixtures(raw: Any) -> list[dict[str, Any]]:
     fixtures: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -940,6 +1010,22 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
                     node["counterNames"] = counter_names
         else:
             node["fixtures"] = _calc_fixtures(raw.get("fixtures"))
+        feeds = _calc_feeds(raw.get("feeds"))
+        if feeds:
+            node["feeds"] = feeds
+        commons = _calc_commons(raw.get("commons"))
+        if commons:
+            node["commons"] = commons
+    elif kind == "tiles":
+        node["name"] = _clip_text(raw.get("name"), 48, "Плитка")
+        if raw.get("filmsOff") is True:
+            node["filmsOff"] = True
+        node["outOn"] = _calc_out_on(raw.get("outOn"))
+        view = _clip_text(raw.get("view"), 80)
+        if view:
+            node["view"] = view
+        node["tiles"] = _calc_tiles(raw.get("tiles"))
+        node["lays"] = _calc_tile_lays(raw.get("lays"))
         feeds = _calc_feeds(raw.get("feeds"))
         if feeds:
             node["feeds"] = feeds
