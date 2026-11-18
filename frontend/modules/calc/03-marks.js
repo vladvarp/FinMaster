@@ -1774,11 +1774,14 @@
   }
 
   function tileFrame(geom, dir, shiftX, shiftY, turn) {
-    const back = dir === 180 || dir === 270;
     const span = geom.span || { w: 0, h: 0 };
-    const origin = back
-      ? { x: geom.anchor.x + span.w, y: geom.anchor.y + span.h }
-      : geom.anchor;
+    // «Вдоль · справа» разворачивает ряд только по горизонтали.
+    // Вертикальная опора остаётся у пола, чтобы раскладка не начиналась от потолка.
+    const origin = dir === 180
+      ? { x: geom.anchor.x + span.w, y: geom.anchor.y }
+      : dir === 270
+        ? { x: geom.anchor.x + span.w, y: geom.anchor.y + span.h }
+        : geom.anchor;
     let ux = dir === 90 ? { x: 0, y: 1 } : dir === 270 ? { x: 0, y: -1 } : dir === 180 ? { x: -1, y: 0 } : { x: 1, y: 0 };
     let uy = dir === 90 ? { x: 1, y: 0 } : dir === 270 ? { x: -1, y: 0 } : dir === 180 ? { x: 0, y: -1 } : { x: 0, y: 1 };
     const rad = ((Number(turn) || 0) * Math.PI) / 180;
