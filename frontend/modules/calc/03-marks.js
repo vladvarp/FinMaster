@@ -1756,13 +1756,39 @@
     };
   }
 
+  function tileHasFactoryEdge(part, cell) {
+    const eps = 0.002;
+    const cross = (a, b) => a.x * b.y - a.y * b.x;
+    const dot = (a, b) => a.x * b.x + a.y * b.y;
+    for (let i = 0; i < cell.length; i += 1) {
+      const ca = cell[i];
+      const cb = cell[(i + 1) % cell.length];
+      const edge = { x: cb.x - ca.x, y: cb.y - ca.y };
+      const edgeLen = Math.hypot(edge.x, edge.y);
+      if (edgeLen < 0.003) continue;
+      for (let j = 0; j < part.length; j += 1) {
+        const pa = part[j];
+        const pb = part[(j + 1) % part.length];
+        const side = { x: pb.x - pa.x, y: pb.y - pa.y };
+        const sideLen = Math.hypot(side.x, side.y);
+        if (sideLen < 0.003 || Math.abs(cross(edge, side)) > eps * edgeLen * sideLen) continue;
+        if (Math.abs(cross(edge, { x: pa.x - ca.x, y: pa.y - ca.y })) > eps * edgeLen) continue;
+        const axis = { x: edge.x / edgeLen, y: edge.y / edgeLen };
+        const a0 = dot({ x: pa.x - ca.x, y: pa.y - ca.y }, axis);
+        const a1 = dot({ x: pb.x - ca.x, y: pb.y - ca.y }, axis);
+        if (Math.min(edgeLen, Math.max(a0, a1)) - Math.max(0, Math.min(a0, a1)) > 0.003) return true;
+      }
+    }
+    return false;
+  }
+
   function tilePack(parts, width, height, tolW, tolH) {
     let count = 0;
     let cuts = 0;
     const rest = [];
     parts.forEach((part) => {
       if (part.full) count += 1;
-      else if (part.w > 0.003 && part.h > 0.003) rest.push(part);
+      else if (part.cleanEdge && part.w > 0.003 && part.h > 0.003) rest.push(part);
     });
     rest.sort((a, b) => b.w * b.h - a.w * a.h);
     const used = new Array(rest.length).fill(false);
@@ -1952,6 +1978,7 @@
             w: rect.w,
             h: rect.h,
             full: full && rects.length === 1,
+            cleanEdge: tileHasFactoryEdge(toPoly(rect), toPoly(cell)),
             pair: "",
           });
         });
@@ -2114,6 +2141,7 @@
           w: fragment.w,
           h: fragment.h,
           full: full && parts.length === 1,
+          cleanEdge: tileHasFactoryEdge(part, cell),
           pair: "",
         });
       });
@@ -3483,7 +3511,8 @@
     const px = world.along != null ? world.along : world.x;
     const py = world.rise != null ? world.rise : world.y;
     for (let i = pieces.length - 1; i >= 0; i -= 1) {
-      if (pieces[i].poly && polyHit(pieces[i].poly, px, py)) return pieces[i];
+      const fragments = Array.isArray(pieces[i].cuts) && pieces[i].cuts.length ? pieces[i].cuts : [pieces[i].poly];
+      if (fragments.some((poly) => poly?.length >= 3 && polyHit(poly, px, py))) return pieces[i];
     }
     return null;
   }
@@ -3691,19 +3720,21 @@
     } else {
       g.globalAlpha = 0.92;
       preview.bag.polys.forEach((piece) => {
-        const poly = piece.poly || piece;
-        trace(poly);
-        paintFill(poly);
-        g.fill();
-        g.stroke();
+        const fragments = Array.isArray(piece.cuts) && piece.cuts.length ? piece.cuts : [piece.poly || piece];
         const picked = session.mark.tileSel && (piece.id === session.mark.tileSel || piece.pair === session.mark.tileSel);
-        if (picked) {
-          g.save();
-          g.strokeStyle = "#2563eb";
-          g.lineWidth = 2.5;
+        fragments.forEach((poly) => {
+          trace(poly);
+          paintFill(poly);
+          g.fill();
           g.stroke();
-          g.restore();
-        }
+          if (picked) {
+            g.save();
+            g.strokeStyle = "#2563eb";
+            g.lineWidth = 2.5;
+            g.stroke();
+            g.restore();
+          }
+        });
       });
     }
     g.restore();
