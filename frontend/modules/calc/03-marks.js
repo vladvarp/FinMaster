@@ -3750,46 +3750,75 @@
         paintFill(poly);
         g.fill();
       });
-      const edgeKey = (a, b) => {
-        const point = (p) => `${Math.round(p.x * 10000)},${Math.round(p.y * 10000)}`;
-        const pa = point(a);
-        const pb = point(b);
-        return pa < pb ? `${pa}|${pb}` : `${pb}|${pa}`;
-      };
-      const edges = new Map();
-      polygons.forEach(({ poly, piece }) => {
-        poly.forEach((a, index) => {
-          const b = poly[(index + 1) % poly.length];
-          const key = edgeKey(a, b);
-          const item = edges.get(key);
-          if (item) item.count += 1;
-          else edges.set(key, { a, b, count: 1, piece });
+      // Объединяем контуры фрагментов отдельно для каждой плитки.
+      // Вырезы могут разбивать Г-образный остаток на прямоугольники с Т-образными
+      // стыками: сравнения только целых рёбер недостаточно, поэтому сначала
+      // разбиваем рёбра по всем вершинам, лежащим на них.
+      const boundaryOf = (items) => {
+        const points = items.flatMap(({ poly }) => poly);
+        const edges = new Map();
+        const keyOf = (a, b) => {
+          const point = (p) => `${Math.round(p.x * 10000)},${Math.round(p.y * 10000)}`;
+          const pa = point(a);
+          const pb = point(b);
+          return pa < pb ? `${pa}|${pb}` : `${pb}|${pa}`;
+        };
+        items.forEach(({ poly }) => {
+          poly.forEach((a, index) => {
+            const b = poly[(index + 1) % poly.length];
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const len2 = dx * dx + dy * dy;
+            if (len2 < 1e-12) return;
+            const split = [0, 1];
+            points.forEach((p) => {
+              const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+              if (t <= 1e-7 || t >= 1 - 1e-7) return;
+              const px = a.x + t * dx;
+              const py = a.y + t * dy;
+              if (Math.hypot(p.x - px, p.y - py) <= 1e-5) split.push(t);
+            });
+            split.sort((x, y) => x - y);
+            for (let i = 1; i < split.length; i += 1) {
+              const t0 = split[i - 1];
+              const t1 = split[i];
+              if (t1 - t0 < 1e-7) continue;
+              const p = { x: a.x + t0 * dx, y: a.y + t0 * dy };
+              const q = { x: a.x + t1 * dx, y: a.y + t1 * dy };
+              const key = keyOf(p, q);
+              const edge = edges.get(key);
+              if (edge) edge.count += 1;
+              else edges.set(key, { a: p, b: q, count: 1 });
+            }
+          });
         });
+        return [...edges.values()].filter((edge) => edge.count === 1);
+      };
+      const groups = new Map();
+      polygons.forEach((item) => {
+        if (!groups.has(item.piece)) groups.set(item.piece, []);
+        groups.get(item.piece).push(item);
       });
-      g.beginPath();
-      edges.forEach(({ a, b, count }) => {
-        if (count !== 1) return;
-        const p = spot(a);
-        const q = spot(b);
-        g.moveTo(p.x, p.y);
-        g.lineTo(q.x, q.y);
-      });
-      g.stroke();
-      const pickedIds = new Set();
-      polygons.forEach(({ piece }) => {
-        if (session.mark.tileSel && (piece.id === session.mark.tileSel || piece.pair === session.mark.tileSel)) {
-          pickedIds.add(piece.id || piece.pair);
-        }
-      });
-      if (pickedIds.size) {
+      const drawBoundaries = (items) => {
+        const edges = boundaryOf(items);
+        g.beginPath();
+        edges.forEach(({ a, b }) => {
+          const p = spot(a);
+          const q = spot(b);
+          g.moveTo(p.x, p.y);
+          g.lineTo(q.x, q.y);
+        });
+        g.stroke();
+      };
+      groups.forEach((items) => drawBoundaries(items));
+      const pickedGroups = [...groups.entries()].filter(([piece]) =>
+        session.mark.tileSel && (piece.id === session.mark.tileSel || piece.pair === session.mark.tileSel)
+      );
+      if (pickedGroups.length) {
         g.save();
         g.strokeStyle = "#2563eb";
         g.lineWidth = 2.5;
-        polygons.forEach(({ poly, piece }) => {
-          if (!pickedIds.has(piece.id || piece.pair)) return;
-          trace(poly);
-          g.stroke();
-        });
+        pickedGroups.forEach(([, items]) => drawBoundaries(items));
         g.restore();
       }
     }
