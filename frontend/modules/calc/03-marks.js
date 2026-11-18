@@ -3588,13 +3588,16 @@
     const pattern = piece.pattern || "rect";
     const cell = piece.cell?.length >= 3 ? piece.cell : piece.poly;
     const face = piece.face?.length >= 3 ? piece.face : piece.poly;
+    const fragments = Array.isArray(piece.cuts) && piece.cuts.length
+      ? piece.cuts.filter((poly) => Array.isArray(poly) && poly.length >= 3)
+      : [face];
     const svg = tip.querySelector("svg");
     const note = tip.querySelector("p");
     if (svg) {
       const pad = 78;
       const maxW = 300;
       const maxH = 360;
-      const pts = cell.concat(face);
+      const pts = cell.concat(...fragments);
       const minX = Math.min(...pts.map((p) => p.x));
       const minY = Math.min(...pts.map((p) => p.y));
       const spanX = Math.max(0.02, Math.max(...pts.map((p) => p.x)) - minX);
@@ -3637,54 +3640,32 @@
         const mx = (A.x + B.x) / 2;
         const my = (A.y + B.y) / 2;
         const C = { x: sx(away.x), y: sy(away.y) };
-        if ((C.x - mx) * nx + (C.y - my) * ny > 0) {
-          nx = -nx;
-          ny = -ny;
-        }
-        if (inward) {
-          nx = -nx;
-          ny = -ny;
-        }
+        if ((C.x - mx) * nx + (C.y - my) * ny > 0) { nx = -nx; ny = -ny; }
+        if (inward) { nx = -nx; ny = -ny; }
         const px = mx + nx * dist;
         const py = my + ny * dist;
         let ang = Math.atan2(dy, dx) * 180 / Math.PI;
         if (ang > 90 || ang < -90) ang += 180;
         const text = tileTipText(meters);
-        const busy = placed.some((item) => {
-          const near = Math.hypot(item.x - px, item.y - py) < 44;
-          const same = item.text === text && Math.hypot(item.x - px, item.y - py) < 78;
-          return near || same;
-        });
-        if (busy) return "";
+        if (placed.some((item) => Math.hypot(item.x - px, item.y - py) < 44)) return "";
         placed.push({ x: px, y: py, text });
         return `<text x="${px.toFixed(1)}" y="${py.toFixed(1)}" font-size="22" font-weight="700" fill="#c2410c" text-anchor="middle" dominant-baseline="middle" transform="rotate(${ang.toFixed(1)} ${px.toFixed(1)} ${py.toFixed(1)})">${text}</text>`;
       };
-      const cut = polyArea(face) < polyArea(cell) * 0.985;
-      const hostOf = (a, b) => cellEdges.find(([c, d]) => onEdge(a, b, c, d));
+      const outline = `<path d="${pathOf(cell)}" fill="none" stroke="#a8a29e" stroke-width="1.6" stroke-dasharray="6 4"/>`;
+      const fills = fragments.map((poly) => `<path d="${pathOf(poly)}" fill="#d6c4a8" stroke="#44403c" stroke-width="2"/>`).join("");
       const fresh = [];
       const rest = [];
-      if (cut) {
-        edgesOf(face).forEach(([a, b]) => {
-          const host = hostOf(a, b);
-          if (!host) fresh.push([a, b, face]);
-          else if (edgeLen(host[0], host[1]) - edgeLen(a, b) > 0.02) rest.push([a, b, face]);
-        });
-      }
-      const outline = cut ? `<path d="${pathOf(cell)}" fill="none" stroke="#a8a29e" stroke-width="1.6" stroke-dasharray="6 4"/>` : "";
-      const fills = `<path d="${pathOf(face)}" fill="#d6c4a8" stroke="${cut ? "none" : "#44403c"}" stroke-width="2"/>`;
+      fragments.forEach((poly) => edgesOf(poly).forEach(([a, b]) => {
+        const host = cellEdges.find(([c, d]) => onEdge(a, b, c, d));
+        if (!host) fresh.push([a, b, poly]);
+        else if (edgeLen(host[0], host[1]) - edgeLen(a, b) > 0.02) rest.push([a, b, poly]);
+      }));
       const seams = fresh.map(([a, b]) => `M${sx(a.x).toFixed(1)} ${sy(a.y).toFixed(1)} L${sx(b.x).toFixed(1)} ${sy(b.y).toFixed(1)}`).join(" ");
       const seamPath = seams ? `<path d="${seams}" fill="none" stroke="#44403c" stroke-width="2"/>` : "";
-      const whole = cellEdges.map(([a, b]) => label(a, b, cellMid, cut ? 40 : 30, false)).join("");
-      const slices = fresh.map(([a, b, poly]) => {
-        const local = mid(poly);
-        local.x /= poly.length;
-        local.y /= poly.length;
+      const whole = cellEdges.map(([a, b]) => label(a, b, cellMid, 40, false)).join("");
+      const slices = fresh.concat(rest).map(([a, b, poly]) => {
+        const local = mid(poly); local.x /= poly.length; local.y /= poly.length;
         return label(a, b, local, 22, false);
-      }).join("") + rest.map(([a, b, poly]) => {
-        const local = mid(poly);
-        local.x /= poly.length;
-        local.y /= poly.length;
-        return label(a, b, local, 22, true);
       }).join("");
       svg.setAttribute("viewBox", `0 0 ${boxW + pad * 2} ${boxH + pad * 2}`);
       svg.innerHTML = `${outline}${fills}${seamPath}${whole}${slices}`;
