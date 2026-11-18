@@ -1706,12 +1706,36 @@
 
   function tileInset(poly, gap) {
     if (!gap || poly.length < 3) return poly;
-    const c = poly.reduce((sum, p) => ({ x: sum.x + p.x, y: sum.y + p.y }), { x: 0, y: 0 });
-    c.x /= poly.length;
-    c.y /= poly.length;
-    const reach = Math.min(...poly.map((p) => Math.hypot(p.x - c.x, p.y - c.y))) || 1;
-    const keep = Math.max(0.25, (reach - gap / 2) / reach);
-    return poly.map((p) => ({ x: c.x + (p.x - c.x) * keep, y: c.y + (p.y - c.y) * keep }));
+    let area = 0;
+    poly.forEach((p, i) => {
+      const next = poly[(i + 1) % poly.length];
+      area += p.x * next.y - next.x * p.y;
+    });
+    const direction = area >= 0 ? 1 : -1;
+    const offset = gap / 2;
+    const edges = poly.map((p, i) => {
+      const next = poly[(i + 1) % poly.length];
+      const dx = next.x - p.x;
+      const dy = next.y - p.y;
+      const length = Math.hypot(dx, dy) || 1;
+      const normal = direction > 0
+        ? { x: -dy / length, y: dx / length }
+        : { x: dy / length, y: -dx / length };
+      return { point: { x: p.x + normal.x * offset, y: p.y + normal.y * offset }, direction: { x: dx, y: dy }, normal };
+    });
+    const inset = poly.map((_, i) => {
+      const previous = edges[(i + edges.length - 1) % edges.length];
+      const current = edges[i];
+      const cross = previous.direction.x * current.direction.y - previous.direction.y * current.direction.x;
+      if (Math.abs(cross) < 1e-10) {
+        return { x: poly[i].x + (previous.normal.x + current.normal.x) * offset / 2, y: poly[i].y + (previous.normal.y + current.normal.y) * offset / 2 };
+      }
+      const dx = current.point.x - previous.point.x;
+      const dy = current.point.y - previous.point.y;
+      const t = (dx * current.direction.y - dy * current.direction.x) / cross;
+      return { x: previous.point.x + previous.direction.x * t, y: previous.point.y + previous.direction.y * t };
+    });
+    return inset.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)) && polyArea(inset) > 1e-8 ? inset : poly;
   }
 
   function tileSpan(part, toLocal, tile) {
