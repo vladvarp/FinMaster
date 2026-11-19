@@ -1997,23 +1997,133 @@
     }
   }
 
+  let ngrokUsageTokenId = "";
+
+  function formatNgrokBytes(value) {
+    const bytes = Math.max(0, Number(value) || 0);
+    if (bytes >= 1024 ** 3) return `${(bytes / (1024 ** 3)).toFixed(2).replace(".", ",")} ГБ`;
+    if (bytes >= 1024 ** 2) return `${(bytes / (1024 ** 2)).toFixed(1).replace(".", ",")} МБ`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1).replace(".", ",")} КБ`;
+    return `${Math.round(bytes)} Б`;
+  }
+
+  function ngrokUsageColor(percent) {
+    if (percent >= 90) return "#dc4545";
+    if (percent >= 70) return "#e58a32";
+    if (percent >= 50) return "#d7ad32";
+    return "#3baf72";
+  }
+
+  function ngrokUsagePercent(value, limit) {
+    return Math.max(0, Number(limit) > 0 ? (Number(value || 0) / Number(limit)) * 100 : 0);
+  }
+
+  function renderNgrokUsageBar(label, value, limit, format) {
+    const percent = ngrokUsagePercent(value, limit);
+    const width = Math.min(100, percent);
+    const color = ngrokUsageColor(percent);
+    return `<div class="ngrok-usage-meter">
+      <div class="ngrok-usage-meter-label"><span>${label}</span><b>${format(value)} / ${format(limit)}</b></div>
+      <div class="ngrok-usage-track"><span style="width:${width.toFixed(2)}%;background:${color}"></span></div>
+    </div>`;
+  }
+
   function renderNgrokManager(tokens) {
     const box = $("ngrok-token-list");
     if (!box) return;
     box.innerHTML = (tokens || []).map((item) => {
       const title = item.name || "Без названия";
-      return `<div class="report-settings-check ngrok-token-row">
-        <span class="ngrok-token-main">
-          <strong>${esc(title)}</strong>
-          <small>${esc(item.prefix)}… ${item.active ? "· используется" : ""}</small>
-        </span>
-        <span class="ngrok-token-actions">
-          ${item.active ? '<span class="online">Активен</span>' : `<button type="button" class="btn small" data-ngrok-select="${esc(item.id)}">Выбрать</button>`}
-          <button type="button" class="btn small" data-ngrok-rename="${esc(item.id)}">Название</button>
-          <button type="button" class="btn small danger" data-ngrok-delete="${esc(item.id)}">Удалить</button>
-        </span>
+      const stats = item.monthly_stats || {};
+      const month = new Date().toLocaleDateString("en-CA");
+      const monthKey = month.slice(0, 7);
+      const current = stats[monthKey] || { requests: 0, traffic_bytes: 0 };
+      const limits = item.limits || { requests: 20000, traffic_bytes: 1024 ** 3 };
+      return `<div class="ngrok-token-row" data-ngrok-row="${esc(item.id)}">
+        <div class="ngrok-token-head">
+          <span class="ngrok-token-main">
+            <strong>${esc(title)}</strong>
+            <small>${esc(item.prefix)}… ${item.active ? "· используется" : ""}</small>
+          </span>
+          <span class="ngrok-token-actions">
+            <button type="button" class="btn small ngrok-info-btn" data-ngrok-info="${esc(item.id)}" title="Статистика и лимиты" aria-label="Статистика и лимиты">i</button>
+            ${item.active ? '<span class="online">Активен</span>' : `<button type="button" class="btn small" data-ngrok-select="${esc(item.id)}">Выбрать</button>`}
+            <button type="button" class="btn small" data-ngrok-rename="${esc(item.id)}">Название</button>
+            <button type="button" class="btn small danger" data-ngrok-delete="${esc(item.id)}">Удалить</button>
+          </span>
+        </div>
+        <div class="ngrok-token-meters">
+          ${renderNgrokUsageBar("Запросы", current.requests, limits.requests, (v) => Math.round(Number(v) || 0).toLocaleString("ru-RU"))}
+          ${renderNgrokUsageBar("Трафик", current.traffic_bytes, limits.traffic_bytes, formatNgrokBytes)}
+        </div>
       </div>`;
     }).join("") || '<p class="report-settings-hint">Токены ещё не добавлены.</p>';
+  }
+
+  function openNgrokUsage(id) {
+    const item = (remote.ngrokTokens || []).find((x) => x.id === id);
+    if (!item) return;
+    ngrokUsageTokenId = id;
+    const stats = item.monthly_stats || {};
+    const limits = item.limits || { requests: 20000, traffic_bytes: 1024 ** 3 };
+    const title = $("ngrok-usage-title");
+    if (title) title.textContent = `Статистика · ${item.name || item.prefix + "…"}`;
+    const requestsLimit = $("ngrok-usage-requests-limit");
+    const trafficLimit = $("ngrok-usage-traffic-limit");
+    if (requestsLimit) requestsLimit.value = String(limits.requests || 20000);
+    if (trafficLimit) trafficLimit.value = String(((limits.traffic_bytes || 1024 ** 3) / (1024 ** 3)).toFixed(3)).replace(/0+$/, "").replace(/\.$/, "");
+    const rows = Object.entries(stats).sort(([a], [b]) => b.localeCompare(a));
+    const body = $("ngrok-usage-history");
+    if (body) body.innerHTML = rows.length ? rows.map(([month, value]) => `
+      <div class="ngrok-usage-history-row">
+        <b>${esc(month)}</b>
+        <span>${Math.max(0, Number(value.requests) || 0).toLocaleString("ru-RU")} запросов</span>
+        <span>${formatNgrokBytes(value.traffic_bytes)}</span>
+      </div>`).join("") : '<div class="ngrok-usage-empty">Статистика пока не накоплена.</div>';
+    $("ngrok-usage-modal")?.classList.add("open");
+  }
+
+  async function saveNgrokUsageLimits() {
+    const requests = Number($("ngrok-usage-requests-limit")?.value);
+    const trafficGb = Number($("ngrok-usage-traffic-limit")?.value);
+    if (!ngrokUsageTokenId || !Number.isSafeInteger(requests) || requests < 1 || !Number.isFinite(trafficGb) || trafficGb <= 0 || trafficGb > 1000000) {
+      toast("Проверьте значения лимитов");
+      return;
+    }
+    const button = $("ngrok-usage-save");
+    if (button) button.disabled = true;
+    try {
+      const data = await apiPost("/api/remote/ngrok/tokens", {
+        action: "limits", id: ngrokUsageTokenId,
+        requests_limit: requests, traffic_limit: Math.round(trafficGb * 1024 ** 3),
+      });
+      remote.ngrokTokens = data.tokens || remote.ngrokTokens;
+      renderNgrokManager(remote.ngrokTokens);
+      openNgrokUsage(ngrokUsageTokenId);
+      toast("Лимиты сохранены");
+    } catch (err) {
+      toast(err.message || "Не удалось сохранить лимиты");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function clearNgrokUsageHistory() {
+    if (!ngrokUsageTokenId) return;
+    const ok = await askConfirm({
+      title: "Очистить историю статистики?",
+      text: "Все месяцы, кроме последнего сохранённого, будут удалены. Счётчики и лимиты последнего месяца останутся.",
+      ok: "Очистить старые месяцы", cancel: "Отмена", danger: true,
+    });
+    if (!ok) return;
+    try {
+      const data = await apiPost("/api/remote/ngrok/tokens", { action: "clear_history", id: ngrokUsageTokenId });
+      remote.ngrokTokens = data.tokens || remote.ngrokTokens;
+      renderNgrokManager(remote.ngrokTokens);
+      openNgrokUsage(ngrokUsageTokenId);
+      toast("Старая статистика очищена");
+    } catch (err) {
+      toast(err.message || "Не удалось очистить статистику");
+    }
   }
 
   async function ngrokManagerPost(body) {
