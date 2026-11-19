@@ -17,6 +17,27 @@
     .ngrok-demo .remote-fold-head { cursor:default; }
     .ngrok-demo .remote-fold-body { display:block !important; }
     .ngrok-demo .remote-ngrok-box { display:block; }
+    .ngrok-demo .remote-ngrok-meters {
+      display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px;
+      margin:8px 0 12px; padding:9px 10px; border:1px solid var(--line);
+      border-radius:9px; background:var(--bg-2);
+    }
+    .ngrok-demo .ngrok-usage-meter { display:grid; gap:4px; min-width:0; }
+    .ngrok-demo .ngrok-usage-meter-label {
+      display:flex; align-items:baseline; justify-content:space-between; gap:8px;
+      color:var(--muted); font-size:10px; line-height:1.25;
+    }
+    .ngrok-demo .ngrok-usage-meter-label b {
+      min-width:0; overflow:hidden; color:var(--text); font-size:10px;
+      font-weight:600; text-align:right; text-overflow:ellipsis; white-space:nowrap;
+      font-variant-numeric:tabular-nums;
+    }
+    .ngrok-demo .ngrok-usage-track {
+      height:6px; overflow:hidden; border-radius:999px; background:var(--line);
+    }
+    .ngrok-demo .ngrok-usage-track > span {
+      display:block; height:100%; border-radius:inherit;
+    }
     .ngrok-demo .remote-state { margin:0 0 10px; }
     .ngrok-demo .remote-autostart { margin:7px 0; cursor:default; }
     .ngrok-demo .remote-autostart input { pointer-events:none; }
@@ -43,7 +64,7 @@
 </head>
 <body>
   <div class="ngrok-demo" id="ngrok-demo">
-    <p class="ngrok-demo-intro">Автоматическая демонстрация переключает состояния. Можно выбрать этап вручную.</p>
+    <p class="ngrok-demo-intro">Автоматическая демонстрация переключает состояния. Можно выбрать этап вручную. В раскрытом блоке также показаны месячные счётчики активного токена.</p>
     <div class="ngrok-demo-tabs" role="group" aria-label="Состояния ngrok">
       <button class="btn small" type="button" data-demo-state="off" aria-pressed="true">Выключен</button>
       <button class="btn small" type="button" data-demo-state="starting" aria-pressed="false">Запуск</button>
@@ -76,6 +97,16 @@
       <div class="remote-fold-body">
         <div class="remote-ngrok-box">
           <div class="remote-ngrok-current">Активный токен: Рабочий аккаунт · 2abc••••••</div>
+          <div class="ngrok-token-meters remote-ngrok-meters" aria-label="Месячное использование активного токена">
+            <div class="ngrok-usage-meter">
+              <div class="ngrok-usage-meter-label"><span>Запросы</span><b>1 240 / 20 000</b></div>
+              <div class="ngrok-usage-track"><span style="width:6.2%;background:#0d9488"></span></div>
+            </div>
+            <div class="ngrok-usage-meter">
+              <div class="ngrok-usage-meter-label"><span>Трафик</span><b>86,4 МБ / 1 ГБ</b></div>
+              <div class="ngrok-usage-track"><span style="width:8.6%;background:#0d9488"></span></div>
+            </div>
+          </div>
           <div class="remote-tg-actions">
             <button type="button" class="btn small primary" tabindex="-1">Управление токенами</button>
             <button type="button" class="btn small" tabindex="-1">Проверить связь</button>

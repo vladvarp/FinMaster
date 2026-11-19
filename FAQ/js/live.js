@@ -81,6 +81,16 @@
 
   function present(el) {
     const clone = clean(el.cloneNode(true));
+    if (clone.classList.contains("remote-fold") && clone.querySelector("#remote-ngrok-current")) {
+      clone.classList.remove("collapsed");
+      const current = clone.querySelector("#remote-ngrok-current");
+      if (current) current.textContent = "Активный токен: Основной · a1b2c3…";
+      const usage = clone.querySelector("#remote-ngrok-usage");
+      if (usage) {
+        usage.hidden = false;
+        usage.innerHTML = '<div class="ngrok-token-meters remote-ngrok-meters"><div class="ngrok-usage-meter"><div class="ngrok-usage-meter-label"><span>Запросы</span><b>1 240 / 20 000</b></div><div class="ngrok-usage-track"><span style="width:6.2%;background:#0d9488"></span></div></div><div class="ngrok-usage-meter"><div class="ngrok-usage-meter-label"><span>Трафик</span><b>86,4 МБ / 1 ГБ</b></div><div class="ngrok-usage-track"><span style="width:8.6%;background:#0d9488"></span></div></div></div>';
+      }
+    }
     const parent = el.parentElement;
     if (parent && parent.classList.contains("nav") && !clone.classList.contains("nav")) {
       const wrap = document.createElement("div");
