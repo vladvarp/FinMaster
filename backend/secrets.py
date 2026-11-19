@@ -202,15 +202,17 @@ def set_ngrok_limits(token_id: str, requests_limit: Any, traffic_limit: Any) -> 
 
 
 def clear_ngrok_history(token_id: str) -> dict[str, Any]:
-    data = load()
-    item = next((x for x in data.get("ngrok_tokens") or [] if x.get("id") == token_id), None)
-    if not item:
-        raise ValueError("Токен не найден.")
-    stats = _clean_ngrok_stats(item.get("monthly_stats"))
-    latest = max(stats) if stats else ""
-    item["monthly_stats"] = {latest: stats[latest]} if latest else {}
-    save(data)
-    return {"monthly_stats": item["monthly_stats"], "limits": _clean_ngrok_limits(item.get("limits"))}
+    with _LOCK:
+        data = load()
+        item = next((x for x in data.get("ngrok_tokens") or [] if x.get("id") == token_id), None)
+        if not item:
+            raise ValueError("Токен не найден.")
+        stats = _clean_ngrok_stats(item.get("monthly_stats"))
+        current_month = datetime.now().astimezone().strftime("%Y-%m")
+        current_stats = stats.get(current_month)
+        item["monthly_stats"] = {current_month: current_stats} if current_stats else {}
+        save(data)
+        return {"monthly_stats": item["monthly_stats"], "limits": _clean_ngrok_limits(item.get("limits"))}
 
 
 def active_ngrok_token() -> str:
