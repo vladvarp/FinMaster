@@ -3901,45 +3901,74 @@
         offsetDims = holes.map((hole, index) => {
           const x = surface === "wall" ? hole.along : hole.x;
           const y = surface === "wall" ? hole.rise : hole.y;
-          const cx = hole.shape === "circle" ? x : x + hole.w / 2;
-          const cy = hole.shape === "circle" ? y : y + hole.h / 2;
-          const center = { x: cx, y: cy };
-          const nearest = edgesOf(cell).map(([a, b]) => {
-            const dx = b.x - a.x, dy = b.y - a.y;
-            const len2 = dx * dx + dy * dy || 1;
-            const normal = { x: -dy / Math.sqrt(len2), y: dx / Math.sqrt(len2) };
-            if (hole.shape === "circle") {
-              const t = Math.max(0, Math.min(1, ((cx - a.x) * dx + (cy - a.y) * dy) / len2));
+          if (hole.shape === "circle") {
+            // Круг виден на соседней плитке, но отступы показываем только
+            // на той плитке, внутри которой находится его центр.
+            if (!polyHit(cell, x, y)) return "";
+            const center = { x, y };
+            const nearest = cellEdges.map(([a, b]) => {
+              const dx = b.x - a.x, dy = b.y - a.y;
+              const len2 = dx * dx + dy * dy || 1;
+              const normal = { x: -dy / Math.sqrt(len2), y: dx / Math.sqrt(len2) };
+              const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / len2));
               const point = { x: a.x + dx * t, y: a.y + dy * t };
-              return { from: center, point, distance: Math.max(0, Math.hypot(cx - point.x, cy - point.y) - hole.d / 2), normal };
-            }
-            const rect = [
-              { x, y }, { x: x + hole.w, y },
-              { x: x + hole.w, y: y + hole.h }, { x, y: y + hole.h },
-            ];
-            const project = (p, c, d) => {
-              const vx = d.x - c.x, vy = d.y - c.y;
-              const t = Math.max(0, Math.min(1, ((p.x - c.x) * vx + (p.y - c.y) * vy) / (vx * vx + vy * vy || 1)));
-              return { x: c.x + vx * t, y: c.y + vy * t };
+              return { from: center, point, distance: Math.max(0, Math.hypot(x - point.x, y - point.y) - hole.d / 2), normal };
+            }).sort((a, b) => a.distance - b.distance);
+            const first = nearest[0];
+            const second = nearest.find((item) => Math.abs(first.normal.x * item.normal.x + first.normal.y * item.normal.y) < 0.75) || nearest[1];
+            const line = (item, text) => {
+              const ax = sx(item.from.x), ay = sy(item.from.y), bx = sx(item.point.x), by = sy(item.point.y);
+              return `<path d="M${ax.toFixed(1)} ${ay.toFixed(1)} L${bx.toFixed(1)} ${by.toFixed(1)}" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>` + callout((ax + bx) / 2, (ay + by) / 2, text, "#6d28d9");
             };
+            const firstText = `A ${tileTipText(first.distance)}`;
+            const secondText = second ? `B ${tileTipText(second.distance)}` : "";
+            legendRows.push(`<span><b>${index + 1}.</b> ${firstText}${secondText ? ` · ${secondText}` : ""}</span>`);
+            return line(first, firstText) + (second ? line(second, secondText) : "");
+          }
+
+          // Для прямоугольника используем только ту часть контура,
+          // которая реально видна внутри текущего фрагмента плитки.
+          const clippedPart = clipToCell([
+            { x, y }, { x: x + hole.w, y },
+            { x: x + hole.w, y: y + hole.h }, { x, y: y + hole.h },
+          ]);
+          if (clippedPart.length < 3 || polygonArea(clippedPart) < 1e-8) return "";
+          const visibleHoleEdges = edgesOf(clippedPart).filter(([a, b]) =>
+            !cellEdges.some(([c, d]) => onEdge(a, b, c, d))
+          );
+          if (!visibleHoleEdges.length) return "";
+
+          const project = (p, a, b) => {
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+            return { x: a.x + dx * t, y: a.y + dy * t };
+          };
+          const nearest = cellEdges.map(([a, b]) => {
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const len = Math.hypot(dx, dy) || 1;
+            const normal = { x: -dy / len, y: dx / len };
             let best = null;
-            edgesOf(rect).forEach(([c, d]) => {
+            visibleHoleEdges.forEach(([c, d]) => {
+              if (segmentsCross(a, b, c, d)) {
+                best = { from: c, point: c, distance: 0 };
+                return;
+              }
               const pairs = [
-                { from: project(c, a, b), to: c },
-                { from: project(d, a, b), to: d },
-                { from: a, to: project(a, c, d) },
-                { from: b, to: project(b, c, d) },
+                { from: project(c, a, b), point: c },
+                { from: project(d, a, b), point: d },
+                { from: a, point: project(a, c, d) },
+                { from: b, point: project(b, c, d) },
               ];
               pairs.forEach((pair) => {
-                const distance = Math.hypot(pair.from.x - pair.to.x, pair.from.y - pair.to.y);
+                const distance = Math.hypot(pair.from.x - pair.point.x, pair.from.y - pair.point.y);
                 if (!best || distance < best.distance) best = { ...pair, distance };
               });
-              if (segmentsCross(a, b, c, d)) best = { from: c, to: c, distance: 0 };
             });
-            return { ...best, point: best.to, normal };
-          }).sort((a, b) => a.distance - b.distance);
+            return best ? { ...best, normal } : null;
+          }).filter(Boolean).sort((a, b) => a.distance - b.distance);
+          if (!nearest.length) return "";
           const first = nearest[0];
-          const second = nearest.find((item) => Math.abs(first.normal.x * item.normal.x + first.normal.y * item.normal.y) < 0.75) || nearest[1];
+          const second = nearest.find((item) => Math.abs(first.normal.x * item.normal.x + first.normal.y * item.normal.y) < 0.75);
           const line = (item, text) => {
             const ax = sx(item.from.x), ay = sy(item.from.y), bx = sx(item.point.x), by = sy(item.point.y);
             return `<path d="M${ax.toFixed(1)} ${ay.toFixed(1)} L${bx.toFixed(1)} ${by.toFixed(1)}" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>` + callout((ax + bx) / 2, (ay + by) / 2, text, "#6d28d9");
@@ -3966,7 +3995,7 @@
         tile: `Размер плитки: ${whole}`,
         cuts: `Размеры фрагментов: ${tileTipText(piece.w)} × ${tileTipText(piece.h)}`,
         holes: holeCount ? "Размеры отверстий: ширина, высота или диаметр" : "В выбранной плитке нет отверстий",
-        offsets: holeCount ? "Для круглых отверстий — от центра до рёбер плитки; для прямоугольных — от границ отверстия до рёбер плитки" : "В выбранной плитке нет отверстий",
+        offsets: holeCount ? "Для круглых отверстий — от центра (только на плитке с центром); для прямоугольных — от видимого ребра отверстия до противоположного ребра фрагмента плитки" : "В выбранной плитке нет отверстий",
       }[mode];
       note.textContent = `${name} · ${desc}${left && mode === "tile" ? ` · фрагмент ${tileTipText(piece.w)} × ${tileTipText(piece.h)}` : ""}`;
     }
