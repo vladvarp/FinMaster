@@ -3721,6 +3721,16 @@
           const box = { left: point.x - width / 2, right: point.x + width / 2, top: point.y - height / 2, bottom: point.y + height / 2 };
           if (box.left < 2 || box.top < 2 || box.right > boxW + pad * 2 - 2 || box.bottom > boxH + pad * 2 - 2) continue;
           if (calloutBoxes.some((item) => box.left < item.right + 4 && box.right + 4 > item.left && box.top < item.bottom + 4 && box.bottom + 4 > item.top)) continue;
+          const coversHole = holes.some((hole) => {
+            const hx = surface === "wall" ? hole.along : hole.x;
+            const hy = surface === "wall" ? hole.rise : hole.y;
+            const left = sx(hx) - (hole.shape === "circle" ? hole.d * scale / 2 : 0);
+            const right = sx(hx + (hole.shape === "circle" ? 0 : hole.w)) + (hole.shape === "circle" ? hole.d * scale / 2 : 0);
+            const top = Math.min(sy(hy), sy(hy + (hole.shape === "circle" ? 0 : hole.h))) - (hole.shape === "circle" ? hole.d * scale / 2 : 0);
+            const bottom = Math.max(sy(hy), sy(hy + (hole.shape === "circle" ? 0 : hole.h))) + (hole.shape === "circle" ? hole.d * scale / 2 : 0);
+            return box.left < right + 3 && box.right + 3 > left && box.top < bottom + 3 && box.bottom + 3 > top;
+          });
+          if (coversHole) continue;
           target = { ...point, box };
           break;
         }
