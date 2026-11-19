@@ -1078,7 +1078,7 @@ def _remote_public(ip: str | None = None, via: str | None = None) -> dict[str, A
         "clients": REMOTE.clients(),
         "ngrok": bool(settings.get("ngrok")),
         "ngrok_ready": bool(settings.get("ngrok_token")),
-        "ngrok_tokens": secrets.ngrok_token_list(),
+        "ngrok_tokens": secrets.ngrok_token_list(include_usage=True),
         "ngrok_active_id": next((item["id"] for item in secrets.ngrok_token_list() if item.get("active")), ""),
         "ngrok_active_label": next(((item.get("name") + " (" + item.get("prefix") + ")") if item.get("name") else item.get("prefix") for item in secrets.ngrok_token_list() if item.get("active")), ""),
         "telegram_ready": bool(settings.get("telegram_bot_token")),
