@@ -3612,7 +3612,12 @@
       const boxW = spanX * scale;
       const boxH = spanY * scale;
       const sx = (x) => pad + (x - minX) * scale;
-      const sy = (y) => pad + (y - minY) * scale;
+      // На стене высота растёт вверх, а координата SVG — вниз.
+      // Повторяем вертикальное преобразование markCamera(), чтобы предпросмотр
+      // совпадал с ориентацией плитки на настенном полотне.
+      const invertY = session.mark?.view?.kind === "wall";
+      const maxY = minY + spanY;
+      const sy = (y) => pad + (invertY ? maxY - y : y - minY) * scale;
       const pathOf = (poly) => `${poly.map((p, i) => `${i ? "L" : "M"}${sx(p.x).toFixed(1)} ${sy(p.y).toFixed(1)}`).join(" ")} Z`;
       const mid = (poly) => poly.reduce((sum, p) => ({ x: sum.x + p.x, y: sum.y + p.y }), { x: 0, y: 0 });
       const cellMid = mid(cell);
