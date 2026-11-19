@@ -19,7 +19,6 @@
           <div class="planner-plan-wrap">
             ${editorSnapControls("mark")}
             <canvas id="mark-canvas"></canvas>
-            <div id="mark-tile-tip" class="mark-tile-tip" hidden><svg viewBox="0 0 200 160" aria-hidden="true"></svg><p></p></div>
             <div class="planner-clip">
               <div class="mark-paste-wrap">
                 <button type="button" class="planner-clip-btn" id="mark-paste" title="Вставить" aria-label="Вставить" aria-haspopup="true" aria-expanded="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h8v2h2a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2V5z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 5.5h6V7H9z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button>
@@ -368,7 +367,6 @@
         const canvas = $("mark-canvas");
         const rect = canvas.getBoundingClientRect();
         const piece = tilePieceAt(e.clientX - rect.left, e.clientY - rect.top);
-        tileTipShow(piece, e.clientX, e.clientY);
         canvas.style.cursor = piece ? "pointer" : "";
       }
       const node = markNode();
@@ -708,6 +706,14 @@
         document.querySelectorAll("#mark-side .mark-select-list").forEach((el) => {
           el.hidden = true;
         });
+      }
+      const tileDimMode = e.target.closest("[data-tile-dim-mode]");
+      if (tileDimMode && node.type === "tiles") {
+        const mode = tileDimMode.dataset.tileDimMode;
+        if (!["tile", "cuts", "holes", "offsets"].includes(mode)) return;
+        try { window.localStorage.setItem("finmaster.tilePreview.dimMode", mode); } catch { /* storage may be unavailable */ }
+        markDraw();
+        return;
       }
       const tileAdd = e.target.closest("[data-tile-add]");
       if (tileAdd && node.type === "tiles") {

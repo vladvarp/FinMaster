@@ -1229,6 +1229,30 @@
     menu.innerHTML = `${(node.layouts || []).map((item) => `<button type="button" class="planner-layout-option ${!common && item.id === node.layoutId ? "is-active" : ""}" role="menuitem" data-planner-layout-choice="${esc(item.id)}">${esc(item.name)}</button>`).join("")}<div class="planner-layout-menu-sep"></div><button type="button" class="planner-layout-option is-create" role="menuitem" data-planner-layout-choice="__new">＋ Создать планировку</button><button type="button" class="planner-layout-option ${common ? "is-active" : ""}" role="menuitem" data-planner-layout-choice="${COMMON_VIEW}">Общий вывод</button>`;
   }
 
+  function plannerSideHelpify(side) {
+    if (!side) return;
+    side.querySelectorAll(".planner-lead").forEach((lead) => {
+      const block = lead.closest(".planner-block");
+      const head = block?.querySelector(".planner-block-h");
+      if (!head) return;
+      const text = String(lead.textContent || "").trim();
+      if (!text) { lead.remove(); return; }
+      let button = head.querySelector(":scope > .planner-help");
+      if (!button) {
+        button = document.createElement("button");
+        button.type = "button";
+        button.className = "planner-help";
+        button.textContent = "i";
+        button.setAttribute("aria-label", "Пояснение к разделу");
+        head.appendChild(button);
+      }
+      const previous = button.dataset.help || "";
+      button.dataset.help = previous ? `${previous}\n${text}` : text;
+      button.title = button.dataset.help;
+      lead.remove();
+    });
+  }
+
   function plannerFill() {
     const node = plannerNode();
     const side = $("planner-side");
@@ -1249,6 +1273,7 @@
     if (stage) stage.hidden = true;
     const scroll = side.scrollTop;
     side.innerHTML = plannerSideHtml(node);
+    plannerSideHelpify(side);
     side.scrollTop = scroll;
     const rect = plannerRect(node.points);
     const boxW = rect ? rect.w : Math.max(...node.points.map((p) => p.x)) - Math.min(...node.points.map((p) => p.x));
