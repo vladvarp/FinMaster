@@ -3663,6 +3663,7 @@
     const svg = tip.querySelector("svg");
     const note = tip.querySelector("p");
     const mode = tilePreviewDimMode();
+    let holeCount = 0;
     tip.querySelectorAll("[data-tile-dim-mode]").forEach((btn) => {
       const active = btn.dataset.tileDimMode === mode;
       btn.classList.toggle("is-active", active);
@@ -3758,6 +3759,7 @@
         // Учитываем только отверстия, центр которых находится внутри выбранной ячейки.
         return polyHit(cell, cx, cy);
       });
+      holeCount = holes.length;
       const holeShapes = holes.map((hole) => {
         const x = surface === "wall" ? hole.along : hole.x;
         const y = surface === "wall" ? hole.rise : hole.y;
@@ -3823,8 +3825,8 @@
       const desc = {
         tile: `Размер плитки: ${whole}`,
         cuts: `Размеры фрагментов: ${tileTipText(piece.w)} × ${tileTipText(piece.h)}`,
-        holes: holes.length ? "Размеры отверстий: ширина, высота или диаметр" : "В выбранной плитке нет отверстий",
-        offsets: holes.length ? "Отступы центра выбранного отверстия до двух ближайших рёбер этой плитки" : "В выбранной плитке нет отверстий",
+        holes: holeCount ? "Размеры отверстий: ширина, высота или диаметр" : "В выбранной плитке нет отверстий",
+        offsets: holeCount ? "Отступы центра выбранного отверстия до двух ближайших рёбер этой плитки" : "В выбранной плитке нет отверстий",
       }[mode];
       note.textContent = `${name} · ${desc}${left && mode === "tile" ? ` · фрагмент ${tileTipText(piece.w)} × ${tileTipText(piece.h)}` : ""}`;
     }
