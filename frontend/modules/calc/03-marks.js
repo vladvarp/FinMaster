@@ -3705,6 +3705,32 @@
       const edgesOf = (poly) => poly.map((pt, i) => [pt, poly[(i + 1) % poly.length]]);
       const cellEdges = edgesOf(cell);
       const placed = [];
+      const calloutBoxes = [];
+      const callout = (ax, ay, text, color) => {
+        const width = Math.max(42, text.length * 7.2 + 16);
+        const height = 23;
+        const candidates = [];
+        for (const radius of [30, 46, 62, 78, 94]) {
+          for (let step = 0; step < 12; step += 1) {
+            const angle = (step / 12) * Math.PI * 2 - Math.PI / 2;
+            candidates.push({ x: ax + Math.cos(angle) * radius, y: ay + Math.sin(angle) * radius });
+          }
+        }
+        let target = null;
+        for (const point of candidates) {
+          const box = { left: point.x - width / 2, right: point.x + width / 2, top: point.y - height / 2, bottom: point.y + height / 2 };
+          if (box.left < 2 || box.top < 2 || box.right > boxW + pad * 2 - 2 || box.bottom > boxH + pad * 2 - 2) continue;
+          if (calloutBoxes.some((item) => box.left < item.right + 4 && box.right + 4 > item.left && box.top < item.bottom + 4 && box.bottom + 4 > item.top)) continue;
+          target = { ...point, box };
+          break;
+        }
+        if (!target) return "";
+        calloutBoxes.push(target.box);
+        const dx = target.x - ax, dy = target.y - ay, len = Math.hypot(dx, dy) || 1;
+        const ex = target.x - dx / len * (width * 0.34);
+        const ey = target.y - dy / len * (height * 0.34);
+        return `<path d="M${ax.toFixed(1)} ${ay.toFixed(1)} L${ex.toFixed(1)} ${ey.toFixed(1)}" stroke="${color}" stroke-width="1.5" fill="none"/><rect x="${target.box.left.toFixed(1)}" y="${target.box.top.toFixed(1)}" width="${width.toFixed(1)}" height="${height}" rx="6" fill="#fff" fill-opacity=".94" stroke="${color}" stroke-width="1.2"/><text x="${target.x.toFixed(1)}" y="${target.y.toFixed(1)}" font-size="13" font-weight="700" fill="${color}" text-anchor="middle" dominant-baseline="middle">${text}</text>`;
+      };
       const label = (a, b, away, dist, inward) => {
         const meters = edgeLen(a, b);
         if (meters < 0.025) return "";
@@ -3750,15 +3776,38 @@
         bottom: Math.min(...cell.map((pt) => pt.y)),
         top: Math.max(...cell.map((pt) => pt.y)),
       };
-      const holes = (ctx.base.openings || []).filter((hole) => {
-        if (hole.surface !== surface || (surface === "wall" && hole.wallId !== wallId)) return false;
+      const pointSegmentDistance = (p, a, b) => {
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const len2 = dx * dx + dy * dy || 1;
+        const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+        return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t));
+      };
+      const segmentsCross = (a, b, c, d) => {
+        const cross = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+        const ab1 = cross(a, b, c), ab2 = cross(a, b, d);
+        const cd1 = cross(c, d, a), cd2 = cross(c, d, b);
+        return ab1 * ab2 <= 1e-10 && cd1 * cd2 <= 1e-10;
+      };
+      const openingHitsCell = (hole) => {
         const x = surface === "wall" ? hole.along : hole.x;
         const y = surface === "wall" ? hole.rise : hole.y;
-        const cx = hole.shape === "circle" ? x : x + hole.w / 2;
-        const cy = hole.shape === "circle" ? y : y + hole.h / 2;
-        // Учитываем только отверстия, центр которых находится внутри выбранной ячейки.
-        return polyHit(cell, cx, cy);
-      });
+        if (hole.shape === "circle") {
+          const center = { x, y }, radius = Math.max(0, hole.d / 2);
+          if (polyHit(cell, x, y)) return true;
+          return cellEdges.some(([a, b]) => pointSegmentDistance(center, a, b) <= radius + 1e-7);
+        }
+        const rect = [
+          { x, y }, { x: x + hole.w, y },
+          { x: x + hole.w, y: y + hole.h }, { x, y: y + hole.h },
+        ];
+        if (rect.some((pt) => polyHit(cell, pt.x, pt.y))) return true;
+        if (cell.some((pt) => pt.x >= x - 1e-7 && pt.x <= x + hole.w + 1e-7 && pt.y >= y - 1e-7 && pt.y <= y + hole.h + 1e-7)) return true;
+        const rectEdges = edgesOf(rect);
+        return cellEdges.some(([a, b]) => rectEdges.some(([c, d]) => segmentsCross(a, b, c, d)));
+      };
+      const holes = (ctx.base.openings || []).filter((hole) =>
+        hole.surface === surface && (surface !== "wall" || hole.wallId === wallId) && openingHitsCell(hole)
+      );
       holeCount = holes.length;
       const holeShapes = holes.map((hole) => {
         const x = surface === "wall" ? hole.along : hole.x;
@@ -3777,11 +3826,18 @@
           const y = surface === "wall" ? hole.rise : hole.y;
           if (hole.shape === "circle") {
             const cx = sx(x), cy = sy(y);
-            return `<text x="${cx.toFixed(1)}" y="${(cy - Math.max(10, hole.d * scale / 2 + 16)).toFixed(1)}" font-size="19" font-weight="700" fill="#b91c1c" text-anchor="middle">Ø ${tileTipText(hole.d)}</text>`;
+            return callout(cx, cy, `Ø ${tileTipText(hole.d)}`, "#b91c1c");
           }
-          const center = { x: x + hole.w / 2, y: y + hole.h / 2 };
-          const p = { x, y }, q = { x: x + hole.w, y }, r = { x, y: y + hole.h };
-          return label(p, q, center, 14, false) + label(p, r, center, 14, false);
+          const partLeft = Math.max(x, cellBounds.left);
+          const partRight = Math.min(x + hole.w, cellBounds.right);
+          const partBottom = Math.max(y, cellBounds.bottom);
+          const partTop = Math.min(y + hole.h, cellBounds.top);
+          const partW = Math.max(0, partRight - partLeft);
+          const partH = Math.max(0, partTop - partBottom);
+          if (partW < 0.005 || partH < 0.005) return "";
+          const center = { x: (partLeft + partRight) / 2, y: (partBottom + partTop) / 2 };
+          const anchorX = sx(center.x), anchorY = sy(center.y);
+          return callout(anchorX, anchorY, `${tileTipText(partW)} × ${tileTipText(partH)}`, "#b91c1c");
         }).join("");
       }
       let offsetDims = "";
@@ -3803,15 +3859,11 @@
           }).sort((a, b) => a.distance - b.distance);
           const first = nearest[0];
           const second = nearest.find((item) => Math.abs(first.normal.x * item.normal.x + first.normal.y * item.normal.y) < 0.75) || nearest[1];
-          const line = (point, text, index) => {
+          const line = (point, text) => {
             const ax = sx(center.x), ay = sy(center.y), bx = sx(point.x), by = sy(point.y);
-            const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy) || 1;
-            const offset = index ? 13 : -4;
-            const lx = (ax + bx) / 2 - (dy / len) * offset;
-            const ly = (ay + by) / 2 + (dx / len) * offset - 7;
-            return `<path d="M${ax.toFixed(1)} ${ay.toFixed(1)} L${bx.toFixed(1)} ${by.toFixed(1)}" stroke="#7c3aed" stroke-width="2" stroke-dasharray="4 3" fill="none"/><text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" fill="#6d28d9" font-size="17" font-weight="700" text-anchor="middle">${text}</text>`;
+            return `<path d="M${ax.toFixed(1)} ${ay.toFixed(1)} L${bx.toFixed(1)} ${by.toFixed(1)}" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>` + callout((ax + bx) / 2, (ay + by) / 2, text, "#6d28d9");
           };
-          return line(first.point, `A ${tileTipText(first.distance)}`, 0) + (second ? line(second.point, `B ${tileTipText(second.distance)}`, 1) : "");
+          return line(first.point, `A ${tileTipText(first.distance)}`) + (second ? line(second.point, `B ${tileTipText(second.distance)}`) : "");
         }).join("");
       }
       const clip = `<defs><clipPath id="tile-preview-clip"><path d="${pathOf(cell)}"/></clipPath></defs>`;
