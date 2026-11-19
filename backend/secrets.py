@@ -127,11 +127,87 @@ def update_tokens(*, ngrok_token: str | None = None, telegram_bot_token: str | N
     return _clone(data)
 
 
-def ngrok_token_list() -> list[dict[str, Any]]:
+def ngrok_token_list(*, include_usage: bool = False) -> list[dict[str, Any]]:
     data = load()
     active_id = str(data.get("active_ngrok_id") or "")
-    return [{"id": x["id"], "name": x.get("name") or "", "prefix": x["token"][:6], "active": x["id"] == active_id}
-            for x in data.get("ngrok_tokens") or []]
+    result = []
+    for item in data.get("ngrok_tokens") or []:
+        row = {"id": item["id"], "name": item.get("name") or "", "prefix": item["token"][:6],
+               "active": item["id"] == active_id}
+        if include_usage:
+            row["monthly_stats"] = _clean_ngrok_stats(item.get("monthly_stats"))
+            row["limits"] = _clean_ngrok_limits(item.get("limits"))
+        result.append(row)
+    return result
+
+
+NGROK_DEFAULT_LIMITS = {"requests": 20000, "traffic_bytes": 1024 ** 3}
+
+
+def _clean_ngrok_limits(raw: Any) -> dict[str, int]:
+    source = raw if isinstance(raw, dict) else {}
+    result = {}
+    for key, default in NGROK_DEFAULT_LIMITS.items():
+        try:
+            value = int(source.get(key, default))
+        except (TypeError, ValueError, OverflowError):
+            value = default
+        result[key] = max(1, min(10 ** 12, value))
+    return result
+
+
+def _clean_ngrok_stats(raw: Any) -> dict[str, dict[str, int]]:
+    if not isinstance(raw, dict):
+        return {}
+    result = {}
+    for month, values in raw.items():
+        if not re.fullmatch(r"\\d{4}-(0[1-9]|1[0-2])", str(month)) or not isinstance(values, dict):
+            continue
+        try:
+            requests_count = max(0, int(values.get("requests") or 0))
+            traffic = max(0, int(values.get("traffic_bytes") or 0))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        result[str(month)] = {"requests": requests_count, "traffic_bytes": traffic}
+    return dict(sorted(result.items()))
+
+
+def add_ngrok_usage(token_id: str, traffic_bytes: int = 0) -> None:
+    if not token_id:
+        return
+    data = load()
+    item = next((x for x in data.get("ngrok_tokens") or [] if x.get("id") == token_id), None)
+    if not item:
+        return
+    month = datetime.now().astimezone().strftime("%Y-%m")
+    stats = _clean_ngrok_stats(item.get("monthly_stats"))
+    current = stats.setdefault(month, {"requests": 0, "traffic_bytes": 0})
+    current["requests"] += 1
+    current["traffic_bytes"] += max(0, int(traffic_bytes or 0))
+    item["monthly_stats"] = stats
+    save(data)
+
+
+def set_ngrok_limits(token_id: str, requests_limit: Any, traffic_limit: Any) -> dict[str, Any]:
+    data = load()
+    item = next((x for x in data.get("ngrok_tokens") or [] if x.get("id") == token_id), None)
+    if not item:
+        raise ValueError("Токен не найден.")
+    item["limits"] = _clean_ngrok_limits({"requests": requests_limit, "traffic_bytes": traffic_limit})
+    save(data)
+    return {"limits": item["limits"], "monthly_stats": _clean_ngrok_stats(item.get("monthly_stats"))}
+
+
+def clear_ngrok_history(token_id: str) -> dict[str, Any]:
+    data = load()
+    item = next((x for x in data.get("ngrok_tokens") or [] if x.get("id") == token_id), None)
+    if not item:
+        raise ValueError("Токен не найден.")
+    stats = _clean_ngrok_stats(item.get("monthly_stats"))
+    latest = max(stats) if stats else ""
+    item["monthly_stats"] = {latest: stats[latest]} if latest else {}
+    save(data)
+    return {"monthly_stats": item["monthly_stats"], "limits": _clean_ngrok_limits(item.get("limits"))}
 
 
 def active_ngrok_token() -> str:
@@ -149,7 +225,8 @@ def _store_ngrok_token(data: dict[str, Any], token: str, name: str = "") -> dict
     item = next((x for x in items if x.get("token") == value), None)
     if item is None:
         item = {"id": hashlib.sha256(value.encode("utf-8")).hexdigest()[:16], "token": value,
-                "name": " ".join(str(name or "").split())[:64]}
+                "name": " ".join(str(name or "").split())[:64],
+                "monthly_stats": {}, "limits": dict(NGROK_DEFAULT_LIMITS)}
         items.append(item)
     elif name:
         item["name"] = " ".join(str(name).split())[:64]
@@ -502,6 +579,10 @@ def apply_export(file_path: str, ids: list[str], *, keep_unique_ngrok: bool = Tr
                 continue
             item = {"id": hashlib.sha256(value.encode("utf-8")).hexdigest()[:16], "token": value,
                     "name": " ".join(str(raw.get("name") or "").split())[:64]}
+            if "monthly_stats" in raw:
+                item["monthly_stats"] = _clean_ngrok_stats(raw.get("monthly_stats"))
+            if "limits" in raw:
+                item["limits"] = _clean_ngrok_limits(raw.get("limits"))
             found = next((x for x in merged if x.get("token") == value), None)
             if found:
                 found.update(item)
@@ -650,7 +731,9 @@ def _normalize(raw: Any) -> dict[str, Any]:
         if isinstance(item, dict):
             token = str(item.get("token") or "").strip()
             if storage.valid_ngrok_token(token):
-                _store_ngrok_token(data, token, str(item.get("name") or ""))
+                stored = _store_ngrok_token(data, token, str(item.get("name") or ""))
+                stored["monthly_stats"] = _clean_ngrok_stats(item.get("monthly_stats"))
+                stored["limits"] = _clean_ngrok_limits(item.get("limits"))
     legacy = str(raw.get("ngrok_token") or "").strip()
     if storage.valid_ngrok_token(legacy) and not any(x.get("token") == legacy for x in data["ngrok_tokens"]):
         _store_ngrok_token(data, legacy, "")
