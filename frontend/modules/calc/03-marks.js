@@ -2474,13 +2474,6 @@
     const geom = tileGeom(plan, face.surface, face.wall, lay);
     const bag = tileBag(tile, lay, geom, true);
     const packed = bag.rough != null ? { count: bag.rough, cuts: 0 } : tilePack(bag.pieces, tile.w, tile.h, lay.tolW, lay.tolH, !tile.noPairs);
-    if (bag.polys) {
-      const paired = new Map();
-      bag.pieces.forEach((part) => {
-        if (part.parentId && part.pair && !paired.has(part.parentId)) paired.set(part.parentId, part.pair);
-      });
-      bag.polys.forEach((piece) => { piece.pair = paired.get(piece.id) || ""; });
-    }
     return { tile, lay, geom, bag, count: packed.count, cuts: packed.cuts };
   }
 
