@@ -3206,7 +3206,9 @@
         button.className = "planner-help";
         button.textContent = "i";
         button.setAttribute("aria-label", "Пояснение к разделу");
-        head.appendChild(button);
+        const titleNode = [...head.childNodes].find((item) => item.nodeType === Node.TEXT_NODE && String(item.textContent || "").trim());
+        if (titleNode) head.insertBefore(button, titleNode.nextSibling);
+        else head.appendChild(button);
       }
       const previous = button.dataset.help || "";
       button.dataset.help = previous ? `${previous}\n${text}` : text;
