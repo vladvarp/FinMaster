@@ -9,8 +9,10 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sys
 import threading
+from datetime import datetime
 from typing import Any
 
 from backend import storage
@@ -580,10 +582,15 @@ def apply_export(file_path: str, ids: list[str], *, keep_unique_ngrok: bool = Tr
                 continue
             item = {"id": hashlib.sha256(value.encode("utf-8")).hexdigest()[:16], "token": value,
                     "name": " ".join(str(raw.get("name") or "").split())[:64]}
+            previous = next((x for x in (data.get("ngrok_tokens") or []) if x.get("token") == value), None)
             if "monthly_stats" in raw:
                 item["monthly_stats"] = _clean_ngrok_stats(raw.get("monthly_stats"))
+            elif previous:
+                item["monthly_stats"] = _clean_ngrok_stats(previous.get("monthly_stats"))
             if "limits" in raw:
                 item["limits"] = _clean_ngrok_limits(raw.get("limits"))
+            elif previous:
+                item["limits"] = _clean_ngrok_limits(previous.get("limits"))
             found = next((x for x in merged if x.get("token") == value), None)
             if found:
                 found.update(item)
