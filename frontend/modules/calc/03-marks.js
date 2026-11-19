@@ -2964,13 +2964,15 @@
         <label class="planner-part"><input type="checkbox" data-mark-out="${esc(cutId)}" ${markChecked(node, cutId, false) || cutLinked ? "checked" : ""} ${cutLinked ? "disabled" : ""} /> <span>${esc(tile.name)} · резка</span> <em>${totals.cuts} шт.</em></label>`;
     }).join("");
     const dimMode = tilePreviewDimMode();
+    let tileCardsOpen = true;
+    try { tileCardsOpen = window.localStorage.getItem("finmaster.tilePreview.cardsOpen") !== "false"; } catch { /* storage may be unavailable */ }
     const previewPanel = `<div id="mark-tile-tip" class="tile-preview-panel" hidden>
       <div class="tile-preview-head"><strong>Предпросмотр плитки</strong><div class="tile-preview-modes">${TILE_PREVIEW_DIMS.map(([id, label]) => `<button type="button" class="btn ${dimMode === id ? "is-active" : ""}" data-tile-dim-mode="${id}" aria-pressed="${dimMode === id ? "true" : "false"}">${label}</button>`).join("")}</div></div>
       <svg viewBox="0 0 200 160" aria-hidden="true"></svg><p></p>
     </div>`;
     return `${previewPanel}
     <div class="planner-block tile-types-block"><div class="planner-block-h">Плитки <button type="button" class="btn" data-tile-add>+ Плитка</button></div>
-      <details class="tile-types-collapse" open><summary>Карточки плиток <span>${node.tiles.length}</span></summary>
+      <details class="tile-types-collapse" ${tileCardsOpen ? "open" : ""}><summary>Карточки плиток <span>${node.tiles.length}</span></summary>
         ${types || `<div class="calc-empty">Добавьте тип плитки</div>`}
       </details>
     </div>
@@ -3726,9 +3728,11 @@
         const local = mid(poly); local.x /= poly.length; local.y /= poly.length;
         return label(a, b, local, 20, false);
       }).join("") : "";
-      const surface = session.mark?.surface || "floor";
+      const faceInfo = tileFaceOf(ctx.base, session.mark?.surface || "floor");
+      const surface = faceInfo?.surface || "floor";
+      const wallId = faceInfo?.wall?.id || session.mark?.view?.wall?.id || "";
       const holes = (ctx.base.openings || []).filter((hole) =>
-        hole.surface === surface && (surface !== "wall" || hole.wallId === ctx.base.wallId || hole.wallId === session.mark?.view?.wall?.id)
+        hole.surface === surface && (surface !== "wall" || hole.wallId === wallId)
       );
       const holeShapes = holes.map((hole) => {
         const x = surface === "wall" ? hole.along : hole.x;
@@ -3761,15 +3765,20 @@
           const y = surface === "wall" ? hole.rise : hole.y;
           const cx = hole.shape === "circle" ? x : x + hole.w / 2;
           const cy = hole.shape === "circle" ? y : y + hole.h / 2;
-          const xs = cell.map((pt) => pt.x), ys = cell.map((pt) => pt.y);
-          const left = Math.min(...xs), right = Math.max(...xs), bottom = Math.min(...ys), top = Math.max(...ys);
-          const targetX = cx - left < right - cx ? left : right;
-          const targetY = cy - bottom < top - cy ? bottom : top;
           const center = { x: cx, y: cy };
-          const xEdge = { x: targetX, y: cy };
-          const yEdge = { x: cx, y: targetY };
-          const line = (a, b, text) => `<path d="M${sx(a.x)} ${sy(a.y)} L${sx(b.x)} ${sy(b.y)}" stroke="#7c3aed" stroke-width="2" stroke-dasharray="4 3" fill="none"/><text x="${((sx(a.x)+sx(b.x))/2).toFixed(1)}" y="${((sy(a.y)+sy(b.y))/2-8).toFixed(1)}" fill="#6d28d9" font-size="18" font-weight="700" text-anchor="middle">${text}</text>`;
-          return line(center, xEdge, `X ${tileTipText(Math.abs(cx-targetX))}`) + line(center, yEdge, `Y ${tileTipText(Math.abs(cy-targetY))}`);
+          const nearest = edgesOf(cell).map(([a, b]) => {
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const len2 = dx * dx + dy * dy || 1;
+            const t = Math.max(0, Math.min(1, ((cx - a.x) * dx + (cy - a.y) * dy) / len2));
+            const point = { x: a.x + dx * t, y: a.y + dy * t };
+            const distance = Math.hypot(cx - point.x, cy - point.y);
+            const normal = { x: -dy / Math.sqrt(len2), y: dx / Math.sqrt(len2) };
+            return { point, distance, normal };
+          }).sort((a, b) => a.distance - b.distance);
+          const first = nearest[0];
+          const second = nearest.find((item) => Math.abs(first.normal.x * item.normal.x + first.normal.y * item.normal.y) < 0.75) || nearest[1];
+          const line = (point, text) => `<path d="M${sx(center.x)} ${sy(center.y)} L${sx(point.x)} ${sy(point.y)}" stroke="#7c3aed" stroke-width="2" stroke-dasharray="4 3" fill="none"/><text x="${((sx(center.x)+sx(point.x))/2).toFixed(1)}" y="${((sy(center.y)+sy(point.y))/2-8).toFixed(1)}" fill="#6d28d9" font-size="18" font-weight="700" text-anchor="middle">${text}</text>`;
+          return line(first.point, `A ${tileTipText(first.distance)}`) + (second ? line(second.point, `B ${tileTipText(second.distance)}`) : "");
         }).join("");
       }
       const clip = `<defs><clipPath id="tile-preview-clip"><path d="${pathOf(cell)}"/></clipPath></defs>`;

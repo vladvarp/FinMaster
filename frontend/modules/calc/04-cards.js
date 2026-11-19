@@ -619,6 +619,10 @@
       markHideMenu();
       markCommit(true);
     });
+    $("mark-side")?.addEventListener("toggle", (e) => {
+      if (!(e.target instanceof HTMLDetailsElement) || !e.target.classList.contains("tile-types-collapse")) return;
+      try { window.localStorage.setItem("finmaster.tilePreview.cardsOpen", e.target.open ? "true" : "false"); } catch { /* storage may be unavailable */ }
+    }, true);
     $("mark-side")?.addEventListener("click", (e) => {
       const node = markNode();
       if (!node) return;
