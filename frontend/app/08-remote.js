@@ -500,6 +500,7 @@
     };
   
     remote.watch = setInterval(tick, 2000);
+    startNgrokUsageWatch();
     tick();
   }
 
@@ -828,6 +829,7 @@
 
   function renderRemoteSignals() {
     renderTokenDots();
+    renderRemoteNgrokUsage();
     const tgStatus = $("remote-tg-status");
     if (tgStatus && !tgStatus.dataset.hold) {
       tgStatus.className = "remote-ngrok-status";
@@ -2003,7 +2005,9 @@
   function startNgrokUsageWatch() {
     if (remote.ngrokUsageTimer) return;
     remote.ngrokUsageTimer = setInterval(async () => {
-      if (!$("ngrok-manager-modal")?.classList.contains("open")) {
+      const remoteOpen = $("remote-modal")?.classList.contains("open");
+      const managerOpen = $("ngrok-manager-modal")?.classList.contains("open");
+      if (!remoteOpen && !managerOpen) {
         stopNgrokUsageWatch();
         return;
       }
@@ -2013,6 +2017,7 @@
         const data = await apiGet("/api/remote/ngrok/tokens");
         remote.ngrokTokens = data.tokens || remote.ngrokTokens;
         renderNgrokManager(remote.ngrokTokens);
+        renderRemoteNgrokUsage();
       } catch {
         /* Следующая проверка повторит запрос. */
       } finally {
@@ -2098,6 +2103,26 @@
         </div>
       </div>`;
     }).join("") || '<p class="report-settings-hint">Токены ещё не добавлены.</p>';
+  }
+
+  function renderRemoteNgrokUsage() {
+    const box = $("remote-ngrok-usage");
+    if (!box) return;
+    const item = (remote.ngrokTokens || []).find((x) => x.id === remote.ngrokActiveId);
+    if (!item) {
+      box.innerHTML = "";
+      box.hidden = true;
+      return;
+    }
+    const now = new Date();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const current = (item.monthly_stats || {})[monthKey] || { requests: 0, traffic_bytes: 0 };
+    const limits = item.limits || { requests: 20000, traffic_bytes: 1_000_000_000 };
+    box.innerHTML = `<div class="ngrok-token-meters remote-ngrok-meters">
+      ${renderNgrokUsageBar("Запросы", current.requests, limits.requests, (v) => Math.round(Number(v) || 0).toLocaleString("ru-RU"))}
+      ${renderNgrokUsageBar("Трафик", current.traffic_bytes, limits.traffic_bytes, formatNgrokBytes)}
+    </div>`;
+    box.hidden = false;
   }
 
   function openNgrokUsage(id) {
