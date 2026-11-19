@@ -2964,18 +2964,20 @@
         <label class="planner-part"><input type="checkbox" data-mark-out="${esc(cutId)}" ${markChecked(node, cutId, false) || cutLinked ? "checked" : ""} ${cutLinked ? "disabled" : ""} /> <span>${esc(tile.name)} · резка</span> <em>${totals.cuts} шт.</em></label>`;
     }).join("");
     const dimMode = tilePreviewDimMode();
-    let tileCardsOpen = true;
-    try { tileCardsOpen = window.localStorage.getItem("finmaster.tilePreview.cardsOpen") !== "false"; } catch { /* storage may be unavailable */ }
     const previewPanel = `<div id="mark-tile-tip" class="tile-preview-panel" hidden>
       <div class="tile-preview-head"><strong>Предпросмотр плитки</strong><div class="tile-preview-modes">${TILE_PREVIEW_DIMS.map(([id, label]) => `<button type="button" class="btn ${dimMode === id ? "is-active" : ""}" data-tile-dim-mode="${id}" aria-pressed="${dimMode === id ? "true" : "false"}">${label}</button>`).join("")}</div></div>
       <svg viewBox="0 0 200 160" aria-hidden="true"></svg><p></p>
     </div>`;
+    let tileSectionOpen = true;
+    try { tileSectionOpen = window.localStorage.getItem("finmaster.tilePreview.sectionOpen") !== "false"; } catch { /* storage may be unavailable */ }
     return `${previewPanel}
-    <div class="planner-block tile-types-block"><div class="planner-block-h">Плитки <button type="button" class="btn" data-tile-add>+ Плитка</button></div>
-      <details class="tile-types-collapse" ${tileCardsOpen ? "open" : ""}><summary>Карточки плиток <span>${node.tiles.length}</span></summary>
+    <details class="planner-block tile-types-block tile-section-collapse" ${tileSectionOpen ? "open" : ""}>
+      <summary class="planner-block-h"><span>Плитки</span><span class="tile-section-count">${node.tiles.length}</span></summary>
+      <div class="tile-section-content">
+        <div class="tile-section-actions"><button type="button" class="btn" data-tile-add>+ Плитка</button></div>
         ${types || `<div class="calc-empty">Добавьте тип плитки</div>`}
-      </details>
-    </div>
+      </div>
+    </details>
     <div class="planner-block"><div class="planner-block-h">${esc(face.name)}</div>
       <div class="tile-face">
       <label class="planner-len"><span>Плитка на этой поверхности</span>${markSelect('data-tile-use="1"', "", useOpts, lay.tileId || "")}</label>
@@ -3246,6 +3248,10 @@
     const scroll = side.scrollTop;
     side.innerHTML = markSideHtml(ctx);
     markSideHelpify(side);
+    const tileSection = side.querySelector(".tile-section-collapse");
+    tileSection?.addEventListener("toggle", () => {
+      try { window.localStorage.setItem("finmaster.tilePreview.sectionOpen", String(tileSection.open)); } catch { /* storage may be unavailable */ }
+    });
     side.scrollTop = scroll;
     if (title && document.activeElement !== title) title.value = ctx.node.name || "";
     const surface = session.mark?.surface || "floor";
@@ -3747,12 +3753,10 @@
         if (hole.surface !== surface || (surface === "wall" && hole.wallId !== wallId)) return false;
         const x = surface === "wall" ? hole.along : hole.x;
         const y = surface === "wall" ? hole.rise : hole.y;
-        const radius = hole.shape === "circle" ? hole.d / 2 : 0;
-        const left = hole.shape === "circle" ? x - radius : x;
-        const right = hole.shape === "circle" ? x + radius : x + hole.w;
-        const bottom = hole.shape === "circle" ? y - radius : y;
-        const top = hole.shape === "circle" ? y + radius : y + hole.h;
-        return right >= cellBounds.left && left <= cellBounds.right && top >= cellBounds.bottom && bottom <= cellBounds.top;
+        const cx = hole.shape === "circle" ? x : x + hole.w / 2;
+        const cy = hole.shape === "circle" ? y : y + hole.h / 2;
+        // Учитываем только отверстия, центр которых находится внутри выбранной ячейки.
+        return polyHit(cell, cx, cy);
       });
       const holeShapes = holes.map((hole) => {
         const x = surface === "wall" ? hole.along : hole.x;
@@ -3797,8 +3801,15 @@
           }).sort((a, b) => a.distance - b.distance);
           const first = nearest[0];
           const second = nearest.find((item) => Math.abs(first.normal.x * item.normal.x + first.normal.y * item.normal.y) < 0.75) || nearest[1];
-          const line = (point, text) => `<path d="M${sx(center.x)} ${sy(center.y)} L${sx(point.x)} ${sy(point.y)}" stroke="#7c3aed" stroke-width="2" stroke-dasharray="4 3" fill="none"/><text x="${((sx(center.x)+sx(point.x))/2).toFixed(1)}" y="${((sy(center.y)+sy(point.y))/2-8).toFixed(1)}" fill="#6d28d9" font-size="18" font-weight="700" text-anchor="middle">${text}</text>`;
-          return line(first.point, `A ${tileTipText(first.distance)}`) + (second ? line(second.point, `B ${tileTipText(second.distance)}`) : "");
+          const line = (point, text, index) => {
+            const ax = sx(center.x), ay = sy(center.y), bx = sx(point.x), by = sy(point.y);
+            const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy) || 1;
+            const offset = index ? 13 : -4;
+            const lx = (ax + bx) / 2 - (dy / len) * offset;
+            const ly = (ay + by) / 2 + (dx / len) * offset - 7;
+            return `<path d="M${ax.toFixed(1)} ${ay.toFixed(1)} L${bx.toFixed(1)} ${by.toFixed(1)}" stroke="#7c3aed" stroke-width="2" stroke-dasharray="4 3" fill="none"/><text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" fill="#6d28d9" font-size="17" font-weight="700" text-anchor="middle">${text}</text>`;
+          };
+          return line(first.point, `A ${tileTipText(first.distance)}`, 0) + (second ? line(second.point, `B ${tileTipText(second.distance)}`, 1) : "");
         }).join("");
       }
       const clip = `<defs><clipPath id="tile-preview-clip"><path d="${pathOf(cell)}"/></clipPath></defs>`;
@@ -3812,8 +3823,8 @@
       const desc = {
         tile: `Размер плитки: ${whole}`,
         cuts: `Размеры фрагментов: ${tileTipText(piece.w)} × ${tileTipText(piece.h)}`,
-        holes: "Размеры отверстий: ширина, высота или диаметр",
-        offsets: "Отступы центров отверстий до ближайших двух рёбер плитки",
+        holes: holes.length ? "Размеры отверстий: ширина, высота или диаметр" : "В выбранной плитке нет отверстий",
+        offsets: holes.length ? "Отступы центра выбранного отверстия до двух ближайших рёбер этой плитки" : "В выбранной плитке нет отверстий",
       }[mode];
       note.textContent = `${name} · ${desc}${left && mode === "tile" ? ` · фрагмент ${tileTipText(piece.w)} × ${tileTipText(piece.h)}` : ""}`;
     }
