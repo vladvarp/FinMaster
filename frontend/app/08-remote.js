@@ -469,6 +469,12 @@
       try {
         const probe = $("remote-ngrok")?.checked ? "?probe=1" : "";
         applyRemotePayload(await apiGet(`/api/remote/info${probe}`));
+        if ($("ngrok-manager-modal")?.classList.contains("open")) {
+          renderNgrokManager(remote.ngrokTokens);
+        }
+        if ($("ngrok-usage-modal")?.classList.contains("open") && ngrokUsageTokenId) {
+          renderNgrokUsageHistory(ngrokUsageTokenId);
+        }
   
         // Синхронизация переключателей с актуальным состоянием сервера.
         const accessChk = $("remote-autostart");
@@ -2106,7 +2112,14 @@
     const trafficLimit = $("ngrok-usage-traffic-limit");
     if (requestsLimit) requestsLimit.value = String(limits.requests || 20000);
     if (trafficLimit) trafficLimit.value = String(((limits.traffic_bytes || 1_000_000_000) / (1_000_000_000)).toFixed(3)).replace(/0+$/, "").replace(/\.$/, "");
-    const rows = Object.entries(stats).sort(([a], [b]) => b.localeCompare(a));
+    renderNgrokUsageHistory(id);
+    $("ngrok-usage-modal")?.classList.add("open");
+  }
+
+  function renderNgrokUsageHistory(id) {
+    const item = (remote.ngrokTokens || []).find((x) => x.id === id);
+    if (!item) return;
+    const rows = Object.entries(item.monthly_stats || {}).sort(([a], [b]) => b.localeCompare(a));
     const body = $("ngrok-usage-history");
     if (body) body.innerHTML = rows.length ? rows.map(([month, value]) => `
       <div class="ngrok-usage-history-row">
@@ -2114,7 +2127,6 @@
         <span>${Math.max(0, Number(value.requests) || 0).toLocaleString("ru-RU")} запросов</span>
         <span>${formatNgrokBytes(value.traffic_bytes)}</span>
       </div>`).join("") : '<div class="ngrok-usage-empty">Статистика пока не накоплена.</div>';
-    $("ngrok-usage-modal")?.classList.add("open");
   }
 
   async function saveNgrokUsageLimits() {
@@ -2146,8 +2158,8 @@
     if (!ngrokUsageTokenId) return;
     const ok = await askConfirm({
       title: "Очистить историю статистики?",
-      text: "Все месяцы, кроме последнего сохранённого, будут удалены. Счётчики и лимиты последнего месяца останутся.",
-      ok: "Очистить старые месяцы", cancel: "Отмена", danger: true,
+      text: "Будет удалена вся история, кроме текущего календарного месяца. Его счётчики останутся нетронутыми.",
+      ok: "Очистить старую историю", cancel: "Отмена", danger: true,
     });
     if (!ok) return;
     try {
@@ -2155,7 +2167,7 @@
       remote.ngrokTokens = data.tokens || remote.ngrokTokens;
       renderNgrokManager(remote.ngrokTokens);
       openNgrokUsage(ngrokUsageTokenId);
-      toast("Старая статистика очищена");
+      toast("История старых месяцев очищена");
     } catch (err) {
       toast(err.message || "Не удалось очистить статистику");
     }
