@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .tile-guide { display:grid;grid-template-columns:minmax(260px,1fr) minmax(220px,.9fr);gap:14px;align-items:start;max-width:760px; }
+    .tile-guide-card { padding:13px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink); }
+    .tile-guide-title { display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:11px;font-weight:700;font-size:13px; }
+    .tile-guide-title small { color:var(--muted);font-weight:500;font-size:10px; }
+    .tile-fields { display:grid;grid-template-columns:1fr 1fr;gap:8px; }
+    .tile-field { display:grid;gap:4px;color:var(--muted);font-size:10px; }
+    .tile-field input { width:100%;min-width:0;padding:7px 8px;border:1px solid var(--line);border-radius:7px;background:var(--bg-2);color:var(--ink);font:12px var(--sans); }
+    .tile-guide-check { display:flex;align-items:center;gap:7px;margin-top:10px;color:var(--ink);font-size:11px; }
+    .tile-guide-check input { accent-color:var(--accent); }
+    .tile-preview-label { margin:0 0 8px;color:var(--muted);font-size:11px; }
+    .tile-preview-art { display:grid;place-items:center;min-height:190px;border-radius:9px;background:var(--bg-2); }
+    .tile-preview-art svg { width:100%;max-width:290px;height:auto; }
+    .tile-guide-note { margin:9px 0 0;color:var(--muted);font-size:10px;line-height:1.45; }
+    @media(max-width:600px){.tile-guide{grid-template-columns:1fr}.tile-fields{grid-template-columns:1fr 1fr}}
+  </style>
+</head>
+<body>
+  <div class="tile-guide">
+    <section class="tile-guide-card">
+      <div class="tile-guide-title"><span>Плитка 1</span><small>Прямоугольник</small></div>
+      <div class="tile-fields">
+        <label class="tile-field">Ширина<input value="60 см" readonly tabindex="-1"></label>
+        <label class="tile-field">Высота<input value="30 см" readonly tabindex="-1"></label>
+        <label class="tile-field">Сдвиг<input value="15 см" readonly tabindex="-1"></label>
+        <label class="tile-field">Сдвигаемых рядов<input value="2" readonly tabindex="-1"></label>
+        <label class="tile-field">Шов<input value="1 мм" readonly tabindex="-1"></label>
+      </div>
+      <label class="tile-guide-check"><input type="checkbox" checked disabled> Не объединять обрезки в пары</label>
+      <p class="tile-guide-note">Сдвиг накапливается по рядам в пределах заданного цикла. Флажок запрещает считать два подходящих обрезка одной целой плиткой.</p>
+    </section>
+    <section class="tile-guide-card">
+      <div class="tile-guide-title"><span>Предпросмотр обрезка</span><small>При наведении</small></div>
+      <p class="tile-preview-label">Пример Г-образной плитки после выреза проёма</p>
+      <div class="tile-preview-art">
+        <svg viewBox="0 0 280 190" role="img" aria-label="Г-образный обрезок плитки с размерами по граням">
+          <path d="M55 24H220V80H132V164H55Z" fill="#c9b99f" stroke="#8c7b63" stroke-width="2"/>
+          <path d="M55 24H220M220 24V80M132 80H220M132 80V164M55 164H132M55 24V164" fill="none" stroke="#6f6251" stroke-width="1.5"/>
+          <path d="M55 13H220M55 10V16M220 10V16" stroke="currentColor" stroke-width="1"/>
+          <text x="137" y="9" text-anchor="middle" fill="currentColor" font-size="10">60 см</text>
+          <path d="M43 24V164M40 24H46M40 164H46" stroke="currentColor" stroke-width="1"/>
+          <text x="31" y="96" text-anchor="middle" fill="currentColor" font-size="10" transform="rotate(-90 31 96)">50 см</text>
+          <path d="M232 24V80M229 24H235M229 80H235" stroke="currentColor" stroke-width="1"/>
+          <text x="244" y="54" fill="currentColor" font-size="10">20 см</text>
+          <path d="M132 175H220M132 172V178M220 172V178" stroke="currentColor" stroke-width="1"/>
+          <text x="176" y="188" text-anchor="middle" fill="currentColor" font-size="10">30 см</text>
+        </svg>
+      </div>
+      <p class="tile-guide-note">Подсказка показывает форму и размеры выбранного фрагмента. Внутри выреза не появляются лишние разделительные линии.</p>
+    </section>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>
