@@ -2034,8 +2034,8 @@
     box.innerHTML = (tokens || []).map((item) => {
       const title = item.name || "Без названия";
       const stats = item.monthly_stats || {};
-      const month = new Date().toLocaleDateString("en-CA");
-      const monthKey = month.slice(0, 7);
+      const now = new Date();
+      const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
       const current = stats[monthKey] || { requests: 0, traffic_bytes: 0 };
       const limits = item.limits || { requests: 20000, traffic_bytes: 1024 ** 3 };
       return `<div class="ngrok-token-row" data-ngrok-row="${esc(item.id)}">
@@ -2153,10 +2153,14 @@
   }
 
   async function handleNgrokTokenClick(event) {
-    const button = event.target.closest("[data-ngrok-select], [data-ngrok-rename], [data-ngrok-delete]");
+    const button = event.target.closest("[data-ngrok-info], [data-ngrok-select], [data-ngrok-rename], [data-ngrok-delete]");
     if (!button) return;
-    const id = button.dataset.ngrokSelect || button.dataset.ngrokRename || button.dataset.ngrokDelete;
+    const id = button.dataset.ngrokInfo || button.dataset.ngrokSelect || button.dataset.ngrokRename || button.dataset.ngrokDelete;
     try {
+      if (button.dataset.ngrokInfo) {
+        openNgrokUsage(id);
+        return;
+      }
       if (button.dataset.ngrokRename) {
         const item = (remote.ngrokTokens || []).find((x) => x.id === id);
         const modal = $("ngrok-rename-modal");
@@ -2514,6 +2518,12 @@
     $("remote-tg-send")?.addEventListener("click", () => postTelegram(true));
     $("ngrok-manage-open")?.addEventListener("click", openNgrokManager);
     $("ngrok-manager-close")?.addEventListener("click", closeNgrokManager);
+    $("ngrok-usage-close")?.addEventListener("click", () => $("ngrok-usage-modal")?.classList.remove("open"));
+    $("ngrok-usage-save")?.addEventListener("click", saveNgrokUsageLimits);
+    $("ngrok-usage-clear")?.addEventListener("click", clearNgrokUsageHistory);
+    $("ngrok-usage-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("ngrok-usage-modal")) $("ngrok-usage-modal").classList.remove("open");
+    });
     $("ngrok-rename-close")?.addEventListener("click", () => $("ngrok-rename-modal")?.classList.remove("open"));
     $("ngrok-rename-cancel")?.addEventListener("click", () => $("ngrok-rename-modal")?.classList.remove("open"));
     $("ngrok-rename-save")?.addEventListener("click", saveNgrokTokenName);
