@@ -2189,8 +2189,8 @@
         body = { action: "select", id };
       }
       const data = await ngrokManagerPost(body);
-      remote.ngrokTokens = data.tokens || [];
       renderRemoteModal(data);
+      remote.ngrokTokens = data.tokens || remote.ngrokTokens;
       renderNgrokManager(remote.ngrokTokens);
       toast(body.action === "select" ? "Активный токен изменён" : "Токен удалён");
     } catch (err) {
@@ -2207,8 +2207,8 @@
     if (save) save.disabled = true;
     try {
       const data = await ngrokManagerPost({ action: "rename", id, name: input.value.trim() });
-      remote.ngrokTokens = data.tokens || [];
       renderRemoteModal(data);
+      remote.ngrokTokens = data.tokens || remote.ngrokTokens;
       renderNgrokManager(remote.ngrokTokens);
       modal.classList.remove("open");
       delete modal.dataset.tokenId;
@@ -2546,7 +2546,8 @@
         $("ngrok-token-value").value = "";
         $("ngrok-token-name").value = "";
         renderRemoteModal(data);
-        renderNgrokManager(data.tokens);
+        remote.ngrokTokens = data.tokens || remote.ngrokTokens;
+        renderNgrokManager(remote.ngrokTokens);
         toast("Токен добавлен");
       } catch (err) { toast(err.message || "Не удалось добавить токен"); }
     });
