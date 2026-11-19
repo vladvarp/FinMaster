@@ -3907,22 +3907,47 @@
           const nearest = edgesOf(cell).map(([a, b]) => {
             const dx = b.x - a.x, dy = b.y - a.y;
             const len2 = dx * dx + dy * dy || 1;
-            const t = Math.max(0, Math.min(1, ((cx - a.x) * dx + (cy - a.y) * dy) / len2));
-            const point = { x: a.x + dx * t, y: a.y + dy * t };
-            const distance = Math.hypot(cx - point.x, cy - point.y);
             const normal = { x: -dy / Math.sqrt(len2), y: dx / Math.sqrt(len2) };
-            return { point, distance, normal };
+            if (hole.shape === "circle") {
+              const t = Math.max(0, Math.min(1, ((cx - a.x) * dx + (cy - a.y) * dy) / len2));
+              const point = { x: a.x + dx * t, y: a.y + dy * t };
+              return { from: center, point, distance: Math.max(0, Math.hypot(cx - point.x, cy - point.y) - hole.d / 2), normal };
+            }
+            const rect = [
+              { x, y }, { x: x + hole.w, y },
+              { x: x + hole.w, y: y + hole.h }, { x, y: y + hole.h },
+            ];
+            const project = (p, c, d) => {
+              const vx = d.x - c.x, vy = d.y - c.y;
+              const t = Math.max(0, Math.min(1, ((p.x - c.x) * vx + (p.y - c.y) * vy) / (vx * vx + vy * vy || 1)));
+              return { x: c.x + vx * t, y: c.y + vy * t };
+            };
+            let best = null;
+            edgesOf(rect).forEach(([c, d]) => {
+              const pairs = [
+                { from: project(c, a, b), to: c },
+                { from: project(d, a, b), to: d },
+                { from: a, to: project(a, c, d) },
+                { from: b, to: project(b, c, d) },
+              ];
+              pairs.forEach((pair) => {
+                const distance = Math.hypot(pair.from.x - pair.to.x, pair.from.y - pair.to.y);
+                if (!best || distance < best.distance) best = { ...pair, distance };
+              });
+              if (segmentsCross(a, b, c, d)) best = { from: c, to: c, distance: 0 };
+            });
+            return { ...best, point: best.to, normal };
           }).sort((a, b) => a.distance - b.distance);
           const first = nearest[0];
           const second = nearest.find((item) => Math.abs(first.normal.x * item.normal.x + first.normal.y * item.normal.y) < 0.75) || nearest[1];
-          const line = (point, text) => {
-            const ax = sx(center.x), ay = sy(center.y), bx = sx(point.x), by = sy(point.y);
+          const line = (item, text) => {
+            const ax = sx(item.from.x), ay = sy(item.from.y), bx = sx(item.point.x), by = sy(item.point.y);
             return `<path d="M${ax.toFixed(1)} ${ay.toFixed(1)} L${bx.toFixed(1)} ${by.toFixed(1)}" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>` + callout((ax + bx) / 2, (ay + by) / 2, text, "#6d28d9");
           };
           const firstText = `A ${tileTipText(first.distance)}`;
           const secondText = second ? `B ${tileTipText(second.distance)}` : "";
           legendRows.push(`<span><b>${index + 1}.</b> ${firstText}${secondText ? ` · ${secondText}` : ""}</span>`);
-          return line(first.point, firstText) + (second ? line(second.point, secondText) : "");
+          return line(first, firstText) + (second ? line(second, secondText) : "");
         }).join("");
       }
       const clip = `<defs><clipPath id="tile-preview-clip"><path d="${pathOf(cell)}"/></clipPath></defs>`;
@@ -3941,7 +3966,7 @@
         tile: `Размер плитки: ${whole}`,
         cuts: `Размеры фрагментов: ${tileTipText(piece.w)} × ${tileTipText(piece.h)}`,
         holes: holeCount ? "Размеры отверстий: ширина, высота или диаметр" : "В выбранной плитке нет отверстий",
-        offsets: holeCount ? "Отступы центра выбранного отверстия до двух ближайших рёбер этой плитки" : "В выбранной плитке нет отверстий",
+        offsets: holeCount ? "Для круглых отверстий — от центра до рёбер плитки; для прямоугольных — от границ отверстия до рёбер плитки" : "В выбранной плитке нет отверстий",
       }[mode];
       note.textContent = `${name} · ${desc}${left && mode === "tile" ? ` · фрагмент ${tileTipText(piece.w)} × ${tileTipText(piece.h)}` : ""}`;
     }
