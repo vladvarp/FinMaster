@@ -2972,7 +2972,7 @@
     try { tileSectionOpen = window.localStorage.getItem("finmaster.tilePreview.sectionOpen") !== "false"; } catch { /* storage may be unavailable */ }
     return `${previewPanel}
     <details class="planner-block tile-types-block tile-section-collapse" ${tileSectionOpen ? "open" : ""}>
-      <summary class="planner-block-h"><span>Плитки</span><span class="tile-section-count">${node.tiles.length}</span></summary>
+      <summary class="planner-block-h"><span>Плитки</span><button type="button" class="planner-help" aria-label="Пояснение к разделу" title="Здесь настраиваются типы плитки: размеры, сдвиг рядов и ширина шва. Раздел можно свернуть целиком.">i</button></summary>
       <div class="tile-section-content">
         <div class="tile-section-actions"><button type="button" class="btn" data-tile-add>+ Плитка</button></div>
         ${types || `<div class="calc-empty">Добавьте тип плитки</div>`}
@@ -3216,8 +3216,8 @@
       }
       let button = wrap.querySelector(':scope > .planner-help');
       if (!button) { button = document.createElement('button'); button.type = 'button'; button.className = 'planner-help'; button.textContent = 'i'; button.setAttribute('aria-label', 'Пояснение к разделу'); wrap.appendChild(button); }
-      button.dataset.help = [...new Set(texts)].join(String.fromCharCode(10));
-      button.removeAttribute('title');
+      button.title = [...new Set(texts)].join(String.fromCharCode(10));
+      button.removeAttribute('data-help');
     });
   }
 
