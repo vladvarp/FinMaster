@@ -3193,6 +3193,7 @@
   function markSideHelpify(side) {
     if (!side) return;
     side.querySelectorAll(".planner-lead").forEach((lead) => {
+      if (lead.hasAttribute("data-tile-need")) return;
       const block = lead.closest(".planner-block");
       const head = block?.querySelector(".planner-block-h");
       if (!head) return;
