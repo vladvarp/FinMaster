@@ -710,7 +710,11 @@
     if (data.via) remote.via = data.via;
     if (typeof data.ngrok === "boolean") remote.ngrok = data.ngrok;
     if (typeof data.ngrok_ready === "boolean") remote.ngrokReady = data.ngrok_ready;
-    if (Array.isArray(data.ngrok_tokens)) remote.ngrokTokens = data.ngrok_tokens;
+    if (Array.isArray(data.ngrok_tokens)) {
+      const managerOpen = $("ngrok-manager-modal")?.classList.contains("open");
+      const hasUsage = data.ngrok_tokens.some((item) => item && item.monthly_stats && item.limits);
+      if (!managerOpen || hasUsage) remote.ngrokTokens = data.ngrok_tokens;
+    }
     if ("ngrok_active_id" in data) remote.ngrokActiveId = data.ngrok_active_id || "";
     if ("ngrok_active_label" in data) remote.ngrokActiveLabel = data.ngrok_active_label || "";
     if (typeof data.ngrok_installed === "boolean") remote.ngrokInstalled = data.ngrok_installed;
