@@ -3144,3 +3144,16 @@ html[data-theme="dark"] .calc-order.is-used small { color: #5eead4; }
 .tile-section-count { margin-left: auto; color: var(--muted); font-weight: 500; }
 .tile-section-content { display: flex; flex-direction: column; gap: 7px; margin-top: 8px; min-width: 0; }
 .tile-section-actions { display: flex; justify-content: flex-end; }
+
+
+/* Сохраняем исходную типографику заголовка «Плитки» после переноса его в summary. */
+.tile-section-collapse > .planner-block-h,
+.tile-section-collapse > summary.planner-block-h { font-size: 13px; font-weight: 800; color: var(--text); }
+.tile-section-collapse > .planner-block-h > span,
+.tile-section-collapse > summary.planner-block-h > span { color: inherit; font-size: inherit; font-weight: inherit; }
+.tile-section-collapse > summary.planner-block-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; list-style: none; }
+.tile-section-collapse > summary.planner-block-h::-webkit-details-marker { display: none; }
+.tile-section-collapse > summary.planner-block-h::before { content: "▸"; margin-right: 0; color: var(--muted); font-size: 12px; }
+.tile-section-collapse[open] > summary.planner-block-h::before { transform: rotate(90deg); }
+.tile-section-collapse .tile-section-count { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: 500; }
+#mark-side .tile-preview-panel:not([hidden]) { display: flex !important; }
