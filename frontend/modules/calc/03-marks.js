@@ -3943,29 +3943,33 @@
             const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
             return { x: a.x + dx * t, y: a.y + dy * t };
           };
-          const nearest = cellEdges.map(([a, b]) => {
-            const dx = b.x - a.x, dy = b.y - a.y;
-            const len = Math.hypot(dx, dy) || 1;
-            const normal = { x: -dy / len, y: dx / len };
-            let best = null;
-            visibleHoleEdges.forEach(([c, d]) => {
-              if (segmentsCross(a, b, c, d)) {
-                best = { from: c, point: c, distance: 0 };
-                return;
-              }
-              const pairs = [
-                { from: project(c, a, b), point: c },
-                { from: project(d, a, b), point: d },
-                { from: a, point: project(a, c, d) },
-                { from: b, point: project(b, c, d) },
-              ];
-              pairs.forEach((pair) => {
-                const distance = Math.hypot(pair.from.x - pair.point.x, pair.from.y - pair.point.y);
-                if (!best || distance < best.distance) best = { ...pair, distance };
+          // Отступ считаем отдельно для каждого оставшегося фрагмента.
+          // Для П-/Г-образного остатка общий контур исходной плитки не является
+          // противоположным ребром фрагмента.
+          const nearest = [];
+          fragments.forEach((fragment) => {
+            edgesOf(fragment).forEach(([a, b]) => {
+              const dx = b.x - a.x, dy = b.y - a.y;
+              const len = Math.hypot(dx, dy) || 1;
+              const normal = { x: -dy / len, y: dx / len };
+              visibleHoleEdges.forEach(([c, d]) => {
+                const hx = d.x - c.x, hy = d.y - c.y;
+                const hlen = Math.hypot(hx, hy) || 1;
+                // Сравниваем только параллельные рёбра с общей проекцией.
+                if (Math.abs((dx * hy - dy * hx) / (len * hlen)) > 0.02) return;
+                const ux = dx / len, uy = dy / len;
+                const a0 = a.x * ux + a.y * uy, a1 = b.x * ux + b.y * uy;
+                const c0 = c.x * ux + c.y * uy, c1 = d.x * ux + d.y * uy;
+                if (Math.min(Math.max(a0, a1), Math.max(c0, c1)) -
+                    Math.max(Math.min(a0, a1), Math.min(c0, c1)) < 0.002) return;
+                const holeMid = { x: (c.x + d.x) / 2, y: (c.y + d.y) / 2 };
+                const fragmentPoint = project(holeMid, a, b);
+                const distance = Math.hypot(fragmentPoint.x - holeMid.x, fragmentPoint.y - holeMid.y);
+                if (distance > 0.002) nearest.push({ from: fragmentPoint, point: holeMid, distance, normal });
               });
             });
-            return best ? { ...best, normal } : null;
-          }).filter(Boolean).sort((a, b) => a.distance - b.distance);
+          });
+          nearest.sort((a, b) => b.distance - a.distance);
           if (!nearest.length) return "";
           const first = nearest[0];
           const second = nearest.find((item) => Math.abs(first.normal.x * item.normal.x + first.normal.y * item.normal.y) < 0.75);
