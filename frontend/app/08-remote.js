@@ -2016,7 +2016,7 @@
       try {
         const data = await apiGet("/api/remote/ngrok/tokens");
         remote.ngrokTokens = data.tokens || remote.ngrokTokens;
-        renderNgrokManager(remote.ngrokTokens);
+        if (managerOpen) renderNgrokManager(remote.ngrokTokens);
         renderRemoteNgrokUsage();
       } catch {
         /* Следующая проверка повторит запрос. */
@@ -2028,7 +2028,7 @@
 
   function closeNgrokManager() {
     $("ngrok-manager-modal")?.classList.remove("open");
-    stopNgrokUsageWatch();
+    if (!$("remote-modal")?.classList.contains("open")) stopNgrokUsageWatch();
   }
 
   async function openNgrokManager() {
