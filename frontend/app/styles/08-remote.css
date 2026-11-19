@@ -1094,3 +1094,10 @@ html.fm-pc-locked .palette {
     flex-direction: column;
   }
 }
+
+.ngrok-usage-note {
+  margin: -7px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
