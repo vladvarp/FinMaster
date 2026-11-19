@@ -3947,7 +3947,7 @@
           // Для П-/Г-образного остатка общий контур исходной плитки не является
           // противоположным ребром фрагмента.
           const nearest = [];
-          fragments.forEach((fragment) => {
+          fragments.forEach((fragment, fragmentIndex) => {
             edgesOf(fragment).forEach(([a, b]) => {
               const dx = b.x - a.x, dy = b.y - a.y;
               const len = Math.hypot(dx, dy) || 1;
@@ -3965,22 +3965,32 @@
                 const holeMid = { x: (c.x + d.x) / 2, y: (c.y + d.y) / 2 };
                 const fragmentPoint = project(holeMid, a, b);
                 const distance = Math.hypot(fragmentPoint.x - holeMid.x, fragmentPoint.y - holeMid.y);
-                if (distance > 0.002) nearest.push({ from: fragmentPoint, point: holeMid, distance, normal });
+                if (distance > 0.002) nearest.push({ from: fragmentPoint, point: holeMid, distance, normal, fragmentIndex });
               });
             });
           });
-          nearest.sort((a, b) => b.distance - a.distance);
           if (!nearest.length) return "";
-          const first = nearest[0];
-          const second = nearest.find((item) => Math.abs(first.normal.x * item.normal.x + first.normal.y * item.normal.y) < 0.75);
           const line = (item, text) => {
             const ax = sx(item.from.x), ay = sy(item.from.y), bx = sx(item.point.x), by = sy(item.point.y);
             return `<path d="M${ax.toFixed(1)} ${ay.toFixed(1)} L${bx.toFixed(1)} ${by.toFixed(1)}" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>` + callout((ax + bx) / 2, (ay + by) / 2, text, "#6d28d9");
           };
-          const firstText = `A ${tileTipText(first.distance)}`;
-          const secondText = second ? `B ${tileTipText(second.distance)}` : "";
-          legendRows.push(`<span><b>${index + 1}.</b> ${firstText}${secondText ? ` · ${secondText}` : ""}</span>`);
-          return line(first, firstText) + (second ? line(second, secondText) : "");
+          const fragmentRows = [];
+          const fragmentLines = [];
+          fragments.forEach((_, fragmentIndex) => {
+            const candidates = nearest.filter((item) => item.fragmentIndex === fragmentIndex)
+              .sort((a, b) => b.distance - a.distance);
+            if (!candidates.length) return;
+            const first = candidates[0];
+            const second = candidates.find((item) => Math.abs(first.normal.x * item.normal.x + first.normal.y * item.normal.y) < 0.75);
+            const prefix = fragments.length > 1 ? `Ф${fragmentIndex + 1} ` : "";
+            const firstText = `${prefix}A ${tileTipText(first.distance)}`;
+            const secondText = second ? `${prefix}B ${tileTipText(second.distance)}` : "";
+            fragmentRows.push(`${firstText}${secondText ? ` · ${secondText}` : ""}`);
+            fragmentLines.push(line(first, firstText));
+            if (second) fragmentLines.push(line(second, secondText));
+          });
+          if (fragmentRows.length) legendRows.push(`<span><b>${index + 1}.</b> ${fragmentRows.join(" · ")}</span>`);
+          return fragmentLines.join("");
         }).join("");
       }
       const clip = `<defs><clipPath id="tile-preview-clip"><path d="${pathOf(cell)}"/></clipPath></defs>`;
