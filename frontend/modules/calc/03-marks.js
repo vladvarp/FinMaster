@@ -3734,9 +3734,23 @@
       const faceInfo = tileFaceOf(ctx.base, session.mark?.surface || "floor");
       const surface = faceInfo?.surface || "floor";
       const wallId = faceInfo?.wall?.id || session.mark?.view?.wall?.id || "";
-      const holes = (ctx.base.openings || []).filter((hole) =>
-        hole.surface === surface && (surface !== "wall" || hole.wallId === wallId)
-      );
+      const cellBounds = {
+        left: Math.min(...cell.map((pt) => pt.x)),
+        right: Math.max(...cell.map((pt) => pt.x)),
+        bottom: Math.min(...cell.map((pt) => pt.y)),
+        top: Math.max(...cell.map((pt) => pt.y)),
+      };
+      const holes = (ctx.base.openings || []).filter((hole) => {
+        if (hole.surface !== surface || (surface === "wall" && hole.wallId !== wallId)) return false;
+        const x = surface === "wall" ? hole.along : hole.x;
+        const y = surface === "wall" ? hole.rise : hole.y;
+        const radius = hole.shape === "circle" ? hole.d / 2 : 0;
+        const left = hole.shape === "circle" ? x - radius : x;
+        const right = hole.shape === "circle" ? x + radius : x + hole.w;
+        const bottom = hole.shape === "circle" ? y - radius : y;
+        const top = hole.shape === "circle" ? y + radius : y + hole.h;
+        return right >= cellBounds.left && left <= cellBounds.right && top >= cellBounds.bottom && bottom <= cellBounds.top;
+      });
       const holeShapes = holes.map((hole) => {
         const x = surface === "wall" ? hole.along : hole.x;
         const y = surface === "wall" ? hole.rise : hole.y;
@@ -3806,11 +3820,11 @@
   function tilePaint(g, view, ctx) {
     if (session.mark) session.mark.tilePieces = [];
     const face = tileFaceOf(ctx.base, session.mark?.surface || "floor");
-    if (!face || !ctx.feed) return;
+    if (!face || !ctx.feed) { tileTipShow(null, ctx); return; }
     const preview = tilePreview(ctx.node, ctx.base, ctx.feed, face);
     const need = $("mark-side")?.querySelector("[data-tile-need]");
     if (need) need.textContent = `Купить: ${preview?.count || 0} шт. Разрезать: ${preview?.cuts || 0} шт.`;
-    if (!preview?.tile || !preview.geom) return;
+    if (!preview?.tile || !preview.geom) { tileTipShow(null, ctx); return; }
     const spot = (p) => (view.kind === "wall" ? view.toAlong(p.x, p.y) : view.view.to(p));
     const trace = (poly) => {
       g.beginPath();
