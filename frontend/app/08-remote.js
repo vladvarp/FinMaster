@@ -2116,7 +2116,7 @@
   async function saveNgrokUsageLimits() {
     const requests = Number($("ngrok-usage-requests-limit")?.value);
     const trafficGb = Number($("ngrok-usage-traffic-limit")?.value);
-    if (!ngrokUsageTokenId || !Number.isSafeInteger(requests) || requests < 1 || !Number.isFinite(trafficGb) || trafficGb <= 0 || trafficGb > 1000000) {
+    if (!ngrokUsageTokenId || !Number.isSafeInteger(requests) || requests < 1 || !Number.isFinite(trafficGb) || trafficGb <= 0 || trafficGb > 1000) {
       toast("Проверьте значения лимитов");
       return;
     }
