@@ -161,7 +161,7 @@ def _clean_ngrok_stats(raw: Any) -> dict[str, dict[str, int]]:
         return {}
     result = {}
     for month, values in raw.items():
-        if not re.fullmatch(r"\\d{4}-(0[1-9]|1[0-2])", str(month)) or not isinstance(values, dict):
+        if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", str(month)) or not isinstance(values, dict):
             continue
         try:
             requests_count = max(0, int(values.get("requests") or 0))
