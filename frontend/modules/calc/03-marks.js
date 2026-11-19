@@ -3784,9 +3784,17 @@
       };
       const segmentsCross = (a, b, c, d) => {
         const cross = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+        const onSegment = (p, q, r) =>
+          q.x >= Math.min(p.x, r.x) - 1e-8 && q.x <= Math.max(p.x, r.x) + 1e-8 &&
+          q.y >= Math.min(p.y, r.y) - 1e-8 && q.y <= Math.max(p.y, r.y) + 1e-8;
         const ab1 = cross(a, b, c), ab2 = cross(a, b, d);
         const cd1 = cross(c, d, a), cd2 = cross(c, d, b);
-        return ab1 * ab2 <= 1e-10 && cd1 * cd2 <= 1e-10;
+        if (((ab1 > 1e-8 && ab2 < -1e-8) || (ab1 < -1e-8 && ab2 > 1e-8)) &&
+            ((cd1 > 1e-8 && cd2 < -1e-8) || (cd1 < -1e-8 && cd2 > 1e-8))) return true;
+        return (Math.abs(ab1) <= 1e-8 && onSegment(a, c, b)) ||
+          (Math.abs(ab2) <= 1e-8 && onSegment(a, d, b)) ||
+          (Math.abs(cd1) <= 1e-8 && onSegment(c, a, d)) ||
+          (Math.abs(cd2) <= 1e-8 && onSegment(c, b, d));
       };
       const openingHitsCell = (hole) => {
         const x = surface === "wall" ? hole.along : hole.x;
