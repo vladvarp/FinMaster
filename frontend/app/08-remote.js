@@ -20,6 +20,8 @@
     ngrokTokens: [],
     ngrokActiveId: "",
     ngrokActiveLabel: "",
+    ngrokUsageTimer: 0,
+    ngrokUsagePolling: false,
   };
 
   const NET_KIND = {
@@ -1982,8 +1984,36 @@
     }
   }
 
+  function stopNgrokUsageWatch() {
+    if (remote.ngrokUsageTimer) clearInterval(remote.ngrokUsageTimer);
+    remote.ngrokUsageTimer = 0;
+    remote.ngrokUsagePolling = false;
+  }
+
+  function startNgrokUsageWatch() {
+    if (remote.ngrokUsageTimer) return;
+    remote.ngrokUsageTimer = setInterval(async () => {
+      if (!$("ngrok-manager-modal")?.classList.contains("open")) {
+        stopNgrokUsageWatch();
+        return;
+      }
+      if (remote.ngrokUsagePolling) return;
+      remote.ngrokUsagePolling = true;
+      try {
+        const data = await apiGet("/api/remote/ngrok/tokens");
+        remote.ngrokTokens = data.tokens || remote.ngrokTokens;
+        renderNgrokManager(remote.ngrokTokens);
+      } catch {
+        /* Следующая проверка повторит запрос. */
+      } finally {
+        remote.ngrokUsagePolling = false;
+      }
+    }, 5000);
+  }
+
   function closeNgrokManager() {
     $("ngrok-manager-modal")?.classList.remove("open");
+    stopNgrokUsageWatch();
   }
 
   async function openNgrokManager() {
@@ -1992,6 +2022,7 @@
       remote.ngrokTokens = data.tokens || [];
       renderNgrokManager(remote.ngrokTokens);
       $("ngrok-manager-modal")?.classList.add("open");
+      startNgrokUsageWatch();
     } catch (err) {
       toast(err.message || "Не удалось загрузить токены");
     }
