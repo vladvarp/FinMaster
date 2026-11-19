@@ -3786,6 +3786,36 @@
         bottom: Math.min(...cell.map((pt) => pt.y)),
         top: Math.max(...cell.map((pt) => pt.y)),
       };
+      const clipToCell = (subject) => {
+        const signedArea = cell.reduce((sum, point, index) => {
+          const next = cell[(index + 1) % cell.length];
+          return sum + point.x * next.y - next.x * point.y;
+        }, 0);
+        const direction = signedArea >= 0 ? 1 : -1;
+        let output = subject;
+        cellEdges.forEach(([a, b]) => {
+          const input = output;
+          output = [];
+          if (!input.length) return;
+          const side = (point) => direction * ((b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x));
+          let start = input[input.length - 1];
+          input.forEach((end) => {
+            const startSide = side(start), endSide = side(end);
+            const startInside = startSide >= -1e-8, endInside = endSide >= -1e-8;
+            if (startInside !== endInside) {
+              const t = startSide / (startSide - endSide);
+              output.push({ x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t });
+            }
+            if (endInside) output.push(end);
+            start = end;
+          });
+        });
+        return output;
+      };
+      const polygonArea = (poly) => Math.abs(poly.reduce((sum, point, index) => {
+        const next = poly[(index + 1) % poly.length];
+        return sum + point.x * next.y - next.x * point.y;
+      }, 0) / 2);
       const pointSegmentDistance = (p, a, b) => {
         const dx = b.x - a.x, dy = b.y - a.y;
         const len2 = dx * dx + dy * dy || 1;
@@ -3818,10 +3848,7 @@
           { x, y }, { x: x + hole.w, y },
           { x: x + hole.w, y: y + hole.h }, { x, y: y + hole.h },
         ];
-        if (rect.some((pt) => polyHit(cell, pt.x, pt.y))) return true;
-        if (cell.some((pt) => pt.x >= x - 1e-7 && pt.x <= x + hole.w + 1e-7 && pt.y >= y - 1e-7 && pt.y <= y + hole.h + 1e-7)) return true;
-        const rectEdges = edgesOf(rect);
-        return cellEdges.some(([a, b]) => rectEdges.some(([c, d]) => segmentsCross(a, b, c, d)));
+        return polygonArea(clipToCell(rect)) > 1e-8;
       };
       const holes = (ctx.base.openings || []).filter((hole) =>
         hole.surface === surface && (surface !== "wall" || hole.wallId === wallId) && openingHitsCell(hole)
@@ -3846,10 +3873,15 @@
             const cx = sx(x), cy = sy(y);
             return callout(cx, cy, `Ø ${tileTipText(hole.d)}`, "#b91c1c");
           }
-          const partLeft = Math.max(x, cellBounds.left);
-          const partRight = Math.min(x + hole.w, cellBounds.right);
-          const partBottom = Math.max(y, cellBounds.bottom);
-          const partTop = Math.min(y + hole.h, cellBounds.top);
+          const clippedPart = clipToCell([
+            { x, y }, { x: x + hole.w, y },
+            { x: x + hole.w, y: y + hole.h }, { x, y: y + hole.h },
+          ]);
+          if (clippedPart.length < 3 || polygonArea(clippedPart) < 1e-8) return "";
+          const partLeft = Math.min(...clippedPart.map((point) => point.x));
+          const partRight = Math.max(...clippedPart.map((point) => point.x));
+          const partBottom = Math.min(...clippedPart.map((point) => point.y));
+          const partTop = Math.max(...clippedPart.map((point) => point.y));
           const partW = Math.max(0, partRight - partLeft);
           const partH = Math.max(0, partTop - partBottom);
           if (partW < 0.005 || partH < 0.005) return "";
