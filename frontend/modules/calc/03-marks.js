@@ -383,9 +383,10 @@
     }).join("");
     const add = commonOutCount(node) >= COMMON_OUT_MAX ? "" : `<button type="button" class="btn" data-common-add>+ Выход</button>`;
     const line = (node.commons || []).filter((row) => row.kind === "sep").length >= COMMON_SEP_MAX ? "" : `<button type="button" class="btn" data-common-line>+ Линия</button>`;
-    return `<div class="planner-block"><div class="planner-block-h">Общий вывод ${add}${line}</div>
+    return `<div class="planner-block"><div class="planner-block-h">Общий вывод</div>
       <p class="planner-lead">Слева числа чертежей. В конце блок «Выходы» — значения карточек, он пересчитывается вместе с ними. Нажмите число — оно встанет в выбранный выход. Клик по знаку между числами меняет действие по кругу. Сначала умножение и деление, потом сложение и вычитание. Числа внутри карточки тянутся за точки. Карточки тоже. «Линия» ставит разделитель между выходами.</p>
       ${cards || `<div class="calc-empty">Выходов пока нет</div>`}
+      ${add || line ? `<div class="tile-section-actions">${add}${line}</div>` : ""}
     </div>`;
   }
 
@@ -2930,8 +2931,8 @@
     <details class="planner-block tile-types-block tile-section-collapse" ${tileSectionOpen ? "open" : ""}>
       <summary class="planner-block-h"><span>Плитки</span><button type="button" class="planner-help" aria-label="Пояснение к разделу" title="Здесь настраиваются типы плитки: размеры, сдвиг рядов и ширина шва. Раздел можно свернуть целиком.">i</button></summary>
       <div class="tile-section-content">
-        <div class="tile-section-actions"><button type="button" class="btn" data-tile-add>+ Плитка</button></div>
         ${types || `<div class="calc-empty">Добавьте тип плитки</div>`}
+        <div class="tile-section-actions"><button type="button" class="btn" data-tile-add>+ Плитка</button></div>
       </div>
     </details>
     <div class="planner-block"><div class="planner-block-h">${esc(face.name)}</div>
