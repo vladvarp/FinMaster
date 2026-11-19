@@ -369,6 +369,13 @@ def _net_peer() -> str:
 
 
 @app.before_request
+def capture_ngrok_usage_profile():
+    if _is_tunneled():
+        active = next((item for item in secrets.ngrok_token_list() if item.get("active")), None)
+        g.ngrok_usage_token_id = str(active.get("id") or "") if active else ""
+
+
+@app.before_request
 def guard_remote_clients():
     """Чужой адрес видит телефон и интерфейс компьютера только с токеном сессии."""
     path = request.path
@@ -487,6 +494,16 @@ def log_ngrok_bridge(response):
         _ngrok_exchange(response)
     except Exception:
         pass
+    token_id = str(getattr(g, "ngrok_usage_token_id", "") or "")
+    if token_id:
+        try:
+            request_bytes = max(0, int(request.content_length or 0))
+            response_bytes = response.calculate_content_length()
+            if response_bytes is None:
+                response_bytes = int(response.headers.get("Content-Length") or 0)
+            secrets.add_ngrok_usage(token_id, request_bytes + max(0, int(response_bytes or 0)))
+        except Exception:
+            pass
     return response
 
 
@@ -1061,7 +1078,7 @@ def _remote_public(ip: str | None = None, via: str | None = None) -> dict[str, A
         "clients": REMOTE.clients(),
         "ngrok": bool(settings.get("ngrok")),
         "ngrok_ready": bool(settings.get("ngrok_token")),
-        "ngrok_tokens": secrets.ngrok_token_list(),
+        "ngrok_tokens": secrets.ngrok_token_list(include_usage=True),
         "ngrok_active_id": next((item["id"] for item in secrets.ngrok_token_list() if item.get("active")), ""),
         "ngrok_active_label": next(((item.get("name") + " (" + item.get("prefix") + ")") if item.get("name") else item.get("prefix") for item in secrets.ngrok_token_list() if item.get("active")), ""),
         "telegram_ready": bool(settings.get("telegram_bot_token")),
@@ -2404,7 +2421,7 @@ def api_remote_ngrok():
 def api_remote_ngrok_tokens():
     if not _is_local() and not _desk_editor():
         return jsonify({"error": "Только в окне программы."}), 403
-    items = secrets.ngrok_token_list()
+    items = secrets.ngrok_token_list(include_usage=True)
     active = next((x for x in items if x.get("active")), None)
     return jsonify({"ok": True, "tokens": items, "active_id": active.get("id") if active else "",
                     "active_label": (active.get("name") or active.get("prefix")) if active else ""})
@@ -2418,6 +2435,20 @@ def api_remote_ngrok_tokens_update():
     action = str(data.get("action") or "")
     token_id = str(data.get("id") or "")
 
+    if action == "limits":
+        try:
+            usage = secrets.set_ngrok_limits(token_id, data.get("requests_limit"), data.get("traffic_limit"))
+            return jsonify({"ok": True, **usage, "tokens": secrets.ngrok_token_list(include_usage=True)})
+        except (ValueError, OSError) as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    if action == "clear_history":
+        try:
+            usage = secrets.clear_ngrok_history(token_id)
+            return jsonify({"ok": True, **usage, "tokens": secrets.ngrok_token_list(include_usage=True)})
+        except (ValueError, OSError) as exc:
+            return jsonify({"error": str(exc)}), 400
+
     if action == "select":
         try:
             payload = _select_ngrok_token(token_id)
@@ -2429,7 +2460,7 @@ def api_remote_ngrok_tokens_update():
         payload.update(
             {
                 "ok": True,
-                "tokens": secrets.ngrok_token_list(),
+                "tokens": secrets.ngrok_token_list(include_usage=True),
                 "ngrok_active_id": next(
                     (item["id"] for item in secrets.ngrok_token_list() if item.get("active")),
                     "",
@@ -2471,7 +2502,7 @@ def api_remote_ngrok_tokens_update():
     payload.update(
         {
             "ok": True,
-            "tokens": secrets.ngrok_token_list(),
+            "tokens": secrets.ngrok_token_list(include_usage=True),
             "ngrok_active_id": next(
                 (item["id"] for item in secrets.ngrok_token_list() if item.get("active")),
                 "",
