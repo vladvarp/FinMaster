@@ -1911,7 +1911,7 @@
     const title = $("token-pack-title");
     if (title) title.textContent = importing ? "Импорт токенов" : "Экспорт токенов";
     const lead = $("token-pack-lead");
-    if (lead) lead.textContent = importing ? "Совпадающие токены будут обновлены данными из файла. Перед импортом можно сохранить уникальные токены этого компьютера." : "Один файл .fmt. В него попадут все токены ngrok с названиями и активным выбором.";
+    if (lead) lead.textContent = importing ? "Совпадающие токены будут обновлены данными из файла, включая месячную статистику и лимиты. Перед импортом можно сохранить уникальные токены этого компьютера." : "Один файл .fmt. В него попадут токены ngrok, названия, активный выбор, месячная статистика и лимиты.";
     const warn = $("token-pack-warn");
     if (warn) warn.hidden = !importing;
     const go = $("token-pack-go");
