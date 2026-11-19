@@ -911,3 +911,186 @@ html.fm-pc-locked .palette {
 #ngrok-rename-modal .ngrok-rename-card > .modal-actions {
   margin-top: 14px;
 }
+
+
+/* Компактная статистика профилей ngrok */
+#ngrok-manager-modal .ngrok-token-row {
+  display: block;
+  padding: 10px 2px 11px;
+  border-bottom: 1px solid var(--line);
+}
+#ngrok-manager-modal .ngrok-token-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+#ngrok-manager-modal .ngrok-token-main {
+  flex: 1 1 120px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+#ngrok-manager-modal .ngrok-token-actions {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+#ngrok-manager-modal .ngrok-info-btn {
+  width: 27px;
+  min-width: 27px;
+  height: 27px;
+  padding: 0;
+  border-radius: 50%;
+  font-weight: 700;
+}
+.ngrok-token-meters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 9px;
+}
+.ngrok-usage-meter {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.ngrok-usage-meter-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.25;
+}
+.ngrok-usage-meter-label span {
+  flex: 0 0 auto;
+}
+.ngrok-usage-meter-label b {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ngrok-usage-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line);
+}
+.ngrok-usage-track > span {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  transition: width .2s ease, background-color .2s ease;
+}
+#ngrok-usage-modal .ngrok-usage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(520px, calc(100vw - 28px));
+  max-height: min(82vh, 720px);
+  overflow: auto;
+}
+.ngrok-usage-heading,
+.ngrok-usage-history-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.ngrok-usage-heading h3,
+.ngrok-usage-history-heading h4,
+.ngrok-usage-limits h4 {
+  min-width: 0;
+  margin: 0;
+}
+.ngrok-usage-limits {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.ngrok-usage-limits h4,
+.ngrok-usage-limit-actions {
+  grid-column: 1 / -1;
+}
+.ngrok-usage-limits .field {
+  min-width: 0;
+  margin: 0;
+}
+.ngrok-usage-limits .field input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.ngrok-usage-limit-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.ngrok-usage-history-wrap {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+}
+.ngrok-usage-history-heading h4 {
+  font-size: 13px;
+}
+.ngrok-usage-history {
+  display: grid;
+  gap: 0;
+  max-height: 280px;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+}
+.ngrok-usage-history-row {
+  display: grid;
+  grid-template-columns: minmax(74px, .7fr) minmax(0, 1.3fr) minmax(70px, .8fr);
+  align-items: center;
+  gap: 8px;
+  padding: 9px 3px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ngrok-usage-history-row b {
+  white-space: nowrap;
+}
+.ngrok-usage-history-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+.ngrok-usage-empty {
+  padding: 18px 6px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+@media (max-width: 560px) {
+  .ngrok-token-meters {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+  }
+  #ngrok-manager-modal .ngrok-token-head {
+    align-items: flex-start;
+  }
+  #ngrok-manager-modal .ngrok-token-actions {
+    max-width: 62%;
+  }
+  .ngrok-usage-history-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
