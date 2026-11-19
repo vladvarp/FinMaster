@@ -175,17 +175,18 @@ def _clean_ngrok_stats(raw: Any) -> dict[str, dict[str, int]]:
 def add_ngrok_usage(token_id: str, traffic_bytes: int = 0) -> None:
     if not token_id:
         return
-    data = load()
-    item = next((x for x in data.get("ngrok_tokens") or [] if x.get("id") == token_id), None)
-    if not item:
-        return
-    month = datetime.now().astimezone().strftime("%Y-%m")
-    stats = _clean_ngrok_stats(item.get("monthly_stats"))
-    current = stats.setdefault(month, {"requests": 0, "traffic_bytes": 0})
-    current["requests"] += 1
-    current["traffic_bytes"] += max(0, int(traffic_bytes or 0))
-    item["monthly_stats"] = stats
-    save(data)
+    with _LOCK:
+        data = load()
+        item = next((x for x in data.get("ngrok_tokens") or [] if x.get("id") == token_id), None)
+        if not item:
+            return
+        month = datetime.now().astimezone().strftime("%Y-%m")
+        stats = _clean_ngrok_stats(item.get("monthly_stats"))
+        current = stats.setdefault(month, {"requests": 0, "traffic_bytes": 0})
+        current["requests"] += 1
+        current["traffic_bytes"] += max(0, int(traffic_bytes or 0))
+        item["monthly_stats"] = stats
+        save(data)
 
 
 def set_ngrok_limits(token_id: str, requests_limit: Any, traffic_limit: Any) -> dict[str, Any]:
