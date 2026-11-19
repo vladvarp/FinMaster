@@ -1231,27 +1231,30 @@
 
   function plannerSideHelpify(side) {
     if (!side) return;
-    side.querySelectorAll(".planner-lead").forEach((lead) => {
-      const block = lead.closest(".planner-block");
-      const head = block?.querySelector(".planner-block-h");
-      if (!head) return;
-      const text = String(lead.textContent || "").trim();
-      if (!text) { lead.remove(); return; }
-      let button = head.querySelector(":scope > .planner-help");
-      if (!button) {
-        button = document.createElement("button");
-        button.type = "button";
-        button.className = "planner-help";
-        button.textContent = "i";
-        button.setAttribute("aria-label", "Пояснение к разделу");
-        const titleNode = [...head.childNodes].find((item) => item.nodeType === Node.TEXT_NODE && String(item.textContent || "").trim());
-        if (titleNode) head.insertBefore(button, titleNode.nextSibling);
-        else head.appendChild(button);
-      }
-      const previous = button.dataset.help || "";
-      button.dataset.help = previous ? `${previous}\n${text}` : text;
-      button.title = button.dataset.help;
+    const groups = new Map();
+    side.querySelectorAll('.planner-lead').forEach((lead) => {
+      if (false) return;
+      const block = lead.closest('.planner-block');
+      if (!block) return;
+      let head = block.querySelector(':scope > .planner-block-h');
+      if (!head) { head = document.createElement('div'); head.className = 'planner-block-h'; head.textContent = 'Пояснение'; block.insertBefore(head, block.firstChild); }
+      const value = String(lead.textContent || '').trim();
+      if (value) { if (!groups.has(head)) groups.set(head, []); groups.get(head).push(value); }
       lead.remove();
+    });
+    groups.forEach((texts, head) => {
+      let wrap = head.querySelector(':scope > .planner-block-title-wrap');
+      if (!wrap) {
+        wrap = document.createElement('span'); wrap.className = 'planner-block-title-wrap';
+        const node = [...head.childNodes].find((item) => item.nodeType === Node.TEXT_NODE && String(item.textContent || '').trim());
+        if (node) { const title = document.createElement('span'); title.className = 'planner-block-title'; title.textContent = node.textContent.trim(); head.replaceChild(title, node); wrap.appendChild(title); }
+        else { const title = [...head.children].find((item) => !item.matches('button,.planner-help')); if (title) wrap.appendChild(title); }
+        head.insertBefore(wrap, head.firstChild);
+      }
+      let button = wrap.querySelector(':scope > .planner-help');
+      if (!button) { button = document.createElement('button'); button.type = 'button'; button.className = 'planner-help'; button.textContent = 'i'; button.setAttribute('aria-label', 'Пояснение к разделу'); wrap.appendChild(button); }
+      button.dataset.help = [...new Set(texts)].join(String.fromCharCode(10));
+      button.removeAttribute('title');
     });
   }
 
@@ -1269,6 +1272,7 @@
       const stage = $("planner-common");
       if (stage) stage.hidden = false;
       paintCommon("planner", node, bp, bp ? computeGraph(bp).values : {});
+      plannerSideHelpify(side);
       return;
     }
     const stage = $("planner-common");
