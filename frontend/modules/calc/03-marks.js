@@ -3813,9 +3813,13 @@
         ];
         return polygonArea(clipToCell(rect)) > 1e-8;
       };
-      const holes = (ctx.base.openings || []).filter((hole) =>
-        hole.surface === surface && (surface !== "wall" || hole.wallId === wallId) && openingHitsCell(hole)
-      );
+      const holes = (ctx.base.openings || []).filter((hole) => {
+        if (hole.surface !== surface || (surface === "wall" && hole.wallId !== wallId) || !openingHitsCell(hole)) return false;
+        // Квадратные проёмы остаются в геометрии раскладки, но не выводятся
+        // в режимах размеров отверстий и отступов предпросмотра.
+        if (hole.shape !== "circle" && Math.abs((Number(hole.w) || 0) - (Number(hole.h) || 0)) <= 0.002) return false;
+        return true;
+      });
       holeCount = holes.length;
       const legend = tip.querySelector("[data-tile-preview-legend]");
       const legendRows = [];
