@@ -143,7 +143,7 @@ def ngrok_token_list(*, include_usage: bool = False) -> list[dict[str, Any]]:
     return result
 
 
-NGROK_DEFAULT_LIMITS = {"requests": 20000, "traffic_bytes": 1024 ** 3}
+NGROK_DEFAULT_LIMITS = {"requests": 20000, "traffic_bytes": 1_000_000_000}
 
 
 def _clean_ngrok_limits(raw: Any) -> dict[str, int]:
