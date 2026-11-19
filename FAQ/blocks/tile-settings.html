@@ -16,6 +16,9 @@
     .tile-guide-check { display:flex;align-items:center;gap:7px;margin-top:10px;color:var(--ink);font-size:11px; }
     .tile-guide-check input { accent-color:var(--accent); }
     .tile-preview-label { margin:0 0 8px;color:var(--muted);font-size:11px; }
+    .tile-preview-modes { display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px; }
+    .tile-preview-modes button { padding:5px 7px;border:1px solid var(--line);border-radius:7px;background:var(--bg-2);color:var(--ink);font:10px var(--sans); }
+    .tile-preview-modes button:first-child { border-color:var(--accent);background:var(--accent-soft); }
     .tile-preview-art { display:grid;place-items:center;min-height:190px;border-radius:9px;background:var(--bg-2); }
     .tile-preview-art svg { width:100%;max-width:290px;height:auto; }
     .tile-guide-note { margin:9px 0 0;color:var(--muted);font-size:10px;line-height:1.45; }
@@ -37,23 +40,30 @@
       <p class="tile-guide-note">Сдвиг накапливается по рядам в пределах заданного цикла. Флажок запрещает считать два подходящих обрезка одной целой плиткой.</p>
     </section>
     <section class="tile-guide-card">
-      <div class="tile-guide-title"><span>Предпросмотр обрезка</span><small>При наведении</small></div>
-      <p class="tile-preview-label">Пример Г-образной плитки после выреза проёма</p>
+      <div class="tile-guide-title"><span>Предпросмотр обрезка</span><small>После клика по плитке</small></div>
+      <p class="tile-preview-label">Выберите, какие размеры показывать</p>
+      <div class="tile-preview-modes"><button>Плитка</button><button>Фрагменты</button><button>Отверстия</button><button>Отступы</button></div>
+      <p class="tile-preview-label">Пример Г-образного фрагмента с отверстием</p>
       <div class="tile-preview-art">
-        <svg viewBox="0 0 280 190" role="img" aria-label="Г-образный обрезок плитки с размерами по граням">
-          <path d="M55 24H220V80H132V164H55Z" fill="#c9b99f" stroke="#8c7b63" stroke-width="2"/>
-          <path d="M55 24H220M220 24V80M132 80H220M132 80V164M55 164H132M55 24V164" fill="none" stroke="#6f6251" stroke-width="1.5"/>
-          <path d="M55 13H220M55 10V16M220 10V16" stroke="currentColor" stroke-width="1"/>
-          <text x="137" y="9" text-anchor="middle" fill="currentColor" font-size="10">60 см</text>
-          <path d="M43 24V164M40 24H46M40 164H46" stroke="currentColor" stroke-width="1"/>
-          <text x="31" y="96" text-anchor="middle" fill="currentColor" font-size="10" transform="rotate(-90 31 96)">50 см</text>
-          <path d="M232 24V80M229 24H235M229 80H235" stroke="currentColor" stroke-width="1"/>
-          <text x="244" y="54" fill="currentColor" font-size="10">20 см</text>
-          <path d="M132 175H220M132 172V178M220 172V178" stroke="currentColor" stroke-width="1"/>
-          <text x="176" y="188" text-anchor="middle" fill="currentColor" font-size="10">30 см</text>
+        <svg viewBox="0 0 280 190" role="img" aria-label="Прямоугольное отверстие пересекает границу двух плиток; на каждой показан размер своей части">
+          <rect x="35" y="34" width="105" height="112" fill="#c9b99f" stroke="#8c7b63" stroke-width="2"/>
+          <rect x="140" y="34" width="105" height="112" fill="#d5c5aa" stroke="#8c7b63" stroke-width="2"/>
+          <path d="M140 34V146" stroke="#6f6251" stroke-width="1.5" stroke-dasharray="4 3"/>
+          <rect x="112" y="78" width="56" height="34" fill="#dc2626" fill-opacity=".22" stroke="#b91c1c" stroke-width="2"/>
+          <path d="M112 69L112 52H72M168 69L168 52H208" fill="none" stroke="#b91c1c" stroke-width="1.2"/>
+          <rect x="39" y="39" width="69" height="20" rx="5" fill="#fff" stroke="#b91c1c"/>
+          <text x="73.5" y="53" text-anchor="middle" fill="#b91c1c" font-size="9" font-weight="700">28 × 34 см</text>
+          <rect x="172" y="39" width="69" height="20" rx="5" fill="#fff" stroke="#b91c1c"/>
+          <text x="206.5" y="53" text-anchor="middle" fill="#b91c1c" font-size="9" font-weight="700">28 × 34 см</text>
+          <circle cx="84" cy="127" r="7" fill="#dc2626" fill-opacity=".22" stroke="#b91c1c" stroke-width="1.5"/>
+          <path d="M84 120L84 103H47" fill="none" stroke="#b91c1c" stroke-width="1"/>
+          <text x="45" y="99" fill="#b91c1c" font-size="9" font-weight="700">Ø 8 см</text>
+          <text x="87" y="163" text-anchor="middle" fill="currentColor" font-size="10">Плитка 1</text>
+          <text x="192" y="163" text-anchor="middle" fill="currentColor" font-size="10">Плитка 2</text>
+          <text x="140" y="183" text-anchor="middle" fill="currentColor" font-size="9">Отверстие учитывается на обеих плитках</text>
         </svg>
       </div>
-      <p class="tile-guide-note">Подсказка показывает форму и размеры выбранного фрагмента. Внутри выреза не появляются лишние разделительные линии.</p>
+      <p class="tile-guide-note">Клик по плитке выделяет её и открывает предпросмотр справа. Отверстие отображается на каждой плитке, с которой пересекается его контур, даже если центр находится за её границей. Для прямоугольного отверстия указывается размер части, попавшей в выбранную плитку, а не общий размер проёма. Подписи размещаются выносными указателями с проверкой пересечений, чтобы не закрывать соседние отверстия и другие подписи. Полный список размеров под схемой остаётся доступен, даже если на самой схеме для подписи не хватает места. Переключатели показывают размер целой плитки, фрагментов, отверстий или для круглых отверстий — расстояния от центра, для прямоугольных проёмов — от видимого ребра отверстия до противоположного ребра фрагмента плитки. Квадратные проёмы не выводятся в режимах «Отверстия» и «Отступы». Выбранный режим сохраняется. Раздел «Плитки» сворачивается целиком вместе со списком типов плитки.</p>
     </section>
   </div>
   <script src="chrome.js"></script>

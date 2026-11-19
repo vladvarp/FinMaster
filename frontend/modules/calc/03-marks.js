@@ -383,9 +383,10 @@
     }).join("");
     const add = commonOutCount(node) >= COMMON_OUT_MAX ? "" : `<button type="button" class="btn" data-common-add>+ Выход</button>`;
     const line = (node.commons || []).filter((row) => row.kind === "sep").length >= COMMON_SEP_MAX ? "" : `<button type="button" class="btn" data-common-line>+ Линия</button>`;
-    return `<div class="planner-block"><div class="planner-block-h">Общий вывод ${add}${line}</div>
+    return `<div class="planner-block"><div class="planner-block-h">Общий вывод</div>
       <p class="planner-lead">Слева числа чертежей. В конце блок «Выходы» — значения карточек, он пересчитывается вместе с ними. Нажмите число — оно встанет в выбранный выход. Клик по знаку между числами меняет действие по кругу. Сначала умножение и деление, потом сложение и вычитание. Числа внутри карточки тянутся за точки. Карточки тоже. «Линия» ставит разделитель между выходами.</p>
       ${cards || `<div class="calc-empty">Выходов пока нет</div>`}
+      ${add || line ? `<div class="tile-section-actions">${add}${line}</div>` : ""}
     </div>`;
   }
 
@@ -1812,7 +1813,6 @@
     const halfW = width / 2;
     const halfH = height / 2;
     const fits = (a, b) => {
-      if (!a.cleanEdge || !b.cleanEdge || (a.parentId && a.parentId === b.parentId)) return false;
       const alongW = a.w + b.w <= width + tolW + 1e-9 && a.h <= height + tolH + 1e-9 && b.h <= height + tolH + 1e-9 && (a.w < halfW - 1e-9 || b.w < halfW - 1e-9);
       const alongH = a.h + b.h <= height + tolH + 1e-9 && a.w <= width + tolW + 1e-9 && b.w <= width + tolW + 1e-9 && (a.h < halfH - 1e-9 || b.h < halfH - 1e-9);
       return alongW || alongH;
@@ -1831,8 +1831,8 @@
       }
       if (best >= 0) {
         used[best] = true;
-        rest[i].pair = rest[best].parentId || rest[best].id;
-        rest[best].pair = rest[i].parentId || rest[i].id;
+        rest[i].pair = rest[best].id;
+        rest[best].pair = rest[i].id;
       }
       used[i] = true;
       count += 1;
@@ -1987,28 +1987,10 @@
           cuts: rects.map(toPoly),
           poly: toPoly(hit),
         };
-        const throughCut = holes.some((hole) => tileHoleSplitsCell(
-          [{ x: cell.x, y: cell.y }, { x: cell.x + cell.w, y: cell.y }, { x: cell.x + cell.w, y: cell.y + cell.h }, { x: cell.x, y: cell.y + cell.h }],
-          hole,
-        ));
-        // Внутреннее отверстие или вырез от одного края не делит плитку на заготовки.
-        // Геометрия реза нужна предпросмотру всегда, даже если вырез не делит плитку насквозь.
+        // Для расчёта пар используем саму плитку, как и до разделения
+        // предпросмотра на отдельные геометрические фрагменты.
         piece.cuts = rects.map(toPoly);
-        if (throughCut) {
-          rects.forEach((rect, index) => {
-            bag.pieces.push({
-              id: `${piece.id}:cut:${index}`,
-              parentId: piece.id,
-              w: rect.w,
-              h: rect.h,
-              full: false,
-              cleanEdge: tileHasFactoryEdge(toPoly(rect), toPoly(cell)),
-              pair: "",
-            });
-          });
-        } else {
-          bag.pieces.push({ id: piece.id, w: piece.w, h: piece.h, full, pair: "" });
-        }
+        bag.pieces.push(piece);
         if (bag.polys && bag.polys.length < 1400) bag.polys.push(piece);
         else bag.solid = true;
       }
@@ -2158,27 +2140,9 @@
       const full = area >= polyArea(cell) * 0.985 && span.w >= tile.w - 0.002 && span.h >= tile.h - 0.002;
       const piece = { id: `p${seq}`, w: span.w, h: span.h, full, pair: "", pattern: tile.pattern, tileW: tile.w, tileH: tile.h, cell, face: clipped, cuts: parts, poly: tile.gap > 0 ? tileInset(clipped, tile.gap) : clipped };
       seq += 1;
-      const throughCut = holes.some((hole) => tileHoleSplitsCell(cell, hole));
-      if (throughCut) {
-        // Только сквозной проём образует отдельные фрагменты для подбора пары.
-        parts.forEach((part, index) => {
-          const fragment = tileSpan(part, toLocal, tile);
-          if (fragment.w < 0.003 || fragment.h < 0.003) return;
-          bag.pieces.push({
-            id: `${piece.id}:cut:${index}`,
-            parentId: piece.id,
-            w: fragment.w,
-            h: fragment.h,
-            full: false,
-            cleanEdge: tileHasFactoryEdge(part, cell),
-            pair: "",
-          });
-        });
-      } else {
-        // Внутренние отверстия и краевые вырезы не дробят плитку в расчёте.
-        bag.pieces.push({ id: piece.id, w: span.w, h: span.h, full, pair: "" });
-      }
-      // Для предпросмотра всегда сохраняем реальный контур после выреза.
+      // Пара подбирается по исходной обрезанной плитке; список частей
+      // после выреза используется только для геометрии предпросмотра.
+      bag.pieces.push(piece);
       piece.cuts = parts;
       if (bag.polys && bag.polys.length < 1400) bag.polys.push(piece);
       else bag.solid = true;
@@ -2511,13 +2475,6 @@
     const geom = tileGeom(plan, face.surface, face.wall, lay);
     const bag = tileBag(tile, lay, geom, true);
     const packed = bag.rough != null ? { count: bag.rough, cuts: 0 } : tilePack(bag.pieces, tile.w, tile.h, lay.tolW, lay.tolH, !tile.noPairs);
-    if (bag.polys) {
-      const paired = new Map();
-      bag.pieces.forEach((part) => {
-        if (part.parentId && part.pair && !paired.has(part.parentId)) paired.set(part.parentId, part.pair);
-      });
-      bag.polys.forEach((piece) => { piece.pair = paired.get(piece.id) || ""; });
-    }
     return { tile, lay, geom, bag, count: packed.count, cuts: packed.cuts };
   }
 
@@ -2963,10 +2920,21 @@
       return `<label class="planner-part"><input type="checkbox" data-mark-out="${esc(id)}" ${markChecked(node, id, false) || linked ? "checked" : ""} ${linked ? "disabled" : ""} /> <span>${esc(tile.name)}</span> <em>${totals.buy} шт.</em></label>
         <label class="planner-part"><input type="checkbox" data-mark-out="${esc(cutId)}" ${markChecked(node, cutId, false) || cutLinked ? "checked" : ""} ${cutLinked ? "disabled" : ""} /> <span>${esc(tile.name)} · резка</span> <em>${totals.cuts} шт.</em></label>`;
     }).join("");
-    return `<div class="planner-block"><div class="planner-block-h">Плитки <button type="button" class="btn" data-tile-add>+ Плитка</button></div>
-      <p class="planner-lead">Ширина и высота — размер плитки, которую покупают. Два обрезка с краёв считаются одной, если вместе не больше плитки плюс запас. Две половинки не склеиваются: каждая уже не меньше половины.</p>
-      ${types}
-    </div>
+    const dimMode = tilePreviewDimMode();
+    const previewPanel = `<div id="mark-tile-tip" class="tile-preview-panel" hidden>
+      <div class="tile-preview-head"><strong>Предпросмотр плитки</strong><div class="tile-preview-modes">${TILE_PREVIEW_DIMS.map(([id, label]) => `<button type="button" class="btn ${dimMode === id ? "is-active" : ""}" data-tile-dim-mode="${id}" aria-pressed="${dimMode === id ? "true" : "false"}">${label}</button>`).join("")}</div></div>
+      <svg viewBox="0 0 200 160" aria-hidden="true"></svg><div class="tile-preview-legend" data-tile-preview-legend hidden></div><p></p>
+    </div>`;
+    let tileSectionOpen = true;
+    try { tileSectionOpen = window.localStorage.getItem("finmaster.tilePreview.sectionOpen") !== "false"; } catch { /* storage may be unavailable */ }
+    return `${previewPanel}
+    <details class="planner-block tile-types-block tile-section-collapse" ${tileSectionOpen ? "open" : ""}>
+      <summary class="planner-block-h"><span>Плитки</span><button type="button" class="planner-help" aria-label="Пояснение к разделу" title="Здесь настраиваются типы плитки: размеры, сдвиг рядов и ширина шва. Раздел можно свернуть целиком.">i</button></summary>
+      <div class="tile-section-content">
+        ${types || `<div class="calc-empty">Добавьте тип плитки</div>`}
+        <div class="tile-section-actions"><button type="button" class="btn" data-tile-add>+ Плитка</button></div>
+      </div>
+    </details>
     <div class="planner-block"><div class="planner-block-h">${esc(face.name)}</div>
       <div class="tile-face">
       <label class="planner-len"><span>Плитка на этой поверхности</span>${markSelect('data-tile-use="1"', "", useOpts, lay.tileId || "")}</label>
@@ -3181,6 +3149,35 @@
     menu.innerHTML = `${linked.map((feed) => `<button type="button" class="planner-layout-option ${!common && feed.id === session.mark?.feed ? "is-active" : ""}" role="menuitem" data-mark-feed-choice="${esc(feed.id)}">${esc(feedTitle(node, feed, bp))}</button>`).join("")}${linked.length ? `<div class="planner-layout-menu-sep"></div>` : ""}<button type="button" class="planner-layout-option ${common ? "is-active" : ""}" role="menuitem" data-mark-feed-choice="${COMMON_VIEW}">Общий вывод</button>`;
   }
 
+  function markSideHelpify(side) {
+    if (!side) return;
+    const groups = new Map();
+    side.querySelectorAll('.planner-lead').forEach((lead) => {
+      if (lead.hasAttribute("data-tile-need")) return;
+      const block = lead.closest('.planner-block');
+      if (!block) return;
+      let head = block.querySelector(':scope > .planner-block-h');
+      if (!head) { head = document.createElement('div'); head.className = 'planner-block-h'; head.textContent = 'Пояснение'; block.insertBefore(head, block.firstChild); }
+      const value = String(lead.textContent || '').trim();
+      if (value) { if (!groups.has(head)) groups.set(head, []); groups.get(head).push(value); }
+      lead.remove();
+    });
+    groups.forEach((texts, head) => {
+      let wrap = head.querySelector(':scope > .planner-block-title-wrap');
+      if (!wrap) {
+        wrap = document.createElement('span'); wrap.className = 'planner-block-title-wrap';
+        const node = [...head.childNodes].find((item) => item.nodeType === Node.TEXT_NODE && String(item.textContent || '').trim());
+        if (node) { const title = document.createElement('span'); title.className = 'planner-block-title'; title.textContent = node.textContent.trim(); head.replaceChild(title, node); wrap.appendChild(title); }
+        else { const title = [...head.children].find((item) => !item.matches('button,.planner-help')); if (title) wrap.appendChild(title); }
+        head.insertBefore(wrap, head.firstChild);
+      }
+      let button = wrap.querySelector(':scope > .planner-help');
+      if (!button) { button = document.createElement('button'); button.type = 'button'; button.className = 'planner-help'; button.textContent = 'i'; button.setAttribute('aria-label', 'Пояснение к разделу'); wrap.appendChild(button); }
+      button.title = [...new Set(texts)].join(String.fromCharCode(10));
+      button.removeAttribute('data-help');
+    });
+  }
+
   function markFill() {
     const ctx = markContext();
     const side = $("mark-side");
@@ -3199,6 +3196,7 @@
       const stage = $("mark-common");
       if (stage) stage.hidden = false;
       paintCommon("mark", ctx.node, ctx.bp, ctx.graph.values);
+      markSideHelpify(side);
       if (title && document.activeElement !== title) title.value = ctx.node.name || "";
       return;
     }
@@ -3206,6 +3204,11 @@
     if (stage) stage.hidden = true;
     const scroll = side.scrollTop;
     side.innerHTML = markSideHtml(ctx);
+    markSideHelpify(side);
+    const tileSection = side.querySelector(".tile-section-collapse");
+    tileSection?.addEventListener("toggle", () => {
+      try { window.localStorage.setItem("finmaster.tilePreview.sectionOpen", String(tileSection.open)); } catch { /* storage may be unavailable */ }
+    });
     side.scrollTop = scroll;
     if (title && document.activeElement !== title) title.value = ctx.node.name || "";
     const surface = session.mark?.surface || "floor";
@@ -3577,15 +3580,32 @@
     return { base: `#${byte(r)}${byte(gch)}${byte(b)}`, mid: `#${byte(mix(r))}${byte(mix(gch))}${byte(mix(b))}` };
   }
 
-  function tileTipHide() {
-    const tip = $("mark-tile-tip");
-    if (tip) tip.hidden = true;
+  const TILE_PREVIEW_DIM_KEY = "finmaster.tilePreview.dimMode";
+  const TILE_PREVIEW_DIMS = [
+    ["tile", "Плитка"],
+    ["cuts", "Фрагменты"],
+    ["holes", "Отверстия"],
+    ["offsets", "Отступы"],
+  ];
+
+  function tilePreviewDimMode() {
+    try {
+      const value = window.localStorage.getItem(TILE_PREVIEW_DIM_KEY);
+      return TILE_PREVIEW_DIMS.some(([id]) => id === value) ? value : "tile";
+    } catch {
+      return "tile";
+    }
   }
 
-  function tileTipShow(piece, clientX, clientY) {
+  function tileTipHide() {
+    const tip = $("mark-tile-tip");
+    if (tip && !session.mark?.tileSel) tip.hidden = true;
+  }
+
+  function tileTipShow(piece, ctx) {
     const tip = $("mark-tile-tip");
     if (!tip) return;
-    if (!piece?.poly?.length) {
+    if (!piece?.poly?.length || !ctx?.base) {
       tip.hidden = true;
       return;
     }
@@ -3599,68 +3619,109 @@
       : [face];
     const svg = tip.querySelector("svg");
     const note = tip.querySelector("p");
+    const mode = tilePreviewDimMode();
+    let holeCount = 0;
+    tip.querySelectorAll("[data-tile-dim-mode]").forEach((btn) => {
+      const active = btn.dataset.tileDimMode === mode;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+    });
     if (svg) {
-      const pad = 78;
+      const pad = 58;
       const maxW = 300;
-      const maxH = 360;
+      const maxH = 330;
       const pts = cell.concat(...fragments);
-      const minX = Math.min(...pts.map((p) => p.x));
-      const minY = Math.min(...pts.map((p) => p.y));
-      const spanX = Math.max(0.02, Math.max(...pts.map((p) => p.x)) - minX);
-      const spanY = Math.max(0.02, Math.max(...pts.map((p) => p.y)) - minY);
+      const minX = Math.min(...pts.map((pt) => pt.x));
+      const minY = Math.min(...pts.map((pt) => pt.y));
+      const maxX = Math.max(...pts.map((pt) => pt.x));
+      const maxY = Math.max(...pts.map((pt) => pt.y));
+      const spanX = Math.max(0.02, maxX - minX);
+      const spanY = Math.max(0.02, maxY - minY);
       const scale = Math.min(maxW / spanX, maxH / spanY);
       const boxW = spanX * scale;
       const boxH = spanY * scale;
       const sx = (x) => pad + (x - minX) * scale;
-      const sy = (y) => pad + (y - minY) * scale;
-      const pathOf = (poly) => `${poly.map((p, i) => `${i ? "L" : "M"}${sx(p.x).toFixed(1)} ${sy(p.y).toFixed(1)}`).join(" ")} Z`;
-      const mid = (poly) => poly.reduce((sum, p) => ({ x: sum.x + p.x, y: sum.y + p.y }), { x: 0, y: 0 });
+      // На стене высота растёт вверх, а координата SVG — вниз.
+      const invertY = session.mark?.view?.kind === "wall";
+      const sy = (y) => pad + (invertY ? maxY - y : y - minY) * scale;
+      const pathOf = (poly) => `${poly.map((pt, i) => `${i ? "L" : "M"}${sx(pt.x).toFixed(1)} ${sy(pt.y).toFixed(1)}`).join(" ")} Z`;
+      const mid = (poly) => poly.reduce((sum, pt) => ({ x: sum.x + pt.x, y: sum.y + pt.y }), { x: 0, y: 0 });
       const cellMid = mid(cell);
       cellMid.x /= cell.length;
       cellMid.y /= cell.length;
       const onEdge = (a, b, edgeA, edgeB) => {
-        const near = (p, c, d) => {
-          const abx = d.x - c.x;
-          const aby = d.y - c.y;
+        const near = (pt, c, d) => {
+          const abx = d.x - c.x, aby = d.y - c.y;
           const len2 = abx * abx + aby * aby || 1;
-          const t = Math.max(0, Math.min(1, ((p.x - c.x) * abx + (p.y - c.y) * aby) / len2));
-          return Math.hypot(p.x - (c.x + abx * t), p.y - (c.y + aby * t)) < 0.01;
+          const t = Math.max(0, Math.min(1, ((pt.x - c.x) * abx + (pt.y - c.y) * aby) / len2));
+          return Math.hypot(pt.x - (c.x + abx * t), pt.y - (c.y + aby * t)) < 0.01;
         };
         return near(a, edgeA, edgeB) && near(b, edgeA, edgeB);
       };
       const edgeLen = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
-      const edgesOf = (poly) => poly.map((p, i) => [p, poly[(i + 1) % poly.length]]);
+      const edgesOf = (poly) => poly.map((pt, i) => [pt, poly[(i + 1) % poly.length]]);
       const cellEdges = edgesOf(cell);
       const placed = [];
+      const calloutBoxes = [];
+      const callout = (ax, ay, text, color) => {
+        const width = Math.max(42, text.length * 7.2 + 16);
+        const height = 23;
+        const candidates = [];
+        for (const radius of [30, 46, 62, 78, 94]) {
+          for (let step = 0; step < 12; step += 1) {
+            const angle = (step / 12) * Math.PI * 2 - Math.PI / 2;
+            candidates.push({ x: ax + Math.cos(angle) * radius, y: ay + Math.sin(angle) * radius });
+          }
+        }
+        let target = null;
+        for (const point of candidates) {
+          const box = { left: point.x - width / 2, right: point.x + width / 2, top: point.y - height / 2, bottom: point.y + height / 2 };
+          if (box.left < 2 || box.top < 2 || box.right > boxW + pad * 2 - 2 || box.bottom > boxH + pad * 2 - 2) continue;
+          if (calloutBoxes.some((item) => box.left < item.right + 4 && box.right + 4 > item.left && box.top < item.bottom + 4 && box.bottom + 4 > item.top)) continue;
+          const coversHole = holes.some((hole) => {
+            const hx = surface === "wall" ? hole.along : hole.x;
+            const hy = surface === "wall" ? hole.rise : hole.y;
+            const left = sx(hx) - (hole.shape === "circle" ? hole.d * scale / 2 : 0);
+            const right = sx(hx + (hole.shape === "circle" ? 0 : hole.w)) + (hole.shape === "circle" ? hole.d * scale / 2 : 0);
+            const top = Math.min(sy(hy), sy(hy + (hole.shape === "circle" ? 0 : hole.h))) - (hole.shape === "circle" ? hole.d * scale / 2 : 0);
+            const bottom = Math.max(sy(hy), sy(hy + (hole.shape === "circle" ? 0 : hole.h))) + (hole.shape === "circle" ? hole.d * scale / 2 : 0);
+            return box.left < right + 3 && box.right + 3 > left && box.top < bottom + 3 && box.bottom + 3 > top;
+          });
+          if (coversHole) continue;
+          target = { ...point, box };
+          break;
+        }
+        if (!target) return "";
+        calloutBoxes.push(target.box);
+        const dx = target.x - ax, dy = target.y - ay, len = Math.hypot(dx, dy) || 1;
+        const ex = target.x - dx / len * (width * 0.34);
+        const ey = target.y - dy / len * (height * 0.34);
+        return `<path d="M${ax.toFixed(1)} ${ay.toFixed(1)} L${ex.toFixed(1)} ${ey.toFixed(1)}" stroke="${color}" stroke-width="1.5" fill="none"/><rect x="${target.box.left.toFixed(1)}" y="${target.box.top.toFixed(1)}" width="${width.toFixed(1)}" height="${height}" rx="6" fill="#fff" fill-opacity=".94" stroke="${color}" stroke-width="1.2"/><text x="${target.x.toFixed(1)}" y="${target.y.toFixed(1)}" font-size="13" font-weight="700" fill="${color}" text-anchor="middle" dominant-baseline="middle">${text}</text>`;
+      };
       const label = (a, b, away, dist, inward) => {
         const meters = edgeLen(a, b);
-        if (meters < 0.04) return "";
+        if (meters < 0.025) return "";
         const A = { x: sx(a.x), y: sy(a.y) };
         const B = { x: sx(b.x), y: sy(b.y) };
         const screen = Math.hypot(B.x - A.x, B.y - A.y);
-        if (screen < 46) return "";
-        const dx = B.x - A.x;
-        const dy = B.y - A.y;
-        let nx = -dy / screen;
-        let ny = dx / screen;
-        const mx = (A.x + B.x) / 2;
-        const my = (A.y + B.y) / 2;
+        if (screen < 34) return "";
+        const dx = B.x - A.x, dy = B.y - A.y;
+        let nx = -dy / screen, ny = dx / screen;
+        const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
         const C = { x: sx(away.x), y: sy(away.y) };
         if ((C.x - mx) * nx + (C.y - my) * ny > 0) { nx = -nx; ny = -ny; }
         if (inward) { nx = -nx; ny = -ny; }
-        const px = mx + nx * dist;
-        const py = my + ny * dist;
+        const px = mx + nx * dist, py = my + ny * dist;
         let ang = Math.atan2(dy, dx) * 180 / Math.PI;
         if (ang > 90 || ang < -90) ang += 180;
         const text = tileTipText(meters);
-        if (placed.some((item) => Math.hypot(item.x - px, item.y - py) < 44)) return "";
+        if (placed.some((item) => Math.hypot(item.x - px, item.y - py) < 38)) return "";
         placed.push({ x: px, y: py, text });
-        return `<text x="${px.toFixed(1)}" y="${py.toFixed(1)}" font-size="22" font-weight="700" fill="#c2410c" text-anchor="middle" dominant-baseline="middle" transform="rotate(${ang.toFixed(1)} ${px.toFixed(1)} ${py.toFixed(1)})">${text}</text>`;
+        return `<text x="${px.toFixed(1)}" y="${py.toFixed(1)}" font-size="19" font-weight="700" fill="#c2410c" text-anchor="middle" dominant-baseline="middle" transform="rotate(${ang.toFixed(1)} ${px.toFixed(1)} ${py.toFixed(1)})">${text}</text>`;
       };
       const outline = `<path d="${pathOf(cell)}" fill="none" stroke="#a8a29e" stroke-width="1.6" stroke-dasharray="6 4"/>`;
       const fills = fragments.map((poly) => `<path d="${pathOf(poly)}" fill="#d6c4a8" stroke="#44403c" stroke-width="2"/>`).join("");
-      const fresh = [];
-      const rest = [];
+      const fresh = [], rest = [];
       fragments.forEach((poly) => edgesOf(poly).forEach(([a, b]) => {
         const host = cellEdges.find(([c, d]) => onEdge(a, b, c, d));
         if (!host) fresh.push([a, b, poly]);
@@ -3668,37 +3729,262 @@
       }));
       const seams = fresh.map(([a, b]) => `M${sx(a.x).toFixed(1)} ${sy(a.y).toFixed(1)} L${sx(b.x).toFixed(1)} ${sy(b.y).toFixed(1)}`).join(" ");
       const seamPath = seams ? `<path d="${seams}" fill="none" stroke="#44403c" stroke-width="2"/>` : "";
-      const whole = cellEdges.map(([a, b]) => label(a, b, cellMid, 40, false)).join("");
-      const slices = fresh.concat(rest).map(([a, b, poly]) => {
+      const whole = mode === "tile" ? cellEdges.map(([a, b]) => label(a, b, cellMid, 34, false)).join("") : "";
+      const slices = mode === "cuts" ? fresh.concat(rest).map(([a, b, poly]) => {
         const local = mid(poly); local.x /= poly.length; local.y /= poly.length;
-        return label(a, b, local, 22, false);
+        return label(a, b, local, 20, false);
+      }).join("") : "";
+      const faceInfo = tileFaceOf(ctx.base, session.mark?.surface || "floor");
+      const surface = faceInfo?.surface || "floor";
+      const wallId = faceInfo?.wall?.id || session.mark?.view?.wall?.id || "";
+      const cellBounds = {
+        left: Math.min(...cell.map((pt) => pt.x)),
+        right: Math.max(...cell.map((pt) => pt.x)),
+        bottom: Math.min(...cell.map((pt) => pt.y)),
+        top: Math.max(...cell.map((pt) => pt.y)),
+      };
+      const clipToCell = (subject) => {
+        const signedArea = cell.reduce((sum, point, index) => {
+          const next = cell[(index + 1) % cell.length];
+          return sum + point.x * next.y - next.x * point.y;
+        }, 0);
+        const direction = signedArea >= 0 ? 1 : -1;
+        let output = subject;
+        cellEdges.forEach(([a, b]) => {
+          const input = output;
+          output = [];
+          if (!input.length) return;
+          const side = (point) => direction * ((b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x));
+          let start = input[input.length - 1];
+          input.forEach((end) => {
+            const startSide = side(start), endSide = side(end);
+            const startInside = startSide >= -1e-8, endInside = endSide >= -1e-8;
+            if (startInside !== endInside) {
+              const t = startSide / (startSide - endSide);
+              output.push({ x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t });
+            }
+            if (endInside) output.push(end);
+            start = end;
+          });
+        });
+        return output;
+      };
+      const polygonArea = (poly) => Math.abs(poly.reduce((sum, point, index) => {
+        const next = poly[(index + 1) % poly.length];
+        return sum + point.x * next.y - next.x * point.y;
+      }, 0) / 2);
+      const pointSegmentDistance = (p, a, b) => {
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const len2 = dx * dx + dy * dy || 1;
+        const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+        return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t));
+      };
+      const segmentsCross = (a, b, c, d) => {
+        const cross = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+        const onSegment = (p, q, r) =>
+          q.x >= Math.min(p.x, r.x) - 1e-8 && q.x <= Math.max(p.x, r.x) + 1e-8 &&
+          q.y >= Math.min(p.y, r.y) - 1e-8 && q.y <= Math.max(p.y, r.y) + 1e-8;
+        const ab1 = cross(a, b, c), ab2 = cross(a, b, d);
+        const cd1 = cross(c, d, a), cd2 = cross(c, d, b);
+        if (((ab1 > 1e-8 && ab2 < -1e-8) || (ab1 < -1e-8 && ab2 > 1e-8)) &&
+            ((cd1 > 1e-8 && cd2 < -1e-8) || (cd1 < -1e-8 && cd2 > 1e-8))) return true;
+        return (Math.abs(ab1) <= 1e-8 && onSegment(a, c, b)) ||
+          (Math.abs(ab2) <= 1e-8 && onSegment(a, d, b)) ||
+          (Math.abs(cd1) <= 1e-8 && onSegment(c, a, d)) ||
+          (Math.abs(cd2) <= 1e-8 && onSegment(c, b, d));
+      };
+      const openingHitsCell = (hole) => {
+        const x = surface === "wall" ? hole.along : hole.x;
+        const y = surface === "wall" ? hole.rise : hole.y;
+        if (hole.shape === "circle") {
+          const center = { x, y }, radius = Math.max(0, hole.d / 2);
+          if (polyHit(cell, x, y)) return true;
+          return cellEdges.some(([a, b]) => pointSegmentDistance(center, a, b) <= radius + 1e-7);
+        }
+        const rect = [
+          { x, y }, { x: x + hole.w, y },
+          { x: x + hole.w, y: y + hole.h }, { x, y: y + hole.h },
+        ];
+        return polygonArea(clipToCell(rect)) > 1e-8;
+      };
+      const holes = (ctx.base.openings || []).filter((hole) => {
+        if (hole.surface !== surface || (surface === "wall" && hole.wallId !== wallId) || !openingHitsCell(hole)) return false;
+        // Квадратные проёмы остаются в геометрии раскладки, но не выводятся
+        // в режимах размеров отверстий и отступов предпросмотра.
+        if (hole.shape !== "circle" && Math.abs((Number(hole.w) || 0) - (Number(hole.h) || 0)) <= 0.002) return false;
+        return true;
+      });
+      holeCount = holes.length;
+      const legend = tip.querySelector("[data-tile-preview-legend]");
+      const legendRows = [];
+      const holeShapes = holes.map((hole) => {
+        const x = surface === "wall" ? hole.along : hole.x;
+        const y = surface === "wall" ? hole.rise : hole.y;
+        if (hole.shape === "circle") {
+          const cx = sx(x), cy = sy(y), radius = Math.max(2, hole.d * scale / 2);
+          return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${radius.toFixed(1)}" fill="#dc2626" fill-opacity=".24" stroke="#b91c1c" stroke-width="2"/>`;
+        }
+        const top = invertY ? sy(y + hole.h) : sy(y);
+        return `<rect x="${sx(x).toFixed(1)}" y="${top.toFixed(1)}" width="${Math.max(1, hole.w * scale).toFixed(1)}" height="${Math.max(1, hole.h * scale).toFixed(1)}" fill="#dc2626" fill-opacity=".24" stroke="#b91c1c" stroke-width="2"/>`;
       }).join("");
+      let holeDims = "";
+      if (mode === "holes") {
+        holeDims = holes.map((hole, index) => {
+          const x = surface === "wall" ? hole.along : hole.x;
+          const y = surface === "wall" ? hole.rise : hole.y;
+          if (hole.shape === "circle") {
+            const cx = sx(x), cy = sy(y);
+            const value = `Ø ${tileTipText(hole.d)}`;
+            legendRows.push(`<span><b>${index + 1}.</b> ${value}</span>`);
+            return callout(cx, cy, value, "#b91c1c");
+          }
+          const clippedPart = clipToCell([
+            { x, y }, { x: x + hole.w, y },
+            { x: x + hole.w, y: y + hole.h }, { x, y: y + hole.h },
+          ]);
+          if (clippedPart.length < 3 || polygonArea(clippedPart) < 1e-8) return "";
+          const partLeft = Math.min(...clippedPart.map((point) => point.x));
+          const partRight = Math.max(...clippedPart.map((point) => point.x));
+          const partBottom = Math.min(...clippedPart.map((point) => point.y));
+          const partTop = Math.max(...clippedPart.map((point) => point.y));
+          const partW = Math.max(0, partRight - partLeft);
+          const partH = Math.max(0, partTop - partBottom);
+          if (partW < 0.005 || partH < 0.005) return "";
+          const center = { x: (partLeft + partRight) / 2, y: (partBottom + partTop) / 2 };
+          const value = `${tileTipText(partW)} × ${tileTipText(partH)}`;
+          legendRows.push(`<span><b>${index + 1}.</b> ${value}</span>`);
+          const anchorX = sx(center.x), anchorY = sy(center.y);
+          return callout(anchorX, anchorY, value, "#b91c1c");
+        }).join("");
+      }
+      let offsetDims = "";
+      if (mode === "offsets") {
+        offsetDims = holes.map((hole, index) => {
+          const x = surface === "wall" ? hole.along : hole.x;
+          const y = surface === "wall" ? hole.rise : hole.y;
+          if (hole.shape === "circle") {
+            // Круг виден на соседней плитке, но отступы показываем только
+            // на той плитке, внутри которой находится его центр.
+            if (!polyHit(cell, x, y)) return "";
+            const center = { x, y };
+            const nearest = cellEdges.map(([a, b]) => {
+              const dx = b.x - a.x, dy = b.y - a.y;
+              const len2 = dx * dx + dy * dy || 1;
+              const normal = { x: -dy / Math.sqrt(len2), y: dx / Math.sqrt(len2) };
+              const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / len2));
+              const point = { x: a.x + dx * t, y: a.y + dy * t };
+              return { from: center, point, distance: Math.max(0, Math.hypot(x - point.x, y - point.y) - hole.d / 2), normal };
+            }).sort((a, b) => a.distance - b.distance);
+            const first = nearest[0];
+            const second = nearest.find((item) => Math.abs(first.normal.x * item.normal.x + first.normal.y * item.normal.y) < 0.75) || nearest[1];
+            const line = (item, text) => {
+              const ax = sx(item.from.x), ay = sy(item.from.y), bx = sx(item.point.x), by = sy(item.point.y);
+              return `<path d="M${ax.toFixed(1)} ${ay.toFixed(1)} L${bx.toFixed(1)} ${by.toFixed(1)}" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>` + callout((ax + bx) / 2, (ay + by) / 2, text, "#6d28d9");
+            };
+            const firstText = `A ${tileTipText(first.distance)}`;
+            const secondText = second ? `B ${tileTipText(second.distance)}` : "";
+            legendRows.push(`<span><b>${index + 1}.</b> ${firstText}${secondText ? ` · ${secondText}` : ""}</span>`);
+            return line(first, firstText) + (second ? line(second, secondText) : "");
+          }
+
+          // Для прямоугольника используем только ту часть контура,
+          // которая реально видна внутри текущего фрагмента плитки.
+          const clippedPart = clipToCell([
+            { x, y }, { x: x + hole.w, y },
+            { x: x + hole.w, y: y + hole.h }, { x, y: y + hole.h },
+          ]);
+          if (clippedPart.length < 3 || polygonArea(clippedPart) < 1e-8) return "";
+          const visibleHoleEdges = edgesOf(clippedPart).filter(([a, b]) =>
+            !cellEdges.some(([c, d]) => onEdge(a, b, c, d))
+          );
+          if (!visibleHoleEdges.length) return "";
+
+          const project = (p, a, b) => {
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+            return { x: a.x + dx * t, y: a.y + dy * t };
+          };
+          // Отступ считаем отдельно для каждого оставшегося фрагмента.
+          // Для П-/Г-образного остатка общий контур исходной плитки не является
+          // противоположным ребром фрагмента.
+          const nearest = [];
+          fragments.forEach((fragment, fragmentIndex) => {
+            edgesOf(fragment).forEach(([a, b]) => {
+              const dx = b.x - a.x, dy = b.y - a.y;
+              const len = Math.hypot(dx, dy) || 1;
+              const normal = { x: -dy / len, y: dx / len };
+              visibleHoleEdges.forEach(([c, d]) => {
+                const hx = d.x - c.x, hy = d.y - c.y;
+                const hlen = Math.hypot(hx, hy) || 1;
+                // Сравниваем только параллельные рёбра с общей проекцией.
+                if (Math.abs((dx * hy - dy * hx) / (len * hlen)) > 0.02) return;
+                const ux = dx / len, uy = dy / len;
+                const a0 = a.x * ux + a.y * uy, a1 = b.x * ux + b.y * uy;
+                const c0 = c.x * ux + c.y * uy, c1 = d.x * ux + d.y * uy;
+                if (Math.min(Math.max(a0, a1), Math.max(c0, c1)) -
+                    Math.max(Math.min(a0, a1), Math.min(c0, c1)) < 0.002) return;
+                const holeMid = { x: (c.x + d.x) / 2, y: (c.y + d.y) / 2 };
+                const fragmentPoint = project(holeMid, a, b);
+                const distance = Math.hypot(fragmentPoint.x - holeMid.x, fragmentPoint.y - holeMid.y);
+                if (distance > 0.002) nearest.push({ from: fragmentPoint, point: holeMid, distance, normal, fragmentIndex });
+              });
+            });
+          });
+          if (!nearest.length) return "";
+          const line = (item, text) => {
+            const ax = sx(item.from.x), ay = sy(item.from.y), bx = sx(item.point.x), by = sy(item.point.y);
+            return `<path d="M${ax.toFixed(1)} ${ay.toFixed(1)} L${bx.toFixed(1)} ${by.toFixed(1)}" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>` + callout((ax + bx) / 2, (ay + by) / 2, text, "#6d28d9");
+          };
+          const fragmentRows = [];
+          const fragmentLines = [];
+          fragments.forEach((_, fragmentIndex) => {
+            const candidates = nearest.filter((item) => item.fragmentIndex === fragmentIndex)
+              .sort((a, b) => b.distance - a.distance);
+            if (!candidates.length) return;
+            const first = candidates[0];
+            const second = candidates.find((item) => Math.abs(first.normal.x * item.normal.x + first.normal.y * item.normal.y) < 0.75);
+            const prefix = fragments.length > 1 ? `Ф${fragmentIndex + 1} ` : "";
+            const firstText = `${prefix}A ${tileTipText(first.distance)}`;
+            const secondText = second ? `${prefix}B ${tileTipText(second.distance)}` : "";
+            fragmentRows.push(`${firstText}${secondText ? ` · ${secondText}` : ""}`);
+            fragmentLines.push(line(first, firstText));
+            if (second) fragmentLines.push(line(second, secondText));
+          });
+          if (fragmentRows.length) legendRows.push(`<span><b>${index + 1}.</b> ${fragmentRows.join(" · ")}</span>`);
+          return fragmentLines.join("");
+        }).join("");
+      }
+      const clip = `<defs><clipPath id="tile-preview-clip"><path d="${pathOf(cell)}"/></clipPath></defs>`;
       svg.setAttribute("viewBox", `0 0 ${boxW + pad * 2} ${boxH + pad * 2}`);
-      svg.innerHTML = `${outline}${fills}${seamPath}${whole}${slices}`;
+      svg.innerHTML = `${clip}${outline}${fills}${seamPath}<g clip-path="url(#tile-preview-clip)">${holeShapes}</g>${whole}${slices}${holeDims}${offsetDims}`;
+      if (legend) {
+        legend.innerHTML = legendRows.join("");
+        legend.hidden = !["holes", "offsets"].includes(mode) || !legendRows.length;
+      }
     }
     if (note) {
       const name = tilePatternName(pattern);
       const whole = `${tileTipText(fullW)} × ${tileTipText(fullH)}`;
       const left = piece.w < fullW - 0.004 || piece.h < fullH - 0.004;
-      note.textContent = left
-        ? `${name}: на стене ${tileTipText(piece.w)} × ${tileTipText(piece.h)}, плитка ${whole}`
-        : `${name}: ${whole}`;
+      const desc = {
+        tile: `Размер плитки: ${whole}`,
+        cuts: `Размеры фрагментов: ${tileTipText(piece.w)} × ${tileTipText(piece.h)}`,
+        holes: holeCount ? "Размеры отверстий: ширина, высота или диаметр" : "В выбранной плитке нет отверстий",
+        offsets: holeCount ? "Для круглых отверстий — от центра (только на плитке с центром); для прямоугольных — от видимого ребра отверстия до противоположного ребра фрагмента плитки" : "В выбранной плитке нет отверстий",
+      }[mode];
+      note.textContent = `${name} · ${desc}${left && mode === "tile" ? ` · фрагмент ${tileTipText(piece.w)} × ${tileTipText(piece.h)}` : ""}`;
     }
     tip.hidden = false;
-    const width = tip.offsetWidth || 320;
-    const height = tip.offsetHeight || 160;
-    tip.style.left = `${Math.max(8, Math.min(clientX + 16, window.innerWidth - width - 8))}px`;
-    tip.style.top = `${Math.max(8, Math.min(clientY + 16, window.innerHeight - height - 8))}px`;
   }
 
   function tilePaint(g, view, ctx) {
     if (session.mark) session.mark.tilePieces = [];
     const face = tileFaceOf(ctx.base, session.mark?.surface || "floor");
-    if (!face || !ctx.feed) return;
+    if (!face || !ctx.feed) { tileTipShow(null, ctx); return; }
     const preview = tilePreview(ctx.node, ctx.base, ctx.feed, face);
     const need = $("mark-side")?.querySelector("[data-tile-need]");
     if (need) need.textContent = `Купить: ${preview?.count || 0} шт. Разрезать: ${preview?.cuts || 0} шт.`;
-    if (!preview?.tile || !preview.geom) return;
+    if (!preview?.tile || !preview.geom) { tileTipShow(null, ctx); return; }
     const spot = (p) => (view.kind === "wall" ? view.toAlong(p.x, p.y) : view.view.to(p));
     const trace = (poly) => {
       g.beginPath();
@@ -3866,6 +4152,8 @@
       }
       g.restore();
     });
+    const selectedPiece = (session.mark?.tilePieces || []).find((item) => item.id === session.mark?.tileSel);
+    tileTipShow(selectedPiece || null, ctx);
   }
 
   function markDraw() {

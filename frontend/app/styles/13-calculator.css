@@ -1781,20 +1781,48 @@ html[data-theme="dark"] .calc-mini-toggle {
   color: var(--muted);
 }
 .planner-plan-wrap { position: relative; flex: 1; min-height: 0; }
-.mark-tile-tip {
-  position: fixed;
-  z-index: 80;
-  width: 420px;
-  padding: 10px 10px 8px;
+.tile-preview-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--card);
-  box-shadow: var(--shadow);
-  pointer-events: none;
+  background: var(--bg-2);
   color: var(--text);
 }
-.mark-tile-tip svg { width: 100%; height: auto; display: block; }
-.mark-tile-tip p { margin: 6px 0 0; font-size: 16px; text-align: center; }
+.tile-preview-panel[hidden] { display: none !important; }
+.tile-preview-panel svg { display: block; width: 100%; max-height: 280px; }
+.tile-preview-legend {
+  display: flex; flex-wrap: wrap; gap: 5px 10px; max-height: 112px; overflow: auto;
+  padding: 7px 8px; border: 1px solid var(--line); border-radius: 7px;
+  background: var(--card); color: var(--ink); font-size: 10px; line-height: 1.35;
+}
+.tile-preview-legend[hidden] { display: none !important; }
+.tile-preview-legend span { white-space: nowrap; }
+.tile-preview-legend b { color: var(--accent); }
+.tile-preview-panel p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.35; text-align: center; }
+.tile-preview-head { display: flex; flex-direction: column; gap: 7px; }
+.tile-preview-head strong { font-size: 12px; }
+.tile-preview-modes { display: flex; flex-wrap: wrap; gap: 4px; }
+.tile-preview-modes .btn { min-height: 26px; padding: 3px 7px; font-size: 10px; }
+.tile-preview-modes .btn.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--card)); color: var(--ink); }
+.tile-types-collapse { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.tile-types-collapse > summary {
+  display: flex; align-items: center; gap: 7px; cursor: pointer;
+  color: var(--muted); font-size: 11px; font-weight: 750; list-style: none;
+}
+.tile-types-collapse > summary::-webkit-details-marker { display: none; }
+.tile-types-collapse > summary::before { content: "▸"; transition: transform .15s ease; }
+.tile-types-collapse[open] > summary::before { transform: rotate(90deg); }
+.tile-types-collapse > summary span { margin-left: auto; font-variant-numeric: tabular-nums; }
+.planner-help {
+  position: relative; flex: 0 0 auto; width: 18px; height: 18px; min-height: 18px;
+  margin-left: 2px; padding: 0; border: 1px solid var(--muted); border-radius: 50%;
+  background: transparent; color: var(--muted); font: 700 11px/16px sans-serif;
+  cursor: help;
+}
+.planner-help::after { content: none !important; display: none !important; }
 .planner-metric.is-tile {
   position: relative;
   flex-direction: column;
@@ -3104,3 +3132,29 @@ html[data-theme="dark"] .calc-order.is-used small { color: #5eead4; }
 @media (max-width: 760px) {
   .planner-layout-control { flex: 1 1 150px; width: auto; max-width: 100%; }
 }
+
+
+/* Подсказка стоит непосредственно после названия раздела. */
+.planner-block-title-wrap { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.planner-block-title { min-width: 0; }
+.tile-section-collapse { display: block; }
+.tile-section-collapse > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
+.tile-section-collapse > summary::-webkit-details-marker { display: none; }
+.tile-section-collapse > summary::before { content: "▸"; transition: transform .15s ease; }
+.tile-section-collapse[open] > summary::before { transform: rotate(90deg); }
+.tile-section-count { margin-left: auto; color: var(--muted); font-weight: 500; }
+.tile-section-content { display: flex; flex-direction: column; gap: 7px; margin-top: 8px; min-width: 0; }
+.tile-section-actions { display: flex; justify-content: flex-end; }
+
+
+/* Сохраняем исходную типографику заголовка «Плитки» после переноса его в summary. */
+.tile-section-collapse > .planner-block-h,
+.tile-section-collapse > summary.planner-block-h { font-size: 13px; font-weight: 800; color: var(--text); }
+.tile-section-collapse > .planner-block-h > span,
+.tile-section-collapse > summary.planner-block-h > span { color: inherit; font-size: inherit; font-weight: inherit; }
+.tile-section-collapse > summary.planner-block-h { display: flex; align-items: center; justify-content: flex-start; gap: 8px; list-style: none; }
+.tile-section-collapse > summary.planner-block-h::-webkit-details-marker { display: none; }
+.tile-section-collapse > summary.planner-block-h::before { content: "▸"; margin-right: 0; color: var(--muted); font-size: 12px; }
+.tile-section-collapse[open] > summary.planner-block-h::before { transform: rotate(90deg); }
+.tile-section-collapse .tile-section-count { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: 500; }
+#mark-side .tile-preview-panel:not([hidden]) { display: flex !important; }

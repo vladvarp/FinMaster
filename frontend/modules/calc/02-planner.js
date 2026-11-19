@@ -1229,6 +1229,35 @@
     menu.innerHTML = `${(node.layouts || []).map((item) => `<button type="button" class="planner-layout-option ${!common && item.id === node.layoutId ? "is-active" : ""}" role="menuitem" data-planner-layout-choice="${esc(item.id)}">${esc(item.name)}</button>`).join("")}<div class="planner-layout-menu-sep"></div><button type="button" class="planner-layout-option is-create" role="menuitem" data-planner-layout-choice="__new">＋ Создать планировку</button><button type="button" class="planner-layout-option ${common ? "is-active" : ""}" role="menuitem" data-planner-layout-choice="${COMMON_VIEW}">Общий вывод</button>`;
   }
 
+  function plannerSideHelpify(side) {
+    if (!side) return;
+    const groups = new Map();
+    side.querySelectorAll('.planner-lead').forEach((lead) => {
+      if (false) return;
+      const block = lead.closest('.planner-block');
+      if (!block) return;
+      let head = block.querySelector(':scope > .planner-block-h');
+      if (!head) { head = document.createElement('div'); head.className = 'planner-block-h'; head.textContent = 'Пояснение'; block.insertBefore(head, block.firstChild); }
+      const value = String(lead.textContent || '').trim();
+      if (value) { if (!groups.has(head)) groups.set(head, []); groups.get(head).push(value); }
+      lead.remove();
+    });
+    groups.forEach((texts, head) => {
+      let wrap = head.querySelector(':scope > .planner-block-title-wrap');
+      if (!wrap) {
+        wrap = document.createElement('span'); wrap.className = 'planner-block-title-wrap';
+        const node = [...head.childNodes].find((item) => item.nodeType === Node.TEXT_NODE && String(item.textContent || '').trim());
+        if (node) { const title = document.createElement('span'); title.className = 'planner-block-title'; title.textContent = node.textContent.trim(); head.replaceChild(title, node); wrap.appendChild(title); }
+        else { const title = [...head.children].find((item) => !item.matches('button,.planner-help')); if (title) wrap.appendChild(title); }
+        head.insertBefore(wrap, head.firstChild);
+      }
+      let button = wrap.querySelector(':scope > .planner-help');
+      if (!button) { button = document.createElement('button'); button.type = 'button'; button.className = 'planner-help'; button.textContent = 'i'; button.setAttribute('aria-label', 'Пояснение к разделу'); wrap.appendChild(button); }
+      button.dataset.help = [...new Set(texts)].join(String.fromCharCode(10));
+      button.removeAttribute('title');
+    });
+  }
+
   function plannerFill() {
     const node = plannerNode();
     const side = $("planner-side");
@@ -1243,12 +1272,14 @@
       const stage = $("planner-common");
       if (stage) stage.hidden = false;
       paintCommon("planner", node, bp, bp ? computeGraph(bp).values : {});
+      plannerSideHelpify(side);
       return;
     }
     const stage = $("planner-common");
     if (stage) stage.hidden = true;
     const scroll = side.scrollTop;
     side.innerHTML = plannerSideHtml(node);
+    plannerSideHelpify(side);
     side.scrollTop = scroll;
     const rect = plannerRect(node.points);
     const boxW = rect ? rect.w : Math.max(...node.points.map((p) => p.x)) - Math.min(...node.points.map((p) => p.x));
