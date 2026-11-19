@@ -3152,7 +3152,7 @@ html[data-theme="dark"] .calc-order.is-used small { color: #5eead4; }
 .tile-section-collapse > summary.planner-block-h { font-size: 13px; font-weight: 800; color: var(--text); }
 .tile-section-collapse > .planner-block-h > span,
 .tile-section-collapse > summary.planner-block-h > span { color: inherit; font-size: inherit; font-weight: inherit; }
-.tile-section-collapse > summary.planner-block-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; list-style: none; }
+.tile-section-collapse > summary.planner-block-h { display: flex; align-items: center; justify-content: flex-start; gap: 8px; list-style: none; }
 .tile-section-collapse > summary.planner-block-h::-webkit-details-marker { display: none; }
 .tile-section-collapse > summary.planner-block-h::before { content: "▸"; margin-right: 0; color: var(--muted); font-size: 12px; }
 .tile-section-collapse[open] > summary.planner-block-h::before { transform: rotate(90deg); }
