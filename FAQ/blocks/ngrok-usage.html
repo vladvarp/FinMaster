@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .usage-demo { max-width:560px; }
+    .usage-demo .modal { display:block!important; position:static!important; inset:auto!important; padding:0!important; background:transparent!important; }
+    .usage-demo .modal-card { width:min(520px,100%); max-height:none; margin:0 auto; }
+    .usage-demo .usage-head,.usage-demo .usage-history-head { display:flex;align-items:center;justify-content:space-between;gap:10px; }
+    .usage-demo .usage-limits { display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px;border:1px solid var(--line);border-radius:10px; }
+    .usage-demo .usage-limits h4,.usage-demo .usage-actions { grid-column:1/-1;margin:0; }
+    .usage-demo .usage-field { display:grid;gap:5px;font-size:12px;color:var(--muted); }
+    .usage-demo .usage-field input { width:100%;min-width:0;padding:7px;border:1px solid var(--line);border-radius:7px;background:var(--bg-2);color:var(--ink); }
+    .usage-demo .usage-history-row { display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:8px;padding:9px 3px;border-bottom:1px solid var(--line);font-size:12px;font-variant-numeric:tabular-nums; }
+    .usage-demo .usage-history-row span { color:var(--muted); }
+    .usage-demo .usage-note { margin:0;color:var(--muted);font-size:11px;line-height:1.45; }
+    @media(max-width:480px){.usage-demo .usage-limits{grid-template-columns:1fr}.usage-demo .usage-history-row{grid-template-columns:1fr 1fr}.usage-demo .usage-history-row span:last-child{grid-column:2}}
+  </style>
+</head>
+<body>
+  <div class="usage-demo">
+    <div class="modal open">
+      <div class="modal-card" role="dialog" aria-labelledby="usage-title">
+        <div class="usage-head"><h3 id="usage-title">Статистика · Рабочий аккаунт</h3><span class="online">Локальная сводка</span></div>
+        <section class="usage-limits">
+          <h4>Месячные лимиты</h4>
+          <label class="usage-field">HTTP-запросы в месяц<input value="20 000" readonly tabindex="-1"></label>
+          <label class="usage-field">Трафик в месяц, ГБ<input value="1" readonly tabindex="-1"></label>
+          <div class="usage-actions"><button type="button" class="btn primary" tabindex="-1">Сохранить лимиты</button></div>
+        </section>
+        <section>
+          <div class="usage-history-head"><h4>История по месяцам</h4></div>
+          <div class="usage-history-row"><b>2026-11</b><span>8 420 запросов</span><span>640 МБ</span></div>
+          <div class="usage-history-row"><b>2026-10</b><span>12 180 запросов</span><span>780 МБ</span></div>
+          <div class="usage-history-row"><b>2026-09</b><span>6 240 запросов</span><span>410 МБ</span></div>
+        </section>
+        <p class="usage-note">Очистка удаляет месяцы до текущего календарного месяца. Счётчики текущего месяца сохраняются.</p>
+        <div class="modal-actions"><button type="button" class="btn danger" tabindex="-1">Очистить старую историю</button><button type="button" class="btn" tabindex="-1">Закрыть</button></div>
+      </div>
+    </div>
+  </div>
+  <script src="chrome.js"></script>
+  <script src="fit.js"></script>
+</body>
+</html>
