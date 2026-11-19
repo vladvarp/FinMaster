@@ -2966,7 +2966,7 @@
     const dimMode = tilePreviewDimMode();
     const previewPanel = `<div id="mark-tile-tip" class="tile-preview-panel" hidden>
       <div class="tile-preview-head"><strong>Предпросмотр плитки</strong><div class="tile-preview-modes">${TILE_PREVIEW_DIMS.map(([id, label]) => `<button type="button" class="btn ${dimMode === id ? "is-active" : ""}" data-tile-dim-mode="${id}" aria-pressed="${dimMode === id ? "true" : "false"}">${label}</button>`).join("")}</div></div>
-      <svg viewBox="0 0 200 160" aria-hidden="true"></svg><p></p>
+      <svg viewBox="0 0 200 160" aria-hidden="true"></svg><div class="tile-preview-legend" data-tile-preview-legend hidden></div><p></p>
     </div>`;
     let tileSectionOpen = true;
     try { tileSectionOpen = window.localStorage.getItem("finmaster.tilePreview.sectionOpen") !== "false"; } catch { /* storage may be unavailable */ }
@@ -3854,6 +3854,8 @@
         hole.surface === surface && (surface !== "wall" || hole.wallId === wallId) && openingHitsCell(hole)
       );
       holeCount = holes.length;
+      const legend = tip.querySelector("[data-tile-preview-legend]");
+      const legendRows = [];
       const holeShapes = holes.map((hole) => {
         const x = surface === "wall" ? hole.along : hole.x;
         const y = surface === "wall" ? hole.rise : hole.y;
@@ -3866,12 +3868,14 @@
       }).join("");
       let holeDims = "";
       if (mode === "holes") {
-        holeDims = holes.map((hole) => {
+        holeDims = holes.map((hole, index) => {
           const x = surface === "wall" ? hole.along : hole.x;
           const y = surface === "wall" ? hole.rise : hole.y;
           if (hole.shape === "circle") {
             const cx = sx(x), cy = sy(y);
-            return callout(cx, cy, `Ø ${tileTipText(hole.d)}`, "#b91c1c");
+            const value = `Ø ${tileTipText(hole.d)}`;
+            legendRows.push(`<span><b>${index + 1}.</b> ${value}</span>`);
+            return callout(cx, cy, value, "#b91c1c");
           }
           const clippedPart = clipToCell([
             { x, y }, { x: x + hole.w, y },
@@ -3886,13 +3890,15 @@
           const partH = Math.max(0, partTop - partBottom);
           if (partW < 0.005 || partH < 0.005) return "";
           const center = { x: (partLeft + partRight) / 2, y: (partBottom + partTop) / 2 };
+          const value = `${tileTipText(partW)} × ${tileTipText(partH)}`;
+          legendRows.push(`<span><b>${index + 1}.</b> ${value}</span>`);
           const anchorX = sx(center.x), anchorY = sy(center.y);
-          return callout(anchorX, anchorY, `${tileTipText(partW)} × ${tileTipText(partH)}`, "#b91c1c");
+          return callout(anchorX, anchorY, value, "#b91c1c");
         }).join("");
       }
       let offsetDims = "";
       if (mode === "offsets") {
-        offsetDims = holes.map((hole) => {
+        offsetDims = holes.map((hole, index) => {
           const x = surface === "wall" ? hole.along : hole.x;
           const y = surface === "wall" ? hole.rise : hole.y;
           const cx = hole.shape === "circle" ? x : x + hole.w / 2;
@@ -3913,12 +3919,19 @@
             const ax = sx(center.x), ay = sy(center.y), bx = sx(point.x), by = sy(point.y);
             return `<path d="M${ax.toFixed(1)} ${ay.toFixed(1)} L${bx.toFixed(1)} ${by.toFixed(1)}" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>` + callout((ax + bx) / 2, (ay + by) / 2, text, "#6d28d9");
           };
-          return line(first.point, `A ${tileTipText(first.distance)}`) + (second ? line(second.point, `B ${tileTipText(second.distance)}`) : "");
+          const firstText = `A ${tileTipText(first.distance)}`;
+          const secondText = second ? `B ${tileTipText(second.distance)}` : "";
+          legendRows.push(`<span><b>${index + 1}.</b> ${firstText}${secondText ? ` · ${secondText}` : ""}</span>`);
+          return line(first.point, firstText) + (second ? line(second.point, secondText) : "");
         }).join("");
       }
       const clip = `<defs><clipPath id="tile-preview-clip"><path d="${pathOf(cell)}"/></clipPath></defs>`;
       svg.setAttribute("viewBox", `0 0 ${boxW + pad * 2} ${boxH + pad * 2}`);
       svg.innerHTML = `${clip}${outline}${fills}${seamPath}<g clip-path="url(#tile-preview-clip)">${holeShapes}</g>${whole}${slices}${holeDims}${offsetDims}`;
+      if (legend) {
+        legend.innerHTML = legendRows.join("");
+        legend.hidden = !["holes", "offsets"].includes(mode) || !legendRows.length;
+      }
     }
     if (note) {
       const name = tilePatternName(pattern);
