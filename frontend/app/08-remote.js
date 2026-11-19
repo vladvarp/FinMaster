@@ -2001,9 +2001,9 @@
 
   function formatNgrokBytes(value) {
     const bytes = Math.max(0, Number(value) || 0);
-    if (bytes >= 1024 ** 3) return `${(bytes / (1024 ** 3)).toFixed(2).replace(".", ",")} ГБ`;
-    if (bytes >= 1024 ** 2) return `${(bytes / (1024 ** 2)).toFixed(1).replace(".", ",")} МБ`;
-    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1).replace(".", ",")} КБ`;
+    if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(2).replace(".", ",")} ГБ`;
+    if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1).replace(".", ",")} МБ`;
+    if (bytes >= 1000) return `${(bytes / 1000).toFixed(1).replace(".", ",")} КБ`;
     return `${Math.round(bytes)} Б`;
   }
 
@@ -2037,7 +2037,7 @@
       const now = new Date();
       const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
       const current = stats[monthKey] || { requests: 0, traffic_bytes: 0 };
-      const limits = item.limits || { requests: 20000, traffic_bytes: 1024 ** 3 };
+      const limits = item.limits || { requests: 20000, traffic_bytes: 1_000_000_000 };
       return `<div class="ngrok-token-row" data-ngrok-row="${esc(item.id)}">
         <div class="ngrok-token-head">
           <span class="ngrok-token-main">
@@ -2064,13 +2064,13 @@
     if (!item) return;
     ngrokUsageTokenId = id;
     const stats = item.monthly_stats || {};
-    const limits = item.limits || { requests: 20000, traffic_bytes: 1024 ** 3 };
+    const limits = item.limits || { requests: 20000, traffic_bytes: 1_000_000_000 };
     const title = $("ngrok-usage-title");
     if (title) title.textContent = `Статистика · ${item.name || item.prefix + "…"}`;
     const requestsLimit = $("ngrok-usage-requests-limit");
     const trafficLimit = $("ngrok-usage-traffic-limit");
     if (requestsLimit) requestsLimit.value = String(limits.requests || 20000);
-    if (trafficLimit) trafficLimit.value = String(((limits.traffic_bytes || 1024 ** 3) / (1024 ** 3)).toFixed(3)).replace(/0+$/, "").replace(/\.$/, "");
+    if (trafficLimit) trafficLimit.value = String(((limits.traffic_bytes || 1_000_000_000) / (1_000_000_000)).toFixed(3)).replace(/0+$/, "").replace(/\.$/, "");
     const rows = Object.entries(stats).sort(([a], [b]) => b.localeCompare(a));
     const body = $("ngrok-usage-history");
     if (body) body.innerHTML = rows.length ? rows.map(([month, value]) => `
@@ -2094,7 +2094,7 @@
     try {
       const data = await apiPost("/api/remote/ngrok/tokens", {
         action: "limits", id: ngrokUsageTokenId,
-        requests_limit: requests, traffic_limit: Math.round(trafficGb * 1024 ** 3),
+        requests_limit: requests, traffic_limit: Math.round(trafficGb * 1_000_000_000),
       });
       remote.ngrokTokens = data.tokens || remote.ngrokTokens;
       renderNgrokManager(remote.ngrokTokens);
