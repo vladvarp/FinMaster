@@ -2120,6 +2120,26 @@
   function renderCalendar() {
     if (!state.doc || !$("cal-board")) return;
     applyCalColors();
+    // Отчёты версии 1 и старше хранили календарный старт позиции в order_date.
+    // Переносим его в work_start один раз, чтобы старые отчёты сохранили линии,
+    // а после миграции дата заказа и начало в календаре были независимы.
+    let migratedLegacyCalendarDates = false;
+    if (Number(state.doc.version || 0) < 2) {
+      (state.doc.orders || []).forEach((order) => {
+        (order.lines || []).forEach((line) => {
+          if (isFrozenLine(line) || isExpenseLine(line)) return;
+          if (!dateDay(line.work_start) && dateDay(line.order_date)) {
+            line.work_start = dateDay(line.order_date);
+            migratedLegacyCalendarDates = true;
+          }
+        });
+      });
+      state.doc.version = 2;
+      migratedLegacyCalendarDates = true;
+    }
+    if (migratedLegacyCalendarDates && !state.preview) {
+      markDirty("Совместимость календаря", { history: false });
+    }
     (state.doc.orders || []).forEach((order) => {
       syncOrderEndWithPositions(order);
       syncOrderPausesFromLines(order);
