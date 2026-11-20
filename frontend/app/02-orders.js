@@ -274,6 +274,7 @@
       name: "",
       notes: "",
       created_at: nowLocalDateTime(),
+      calendar_dates_independent: true,
       work_start: "",
       work_end: "",
       work_pauses: [],
