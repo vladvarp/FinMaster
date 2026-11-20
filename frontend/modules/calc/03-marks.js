@@ -529,9 +529,27 @@
       stage.innerHTML = commonStageHtml(listed, usedCommonPorts(node));
     }
     if (side) {
+      const selectedId = bag?.commonId || picked?.id || "";
+      const selected = selectedId
+        ? side.querySelector(`[data-common-pick="${cssEsc(selectedId)}"]`)
+        : null;
+      const sideTop = side.getBoundingClientRect().top;
+      const selectedOffset = selected
+        ? selected.getBoundingClientRect().top - sideTop
+        : null;
       const scroll = side.scrollTop;
+
       side.innerHTML = commonSideHtml(node, listed);
-      side.scrollTop = scroll;
+
+      const nextSelected = selectedId
+        ? side.querySelector(`[data-common-pick="${cssEsc(selectedId)}"]`)
+        : null;
+      if (nextSelected && selectedOffset != null) {
+        const nextOffset = nextSelected.getBoundingClientRect().top - side.getBoundingClientRect().top;
+        side.scrollTop = scroll + nextOffset - selectedOffset;
+      } else {
+        side.scrollTop = scroll;
+      }
     }
     if (which === "planner") {
       const title = $("planner-title");
