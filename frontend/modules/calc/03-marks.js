@@ -25,7 +25,8 @@
   function ensureCommonInputs(node, links) {
     if (!node) return [];
     if (!Array.isArray(node.commonInputs)) node.commonInputs = [];
-    const linked = new Set((links || blueprintOf(node)?.links || []).filter((link) => link.to === node.id).map((link) => String(link.toPort || "")));
+    const activeLinks = links || blueprintOf(node)?.links || [];
+    const linked = new Set(activeLinks.filter((link) => link.to === node.id).map((link) => String(link.toPort || "")));
     const seen = new Set();
     const rows = [];
     node.commonInputs.forEach((raw, index) => {
@@ -35,16 +36,15 @@
       seen.add(id);
       rows.push({ id, name: String(raw.name || "").trim().slice(0, 48) || `Вход ${index + 1}` });
     });
-    const isLinked = (row) => linked.has(`common-in:${row.id}`);
-    const kept = rows.filter((row, index) => isLinked(row) || index === rows.length - 1);
-    if (!kept.length || isLinked(kept[kept.length - 1])) {
-      if (kept.length < COMMON_IN_MAX) {
-        let id = uid();
-        while (seen.has(id)) id = uid();
-        kept.push({ id, name: `Вход ${kept.length + 1}` });
-      }
+    if (!rows.length) rows.push({ id: uid(), name: "Вход 1" });
+    // Сохраняем ID всех портов: их могут использовать существующие связи.
+    const last = rows[rows.length - 1];
+    if (linked.has(`common-in:${last.id}`) && rows.length < COMMON_IN_MAX) {
+      let id = uid();
+      while (seen.has(id)) id = uid();
+      rows.push({ id, name: `Вход ${rows.length + 1}` });
     }
-    node.commonInputs = kept.slice(0, COMMON_IN_MAX);
+    node.commonInputs = rows;
     return node.commonInputs;
   }
 
@@ -65,9 +65,10 @@
     const rows = ports.map((port) => {
       const linked = (links || []).some((link) => link.to === node.id && link.toPort === port.id);
       const value = graph?.values?.[`${node.id}:${port.id}`];
+      const inputId = port.id.slice("common-in:".length);
       return `<div class="calc-row in">
         <i class="calc-port in" data-port="${esc(port.id)}" data-io="in" title="${esc(port.name)}"></i>
-        <span>${esc(port.name)}</span>
+        <input class="planner-name" data-common-input-name="${esc(inputId)}" value="${esc(port.name)}" maxlength="48" aria-label="Название входа" />
         <b>${value != null && Number.isFinite(value) ? esc(fmtShort(value)) : "—"}</b>
         ${linked ? `<button type="button" class="calc-mini" data-del-in-link="${esc(port.id)}" title="Удалить связь">×</button>` : ""}
       </div>`;
@@ -545,6 +546,12 @@
   }
 
   function handleCommonInput(e, node) {
+    const inputName = e.target.closest("[data-common-input-name]");
+    if (inputName) {
+      const input = (node.commonInputs || []).find((item) => item.id === inputName.dataset.commonInputName);
+      if (input) input.name = String(inputName.value || "").trim().slice(0, 48);
+      return true;
+    }
     const name = e.target.closest("[data-common-name]");
     if (!name) return false;
     const row = (node.commons || []).find((item) => item.id === name.dataset.commonName);
@@ -2795,7 +2802,11 @@
     const ports = node.type === "openings" ? openingOutputs(node, bp, graph.values, bp.links) : node.type === "tiles" ? tileOutputs(node, bp, graph.values, bp.links) : electricOutputs(node, bp, graph.values, bp.links);
     const ids = new Set(ports.map((port) => port.id));
     bp.links = (bp.links || []).filter((link) => link.from !== node.id || ids.has(link.fromPort));
-    const inputs = new Set((node.type === "openings" ? openingInputs(node) : node.type === "tiles" ? tileInputs(node) : electricInputs(node)).map((port) => port.id));
+    const inputs = new Set(
+      (node.type === "openings" ? openingInputs(node) : node.type === "tiles" ? tileInputs(node) : electricInputs(node))
+        .concat(commonInputPorts(node, bp.links))
+        .map((port) => port.id)
+    );
     bp.links = bp.links.filter((link) => link.to !== node.id || inputs.has(link.toPort));
   }
 

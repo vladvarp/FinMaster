@@ -866,7 +866,7 @@
       const node = markNode();
       const bp = activeBlueprint();
       if (!node || !bp) return;
-      if (e.target?.dataset?.commonName) {
+      if (e.target?.dataset?.commonName || e.target?.dataset?.commonInputName) {
         markCommit(false);
         return;
       }
