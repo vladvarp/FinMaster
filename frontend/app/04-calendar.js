@@ -1162,6 +1162,12 @@
     return dateDay(line?.work_start) || "";
   }
 
+  function orderMainDateFloor(order) {
+    const orderDates = (order?.lines || []).map((line) => dateDay(line?.order_date)).filter(Boolean);
+    const dates = [...orderDates, dateDay(order?.work_start)].filter(Boolean).sort();
+    return dates.at(-1) || "";
+  }
+
   function lineWorkProxy(order, line) {
     const start = lineDateFloor(line);
     const pauses = Array.isArray(line?.work_pauses) ? line.work_pauses.map((pause) => ({ ...pause })) : [];
@@ -1687,7 +1693,16 @@
       return { from: start, till };
     }
     if (!start && end) return { from: end, till: end };
-    return { from: start, till: end };
+    let till = end;
+    if (Array.isArray(order?.lines)) {
+      calendarWorkLines(order).forEach((line) => {
+        const own = lineOwnDrawSpan(order, line, today);
+        if (!own) return;
+        if (own.till > till) till = own.till;
+        if (own.from > till) till = own.from;
+      });
+    }
+    return { from: start, till };
   }
 
   function timelineFullRange() {
@@ -2685,7 +2700,9 @@
                 const pickedIndex = calendarState().pick
                   ? win.days.findIndex((day) => dayKey(day) === calendarState().pick)
                   : -1;
-                const addDate = !lineDateFloor(line) && pickedIndex >= 0
+                const pickedDay = calendarState().pick || "";
+                const mainDateFloor = orderMainDateFloor(order);
+                const addDate = !lineDateFloor(line) && pickedIndex >= 0 && (!mainDateFloor || pickedDay >= mainDateFloor)
                   ? `<button type="button" class="gantt-add-line-date" data-cal-add-line-date="${esc(order.id)}" data-cal-line="${esc(line.id)}" style="grid-column:${pickedIndex + 1}" title="Назначить начало в календаре: ${esc(calFmtDay(win.days[pickedIndex], true))}" aria-label="Назначить начало позиции в календаре">+</button>`
                   : "";
                 return `<div class="gantt-row is-line ${calSelectedClass(order.id, line.id)} ${linePaused ? "is-paused" : ""}" data-cal-id="${esc(order.id)}" data-cal-line="${esc(line.id)}">
@@ -3343,7 +3360,8 @@
       const order = findOrder(addLineDate.dataset.calAddLineDate);
       const line = findCalendarLine(order, addLineDate.dataset.calLine);
       const day = calendarState().pick;
-      if (!order || !line || !day || lineDateFloor(line)) return;
+      const mainDateFloor = orderMainDateFloor(order);
+      if (!order || !line || !day || lineDateFloor(line) || (mainDateFloor && day < mainDateFloor)) return;
       historyCommit();
       line.work_start = day;
       calendarState().selected = order.id;
