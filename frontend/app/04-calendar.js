@@ -2697,7 +2697,7 @@
                   ? win.days.findIndex((day) => dayKey(day) === calendarState().pick)
                   : -1;
                 const addDate = !lineDateFloor(line) && pickedIndex >= 0
-                  ? `<button type="button" class="gantt-add-line-date" data-cal-add-line-date="${esc(order.id)}" data-cal-line="${esc(line.id)}" title="Назначить позиции дату ${esc(calFmtDay(win.days[pickedIndex], true))}" aria-label="Назначить дату позиции">+</button>`
+                  ? `<button type="button" class="gantt-add-line-date" data-cal-add-line-date="${esc(order.id)}" data-cal-line="${esc(line.id)}" style="grid-column:${pickedIndex + 1}" title="Назначить позиции дату ${esc(calFmtDay(win.days[pickedIndex], true))}" aria-label="Назначить дату позиции">+</button>`
                   : "";
                 return `<div class="gantt-row is-line ${calSelectedClass(order.id, line.id)} ${linePaused ? "is-paused" : ""}" data-cal-id="${esc(order.id)}" data-cal-line="${esc(line.id)}">
           <div class="gantt-head">
