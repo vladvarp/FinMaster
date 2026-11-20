@@ -1620,7 +1620,7 @@
           setVal(nodeId, id, Number.isFinite(value) ? value : 0);
         });
       } else if (node.type === "planner") {
-        plannerOutputs(node, links).forEach((port) => {
+        plannerOutputs(node, links, values).forEach((port) => {
           if (port.signal === "plan") return;
           setVal(nodeId, port.id, port.value ?? port.area);
         });
