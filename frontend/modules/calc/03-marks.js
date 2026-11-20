@@ -118,7 +118,7 @@
       const inputId = port.id.slice("common-in:".length);
       return `<div class="calc-row in">
         <i class="calc-port in" data-port="${esc(port.id)}" data-io="in" title="${esc(port.name)}"></i>
-        <input class="planner-name" data-common-input-name="${esc(inputId)}" value="${esc(port.name)}" maxlength="48" aria-label="Название входа" />
+        <span class="planner-name calc-common-input-label">${esc(port.name)}</span>
         <b>${value != null && Number.isFinite(value) ? esc(fmtShort(value)) : "—"}</b>
         ${linked ? `<button type="button" class="calc-mini" data-del-in-link="${esc(port.id)}" title="Удалить связь">×</button>` : ""}
       </div>`;
@@ -596,12 +596,6 @@
   }
 
   function handleCommonInput(e, node) {
-    const inputName = e.target.closest("[data-common-input-name]");
-    if (inputName) {
-      const input = (node.commonInputs || []).find((item) => item.id === inputName.dataset.commonInputName);
-      if (input) input.name = String(inputName.value || "").trim().slice(0, 48);
-      return true;
-    }
     const name = e.target.closest("[data-common-name]");
     if (!name) return false;
     const row = (node.commons || []).find((item) => item.id === name.dataset.commonName);
