@@ -26,23 +26,27 @@
     if (!node) return [];
     if (!Array.isArray(node.commonInputs)) node.commonInputs = [];
     const activeLinks = links || blueprintOf(node)?.links || [];
-    const linked = new Set(activeLinks.filter((link) => link.to === node.id).map((link) => String(link.toPort || "")));
+    const linked = new Set(activeLinks
+      .filter((link) => link.to === node.id && String(link.toPort || "").startsWith("common-in:"))
+      .map((link) => String(link.toPort).slice("common-in:".length)));
     const seen = new Set();
     const rows = [];
-    node.commonInputs.forEach((raw, index) => {
+    node.commonInputs.forEach((raw) => {
       if (!raw || typeof raw !== "object" || rows.length >= COMMON_IN_MAX) return;
       let id = String(raw.id || "").trim();
       if (!id || seen.has(id)) id = uid();
       seen.add(id);
+      // Удаляем все неподключённые порты: остаются только реально используемые.
+      if (!linked.has(id)) return;
       const rawName = String(raw.name || "").trim().slice(0, 48);
       rows.push({ id, name: /^Вход \d+$/.test(rawName) ? "" : rawName });
     });
-    if (!rows.length) rows.push({ id: uid(), name: "" });
-    // Сохраняем ID всех портов: их могут использовать существующие связи.
-    const last = rows[rows.length - 1];
-    if (linked.has(`common-in:${last.id}`) && rows.length < COMMON_IN_MAX) {
-      let id = uid();
-      while (seen.has(id)) id = uid();
+    if (rows.length < COMMON_IN_MAX) {
+      let id = (node.commonInputs || []).map((item) => String(item?.id || "")).find((candidate) => candidate && !seen.has(candidate) && !linked.has(candidate));
+      if (!id) {
+        id = uid();
+        while (seen.has(id) || linked.has(id)) id = uid();
+      }
       rows.push({ id, name: "" });
     }
     node.commonInputs = rows;
@@ -58,9 +62,23 @@
       if (link && host) {
         const source = (host.nodes || []).find((entry) => entry.id === link.from);
         if (source) {
-          const order = source.type === "order" ? api.findOrder(source.orderId) : null;
-          const output = nodeOutputs(source, order, activeLinks).find((port) => port.id === link.fromPort);
-          sourceName = String(output?.name || "").trim();
+          if (source.type === "teleport") {
+            const entry = teleportPortOf(source, link.fromPort);
+            sourceName = teleportPortName(host, source, entry);
+          } else if (source.type === "teleout") {
+            const output = teleoutPort(source, link.fromPort);
+            const teleport = output && teleportHost(host, output.source);
+            const entry = teleport && teleportEntry(teleport, output.source);
+            sourceName = teleport && entry ? teleportPortName(host, teleport, entry) : "";
+          } else if (source.type === "bus") {
+            const lane = busLanes(source).find((item) => `out:${item.id}` === link.fromPort || item.id === link.fromPort);
+            sourceName = String(lane?.name || lane?.label || "").trim();
+          }
+          if (!sourceName) {
+            const order = source.type === "order" ? api.findOrder(source.orderId) : null;
+            const output = nodeOutputs(source, order, activeLinks).find((port) => port.id === link.fromPort);
+            sourceName = String(output?.name || "").trim();
+          }
           if (!sourceName || sourceName === "out") sourceName = markNodeTitle(source);
         }
       }
