@@ -1159,16 +1159,17 @@
 
   function lineWorkProxy(order, line) {
     const floor = lineDateFloor(line);
+    const pauses = Array.isArray(line?.work_pauses) ? line.work_pauses.map((pause) => ({ ...pause })) : [];
+    // Позиция без даты заказа не участвует в таймлайне, даже если у заказа есть общий срок.
+    if (!floor) return { work_start: "", work_end: "", work_pauses: pauses };
     let start = dateDay(line?.work_start) || dateDay(order?.work_start);
     let end = dateDay(line?.work_end) || dateDay(order?.work_end);
-    if (floor) {
-      if (start && start < floor) start = floor;
-      if (end && end < floor) end = floor;
-    }
+    if (start && start < floor) start = floor;
+    if (end && end < floor) end = floor;
     return {
       work_start: start || "",
       work_end: end || "",
-      work_pauses: Array.isArray(line?.work_pauses) ? line.work_pauses.map((pause) => ({ ...pause })) : [],
+      work_pauses: pauses,
     };
   }
 
@@ -2693,6 +2694,12 @@
                   noteText: String(line.notes || "").trim(),
                 });
                 const days = workDurationDays(proxy);
+                const pickedIndex = calendarState().pick
+                  ? win.days.findIndex((day) => dayKey(day) === calendarState().pick)
+                  : -1;
+                const addDate = !lineDateFloor(line) && pickedIndex >= 0
+                  ? `<button type="button" class="gantt-add-line-date" data-cal-add-line-date="${esc(order.id)}" data-cal-line="${esc(line.id)}" title="Назначить позиции дату ${esc(calFmtDay(win.days[pickedIndex], true))}" aria-label="Назначить дату позиции">+</button>`
+                  : "";
                 return `<div class="gantt-row is-line ${calSelectedClass(order.id, line.id)} ${linePaused ? "is-paused" : ""}" data-cal-id="${esc(order.id)}" data-cal-line="${esc(line.id)}">
           <div class="gantt-head">
             <button type="button" class="gantt-label" data-cal-id="${esc(order.id)}" data-cal-line="${esc(line.id)}">
@@ -2700,7 +2707,7 @@
               <small>${ganttStatusHtml(lineMeta)}${days ? ` · ${days} дн.` : ""}</small>
             </button>
           </div>
-          <div class="gantt-track" data-cal-track="${esc(order.id)}" data-cal-line="${esc(line.id)}">${lineBars}</div>
+          <div class="gantt-track" data-cal-track="${esc(order.id)}" data-cal-line="${esc(line.id)}">${lineBars}${addDate}</div>
         </div>`;
               })
               .join("")
@@ -3341,6 +3348,22 @@
     const actBtn = e.target.closest("[data-cal-act]");
     if (actBtn) {
       onCalendarAct(actBtn.dataset.calAct, actBtn);
+      return;
+    }
+    const addLineDate = e.target.closest("[data-cal-add-line-date]");
+    if (addLineDate) {
+      const order = findOrder(addLineDate.dataset.calAddLineDate);
+      const line = findCalendarLine(order, addLineDate.dataset.calLine);
+      const day = calendarState().pick;
+      if (!order || !line || !day || lineDateFloor(line)) return;
+      historyCommit();
+      line.order_date = day;
+      calendarState().selected = order.id;
+      calendarState().selectedLine = line.id;
+      markDirty();
+      historyCommit();
+      renderCalendar();
+      toast(`Дата назначена: ${calFmtDay(parseDay(day), true)}`);
       return;
     }
     const expand = e.target.closest("[data-cal-expand]");
