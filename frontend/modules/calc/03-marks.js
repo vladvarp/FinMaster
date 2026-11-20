@@ -1181,9 +1181,16 @@
     delete node.tones;
     delete node.color;
     if (!Array.isArray(node.fixtures)) node.fixtures = [];
+    ensureFeeds(node);
+    const feedIds = new Set(node.feeds.map((feed) => feed.id));
+    const firstFeed = node.feeds[0].id;
+    const counts = new Map();
     const list = [];
     node.fixtures.forEach((raw) => {
-      if (!raw || typeof raw !== "object" || list.length >= 120) return;
+      if (!raw || typeof raw !== "object") return;
+      const feed = feedIds.has(String(raw.feed || "")) ? String(raw.feed) : firstFeed;
+      const count = counts.get(feed) || 0;
+      if (count >= 120) return;
       let id = String(raw.id || "").trim();
       if (!id || list.some((item) => item.id === id)) id = uid();
       const kind = raw.kind === "light" ? "light" : "socket";
@@ -1210,16 +1217,11 @@
         lw: plannerRound(plannerClamp(plannerNum(raw.lw, 0.6), 0.05, 8)),
         ll: plannerRound(plannerClamp(plannerNum(raw.ll, 1.2), 0.05, 12)),
         angle: lightAngle(raw),
-        feed: String(raw.feed || ""),
+        feed,
       });
+      counts.set(feed, count + 1);
     });
     node.fixtures = list;
-    ensureFeeds(node);
-    const feedIds = new Set(node.feeds.map((feed) => feed.id));
-    const firstFeed = node.feeds[0].id;
-    node.fixtures.forEach((fix) => {
-      if (!feedIds.has(fix.feed)) fix.feed = firstFeed;
-    });
     if (!node.outOn || typeof node.outOn !== "object") node.outOn = {};
     node.name = String(node.name || "").trim().slice(0, 48) || "Электрика";
     return node;
@@ -4564,6 +4566,10 @@
       y: world.y || 0,
     };
     const feedId = activeFeed(node)?.id || node.feeds?.[0]?.id || "";
+    if (node.type === "electrics" && node.fixtures.filter((fix) => fix.feed === feedId).length >= 120) {
+      api?.toast?.("На этом чертеже достигнут лимит 120 точек электрики");
+      return "";
+    }
     if (node.type === "openings") {
       const hole = {
         id: uid(),
@@ -5118,7 +5124,7 @@
       if (mode === "replace") applyFeedClip(node, ctx.feed, editorClip, incoming, ctx.base);
     } else {
       if (mode === "replace") node.fixtures = node.fixtures.filter((fix) => fix.feed !== feedId);
-      const room = 120 - node.fixtures.length;
+      const room = 120 - node.fixtures.filter((fix) => fix.feed === feedId).length;
       const incoming = (editorClip.fixtures || []).slice(0, Math.max(0, room)).map((raw) => {
         const fix = JSON.parse(JSON.stringify(raw));
         delete fix.wallIndex;
