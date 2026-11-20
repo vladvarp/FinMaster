@@ -34,7 +34,7 @@
       let id = String(raw.id || "").trim();
       if (!id || seen.has(id)) id = uid();
       seen.add(id);
-      rows.push({ id, name: String(raw.name || "").trim().slice(0, 48) || `Вход ${index + 1}` });
+      rows.push({ id, name: String(raw.name || "").trim().slice(0, 48) });
     });
     if (!rows.length) rows.push({ id: uid(), name: "Вход 1" });
     // Сохраняем ID всех портов: их могут использовать существующие связи.
@@ -49,7 +49,26 @@
   }
 
   function commonInputPorts(node, links) {
-    return ensureCommonInputs(node, links).map((item) => ({ id: `common-in:${item.id}`, name: item.name, commonInput: true }));
+    const host = blueprintOf(node);
+    const activeLinks = links || host?.links || [];
+    return ensureCommonInputs(node, activeLinks).map((item, index) => {
+      const link = activeLinks.find((entry) => entry.to === node.id && entry.toPort === `common-in:${item.id}`);
+      let sourceName = "";
+      if (link && host) {
+        const source = (host.nodes || []).find((entry) => entry.id === link.from);
+        if (source) {
+          const order = source.type === "order" ? api.findOrder(source.orderId) : null;
+          const output = nodeOutputs(source, order, activeLinks).find((port) => port.id === link.fromPort);
+          sourceName = String(output?.name || "").trim();
+          if (!sourceName || sourceName === "out") sourceName = markNodeTitle(source);
+        }
+      }
+      return {
+        id: `common-in:${item.id}`,
+        name: item.name || sourceName || `Вход ${index + 1}`,
+        commonInput: true,
+      };
+    });
   }
 
   function commonInputSourceGroup(node, links, values) {
