@@ -2741,8 +2741,8 @@
       <div class="calc-node-sub">${esc(sub)}</div>
       <div class="calc-ports">
         ${blocks}
-        ${commonBlockHtml(node, commons, graph, (port) => countRows(node, [port], graph))}
         ${commonInputBlockHtml(node, graph, bp.links)}
+        ${commonBlockHtml(node, commons, graph, (port) => countRows(node, [port], graph))}
       </div>
     </article>`;
   }
