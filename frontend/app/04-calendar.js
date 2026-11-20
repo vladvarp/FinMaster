@@ -1162,10 +1162,6 @@
     return dateDay(line?.work_start) || "";
   }
 
-  function dayKeyMax(...keys) {
-    return keys.filter(Boolean).sort().at(-1) || "";
-  }
-
   function lineWorkProxy(order, line) {
     const start = lineDateFloor(line);
     const pauses = Array.isArray(line?.work_pauses) ? line.work_pauses.map((pause) => ({ ...pause })) : [];
@@ -1254,7 +1250,6 @@
     proxy.work_end = clamped.end;
     normalizeWorkDates(proxy, { mergePauses: true, lines: false });
     const pauses = workPauses(proxy);
-    const keepOwnEnd = !!dateDay(line.work_end);
     if (!dateDay(proxy.work_start) && !dateDay(proxy.work_end)) {
       line.work_start = "";
       line.work_end = "";
