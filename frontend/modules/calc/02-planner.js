@@ -370,10 +370,10 @@
     return ports;
   }
 
-  function plannerOutputs(node, links) {
+  function plannerOutputs(node, links, values) {
     ensurePlanner(node);
     const ports = plannerLayoutPorts(node, links, false);
-    appendCommons(node, ports, linkedFromPorts(node.id, links || []), plannerLayoutPorts(node, links, true));
+    appendCommons(node, ports, linkedFromPorts(node.id, links || []), plannerLayoutPorts(node, links, true), values, links);
     return ports;
   }
 
