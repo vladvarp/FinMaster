@@ -1301,7 +1301,6 @@
       if (!raw || typeof raw !== "object") return;
       const feed = feedIds.has(String(raw.feed || "")) ? String(raw.feed) : firstFeed;
       const count = counts.get(feed) || 0;
-      if (count >= 120) return;
       let id = String(raw.id || "").trim();
       if (!id || list.some((item) => item.id === id)) id = uid();
       const kind = raw.kind === "light" ? "light" : "socket";
