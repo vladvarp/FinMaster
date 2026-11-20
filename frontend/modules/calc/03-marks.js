@@ -113,14 +113,11 @@
   function commonInputBlockHtml(node, graph, links) {
     const ports = commonInputPorts(node, links);
     const rows = ports.map((port) => {
-      const linked = (links || []).some((link) => link.to === node.id && link.toPort === port.id);
       const value = graph?.values?.[`${node.id}:${port.id}`];
-      const inputId = port.id.slice("common-in:".length);
       return `<div class="calc-row in">
         <i class="calc-port in" data-port="${esc(port.id)}" data-io="in" title="${esc(port.name)}"></i>
-        <span class="planner-name calc-common-input-label">${esc(port.name)}</span>
+        <span class="calc-common-input-label">${esc(port.name)}</span>
         <b>${value != null && Number.isFinite(value) ? esc(fmtShort(value)) : "—"}</b>
-        ${linked ? `<button type="button" class="calc-mini" data-del-in-link="${esc(port.id)}" title="Удалить связь">×</button>` : ""}
       </div>`;
     }).join("");
     return `<div class="calc-sec">Общий ввод</div>${rows || `<div class="calc-empty">Подключите числовые значения</div>`}`;
