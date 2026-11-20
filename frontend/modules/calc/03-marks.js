@@ -34,15 +34,15 @@
       let id = String(raw.id || "").trim();
       if (!id || seen.has(id)) id = uid();
       seen.add(id);
-      rows.push({ id, name: String(raw.name || "").trim().slice(0, 48) });
+      const rawName = String(raw.name || "").trim().slice(0, 48);\n      rows.push({ id, name: /^Вход \\d+$/.test(rawName) ? "" : rawName });
     });
-    if (!rows.length) rows.push({ id: uid(), name: "Вход 1" });
+    if (!rows.length) rows.push({ id: uid(), name: "" });
     // Сохраняем ID всех портов: их могут использовать существующие связи.
     const last = rows[rows.length - 1];
     if (linked.has(`common-in:${last.id}`) && rows.length < COMMON_IN_MAX) {
       let id = uid();
       while (seen.has(id)) id = uid();
-      rows.push({ id, name: `Вход ${rows.length + 1}` });
+      rows.push({ id, name: "" });
     }
     node.commonInputs = rows;
     return node.commonInputs;
