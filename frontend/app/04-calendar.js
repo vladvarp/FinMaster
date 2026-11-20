@@ -1172,9 +1172,11 @@
   function lineWorkProxy(order, line) {
     const start = lineDateFloor(line);
     const pauses = Array.isArray(line?.work_pauses) ? line.work_pauses.map((pause) => ({ ...pause })) : [];
-    if (!start) return { work_start: "", work_end: "", work_pauses: [] };
+    // Конечная дата может существовать отдельно от начала. Не теряем её
+    // при построении прокси: позиция без старта не рисуется на таймлайне,
+    // но сохранённый work_end должен переживать любые операции с календарём.
     let end = dateDay(line?.work_end);
-    if (end && end < start) end = start;
+    if (start && end && end < start) end = start;
     return {
       work_start: start,
       work_end: end || "",
