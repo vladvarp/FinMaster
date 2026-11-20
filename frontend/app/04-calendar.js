@@ -1176,12 +1176,11 @@
   /** Срок позиции без расширения по sibling-линиям заказа. */
   function lineOwnDrawSpan(order, line, today = clockToday()) {
     const floor = lineDateFloor(line);
+    if (!floor) return null;
     let start = dateDay(line?.work_start) || dateDay(order?.work_start);
     let end = dateDay(line?.work_end) || dateDay(order?.work_end);
-    if (floor) {
-      if (start && start < floor) start = floor;
-      if (end && end < floor) end = floor;
-    }
+    if (start && start < floor) start = floor;
+    if (end && end < floor) end = floor;
     return orderDrawSpan({ work_start: start || "", work_end: end || "", work_pauses: [] }, today);
   }
 
