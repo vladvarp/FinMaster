@@ -2726,7 +2726,7 @@
                   : -1;
                 const pickedDay = calendarState().pick || "";
                 const mainDateFloor = orderMainDateFloor(order);
-                const addDate = !lineDateFloor(line) && pickedIndex >= 0 && (!mainDateFloor || pickedDay >= mainDateFloor)
+                const addDate = order.calendar_dates_independent && !lineDateFloor(line) && pickedIndex >= 0 && (!mainDateFloor || pickedDay >= mainDateFloor)
                   ? `<button type="button" class="gantt-add-line-date" data-cal-add-line-date="${esc(order.id)}" data-cal-line="${esc(line.id)}" style="grid-column:${pickedIndex + 1}" title="Назначить начало в календаре: ${esc(calFmtDay(win.days[pickedIndex], true))}" aria-label="Назначить начало позиции в календаре">+</button>`
                   : "";
                 return `<div class="gantt-row is-line ${calSelectedClass(order.id, line.id)} ${linePaused ? "is-paused" : ""}" data-cal-id="${esc(order.id)}" data-cal-line="${esc(line.id)}">
@@ -3385,7 +3385,7 @@
       const line = findCalendarLine(order, addLineDate.dataset.calLine);
       const day = calendarState().pick;
       const mainDateFloor = orderMainDateFloor(order);
-      if (!order || !line || !day || lineDateFloor(line) || (mainDateFloor && day < mainDateFloor)) return;
+      if (!order?.calendar_dates_independent || !line || !day || lineDateFloor(line) || (mainDateFloor && day < mainDateFloor)) return;
       historyCommit();
       line.work_start = day;
       calendarState().selected = order.id;
