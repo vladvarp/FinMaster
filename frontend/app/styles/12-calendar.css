@@ -1066,7 +1066,10 @@
   border-radius: 50%;
   background: var(--card);
   color: var(--accent);
-  font: 600 17px/1 inherit;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1;
   cursor: pointer;
   transition: background .15s ease, color .15s ease, transform .15s ease;
 }
