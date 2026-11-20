@@ -3624,6 +3624,20 @@
       return;
     }
     if (!field) return;
+    const cal = calendarState();
+    const selectedOrder = findOrder(cal.selected);
+    const selectedLine = cal.selectedLine ? findCalendarLine(selectedOrder, cal.selectedLine) : null;
+    // Явная очистка начала старой позиции переводит только её заказ
+    // на независимую модель дат. Конец и остальные даты старых позиций не трогаем.
+    if (field === "work_start" && selectedLine && selectedOrder && !selectedOrder.calendar_dates_independent && !e.target.value) {
+      historyCommit();
+      selectedOrder.calendar_dates_independent = true;
+      selectedLine.work_start = "";
+      markDirty();
+      historyCommit();
+      renderCalendar();
+      return;
+    }
     applyCalendarOrder((order) => {
       order[field] = e.target.value;
       normalizeWorkDates(order);
