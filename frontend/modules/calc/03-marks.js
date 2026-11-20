@@ -1477,7 +1477,7 @@
       ports.push(...electricFeedPorts(node, host, links, feed, false));
       catalog.push(...electricFeedPorts(node, host, links, feed, true));
     });
-    appendCommons(node, ports, linkedFromPorts(node.id, links || host?.links || []), catalog);
+    appendCommons(node, ports, linkedFromPorts(node.id, links || host?.links || []), catalog, values, links || host?.links || []);
     return ports;
   }
 
@@ -2646,7 +2646,7 @@
       ports.push(...tileFeedPorts(node, host, values, links, feed, false));
       catalog.push(...tileFeedPorts(node, host, values, links, feed, true));
     });
-    appendCommons(node, ports, linkedFromPorts(node.id, links || host?.links || []), catalog);
+    appendCommons(node, ports, linkedFromPorts(node.id, links || host?.links || []), catalog, values, links || host?.links || []);
     return ports;
   }
 
