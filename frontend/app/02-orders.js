@@ -206,7 +206,7 @@
 
   function emptyDoc() {
     return {
-      version: 1,
+      version: 2,
       title: "Новый отчёт",
       id: uid(),
       created_at: new Date().toISOString(),
@@ -274,6 +274,7 @@
       name: "",
       notes: "",
       created_at: nowLocalDateTime(),
+      calendar_dates_independent: true,
       work_start: "",
       work_end: "",
       work_pauses: [],

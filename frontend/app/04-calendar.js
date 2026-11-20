@@ -914,8 +914,25 @@
   function toggleLineFromNextDay(proxy) {
     const today = clockToday();
     if (dateDay(proxy?.work_end)) return "";
-    if (workStatus(proxy, today) !== "now") return "";
+    const status = workStatus(proxy, today);
     const todayKey = dayKey(today);
+    // Запланированную позицию ставим на открытую паузу с её плановой даты
+    // начала. Не ограничиваем такую паузу сегодняшним днём.
+    if (status === "planned") {
+      if (futureOpenPauses(proxy, today).length) {
+        proxy.work_pauses = workPauses(proxy).filter(
+          (pause) => !(pauseIsOpen(proxy, pause) && dateDay(pause.start) > todayKey)
+        );
+        normalizeWorkPauses(proxy);
+        return "Пауза запланированной позиции снята";
+      }
+      const plannedStart = dateDay(proxy.work_start);
+      if (!plannedStart) return "";
+      proxy.work_pauses = workPauses(proxy).concat({ start: plannedStart, end: "", open: true });
+      normalizeWorkPauses(proxy);
+      return "Позиция на паузе с даты начала";
+    }
+    if (status !== "now") return "";
     if (futureOpenPauses(proxy, today).length) {
       proxy.work_pauses = workPauses(proxy).filter((pause) => !(pauseIsOpen(proxy, pause) && dateDay(pause.start) > todayKey));
       normalizeWorkPauses(proxy);
@@ -1018,12 +1035,10 @@
     return !!(dateDay(order?.work_start) || dateDay(order?.work_end));
   }
 
-  /** Конец позиции в календаре: свой или унаследованный от заказа. */
+  /** Конец позиции в календаре задаётся только её собственной датой. */
   function lineCalendarEnd(order, line) {
     if (!line || isFrozenLine(line) || isExpenseLine(line)) return "";
-    if (dateDay(line.work_end)) return dateDay(line.work_end);
-    if (!dateDay(line.work_start) && dateDay(order?.work_end)) return dateDay(order.work_end);
-    return "";
+    return dateDay(line.work_end);
   }
 
   /** Галочка включена: у позиции есть конечная дата. Зелёная — конец сегодня или раньше, оранжевая — позже. */
@@ -1033,9 +1048,7 @@
 
   function positionIsOpen(order, line) {
     if (!line || isFrozenLine(line) || isExpenseLine(line)) return false;
-    if (dateDay(line.work_end)) return false;
-    if (dateDay(line.work_start)) return true;
-    return !dateDay(order?.work_end) && !!dateDay(order?.work_start);
+    return !!dateDay(line.work_start) && !dateDay(line.work_end);
   }
 
   function orderHasOpenPosition(order) {
@@ -1069,11 +1082,9 @@
     const end = dateDay(order?.work_end);
     if (!end) return;
     calendarWorkLines(order).forEach((line) => {
-      if (line.id === exceptId || dateDay(line.work_end)) return;
-      let start = dateDay(line.work_start) || dateDay(order.work_start) || end;
-      if (start > end) start = end;
-      line.work_start = start;
-      line.work_end = end;
+      const start = dateDay(line.work_start);
+      if (line.id === exceptId || !start || dateDay(line.work_end)) return;
+      line.work_end = start > end ? start : end;
     });
   }
 
@@ -1084,10 +1095,9 @@
   
     if (lineCalendarDone(order, line)) {
       keepSiblingEnds(order, line.id);
-      if (!dateDay(line.work_start)) line.work_start = dateDay(order.work_start) || today;
       line.work_end = "";
     } else {
-      let start = dateDay(line.work_start) || dateDay(order.work_start) || today;
+      let start = dateDay(line.work_start) || today;
       if (start > today) start = today;
       line.work_start = start;
       line.work_end = today;
@@ -1116,7 +1126,7 @@
       lines.forEach((line) => {
         if (lineCalendarDone(order, line)) return;
   
-        let start = dateDay(line.work_start) || dateDay(order.work_start) || today;
+        let start = dateDay(line.work_start) || today;
         if (start > today) start = today;
   
         line.work_start = start;
@@ -1130,7 +1140,6 @@
       }
     } else {
       lines.forEach((line) => {
-        if (!dateDay(line.work_start)) line.work_start = dateDay(order.work_start) || today;
         line.work_end = "";
       });
     }
@@ -1149,39 +1158,55 @@
     return name || `Позиция ${index + 1}`;
   }
 
-  function lineDateFloor(line) {
-    return dateDay(line?.order_date) || "";
+  function lineUsesIndependentCalendar(line) {
+    const order = (state.doc?.orders || []).find((item) => (item.lines || []).includes(line));
+    return !!order?.calendar_dates_independent;
   }
 
-  function dayKeyMax(...keys) {
-    return keys.filter(Boolean).sort().at(-1) || "";
+  function lineDateFloor(line) {
+    return lineUsesIndependentCalendar(line) ? dateDay(line?.work_start) || "" : dateDay(line?.order_date) || "";
+  }
+
+  function orderMainDateFloor(order) {
+    const orderDates = (order?.lines || []).map((line) => dateDay(line?.order_date)).filter(Boolean).sort();
+    const orderDate = orderDates.at(-1) || dateDay(order?.created_at);
+    const dates = [orderDate, dateDay(order?.work_start)].filter(Boolean).sort();
+    return dates.at(-1) || "";
   }
 
   function lineWorkProxy(order, line) {
-    const floor = lineDateFloor(line);
-    let start = dateDay(line?.work_start) || dateDay(order?.work_start);
-    let end = dateDay(line?.work_end) || dateDay(order?.work_end);
-    if (floor) {
-      if (start && start < floor) start = floor;
-      if (end && end < floor) end = floor;
+    const pauses = Array.isArray(line?.work_pauses) ? line.work_pauses.map((pause) => ({ ...pause })) : [];
+    if (!order?.calendar_dates_independent) {
+      const floor = dateDay(line?.order_date);
+      let start = dateDay(line?.work_start) || dateDay(order?.work_start);
+      let end = dateDay(line?.work_end) || dateDay(order?.work_end);
+      if (floor) {
+        if (start && start < floor) start = floor;
+        if (end && end < floor) end = floor;
+      }
+      return { work_start: start || "", work_end: end || "", work_pauses: pauses };
     }
-    return {
-      work_start: start || "",
-      work_end: end || "",
-      work_pauses: Array.isArray(line?.work_pauses) ? line.work_pauses.map((pause) => ({ ...pause })) : [],
-    };
+    const start = dateDay(line?.work_start) || "";
+    let end = dateDay(line?.work_end);
+    if (start && end && end < start) end = start;
+    return { work_start: start, work_end: end || "", work_pauses: pauses };
   }
 
-  /** Срок позиции без расширения по sibling-линиям заказа. */
+  /** Срок позиции определяется только её собственными датами календаря. */
   function lineOwnDrawSpan(order, line, today = clockToday()) {
-    const floor = lineDateFloor(line);
-    let start = dateDay(line?.work_start) || dateDay(order?.work_start);
-    let end = dateDay(line?.work_end) || dateDay(order?.work_end);
-    if (floor) {
-      if (start && start < floor) start = floor;
-      if (end && end < floor) end = floor;
+    if (!order?.calendar_dates_independent) {
+      const floor = dateDay(line?.order_date);
+      let start = dateDay(line?.work_start) || dateDay(order?.work_start);
+      let end = dateDay(line?.work_end) || dateDay(order?.work_end);
+      if (floor) {
+        if (start && start < floor) start = floor;
+        if (end && end < floor) end = floor;
+      }
+      return orderDrawSpan({ work_start: start || "", work_end: end || "", work_pauses: [] }, today);
     }
-    return orderDrawSpan({ work_start: start || "", work_end: end || "", work_pauses: [] }, today);
+    const proxy = lineWorkProxy(order, line);
+    if (!dateDay(proxy.work_start)) return null;
+    return orderDrawSpan({ ...proxy, work_pauses: [] }, today);
   }
 
   function dayIsOrderDerivedPause(order, day, today = clockToday()) {
@@ -1238,13 +1263,8 @@
   }
 
   function clampLineToOrder(order, start, end, line) {
-    const oStart = dateDay(order?.work_start);
-    const floor = lineDateFloor(line);
     let a = dateDay(start);
     let b = dateDay(end);
-    if (oStart && a && a < oStart) a = oStart;
-    if (floor && a && a < floor) a = floor;
-    if (floor && b && b < floor) b = floor;
     if (a && b && b < a) b = a;
     return { start: a, end: b };
   }
@@ -1257,23 +1277,33 @@
     proxy.work_end = clamped.end;
     normalizeWorkDates(proxy, { mergePauses: true, lines: false });
     const pauses = workPauses(proxy);
-    const oStart = dateDay(order.work_start);
-    const oEnd = dateDay(order.work_end);
-    const defaultStart = dayKeyMax(oStart, lineDateFloor(line));
-    const sameDates = dateDay(proxy.work_start) === defaultStart && dateDay(proxy.work_end) === oEnd;
-    const keepOwnEnd = !!dateDay(line.work_end);
-    if (!dateDay(proxy.work_start) && !dateDay(proxy.work_end)) {
+    if (!order?.calendar_dates_independent) {
+      const oStart = dateDay(order.work_start);
+      const oEnd = dateDay(order.work_end);
+      const floor = dateDay(line.order_date);
+      const defaultStart = [oStart, floor].filter(Boolean).sort().at(-1) || "";
+      const sameDates = dateDay(proxy.work_start) === defaultStart && dateDay(proxy.work_end) === oEnd;
+      const keepOwnEnd = !!dateDay(line.work_end);
+      if (!dateDay(proxy.work_start) && !dateDay(proxy.work_end)) {
+        line.work_start = "";
+        line.work_end = "";
+        line.work_pauses = [];
+        syncOrderPausesFromLines(order);
+        syncOrderEndWithPositions(order);
+        return;
+      }
+      if (sameDates && !keepOwnEnd) {
+        line.work_start = "";
+        line.work_end = "";
+        line.work_pauses = pauses;
+        syncOrderPausesFromLines(order);
+        syncOrderEndWithPositions(order);
+        return;
+      }
+    } else if (!dateDay(proxy.work_start) && !dateDay(proxy.work_end)) {
       line.work_start = "";
       line.work_end = "";
       line.work_pauses = [];
-      syncOrderPausesFromLines(order);
-      syncOrderEndWithPositions(order);
-      return;
-    }
-    if (sameDates && !keepOwnEnd) {
-      line.work_start = "";
-      line.work_end = "";
-      line.work_pauses = pauses;
       syncOrderPausesFromLines(order);
       syncOrderEndWithPositions(order);
       return;
@@ -1286,27 +1316,16 @@
   }
 
   function normalizeOrderLinesWork(order) {
-    if (!dateDay(order.work_start) && !dateDay(order.work_end)) {
-      calendarWorkLines(order).forEach((line) => {
-        line.work_start = "";
-        line.work_end = "";
-        line.work_pauses = [];
-      });
-      return order;
-    }
     calendarWorkLines(order).forEach((line) => {
-      const proxy = lineWorkProxy(order, line);
-      writeLineWork(order, line, proxy);
+      normalizeWorkDates(line, { mergePauses: true, lines: false });
     });
     return order;
   }
 
   function lineDrawEnvelope(order, line) {
-    const oStart = parseDay(order?.work_start);
     const oEnd = parseDay(order?.work_end);
     const floor = parseDay(lineDateFloor(line));
-    let from = oStart;
-    if (floor && (!from || floor > from)) from = floor;
+    const from = floor || parseDay(order?.work_start);
     if (!from) return null;
     // Конец позиции может быть позже конца заказа: линия заказа подтянется к самой поздней.
     let till = addDays(clockToday(), LINE_DRAG_HORIZON_DAYS);
@@ -1718,7 +1737,16 @@
       return { from: start, till };
     }
     if (!start && end) return { from: end, till: end };
-    return { from: start, till: end };
+    let till = end;
+    if (Array.isArray(order?.lines)) {
+      calendarWorkLines(order).forEach((line) => {
+        const own = lineOwnDrawSpan(order, line, today);
+        if (!own) return;
+        if (own.till > till) till = own.till;
+        if (own.from > till) till = own.from;
+      });
+    }
+    return { from: start, till };
   }
 
   function timelineFullRange() {
@@ -2693,6 +2721,14 @@
                   noteText: String(line.notes || "").trim(),
                 });
                 const days = workDurationDays(proxy);
+                const pickedIndex = calendarState().pick
+                  ? win.days.findIndex((day) => dayKey(day) === calendarState().pick)
+                  : -1;
+                const pickedDay = calendarState().pick || "";
+                const mainDateFloor = orderMainDateFloor(order);
+                const addDate = order.calendar_dates_independent && !lineDateFloor(line) && pickedIndex >= 0 && (!mainDateFloor || pickedDay >= mainDateFloor)
+                  ? `<button type="button" class="gantt-add-line-date" data-cal-add-line-date="${esc(order.id)}" data-cal-line="${esc(line.id)}" style="grid-column:${pickedIndex + 1}" title="Назначить начало в календаре: ${esc(calFmtDay(win.days[pickedIndex], true))}" aria-label="Назначить начало позиции в календаре">+</button>`
+                  : "";
                 return `<div class="gantt-row is-line ${calSelectedClass(order.id, line.id)} ${linePaused ? "is-paused" : ""}" data-cal-id="${esc(order.id)}" data-cal-line="${esc(line.id)}">
           <div class="gantt-head">
             <button type="button" class="gantt-label" data-cal-id="${esc(order.id)}" data-cal-line="${esc(line.id)}">
@@ -2700,7 +2736,7 @@
               <small>${ganttStatusHtml(lineMeta)}${days ? ` · ${days} дн.` : ""}</small>
             </button>
           </div>
-          <div class="gantt-track" data-cal-track="${esc(order.id)}" data-cal-line="${esc(line.id)}">${lineBars}</div>
+          <div class="gantt-track" data-cal-track="${esc(order.id)}" data-cal-line="${esc(line.id)}">${lineBars}${addDate}</div>
         </div>`;
               })
               .join("")
@@ -3343,6 +3379,23 @@
       onCalendarAct(actBtn.dataset.calAct, actBtn);
       return;
     }
+    const addLineDate = e.target.closest("[data-cal-add-line-date]");
+    if (addLineDate) {
+      const order = findOrder(addLineDate.dataset.calAddLineDate);
+      const line = findCalendarLine(order, addLineDate.dataset.calLine);
+      const day = calendarState().pick;
+      const mainDateFloor = orderMainDateFloor(order);
+      if (!order?.calendar_dates_independent || !line || !day || lineDateFloor(line) || (mainDateFloor && day < mainDateFloor)) return;
+      historyCommit();
+      line.work_start = day;
+      calendarState().selected = order.id;
+      calendarState().selectedLine = line.id;
+      markDirty();
+      historyCommit();
+      renderCalendar();
+      toast(`Начало в календаре назначено: ${calFmtDay(parseDay(day), true)}`);
+      return;
+    }
     const expand = e.target.closest("[data-cal-expand]");
     if (expand) {
       toggleCalendarLines(expand.dataset.calExpand);
@@ -3571,6 +3624,20 @@
       return;
     }
     if (!field) return;
+    const cal = calendarState();
+    const selectedOrder = findOrder(cal.selected);
+    const selectedLine = cal.selectedLine ? findCalendarLine(selectedOrder, cal.selectedLine) : null;
+    // Явная очистка начала старой позиции переводит только её заказ
+    // на независимую модель дат. Конец и остальные даты старых позиций не трогаем.
+    if (field === "work_start" && selectedLine && selectedOrder && !selectedOrder.calendar_dates_independent && !e.target.value) {
+      historyCommit();
+      selectedOrder.calendar_dates_independent = true;
+      selectedLine.work_start = "";
+      markDirty();
+      historyCommit();
+      renderCalendar();
+      return;
+    }
     applyCalendarOrder((order) => {
       order[field] = e.target.value;
       normalizeWorkDates(order);
