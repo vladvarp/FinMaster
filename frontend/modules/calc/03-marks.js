@@ -53,35 +53,54 @@
     return node.commonInputs;
   }
 
+  function commonInputSourceName(host, link, seen) {
+    if (!host || !link) return "";
+    const guard = seen || new Set();
+    const source = (host.nodes || []).find((entry) => entry.id === link.from);
+    if (!source) return "";
+    const key = `${source.id}:${link.fromPort || ""}`;
+    if (guard.has(key)) return "";
+    guard.add(key);
+
+    if (source.type === "teleport") {
+      return teleportPortName(host, source, teleportPortOf(source, link.fromPort));
+    }
+    if (source.type === "teleout") {
+      const output = teleoutPort(source, link.fromPort);
+      const teleport = output && teleportHost(host, output.source);
+      const entry = teleport && teleportEntry(teleport, output.source);
+      return teleport && entry ? teleportPortName(host, teleport, entry) : "";
+    }
+
+    let passThroughInput = "";
+    if (source.type === "joint") passThroughInput = "in";
+    else if (source.type === "result") passThroughInput = "in";
+    else if (source.type === "bus") passThroughInput = `in:${laneIdOf(link.fromPort)}`;
+    if (passThroughInput) {
+      const incoming = (host.links || []).find((item) => item.to === source.id && item.toPort === passThroughInput);
+      if (incoming) {
+        const upstreamName = commonInputSourceName(host, incoming, guard);
+        if (upstreamName) return upstreamName;
+      }
+    }
+
+    if (source.type === "bus") {
+      const lane = busLanes(source).find((item) => `out:${item.id}` === link.fromPort || item.id === link.fromPort);
+      const laneName = String(lane?.name || lane?.label || "").trim();
+      if (laneName) return laneName;
+    }
+    const order = source.type === "order" ? api.findOrder(source.orderId) : null;
+    const output = nodeOutputs(source, order, host.links || []).find((port) => port.id === link.fromPort);
+    const outputName = String(output?.name || "").trim();
+    return outputName && outputName !== "out" ? outputName : markNodeTitle(source);
+  }
+
   function commonInputPorts(node, links) {
     const host = blueprintOf(node);
     const activeLinks = links || host?.links || [];
     return ensureCommonInputs(node, activeLinks).map((item, index) => {
       const link = activeLinks.find((entry) => entry.to === node.id && entry.toPort === `common-in:${item.id}`);
-      let sourceName = "";
-      if (link && host) {
-        const source = (host.nodes || []).find((entry) => entry.id === link.from);
-        if (source) {
-          if (source.type === "teleport") {
-            const entry = teleportPortOf(source, link.fromPort);
-            sourceName = teleportPortName(host, source, entry);
-          } else if (source.type === "teleout") {
-            const output = teleoutPort(source, link.fromPort);
-            const teleport = output && teleportHost(host, output.source);
-            const entry = teleport && teleportEntry(teleport, output.source);
-            sourceName = teleport && entry ? teleportPortName(host, teleport, entry) : "";
-          } else if (source.type === "bus") {
-            const lane = busLanes(source).find((item) => `out:${item.id}` === link.fromPort || item.id === link.fromPort);
-            sourceName = String(lane?.name || lane?.label || "").trim();
-          }
-          if (!sourceName) {
-            const order = source.type === "order" ? api.findOrder(source.orderId) : null;
-            const output = nodeOutputs(source, order, activeLinks).find((port) => port.id === link.fromPort);
-            sourceName = String(output?.name || "").trim();
-          }
-          if (!sourceName || sourceName === "out") sourceName = markNodeTitle(source);
-        }
-      }
+      const sourceName = link && host ? commonInputSourceName(host, link) : "";
       return {
         id: `common-in:${item.id}`,
         name: item.name || sourceName || `Вход ${index + 1}`,
@@ -89,7 +108,6 @@
       };
     });
   }
-
   function commonInputSourceGroup(node, links, values) {
     const linked = new Set((links || []).filter((link) => link.to === node.id).map((link) => String(link.toPort || "")));
     const rows = commonInputPorts(node, links).filter((port) => linked.has(port.id)).map((port) => ({
