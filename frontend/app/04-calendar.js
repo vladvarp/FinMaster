@@ -914,8 +914,25 @@
   function toggleLineFromNextDay(proxy) {
     const today = clockToday();
     if (dateDay(proxy?.work_end)) return "";
-    if (workStatus(proxy, today) !== "now") return "";
+    const status = workStatus(proxy, today);
     const todayKey = dayKey(today);
+    // Запланированную позицию ставим на открытую паузу с её плановой даты
+    // начала. Не ограничиваем такую паузу сегодняшним днём.
+    if (status === "planned") {
+      if (futureOpenPauses(proxy, today).length) {
+        proxy.work_pauses = workPauses(proxy).filter(
+          (pause) => !(pauseIsOpen(proxy, pause) && dateDay(pause.start) > todayKey)
+        );
+        normalizeWorkPauses(proxy);
+        return "Пауза запланированной позиции снята";
+      }
+      const plannedStart = dateDay(proxy.work_start);
+      if (!plannedStart) return "";
+      proxy.work_pauses = workPauses(proxy).concat({ start: plannedStart, end: "", open: true });
+      normalizeWorkPauses(proxy);
+      return "Позиция на паузе с даты начала";
+    }
+    if (status !== "now") return "";
     if (futureOpenPauses(proxy, today).length) {
       proxy.work_pauses = workPauses(proxy).filter((pause) => !(pauseIsOpen(proxy, pause) && dateDay(pause.start) > todayKey));
       normalizeWorkPauses(proxy);
