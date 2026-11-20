@@ -3357,7 +3357,7 @@
       if (!order || !line || !day || lineDateFloor(line)) return;
       historyCommit();
       line.order_date = day;
-      if (!dateDay(line.work_start) && !dateDay(order.work_start)) line.work_start = day;
+      if (!dateDay(line.work_start)) line.work_start = day;
       calendarState().selected = order.id;
       calendarState().selectedLine = line.id;
       markDirty();
