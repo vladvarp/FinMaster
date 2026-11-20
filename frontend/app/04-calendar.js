@@ -1163,8 +1163,9 @@
   }
 
   function orderMainDateFloor(order) {
-    const orderDates = (order?.lines || []).map((line) => dateDay(line?.order_date)).filter(Boolean);
-    const dates = [...orderDates, dateDay(order?.work_start)].filter(Boolean).sort();
+    const orderDates = (order?.lines || []).map((line) => dateDay(line?.order_date)).filter(Boolean).sort();
+    const orderDate = orderDates.at(-1) || dateDay(order?.created_at);
+    const dates = [orderDate, dateDay(order?.work_start)].filter(Boolean).sort();
     return dates.at(-1) || "";
   }
 
