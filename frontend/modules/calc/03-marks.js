@@ -1295,12 +1295,10 @@
     ensureFeeds(node);
     const feedIds = new Set(node.feeds.map((feed) => feed.id));
     const firstFeed = node.feeds[0].id;
-    const counts = new Map();
     const list = [];
     node.fixtures.forEach((raw) => {
       if (!raw || typeof raw !== "object") return;
       const feed = feedIds.has(String(raw.feed || "")) ? String(raw.feed) : firstFeed;
-      const count = counts.get(feed) || 0;
       let id = String(raw.id || "").trim();
       if (!id || list.some((item) => item.id === id)) id = uid();
       const kind = raw.kind === "light" ? "light" : "socket";
@@ -1329,7 +1327,6 @@
         angle: lightAngle(raw),
         feed,
       });
-      counts.set(feed, count + 1);
     });
     node.fixtures = list;
     if (!node.outOn || typeof node.outOn !== "object") node.outOn = {};
