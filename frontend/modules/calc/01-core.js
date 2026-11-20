@@ -1129,9 +1129,10 @@
     ];
     if (node.type === "formula") return node.inputs || [];
     if (node.type === "present") return presentPorts(node);
-    if (node.type === "openings") return openingInputs(node);
-    if (node.type === "electrics") return electricInputs(node);
-    if (node.type === "tiles") return tileInputs(node);
+    if (node.type === "planner") return commonInputPorts(node, links);
+    if (node.type === "openings") return openingInputs(node).concat(commonInputPorts(node, links));
+    if (node.type === "electrics") return electricInputs(node).concat(commonInputPorts(node, links));
+    if (node.type === "tiles") return tileInputs(node).concat(commonInputPorts(node, links));
     if (node.type === "order") {
       const order = api.findOrder(node.orderId);
       const linkedIn = usedInputPorts(node.id, links || []);
@@ -1417,6 +1418,13 @@
       if (!node) return;
       visiting.add(nodeId);
       (incoming[nodeId] || []).forEach((link) => walk(link.from));
+      if (["planner", "openings", "electrics", "tiles"].includes(node.type)) {
+        commonInputPorts(node, links).forEach((port) => {
+          const link = (incoming[nodeId] || []).find((item) => item.toPort === port.id);
+          const value = link ? values[`${link.from}:${link.fromPort}`] : null;
+          setVal(nodeId, port.id, value);
+        });
+      }
       if (node.type === "order") {
         const order = api.findOrder(node.orderId);
         if (!order) errors.add(nodeId);

@@ -4011,7 +4011,7 @@
       </header>
       <div class="calc-film calc-film-top">${film}</div>
       <div class="calc-node-sub">${esc(sub)}</div>
-      <div class="calc-ports">${groups || `<div class="calc-empty">Включите выходы в редакторе</div>`}${commonBlockHtml(node, commons, graph, (port) => plannerPortRow(node, port, graph))}</div>
+      <div class="calc-ports">${groups || `<div class="calc-empty">Включите выходы в редакторе</div>`}${commonBlockHtml(node, commons, graph, (port) => plannerPortRow(node, port, graph))}${commonInputBlockHtml(node, graph, bp.links)}</div>
     </article>`;
   }
 

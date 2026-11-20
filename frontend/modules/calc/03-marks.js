@@ -2,6 +2,7 @@
   const MARK_MAX_FEEDS = 8;
   const COMMON_OUT_MAX = 20;
   const COMMON_SEP_MAX = 8;
+  const COMMON_IN_MAX = 30;
   const COMMON_VIEW = "__common";
 
   function feedPort(feed) {
@@ -19,6 +20,59 @@
     if (kind === "tile") return primary ? `tile:${rest}` : `tile:${feed.id}:${rest}`;
     if (kind === "cut") return primary ? `cut:${rest}` : `cut:${feed.id}:${rest}`;
     return `${kind}:${rest}`;
+  }
+
+  function ensureCommonInputs(node, links) {
+    if (!node) return [];
+    if (!Array.isArray(node.commonInputs)) node.commonInputs = [];
+    const linked = new Set((links || blueprintOf(node)?.links || []).filter((link) => link.to === node.id).map((link) => String(link.toPort || "")));
+    const seen = new Set();
+    const rows = [];
+    node.commonInputs.forEach((raw, index) => {
+      if (!raw || typeof raw !== "object" || rows.length >= COMMON_IN_MAX) return;
+      let id = String(raw.id || "").trim();
+      if (!id || seen.has(id)) id = uid();
+      seen.add(id);
+      rows.push({ id, name: String(raw.name || "").trim().slice(0, 48) || `Вход ${index + 1}` });
+    });
+    const isLinked = (row) => linked.has(`common-in:${row.id}`);
+    const kept = rows.filter((row, index) => isLinked(row) || index === rows.length - 1);
+    if (!kept.length || isLinked(kept[kept.length - 1])) {
+      if (kept.length < COMMON_IN_MAX) {
+        let id = uid();
+        while (seen.has(id)) id = uid();
+        kept.push({ id, name: `Вход ${kept.length + 1}` });
+      }
+    }
+    node.commonInputs = kept.slice(0, COMMON_IN_MAX);
+    return node.commonInputs;
+  }
+
+  function commonInputPorts(node, links) {
+    return ensureCommonInputs(node, links).map((item) => ({ id: `common-in:${item.id}`, name: item.name, commonInput: true }));
+  }
+
+  function commonInputSourceGroup(node, links, values) {
+    const linked = new Set((links || []).filter((link) => link.to === node.id).map((link) => String(link.toPort || "")));
+    const rows = commonInputPorts(node, links).filter((port) => linked.has(port.id)).map((port) => ({
+      id: port.id, name: port.name, value: values?.[`${node.id}:${port.id}`] ?? null, unit: "",
+    }));
+    return rows.length ? { id: "common-inputs", name: "Общий ввод", rows } : null;
+  }
+
+  function commonInputBlockHtml(node, graph, links) {
+    const ports = commonInputPorts(node, links);
+    const rows = ports.map((port) => {
+      const linked = (links || []).some((link) => link.to === node.id && link.toPort === port.id);
+      const value = graph?.values?.[`${node.id}:${port.id}`];
+      return `<div class="calc-row in">
+        <i class="calc-port in" data-port="${esc(port.id)}" data-io="in" title="${esc(port.name)}"></i>
+        <span>${esc(port.name)}</span>
+        <b>${value != null && Number.isFinite(value) ? esc(fmtShort(value)) : "—"}</b>
+        ${linked ? `<button type="button" class="calc-mini" data-del-in-link="${esc(port.id)}" title="Удалить связь">×</button>` : ""}
+      </div>`;
+    }).join("");
+    return `<div class="calc-sec">Общий ввод</div>${rows || `<div class="calc-empty">Подключите числовые значения</div>`}`;
   }
 
   function ensureCommons(node) {
@@ -268,20 +322,20 @@
     if (node.type === "planner") {
       ensurePlanner(node);
       const ports = plannerLayoutPorts(node, links, true).filter((port) => port.signal !== "plan");
-      return (node.layouts || []).map((layout) => ({
+      const groups = (node.layouts || []).map((layout) => ({
         id: layout.id,
         name: layout.name,
         rows: ports.filter((port) => port.layoutId === layout.id).map((port) => ({
-          id: port.id,
-          name: port.name,
-          value: port.value ?? port.area,
-          unit: port.unit || "м²",
+          id: port.id, name: port.name, value: port.value ?? port.area, unit: port.unit || "м²",
         })),
       }));
+      const commonInputs = commonInputSourceGroup(node, links, values);
+      if (commonInputs) groups.push(commonInputs);
+      return groups;
     }
     if (node.type === "openings") {
       ensureOpenings(node);
-      return node.feeds.filter((feed) => upstreamPlan(node, host, [], values || {}, feedPort(feed))).map((feed) => ({
+      const groups = node.feeds.filter((feed) => upstreamPlan(node, host, [], values || {}, feedPort(feed))).map((feed) => ({
         id: feed.id,
         name: feedTitle(node, feed, host),
         rows: openingFeedPorts(node, host, values, links, feed, true).filter((port) => port.signal !== "plan").map((port) => ({
@@ -291,10 +345,13 @@
           unit: port.unit || "",
         })),
       }));
+      const commonInputs = commonInputSourceGroup(node, links, values);
+      if (commonInputs) groups.push(commonInputs);
+      return groups;
     }
     if (node.type === "tiles") {
       ensureTiles(node);
-      return node.feeds.filter((feed) => upstreamPlan(node, host, [], values || {}, feedPort(feed))).map((feed) => ({
+      const groups = node.feeds.filter((feed) => upstreamPlan(node, host, [], values || {}, feedPort(feed))).map((feed) => ({
         id: feed.id,
         name: feedTitle(node, feed, host),
         rows: tileFeedPorts(node, host, values, links, feed, true).filter((port) => port.signal !== "plan").map((port) => ({
@@ -304,9 +361,12 @@
           unit: port.unit || "",
         })),
       }));
+      const commonInputs = commonInputSourceGroup(node, links, values);
+      if (commonInputs) groups.push(commonInputs);
+      return groups;
     }
     ensureElectrics(node);
-    return node.feeds.filter((feed) => upstreamPlan(node, host, [], values || {}, feedPort(feed))).map((feed) => ({
+    const groups = node.feeds.filter((feed) => upstreamPlan(node, host, [], values || {}, feedPort(feed))).map((feed) => ({
       id: feed.id,
       name: feedTitle(node, feed, host),
       rows: electricFeedPorts(node, host, links, feed, true).map((port) => ({
@@ -316,6 +376,9 @@
         unit: port.unit || "",
       })),
     }));
+    const commonInputs = commonInputSourceGroup(node, links, values);
+    if (commonInputs) groups.push(commonInputs);
+    return groups;
   }
 
   function commonCardGroup(node, sources) {
@@ -2622,6 +2685,7 @@
       <div class="calc-ports">
         ${blocks}
         ${commonBlockHtml(node, commons, graph, (port) => countRows(node, [port], graph))}
+        ${commonInputBlockHtml(node, graph, bp.links)}
       </div>
     </article>`;
   }
