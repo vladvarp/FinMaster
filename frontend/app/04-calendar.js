@@ -1158,8 +1158,13 @@
     return name || `Позиция ${index + 1}`;
   }
 
+  function lineUsesIndependentCalendar(line) {
+    const order = (state.doc?.orders || []).find((item) => (item.lines || []).includes(line));
+    return !!order?.calendar_dates_independent;
+  }
+
   function lineDateFloor(line) {
-    return dateDay(line?.work_start) || "";
+    return lineUsesIndependentCalendar(line) ? dateDay(line?.work_start) || "" : dateDay(line?.order_date) || "";
   }
 
   function orderMainDateFloor(order) {
@@ -1170,22 +1175,35 @@
   }
 
   function lineWorkProxy(order, line) {
-    const start = lineDateFloor(line);
     const pauses = Array.isArray(line?.work_pauses) ? line.work_pauses.map((pause) => ({ ...pause })) : [];
-    // Конечная дата может существовать отдельно от начала. Не теряем её
-    // при построении прокси: позиция без старта не рисуется на таймлайне,
-    // но сохранённый work_end должен переживать любые операции с календарём.
+    if (!order?.calendar_dates_independent) {
+      const floor = dateDay(line?.order_date);
+      let start = dateDay(line?.work_start) || dateDay(order?.work_start);
+      let end = dateDay(line?.work_end) || dateDay(order?.work_end);
+      if (floor) {
+        if (start && start < floor) start = floor;
+        if (end && end < floor) end = floor;
+      }
+      return { work_start: start || "", work_end: end || "", work_pauses: pauses };
+    }
+    const start = dateDay(line?.work_start) || "";
     let end = dateDay(line?.work_end);
     if (start && end && end < start) end = start;
-    return {
-      work_start: start,
-      work_end: end || "",
-      work_pauses: pauses,
-    };
+    return { work_start: start, work_end: end || "", work_pauses: pauses };
   }
 
   /** Срок позиции определяется только её собственными датами календаря. */
   function lineOwnDrawSpan(order, line, today = clockToday()) {
+    if (!order?.calendar_dates_independent) {
+      const floor = dateDay(line?.order_date);
+      let start = dateDay(line?.work_start) || dateDay(order?.work_start);
+      let end = dateDay(line?.work_end) || dateDay(order?.work_end);
+      if (floor) {
+        if (start && start < floor) start = floor;
+        if (end && end < floor) end = floor;
+      }
+      return orderDrawSpan({ work_start: start || "", work_end: end || "", work_pauses: [] }, today);
+    }
     const proxy = lineWorkProxy(order, line);
     if (!dateDay(proxy.work_start)) return null;
     return orderDrawSpan({ ...proxy, work_pauses: [] }, today);
@@ -1259,7 +1277,30 @@
     proxy.work_end = clamped.end;
     normalizeWorkDates(proxy, { mergePauses: true, lines: false });
     const pauses = workPauses(proxy);
-    if (!dateDay(proxy.work_start) && !dateDay(proxy.work_end)) {
+    if (!order?.calendar_dates_independent) {
+      const oStart = dateDay(order.work_start);
+      const oEnd = dateDay(order.work_end);
+      const floor = dateDay(line.order_date);
+      const defaultStart = [oStart, floor].filter(Boolean).sort().at(-1) || "";
+      const sameDates = dateDay(proxy.work_start) === defaultStart && dateDay(proxy.work_end) === oEnd;
+      const keepOwnEnd = !!dateDay(line.work_end);
+      if (!dateDay(proxy.work_start) && !dateDay(proxy.work_end)) {
+        line.work_start = "";
+        line.work_end = "";
+        line.work_pauses = [];
+        syncOrderPausesFromLines(order);
+        syncOrderEndWithPositions(order);
+        return;
+      }
+      if (sameDates && !keepOwnEnd) {
+        line.work_start = "";
+        line.work_end = "";
+        line.work_pauses = pauses;
+        syncOrderPausesFromLines(order);
+        syncOrderEndWithPositions(order);
+        return;
+      }
+    } else if (!dateDay(proxy.work_start) && !dateDay(proxy.work_end)) {
       line.work_start = "";
       line.work_end = "";
       line.work_pauses = [];
@@ -2138,26 +2179,6 @@
   function renderCalendar() {
     if (!state.doc || !$("cal-board")) return;
     applyCalColors();
-    // Отчёты версии 1 и старше хранили календарный старт позиции в order_date.
-    // Переносим его в work_start один раз, чтобы старые отчёты сохранили линии,
-    // а после миграции дата заказа и начало в календаре были независимы.
-    let migratedLegacyCalendarDates = false;
-    if (Number(state.doc.version || 0) < 2) {
-      (state.doc.orders || []).forEach((order) => {
-        (order.lines || []).forEach((line) => {
-          if (isFrozenLine(line) || isExpenseLine(line)) return;
-          if (!dateDay(line.work_start) && dateDay(line.order_date)) {
-            line.work_start = dateDay(line.order_date);
-            migratedLegacyCalendarDates = true;
-          }
-        });
-      });
-      state.doc.version = 2;
-      migratedLegacyCalendarDates = true;
-    }
-    if (migratedLegacyCalendarDates && !state.preview) {
-      markDirty("Совместимость календаря", { history: false });
-    }
     (state.doc.orders || []).forEach((order) => {
       syncOrderEndWithPositions(order);
       syncOrderPausesFromLines(order);
