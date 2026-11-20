@@ -1745,7 +1745,7 @@
     $("planner-side")?.addEventListener("change", (e) => {
       const node = plannerNode();
       if (!node) return;
-      if (e.target?.dataset?.commonName) {
+      if (e.target?.dataset?.commonName || e.target?.dataset?.commonInputName) {
         plannerCommit(false);
         return;
       }

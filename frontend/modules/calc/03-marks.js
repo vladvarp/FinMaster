@@ -2,6 +2,7 @@
   const MARK_MAX_FEEDS = 8;
   const COMMON_OUT_MAX = 20;
   const COMMON_SEP_MAX = 8;
+  const COMMON_IN_MAX = 30;
   const COMMON_VIEW = "__common";
 
   function feedPort(feed) {
@@ -19,6 +20,107 @@
     if (kind === "tile") return primary ? `tile:${rest}` : `tile:${feed.id}:${rest}`;
     if (kind === "cut") return primary ? `cut:${rest}` : `cut:${feed.id}:${rest}`;
     return `${kind}:${rest}`;
+  }
+
+  function ensureCommonInputs(node, links) {
+    if (!node) return [];
+    if (!Array.isArray(node.commonInputs)) node.commonInputs = [];
+    const activeLinks = links || blueprintOf(node)?.links || [];
+    const linked = new Set(activeLinks
+      .filter((link) => link.to === node.id && String(link.toPort || "").startsWith("common-in:"))
+      .map((link) => String(link.toPort).slice("common-in:".length)));
+    const seen = new Set();
+    const rows = [];
+    let spare = null;
+    node.commonInputs.forEach((raw) => {
+      if (!raw || typeof raw !== "object" || rows.length >= COMMON_IN_MAX) return;
+      let id = String(raw.id || "").trim();
+      if (!id || seen.has(id)) id = uid();
+      seen.add(id);
+      const rawName = String(raw.name || "").trim().slice(0, 48);
+      const row = { id, name: /^Вход \d+$/.test(rawName) ? "" : rawName };
+      if (linked.has(id)) rows.push(row);
+      else if (!spare) spare = row;
+    });
+    // Сохраняем один свободный порт, остальные отключённые удаляем.
+    if (rows.length < COMMON_IN_MAX) rows.push(spare || { id: uid(), name: "" });
+    node.commonInputs = rows;
+    return node.commonInputs;
+  }
+  function commonInputSourceName(host, link, seen) {
+    if (!host || !link) return "";
+    const guard = seen || new Set();
+    const source = (host.nodes || []).find((entry) => entry.id === link.from);
+    if (!source) return "";
+    const key = `${source.id}:${link.fromPort || ""}`;
+    if (guard.has(key)) return "";
+    guard.add(key);
+
+    if (source.type === "teleport") {
+      return teleportPortName(host, source, teleportPortOf(source, link.fromPort));
+    }
+    if (source.type === "teleout") {
+      const output = teleoutPort(source, link.fromPort);
+      const teleport = output && teleportHost(host, output.source);
+      const entry = teleport && teleportEntry(teleport, output.source);
+      return teleport && entry ? teleportPortName(host, teleport, entry) : "";
+    }
+
+    let passThroughInput = "";
+    if (source.type === "joint") passThroughInput = "in";
+    else if (source.type === "result") passThroughInput = "in";
+    else if (source.type === "bus") passThroughInput = `in:${laneIdOf(link.fromPort)}`;
+    if (passThroughInput) {
+      const incoming = (host.links || []).find((item) => item.to === source.id && item.toPort === passThroughInput);
+      if (incoming) {
+        const upstreamName = commonInputSourceName(host, incoming, guard);
+        if (upstreamName) return upstreamName;
+      }
+    }
+
+    if (source.type === "bus") {
+      const lane = busLanes(source).find((item) => `out:${item.id}` === link.fromPort || item.id === link.fromPort);
+      const laneName = String(lane?.name || lane?.label || "").trim();
+      if (laneName) return laneName;
+    }
+    const order = source.type === "order" ? api.findOrder(source.orderId) : null;
+    const output = nodeOutputs(source, order, host.links || []).find((port) => port.id === link.fromPort);
+    const outputName = String(output?.name || "").trim();
+    return outputName && outputName !== "out" ? outputName : markNodeTitle(source);
+  }
+
+  function commonInputPorts(node, links) {
+    const host = blueprintOf(node);
+    const activeLinks = links || host?.links || [];
+    return ensureCommonInputs(node, activeLinks).map((item, index) => {
+      const link = activeLinks.find((entry) => entry.to === node.id && entry.toPort === `common-in:${item.id}`);
+      const sourceName = link && host ? commonInputSourceName(host, link) : "";
+      return {
+        id: `common-in:${item.id}`,
+        name: item.name || sourceName || `Вход ${index + 1}`,
+        commonInput: true,
+      };
+    });
+  }
+  function commonInputSourceGroup(node, links, values) {
+    const linked = new Set((links || []).filter((link) => link.to === node.id).map((link) => String(link.toPort || "")));
+    const rows = commonInputPorts(node, links).filter((port) => linked.has(port.id)).map((port) => ({
+      id: port.id, name: port.name, value: values?.[`${node.id}:${port.id}`] ?? null, unit: "",
+    }));
+    return rows.length ? { id: "common-inputs", name: "Общий ввод", rows } : null;
+  }
+
+  function commonInputBlockHtml(node, graph, links) {
+    const ports = commonInputPorts(node, links);
+    const rows = ports.map((port) => {
+      const value = graph?.values?.[`${node.id}:${port.id}`];
+      return `<div class="calc-row in">
+        <i class="calc-port in" data-port="${esc(port.id)}" data-io="in" title="${esc(port.name)}"></i>
+        <span class="calc-common-input-label">${esc(port.name)}</span>
+        <b>${value != null && Number.isFinite(value) ? esc(fmtShort(value)) : "—"}</b>
+      </div>`;
+    }).join("");
+    return `<div class="calc-sec">Общий ввод</div>${rows || `<div class="calc-empty">Подключите числовые значения</div>`}`;
   }
 
   function ensureCommons(node) {
@@ -268,20 +370,20 @@
     if (node.type === "planner") {
       ensurePlanner(node);
       const ports = plannerLayoutPorts(node, links, true).filter((port) => port.signal !== "plan");
-      return (node.layouts || []).map((layout) => ({
+      const groups = (node.layouts || []).map((layout) => ({
         id: layout.id,
         name: layout.name,
         rows: ports.filter((port) => port.layoutId === layout.id).map((port) => ({
-          id: port.id,
-          name: port.name,
-          value: port.value ?? port.area,
-          unit: port.unit || "м²",
+          id: port.id, name: port.name, value: port.value ?? port.area, unit: port.unit || "м²",
         })),
       }));
+      const commonInputs = commonInputSourceGroup(node, links, values);
+      if (commonInputs) groups.push(commonInputs);
+      return groups;
     }
     if (node.type === "openings") {
       ensureOpenings(node);
-      return node.feeds.filter((feed) => upstreamPlan(node, host, [], values || {}, feedPort(feed))).map((feed) => ({
+      const groups = node.feeds.filter((feed) => upstreamPlan(node, host, [], values || {}, feedPort(feed))).map((feed) => ({
         id: feed.id,
         name: feedTitle(node, feed, host),
         rows: openingFeedPorts(node, host, values, links, feed, true).filter((port) => port.signal !== "plan").map((port) => ({
@@ -291,10 +393,13 @@
           unit: port.unit || "",
         })),
       }));
+      const commonInputs = commonInputSourceGroup(node, links, values);
+      if (commonInputs) groups.push(commonInputs);
+      return groups;
     }
     if (node.type === "tiles") {
       ensureTiles(node);
-      return node.feeds.filter((feed) => upstreamPlan(node, host, [], values || {}, feedPort(feed))).map((feed) => ({
+      const groups = node.feeds.filter((feed) => upstreamPlan(node, host, [], values || {}, feedPort(feed))).map((feed) => ({
         id: feed.id,
         name: feedTitle(node, feed, host),
         rows: tileFeedPorts(node, host, values, links, feed, true).filter((port) => port.signal !== "plan").map((port) => ({
@@ -304,9 +409,12 @@
           unit: port.unit || "",
         })),
       }));
+      const commonInputs = commonInputSourceGroup(node, links, values);
+      if (commonInputs) groups.push(commonInputs);
+      return groups;
     }
     ensureElectrics(node);
-    return node.feeds.filter((feed) => upstreamPlan(node, host, [], values || {}, feedPort(feed))).map((feed) => ({
+    const groups = node.feeds.filter((feed) => upstreamPlan(node, host, [], values || {}, feedPort(feed))).map((feed) => ({
       id: feed.id,
       name: feedTitle(node, feed, host),
       rows: electricFeedPorts(node, host, links, feed, true).map((port) => ({
@@ -316,6 +424,9 @@
         unit: port.unit || "",
       })),
     }));
+    const commonInputs = commonInputSourceGroup(node, links, values);
+    if (commonInputs) groups.push(commonInputs);
+    return groups;
   }
 
   function commonCardGroup(node, sources) {
@@ -1181,9 +1292,16 @@
     delete node.tones;
     delete node.color;
     if (!Array.isArray(node.fixtures)) node.fixtures = [];
+    ensureFeeds(node);
+    const feedIds = new Set(node.feeds.map((feed) => feed.id));
+    const firstFeed = node.feeds[0].id;
+    const counts = new Map();
     const list = [];
     node.fixtures.forEach((raw) => {
-      if (!raw || typeof raw !== "object" || list.length >= 120) return;
+      if (!raw || typeof raw !== "object") return;
+      const feed = feedIds.has(String(raw.feed || "")) ? String(raw.feed) : firstFeed;
+      const count = counts.get(feed) || 0;
+      if (count >= 120) return;
       let id = String(raw.id || "").trim();
       if (!id || list.some((item) => item.id === id)) id = uid();
       const kind = raw.kind === "light" ? "light" : "socket";
@@ -1210,16 +1328,11 @@
         lw: plannerRound(plannerClamp(plannerNum(raw.lw, 0.6), 0.05, 8)),
         ll: plannerRound(plannerClamp(plannerNum(raw.ll, 1.2), 0.05, 12)),
         angle: lightAngle(raw),
-        feed: String(raw.feed || ""),
+        feed,
       });
+      counts.set(feed, count + 1);
     });
     node.fixtures = list;
-    ensureFeeds(node);
-    const feedIds = new Set(node.feeds.map((feed) => feed.id));
-    const firstFeed = node.feeds[0].id;
-    node.fixtures.forEach((fix) => {
-      if (!feedIds.has(fix.feed)) fix.feed = firstFeed;
-    });
     if (!node.outOn || typeof node.outOn !== "object") node.outOn = {};
     node.name = String(node.name || "").trim().slice(0, 48) || "Электрика";
     return node;
@@ -2619,6 +2732,7 @@
       <div class="calc-node-sub">${esc(sub)}</div>
       <div class="calc-ports">
         ${blocks}
+        ${commonInputBlockHtml(node, graph, bp.links)}
         ${commonBlockHtml(node, commons, graph, (port) => countRows(node, [port], graph))}
       </div>
     </article>`;
@@ -2729,7 +2843,11 @@
     const ports = node.type === "openings" ? openingOutputs(node, bp, graph.values, bp.links) : node.type === "tiles" ? tileOutputs(node, bp, graph.values, bp.links) : electricOutputs(node, bp, graph.values, bp.links);
     const ids = new Set(ports.map((port) => port.id));
     bp.links = (bp.links || []).filter((link) => link.from !== node.id || ids.has(link.fromPort));
-    const inputs = new Set((node.type === "openings" ? openingInputs(node) : node.type === "tiles" ? tileInputs(node) : electricInputs(node)).map((port) => port.id));
+    const inputs = new Set(
+      (node.type === "openings" ? openingInputs(node) : node.type === "tiles" ? tileInputs(node) : electricInputs(node))
+        .concat(commonInputPorts(node, bp.links))
+        .map((port) => port.id)
+    );
     bp.links = bp.links.filter((link) => link.to !== node.id || inputs.has(link.toPort));
   }
 
@@ -4564,6 +4682,10 @@
       y: world.y || 0,
     };
     const feedId = activeFeed(node)?.id || node.feeds?.[0]?.id || "";
+    if (node.type === "electrics" && node.fixtures.filter((fix) => fix.feed === feedId).length >= 120) {
+      api?.toast?.("На этом чертеже достигнут лимит 120 точек электрики");
+      return "";
+    }
     if (node.type === "openings") {
       const hole = {
         id: uid(),
@@ -5118,7 +5240,7 @@
       if (mode === "replace") applyFeedClip(node, ctx.feed, editorClip, incoming, ctx.base);
     } else {
       if (mode === "replace") node.fixtures = node.fixtures.filter((fix) => fix.feed !== feedId);
-      const room = 120 - node.fixtures.length;
+      const room = 120 - node.fixtures.filter((fix) => fix.feed === feedId).length;
       const incoming = (editorClip.fixtures || []).slice(0, Math.max(0, room)).map((raw) => {
         const fix = JSON.parse(JSON.stringify(raw));
         delete fix.wallIndex;

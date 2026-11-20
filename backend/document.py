@@ -560,6 +560,20 @@ def _calc_feeds(raw: Any) -> list[dict[str, Any]]:
     return feeds
 
 
+def _calc_common_inputs(raw: Any) -> list[dict[str, Any]]:
+    ports: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(raw if isinstance(raw, list) else []):
+        if not isinstance(item, dict) or len(ports) >= 30:
+            continue
+        port_id = _clip_text(item.get("id"), 80)
+        if not port_id or port_id in seen:
+            continue
+        seen.add(port_id)
+        ports.append({"id": port_id, "name": _clip_text(item.get("name"), 48, f"Вход {index + 1}")})
+    return ports
+
+
 def _calc_commons(raw: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -987,6 +1001,9 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         commons = _calc_commons(raw.get("commons"))
         if commons:
             node["commons"] = commons
+        common_inputs = _calc_common_inputs(raw.get("commonInputs"))
+        if common_inputs:
+            node["commonInputs"] = common_inputs
     elif kind in ("openings", "electrics"):
         node["name"] = _clip_text(raw.get("name"), 48, "Проёмы" if kind == "openings" else "Электрика")
         if raw.get("filmsOff") is True:
@@ -1016,6 +1033,9 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         commons = _calc_commons(raw.get("commons"))
         if commons:
             node["commons"] = commons
+        common_inputs = _calc_common_inputs(raw.get("commonInputs"))
+        if common_inputs:
+            node["commonInputs"] = common_inputs
     elif kind == "tiles":
         node["name"] = _clip_text(raw.get("name"), 48, "Плитка")
         if raw.get("filmsOff") is True:
@@ -1032,6 +1052,9 @@ def _calc_node(raw: Any) -> dict[str, Any] | None:
         commons = _calc_commons(raw.get("commons"))
         if commons:
             node["commons"] = commons
+        common_inputs = _calc_common_inputs(raw.get("commonInputs"))
+        if common_inputs:
+            node["commonInputs"] = common_inputs
     elif kind == "present":
         node["pageId"] = _clip_text(raw.get("pageId"), 80)
         node["blockId"] = _clip_text(raw.get("blockId"), 80)
