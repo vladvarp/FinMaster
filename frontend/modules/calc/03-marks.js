@@ -304,9 +304,14 @@
     return { cards, valueOf, unitOf };
   }
 
-  function appendCommons(node, ports, linked, catalog) {
+  function appendCommons(node, ports, linked, catalog, values, links) {
     ensureCommons(node);
-    const math = commonMath(node, catalog || ports);
+    const sources = (catalog || ports || []).slice();
+    commonInputPorts(node, links).forEach((port) => {
+      const value = values?.[`${node.id}:${port.id}`];
+      if (value != null && Number.isFinite(value)) sources.push({ id: port.id, name: port.name, value, unit: "" });
+    });
+    const math = commonMath(node, sources);
     math.cards.forEach((row) => {
       const id = `common:${row.id}`;
       if (!row.on && !linked?.has(id)) return;
@@ -1415,7 +1420,7 @@
       ports.push(...openingFeedPorts(node, host, values, links, feed, false));
       catalog.push(...openingFeedPorts(node, host, values, links, feed, true));
     });
-    appendCommons(node, ports, linkedFromPorts(node.id, links || host?.links || []), catalog);
+    appendCommons(node, ports, linkedFromPorts(node.id, links || host?.links || []), catalog, values, links || host?.links || []);
     return ports;
   }
 
