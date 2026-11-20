@@ -34,7 +34,8 @@
       let id = String(raw.id || "").trim();
       if (!id || seen.has(id)) id = uid();
       seen.add(id);
-      const rawName = String(raw.name || "").trim().slice(0, 48);\n      rows.push({ id, name: /^Вход \\d+$/.test(rawName) ? "" : rawName });
+      const rawName = String(raw.name || "").trim().slice(0, 48);
+      rows.push({ id, name: /^Вход \d+$/.test(rawName) ? "" : rawName });
     });
     if (!rows.length) rows.push({ id: uid(), name: "" });
     // Сохраняем ID всех портов: их могут использовать существующие связи.
