@@ -776,7 +776,7 @@ def _calc_fixtures(raw: Any) -> list[dict[str, Any]]:
     fixtures: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in raw if isinstance(raw, list) else []:
-        if not isinstance(item, dict) or len(fixtures) >= 120:
+        if not isinstance(item, dict):
             continue
         fix_id = _clip_text(item.get("id"), 80)
         if not fix_id or fix_id in seen:
