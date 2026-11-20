@@ -1162,7 +1162,9 @@
     const pauses = Array.isArray(line?.work_pauses) ? line.work_pauses.map((pause) => ({ ...pause })) : [];
     // Позиция без даты заказа не участвует в таймлайне, даже если у заказа есть общий срок.
     if (!floor) return { work_start: "", work_end: "", work_pauses: pauses };
-    let start = dateDay(line?.work_start) || dateDay(order?.work_start);
+    // Дата заказа позиции задаёт начало её полосы, даже если работа ещё не
+    // начиналась отдельно или позиция сейчас находится на открытой паузе.
+    let start = dateDay(line?.work_start) || dateDay(order?.work_start) || floor;
     let end = dateDay(line?.work_end) || dateDay(order?.work_end);
     if (start && start < floor) start = floor;
     if (end && end < floor) end = floor;
@@ -1177,7 +1179,9 @@
   function lineOwnDrawSpan(order, line, today = clockToday()) {
     const floor = lineDateFloor(line);
     if (!floor) return null;
-    let start = dateDay(line?.work_start) || dateDay(order?.work_start);
+    // Дата заказа позиции задаёт начало её полосы, даже если работа ещё не
+    // начиналась отдельно или позиция сейчас находится на открытой паузе.
+    let start = dateDay(line?.work_start) || dateDay(order?.work_start) || floor;
     let end = dateDay(line?.work_end) || dateDay(order?.work_end);
     if (start && start < floor) start = floor;
     if (end && end < floor) end = floor;
