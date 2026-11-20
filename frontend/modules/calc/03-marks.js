@@ -31,28 +31,22 @@
       .map((link) => String(link.toPort).slice("common-in:".length)));
     const seen = new Set();
     const rows = [];
+    let spare = null;
     node.commonInputs.forEach((raw) => {
       if (!raw || typeof raw !== "object" || rows.length >= COMMON_IN_MAX) return;
       let id = String(raw.id || "").trim();
       if (!id || seen.has(id)) id = uid();
       seen.add(id);
-      // Удаляем все неподключённые порты: остаются только реально используемые.
-      if (!linked.has(id)) return;
       const rawName = String(raw.name || "").trim().slice(0, 48);
-      rows.push({ id, name: /^Вход \d+$/.test(rawName) ? "" : rawName });
+      const row = { id, name: /^Вход \d+$/.test(rawName) ? "" : rawName };
+      if (linked.has(id)) rows.push(row);
+      else if (!spare) spare = row;
     });
-    if (rows.length < COMMON_IN_MAX) {
-      let id = (node.commonInputs || []).map((item) => String(item?.id || "")).find((candidate) => candidate && !seen.has(candidate) && !linked.has(candidate));
-      if (!id) {
-        id = uid();
-        while (seen.has(id) || linked.has(id)) id = uid();
-      }
-      rows.push({ id, name: "" });
-    }
+    // Сохраняем один свободный порт, остальные отключённые удаляем.
+    if (rows.length < COMMON_IN_MAX) rows.push(spare || { id: uid(), name: "" });
     node.commonInputs = rows;
     return node.commonInputs;
   }
-
   function commonInputSourceName(host, link, seen) {
     if (!host || !link) return "";
     const guard = seen || new Set();
