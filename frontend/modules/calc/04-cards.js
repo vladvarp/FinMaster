@@ -4000,8 +4000,9 @@
 
   function plannerNodeHtml(node, bp, graph) {
     ensurePlanner(node);
-    const model = plannerModel(node);
-    const ports = plannerOutputs(node, bp.links);
+    const incomingHeight = graph?.values?.[`${node.id}:height-in`];
+    const model = plannerModel(node, node.heightInputEnabled && Number.isFinite(incomingHeight) && incomingHeight > 0 ? incomingHeight : null);
+    const ports = plannerOutputs(node, bp.links, graph?.values);
     const sub = `пол ${fmtShort(model.floor)} м² · ${model.walls.length} стен · h ${fmtShort(model.height)} м`;
 
     const film = node.layouts.map((layout) => `<div class="calc-film-card ${layout.id === node.layoutId ? "is-on" : ""}" data-planner-layout="${esc(layout.id)}" title="${esc(layout.name)}"><span class="calc-film-name">${esc(layout.name)}</span>${plannerThumb(layout.points, true, layout.color)}<button type="button" class="calc-film-delete" data-del-planner-layout="${esc(layout.id)}" title="Удалить планировку" aria-label="Удалить планировку ${esc(layout.name)}" ${node.layouts.length <= 1 ? "disabled" : ""}>×</button></div>`).join("");
@@ -4010,6 +4011,9 @@
       return `<div class="calc-plan-group" style="--planner-color:${esc(layout.color)}">${rows.map((port) => plannerPortRow(node, port, graph)).join("")}</div>`;
     }).join("");
     const commons = ports.filter((port) => port.common);
+    const heightInput = node.heightInputEnabled || (bp.links || []).some((link) => link.to === node.id && link.toPort === "height-in")
+      ? `<div class="calc-row in"><i class="calc-port in" data-port="height-in" data-io="in" title="Высота потолка"></i><span>Высота потолка</span><b>${incomingHeight != null && Number.isFinite(incomingHeight) ? esc(fmtShort(incomingHeight)) + " м" : "—"}</b></div>`
+      : "";
     return `<article class="calc-node is-planner ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(node.color || "#65a30d")}">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
@@ -4020,7 +4024,7 @@
       </header>
       <div class="calc-film calc-film-top">${film}</div>
       <div class="calc-node-sub">${esc(sub)}</div>
-      <div class="calc-ports">${groups || `<div class="calc-empty">Включите выходы в редакторе</div>`}${commonBlockHtml(node, commons, graph, (port) => plannerPortRow(node, port, graph))}${commonInputBlockHtml(node, graph, bp.links)}</div>
+      <div class="calc-ports">${groups || `<div class="calc-empty">Включите выходы в редакторе</div>`}${commonBlockHtml(node, commons, graph, (port) => plannerPortRow(node, port, graph))}${heightInput}${commonInputBlockHtml(node, graph, bp.links)}</div>
     </article>`;
   }
 
