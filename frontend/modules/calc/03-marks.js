@@ -1029,7 +1029,7 @@
         wallNames[wall.id] = plannerWallName(out, index);
       });
       const incomingHeight = values?.[`${node.id}:height-in`];
-      const height = node.heightInputEnabled && Number.isFinite(incomingHeight)
+      const height = Number.isFinite(incomingHeight)
         ? Math.max(0.2, Math.min(30, incomingHeight))
         : layout.height;
       return {
