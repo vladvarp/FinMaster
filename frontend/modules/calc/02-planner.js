@@ -314,14 +314,14 @@
     const bp = activeBlueprint();
     if (!bp) return null;
     const value = computeGraph(bp).values?.[`${node.id}:height-in`];
-    return Number.isFinite(value) && value > 0 ? plannerRound(plannerClamp(value, 0.2, 30)) : null;
+    return Number.isFinite(value) ? plannerRound(plannerClamp(value, 0.2, 30)) : null;
   }
 
   function plannerModel(node, heightOverride) {
     if (node?.type === "planner") ensurePlanner(node);
     const walls = plannerWalls(node);
     const floor = plannerArea(node.points);
-    const height = Number.isFinite(heightOverride) && heightOverride > 0
+    const height = Number.isFinite(heightOverride)
       ? plannerRound(plannerClamp(heightOverride, 0.2, 30))
       : node.height;
     const outById = Object.fromEntries((node.outs || []).map((item) => [item.id, item]));
@@ -383,7 +383,7 @@
   function plannerOutputs(node, links, values) {
     ensurePlanner(node);
     const incomingHeight = values?.[`${node.id}:height-in`];
-    const heightOverride = node.heightInputEnabled && Number.isFinite(incomingHeight) && incomingHeight > 0 ? incomingHeight : null;
+    const heightOverride = node.heightInputEnabled && Number.isFinite(incomingHeight) ? incomingHeight : null;
     const ports = plannerLayoutPorts(node, links, false, heightOverride);
     appendCommons(node, ports, linkedFromPorts(node.id, links || []), plannerLayoutPorts(node, links, true, heightOverride), values, links);
     return ports;
@@ -1321,7 +1321,7 @@
     const graph = activeBlueprint() ? computeGraph(activeBlueprint()) : null;
     const linkedHeight = (activeBlueprint()?.links || []).some((link) => link.to === node.id && link.toPort === "height-in");
     const incomingHeight = graph?.values?.[`${node.id}:height-in`];
-    const effectiveHeight = node.heightInputEnabled && Number.isFinite(incomingHeight) && incomingHeight > 0 ? incomingHeight : node.height;
+    const effectiveHeight = node.heightInputEnabled && Number.isFinite(incomingHeight) ? plannerRound(plannerClamp(incomingHeight, 0.2, 30)) : node.height;
     if (width && document.activeElement !== width) width.value = plannerInput(boxW || 4);
     if (depth && document.activeElement !== depth) depth.value = plannerInput(boxD || 3);
     if (height && document.activeElement !== height) height.value = plannerInput(effectiveHeight);
