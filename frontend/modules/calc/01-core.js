@@ -1130,8 +1130,12 @@
     if (node.type === "formula") return node.inputs || [];
     if (node.type === "present") return presentPorts(node);
     if (node.type === "planner") {
-      const linkedHeight = (links || []).some((link) => link.to === node.id && link.toPort === "height-in");
-      return commonInputPorts(node, links).concat(node.heightInputEnabled || linkedHeight ? [{ id: "height-in", name: "Высота потолка" }] : []);
+      const linked = new Set((links || []).filter((link) => link.to === node.id).map((link) => link.toPort));
+      const globalEnabled = node.heightGlobalInputEnabled || linked.has("height-global-in") || linked.has("height-in");
+      const global = globalEnabled ? [{ id: "height-global-in", name: "Глобальная высота стен" }] : [];
+      const individual = (node.layouts || []).filter((layout) => (node.heightInputLayouts || []).includes(layout.id) || linked.has(`height-in:${layout.id}`))
+        .map((layout) => ({ id: `height-in:${layout.id}`, name: `Высота стен · ${layout.name || "Чертёж"}` }));
+      return global.concat(commonInputPorts(node, links), individual);
     }
     if (node.type === "openings") return openingInputs(node).concat(commonInputPorts(node, links));
     if (node.type === "electrics") return electricInputs(node).concat(commonInputPorts(node, links));
@@ -1428,9 +1432,9 @@
           setVal(nodeId, port.id, value);
         });
         if (node.type === "planner") {
-          const heightLink = (incoming[nodeId] || []).find((item) => item.toPort === "height-in");
-          const heightValue = heightLink ? values[`${heightLink.from}:${heightLink.fromPort}`] : null;
-          setVal(nodeId, "height-in", heightValue);
+          (incoming[nodeId] || []).filter((item) => item.toPort === "height-global-in" || item.toPort === "height-in" || String(item.toPort || "").startsWith("height-in:")).forEach((heightLink) => {
+            setVal(nodeId, heightLink.toPort, values[`${heightLink.from}:${heightLink.fromPort}`]);
+          });
         }
       }
       if (node.type === "order") {
