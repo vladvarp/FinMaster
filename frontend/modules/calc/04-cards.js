@@ -9,6 +9,7 @@
           <button type="button" class="planner-layout-trigger" id="mark-layout-trigger" aria-haspopup="true" aria-expanded="false">Чертёж</button>
           <div class="planner-layout-menu" id="mark-layout-menu" role="menu" hidden></div>
         </div>
+        <button type="button" class="planner-common-toggle" id="mark-common-toggle" aria-label="Открыть общий вывод" aria-pressed="false" title="Общий вывод">Σ</button>
         <input id="mark-title" class="planner-title" maxlength="48" spellcheck="false" aria-label="Имя" />
         <button type="button" class="btn" id="mark-reset">Сброс</button>
         <button type="button" class="btn primary" id="mark-close">Готово</button>
@@ -233,6 +234,14 @@
       if (menu) menu.hidden = true;
       $("mark-paste")?.setAttribute("aria-expanded", "false");
       markPaste(choice.dataset.markPaste === "replace" ? "replace" : "add");
+    });
+    $("mark-common-toggle")?.addEventListener("click", () => {
+      if (!session.mark) return;
+      session.mark.view = session.mark.view === COMMON_VIEW ? "" : COMMON_VIEW;
+      const menu = $("mark-layout-menu");
+      if (menu) menu.hidden = true;
+      $("mark-layout-trigger")?.setAttribute("aria-expanded", "false");
+      markCommit(true);
     });
     $("mark-layout-trigger")?.addEventListener("click", (e) => {
       e.stopPropagation();
