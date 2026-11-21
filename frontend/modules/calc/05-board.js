@@ -1970,6 +1970,58 @@
     });
   }
 
+  function plannerLayoutForOutput(node, portId) {
+    const layouts = node?.layouts?.length ? node.layouts : [node];
+    return layouts.find((layout) => portId === `plan:${layout.id}` || (layout.outs || []).some((out) => out.id === portId) || (layout.legacy && ["plan", "floor", "height"].includes(portId))) || null;
+  }
+  function enablePlannerHeightInput(node, layout, global = false) {
+    if (!node || (!layout && !global)) return false;
+    if (global) node.heightGlobalInputEnabled = true;
+    else {
+      if (!Array.isArray(node.heightInputLayouts)) node.heightInputLayouts = [];
+      if (!node.heightInputLayouts.includes(layout.id)) node.heightInputLayouts.push(layout.id);
+    }
+    dirty(); render(); return true;
+  }
+
+  function removePlannerHeightInput(node, portId) {
+    if (!node || !portId) return false;
+    const bp = activeBlueprint();
+    if (!bp) return false;
+    if (portId === "height-global-in" || portId === "height-in") {
+      node.heightGlobalInputEnabled = false;
+      bp.links = (bp.links || []).filter((link) => !(link.to === node.id && ["height-global-in", "height-in"].includes(link.toPort)));
+    } else if (portId.startsWith("height-in:")) {
+      const layoutId = portId.slice("height-in:".length);
+      node.heightInputLayouts = (node.heightInputLayouts || []).filter((id) => id !== layoutId);
+      bp.links = (bp.links || []).filter((link) => !(link.to === node.id && link.toPort === portId));
+    } else return false;
+    dirty();
+    render();
+    return true;
+  }
+  function showPlannerHeightPortMenu(clientX, clientY, nodeId, portId) {
+    document.querySelector(".calc-port-menu")?.remove();
+    const bp = activeBlueprint(), node = bp?.nodes?.find((item) => item.id === nodeId && item.type === "planner");
+    const layout = plannerLayoutForOutput(node, portId);
+    if (!node || !layout) return;
+    const menu = document.createElement("div"); menu.className = "calc-port-menu";
+    menu.style.left = `${clientX}px`; menu.style.top = `${clientY}px`;
+    const individualId = `height-in:${layout.id}`;
+    const globalOn = !!node.heightGlobalInputEnabled || (bp.links || []).some((link) => link.to === node.id && ["height-global-in", "height-in"].includes(link.toPort));
+    const individualOn = (node.heightInputLayouts || []).includes(layout.id) || (bp.links || []).some((link) => link.to === node.id && link.toPort === individualId);
+    menu.innerHTML = `<button type="button" data-planner-height-individual="1" ${individualOn ? "disabled" : ""}>Высота стены · ${esc(layout.name || "Чертёж")}</button><button type="button" data-planner-height-global="1" ${globalOn ? "disabled" : ""}>Глобальная высота стен</button>`;
+    document.body.appendChild(menu);
+    const close = () => { menu.remove(); document.removeEventListener("pointerdown", onDoc, true); };
+    const onDoc = (ev) => { if (!menu.contains(ev.target)) close(); };
+    menu.addEventListener("click", (ev) => {
+      if (ev.target.closest("[data-planner-height-individual]")) enablePlannerHeightInput(node, layout);
+      if (ev.target.closest("[data-planner-height-global]")) enablePlannerHeightInput(node, null, true);
+      close();
+    });
+    setTimeout(() => document.addEventListener("pointerdown", onDoc, true), 0);
+  }
+
   function showPresentPortMenu(clientX, clientY, nodeId, portId) {
     document.querySelector(".calc-port-menu")?.remove();
     const bp = activeBlueprint();
@@ -2077,6 +2129,15 @@
       session.busy = true;
       session.pan = { x: e.clientX, y: e.clientY, ox: bp.x || 0, oy: bp.y || 0 };
       $("calc-board").setPointerCapture(e.pointerId);
+      return;
+    }
+    const delHeightPort = e.target.closest("[data-del-planner-height]");
+    if (delHeightPort) {
+      e.preventDefault();
+      e.stopPropagation();
+      const nodeEl = delHeightPort.closest(".calc-node");
+      const node = nodeEl && bp.nodes.find((item) => item.id === nodeEl.dataset.node && item.type === "planner");
+      if (node) removePlannerHeightInput(node, delHeightPort.dataset.delPlannerHeight);
       return;
     }
     const delLayout = e.target.closest("[data-del-planner-layout]");
@@ -2208,6 +2269,7 @@
         else {
           const owner = bp?.nodes.find((item) => item.id === nodeId);
           if (owner?.type === "dashboard") showDashPortMenu(e.clientX, e.clientY, nodeId);
+          else if (owner?.type === "planner" && io === "out") showPlannerHeightPortMenu(e.clientX, e.clientY, nodeId, portId);
           else if (owner?.type === "present" && io === "in") showPresentPortMenu(e.clientX, e.clientY, nodeId, portId);
           else if (owner?.type === "order" && io === "in") showOrderInputPortMenu(e.clientX, e.clientY, nodeId, portId);
         }
@@ -2253,6 +2315,13 @@
         $("calc-board").setPointerCapture(e.pointerId);
         drawWires(bp, computeGraph(bp));
         return;
+      }
+      const ownerNode = bp.nodes.find((item) => item.id === nodeId);
+      if (io === "out" && ownerNode?.type === "planner") {
+        const layout = plannerLayoutForOutput(ownerNode, portId);
+        const inputPort = layout ? `height-in:${layout.id}` : "";
+        const inputEnabled = !!layout && ((ownerNode.heightInputLayouts || []).includes(layout.id) || (bp.links || []).some((link) => link.to === ownerNode.id && link.toPort === inputPort));
+        if (layout && !inputEnabled) { enablePlannerHeightInput(ownerNode, layout); return; }
       }
       const board = $("calc-board");
       const at = screenToWorld(e.clientX, e.clientY, bp);

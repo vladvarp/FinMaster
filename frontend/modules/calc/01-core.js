@@ -1129,7 +1129,15 @@
     ];
     if (node.type === "formula") return node.inputs || [];
     if (node.type === "present") return presentPorts(node);
-    if (node.type === "planner") return commonInputPorts(node, links);
+    if (node.type === "planner") {
+      const linked = new Set((links || []).filter((link) => link.to === node.id).map((link) => link.toPort));
+      const legacyGlobal = linked.has("height-in");
+      const globalEnabled = node.heightGlobalInputEnabled || linked.has("height-global-in") || legacyGlobal;
+      const global = globalEnabled ? [{ id: legacyGlobal && !linked.has("height-global-in") ? "height-in" : "height-global-in", name: "Глобальная высота стен" }] : [];
+      const individual = (node.layouts || []).filter((layout) => (node.heightInputLayouts || []).includes(layout.id) || linked.has(`height-in:${layout.id}`))
+        .map((layout) => ({ id: `height-in:${layout.id}`, name: `Высота стен · ${layout.name || "Чертёж"}` }));
+      return global.concat(commonInputPorts(node, links), individual);
+    }
     if (node.type === "openings") return openingInputs(node).concat(commonInputPorts(node, links));
     if (node.type === "electrics") return electricInputs(node).concat(commonInputPorts(node, links));
     if (node.type === "tiles") return tileInputs(node).concat(commonInputPorts(node, links));
@@ -1424,6 +1432,11 @@
           const value = link ? values[`${link.from}:${link.fromPort}`] : null;
           setVal(nodeId, port.id, value);
         });
+        if (node.type === "planner") {
+          (incoming[nodeId] || []).filter((item) => item.toPort === "height-global-in" || item.toPort === "height-in" || String(item.toPort || "").startsWith("height-in:")).forEach((heightLink) => {
+            setVal(nodeId, heightLink.toPort, values[`${heightLink.from}:${heightLink.fromPort}`]);
+          });
+        }
       }
       if (node.type === "order") {
         const order = api.findOrder(node.orderId);
@@ -1741,7 +1754,9 @@
       layouts.forEach((layout) => {
         n += Array.isArray(layout.outs) ? layout.outs.filter((item) => item && item.on).length : 1;
         if (layout.heightOut) n += 1;
+        if ((node.heightInputLayouts || []).includes(layout.id)) n += 1;
       });
+      if (node.heightGlobalInputEnabled) n += 1;
       return { w: 300, h: 168 + n * 28 };
     }
     if (node.type === "openings" || node.type === "electrics" || node.type === "tiles") return { w: 300, h: 460 };

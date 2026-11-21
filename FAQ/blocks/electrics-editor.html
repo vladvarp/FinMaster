@@ -13,6 +13,9 @@
     .faq-menu { position: absolute; z-index: 2; left: 46%; top: 38%; width: 210px; display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: var(--shadow); }
     .faq-menu button { border: 1px solid var(--line); background: var(--bg-2); color: var(--ink); border-radius: 8px; padding: 4px 8px; font-size: 12px; font-weight: 700; text-align: left; }
     .faq-menu b { font-size: 11px; color: var(--muted); }
+  
+    .planner-common-toggle { display:inline-flex; align-items:center; justify-content:center; flex:0 0 32px; width:32px; height:32px; padding:0; border:1px solid var(--line); border-radius:8px; background:var(--bg-2); color:var(--muted); font:inherit; font-size:17px; font-weight:800; cursor:pointer; }
+    .planner-common-toggle.is-on { color:#fff; background:#16a34a; border-color:#16a34a; }
   </style>
 </head>
 <body>
@@ -21,6 +24,7 @@
       <div class="planner-layout-control">
         <button type="button" class="planner-layout-trigger" tabindex="-1">Кухня</button>
       </div>
+      <button type="button" class="planner-common-toggle" tabindex="-1" title="Общий вывод">Σ</button>
       <input class="planner-title" value="Электрика" maxlength="48" readonly tabindex="-1" aria-label="Имя" />
       <button type="button" class="btn" tabindex="-1">Сброс</button>
       <button type="button" class="btn primary" tabindex="-1">Готово</button>

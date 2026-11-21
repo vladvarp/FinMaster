@@ -1028,8 +1028,15 @@
         const out = (layout.outs || []).find((item) => item.id === wall.id);
         wallNames[wall.id] = plannerWallName(out, index);
       });
+      const individualId = `height-in:${layout.id}`;
+      const individualHeight = values?.[`${node.id}:${individualId}`];
+      const globalHeight = values?.[`${node.id}:height-global-in`] ?? values?.[`${node.id}:height-in`];
+      const incomingHeight = Number.isFinite(individualHeight) ? individualHeight : globalHeight;
+      const height = Number.isFinite(incomingHeight)
+        ? Math.max(0.2, Math.min(30, incomingHeight))
+        : layout.height;
       return {
-        height: layout.height,
+        height,
         color: markHex(layout.color || node.color, "#65a30d"),
         points: layout.points.map((p) => ({ id: p.id, x: p.x, y: p.y })),
         wallNames,
@@ -3282,6 +3289,13 @@
     const common = session.mark?.view === COMMON_VIEW;
     const linked = (node.feeds || []).filter((feed) => (bp?.links || []).some((link) => link.to === node.id && link.toPort === feedPort(feed)));
     const current = (node.feeds || []).find((feed) => feed.id === session.mark?.feed) || linked[0];
+    const commonToggle = $("mark-common-toggle");
+    if (commonToggle) {
+      commonToggle.classList.toggle("is-on", common);
+      commonToggle.setAttribute("aria-pressed", String(common));
+      commonToggle.setAttribute("aria-label", common ? "Вернуться к чертежу" : "Открыть общий вывод");
+      commonToggle.title = common ? "Вернуться к чертежу" : "Общий вывод";
+    }
     picker.textContent = common ? "Общий вывод" : (current && linked.some((feed) => feed.id === current.id) ? feedTitle(node, current, bp) : (linked[0] ? feedTitle(node, linked[0], bp) : "Чертёж"));
     menu.innerHTML = `${linked.map((feed) => `<button type="button" class="planner-layout-option ${!common && feed.id === session.mark?.feed ? "is-active" : ""}" role="menuitem" data-mark-feed-choice="${esc(feed.id)}">${esc(feedTitle(node, feed, bp))}</button>`).join("")}${linked.length ? `<div class="planner-layout-menu-sep"></div>` : ""}<button type="button" class="planner-layout-option ${common ? "is-active" : ""}" role="menuitem" data-mark-feed-choice="${COMMON_VIEW}">Общий вывод</button>`;
   }

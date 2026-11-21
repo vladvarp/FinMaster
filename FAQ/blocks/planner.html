@@ -15,6 +15,9 @@
     .planner-plan-wrap { flex: none; height: 260px; min-height: 0; }
     #planner-plan { height: 260px; }
     #planner-unfold { height: 148px; flex-basis: 148px; }
+  
+    .planner-common-toggle { display:inline-flex; align-items:center; justify-content:center; flex:0 0 32px; width:32px; height:32px; padding:0; border:1px solid var(--line); border-radius:8px; background:var(--bg-2); color:var(--muted); font:inherit; font-size:17px; font-weight:800; cursor:pointer; }
+    .planner-common-toggle.is-on { color:#fff; background:#16a34a; border-color:#16a34a; }
   </style>
 </head>
 <body>
@@ -23,6 +26,7 @@
       <div class="planner-layout-control">
         <button type="button" class="planner-layout-trigger" tabindex="-1">Планировка 1</button>
       </div>
+      <button type="button" class="planner-common-toggle" tabindex="-1" title="Общий вывод">Σ</button>
       <input class="planner-title" value="Кухня" maxlength="48" readonly tabindex="-1" aria-label="Имя планировки" />
       <label>Высота <input value="2,7" readonly tabindex="-1" aria-label="Высота стен, метры" /> м</label>
       <label>Ширина <input value="4" readonly tabindex="-1" aria-label="Ширина, метры" /> м</label>
@@ -81,6 +85,10 @@
             <label class="planner-len">длина <input value="3" readonly tabindex="-1" aria-label="Длина стены" /> м</label>
             <b>8,1 м²</b>
           </div>
+        </div>
+        <div class="planner-block">
+          <div class="planner-block-h">Параметры</div>
+          <div class="planner-metric"><span class="planner-label">Высота стен</span><b>2,7 м</b></div>
         </div>
         <div class="planner-block">
           <div class="planner-block-h">Сумма выбранных</div>

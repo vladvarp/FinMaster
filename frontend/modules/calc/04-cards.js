@@ -9,6 +9,7 @@
           <button type="button" class="planner-layout-trigger" id="mark-layout-trigger" aria-haspopup="true" aria-expanded="false">Чертёж</button>
           <div class="planner-layout-menu" id="mark-layout-menu" role="menu" hidden></div>
         </div>
+        <button type="button" class="planner-common-toggle" id="mark-common-toggle" aria-label="Открыть общий вывод" aria-pressed="false" title="Общий вывод">Σ</button>
         <input id="mark-title" class="planner-title" maxlength="48" spellcheck="false" aria-label="Имя" />
         <button type="button" class="btn" id="mark-reset">Сброс</button>
         <button type="button" class="btn primary" id="mark-close">Готово</button>
@@ -233,6 +234,14 @@
       if (menu) menu.hidden = true;
       $("mark-paste")?.setAttribute("aria-expanded", "false");
       markPaste(choice.dataset.markPaste === "replace" ? "replace" : "add");
+    });
+    $("mark-common-toggle")?.addEventListener("click", () => {
+      if (!session.mark) return;
+      session.mark.view = session.mark.view === COMMON_VIEW ? "" : COMMON_VIEW;
+      const menu = $("mark-layout-menu");
+      if (menu) menu.hidden = true;
+      $("mark-layout-trigger")?.setAttribute("aria-expanded", "false");
+      markCommit(true);
     });
     $("mark-layout-trigger")?.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -3991,16 +4000,29 @@
 
   function plannerNodeHtml(node, bp, graph) {
     ensurePlanner(node);
-    const model = plannerModel(node);
-    const ports = plannerOutputs(node, bp.links);
+    const activeLayout = (node.layouts || []).find((item) => item.id === node.layoutId) || node.layouts?.[0];
+    const globalHeight = graph?.values?.[`${node.id}:height-global-in`] ?? graph?.values?.[`${node.id}:height-in`];
+    const activeIndividualHeight = activeLayout ? graph?.values?.[`${node.id}:height-in:${activeLayout.id}`] : null;
+    const incomingHeight = Number.isFinite(activeIndividualHeight) ? activeIndividualHeight : globalHeight;
+    const model = plannerModel(node, Number.isFinite(incomingHeight) ? incomingHeight : null);
+    const ports = plannerOutputs(node, bp.links, graph?.values);
     const sub = `пол ${fmtShort(model.floor)} м² · ${model.walls.length} стен · h ${fmtShort(model.height)} м`;
 
     const film = node.layouts.map((layout) => `<div class="calc-film-card ${layout.id === node.layoutId ? "is-on" : ""}" data-planner-layout="${esc(layout.id)}" title="${esc(layout.name)}"><span class="calc-film-name">${esc(layout.name)}</span>${plannerThumb(layout.points, true, layout.color)}<button type="button" class="calc-film-delete" data-del-planner-layout="${esc(layout.id)}" title="Удалить планировку" aria-label="Удалить планировку ${esc(layout.name)}" ${node.layouts.length <= 1 ? "disabled" : ""}>×</button></div>`).join("");
     const groups = node.layouts.map((layout) => {
       const rows = ports.filter((port) => port.layoutId === layout.id && !port.common);
-      return `<div class="calc-plan-group" style="--planner-color:${esc(layout.color)}">${rows.map((port) => plannerPortRow(node, port, graph)).join("")}</div>`;
+      const inputId = `height-in:${layout.id}`;
+      const inputOn = (node.heightInputLayouts || []).includes(layout.id) || (bp.links || []).some((link) => link.to === node.id && link.toPort === inputId);
+      const inputValue = graph?.values?.[`${node.id}:${inputId}`];
+      const input = inputOn ? `<div class="calc-row in"><i class="calc-port in" data-port="${esc(inputId)}" data-io="in" title="Индивидуальная высота стен · ${esc(layout.name)}"></i><span>Высота · ${esc(layout.name)}</span><b>${Number.isFinite(inputValue) ? esc(fmtShort(inputValue)) + " м" : "—"}</b><button type="button" class="calc-height-port-delete" style="border:0;background:transparent;color:var(--muted,#94a3b8);font-size:18px;line-height:1;padding:0 3px;cursor:pointer;flex:0 0 auto" data-del-planner-height="${esc(inputId)}" title="Удалить вход высоты" aria-label="Удалить вход высоты для ${esc(layout.name)}">×</button></div>` : "";
+      return `<div class="calc-plan-group" style="--planner-color:${esc(layout.color)}">${input}${rows.map((port) => plannerPortRow(node, port, graph)).join("")}</div>`;
     }).join("");
     const commons = ports.filter((port) => port.common);
+    const globalInputOn = !!node.heightGlobalInputEnabled || (bp.links || []).some((link) => link.to === node.id && (link.toPort === "height-global-in" || link.toPort === "height-in"));
+    const globalInputValue = graph?.values?.[`${node.id}:height-global-in`] ?? graph?.values?.[`${node.id}:height-in`];
+    const legacyGlobalInput = (bp.links || []).some((link) => link.to === node.id && link.toPort === "height-in") && !(bp.links || []).some((link) => link.to === node.id && link.toPort === "height-global-in");
+    const globalInputPort = legacyGlobalInput ? "height-in" : "height-global-in";
+    const globalHeightInput = globalInputOn ? `<div class="calc-row in"><i class="calc-port in" data-port="${globalInputPort}" data-io="in" title="Глобальная высота стен"></i><span>Глобальная высота стен</span><b>${Number.isFinite(globalInputValue) ? esc(fmtShort(globalInputValue)) + " м" : "—"}</b><button type="button" class="calc-height-port-delete" style="border:0;background:transparent;color:var(--muted,#94a3b8);font-size:18px;line-height:1;padding:0 3px;cursor:pointer;flex:0 0 auto" data-del-planner-height="${globalInputPort}" title="Удалить глобальный вход высоты" aria-label="Удалить глобальный вход высоты">×</button></div>` : "";
     return `<article class="calc-node is-planner ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(node.color || "#65a30d")}">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
@@ -4011,7 +4033,7 @@
       </header>
       <div class="calc-film calc-film-top">${film}</div>
       <div class="calc-node-sub">${esc(sub)}</div>
-      <div class="calc-ports">${groups || `<div class="calc-empty">Включите выходы в редакторе</div>`}${commonBlockHtml(node, commons, graph, (port) => plannerPortRow(node, port, graph))}${commonInputBlockHtml(node, graph, bp.links)}</div>
+      <div class="calc-ports">${groups || `<div class="calc-empty">Включите выходы в редакторе</div>`}${globalHeightInput}${commonBlockHtml(node, commons, graph, (port) => plannerPortRow(node, port, graph))}${commonInputBlockHtml(node, graph, bp.links)}</div>
     </article>`;
   }
 
