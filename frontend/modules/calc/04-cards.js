@@ -4001,7 +4001,7 @@
   function plannerNodeHtml(node, bp, graph) {
     ensurePlanner(node);
     const incomingHeight = graph?.values?.[`${node.id}:height-in`];
-    const model = plannerModel(node, node.heightInputEnabled && Number.isFinite(incomingHeight) ? incomingHeight : null);
+    const model = plannerModel(node, Number.isFinite(incomingHeight) ? incomingHeight : null);
     const ports = plannerOutputs(node, bp.links, graph?.values);
     const sub = `пол ${fmtShort(model.floor)} м² · ${model.walls.length} стен · h ${fmtShort(model.height)} м`;
 
