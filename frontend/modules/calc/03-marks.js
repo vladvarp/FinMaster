@@ -1028,8 +1028,12 @@
         const out = (layout.outs || []).find((item) => item.id === wall.id);
         wallNames[wall.id] = plannerWallName(out, index);
       });
+      const incomingHeight = values?.[`${node.id}:height-in`];
+      const height = node.heightInputEnabled && Number.isFinite(incomingHeight) && incomingHeight > 0
+        ? Math.max(0.2, Math.min(30, incomingHeight))
+        : layout.height;
       return {
-        height: layout.height,
+        height,
         color: markHex(layout.color || node.color, "#65a30d"),
         points: layout.points.map((p) => ({ id: p.id, x: p.x, y: p.y })),
         wallNames,
