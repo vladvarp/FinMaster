@@ -1028,7 +1028,10 @@
         const out = (layout.outs || []).find((item) => item.id === wall.id);
         wallNames[wall.id] = plannerWallName(out, index);
       });
-      const incomingHeight = values?.[`${node.id}:height-in`];
+      const individualId = `height-in:${layout.id}`;
+      const individualHeight = values?.[`${node.id}:${individualId}`];
+      const globalHeight = values?.[`${node.id}:height-global-in`] ?? values?.[`${node.id}:height-in`];
+      const incomingHeight = Number.isFinite(individualHeight) ? individualHeight : globalHeight;
       const height = Number.isFinite(incomingHeight)
         ? Math.max(0.2, Math.min(30, incomingHeight))
         : layout.height;
