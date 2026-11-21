@@ -309,6 +309,14 @@
     return layout;
   }
 
+  function plannerExternalHeight(node) {
+    if (!node?.heightInputEnabled) return null;
+    const bp = activeBlueprint();
+    if (!bp) return null;
+    const value = computeGraph(bp).values?.[`${node.id}:height-in`];
+    return Number.isFinite(value) && value > 0 ? plannerRound(plannerClamp(value, 0.2, 30)) : null;
+  }
+
   function plannerModel(node, heightOverride) {
     if (node?.type === "planner") ensurePlanner(node);
     const walls = plannerWalls(node);
@@ -861,7 +869,7 @@
     const unfold = $("planner-unfold");
     if (!node || !plan || !unfold || !session.planner) return;
     const colors = plannerColors();
-    const model = plannerModel(node);
+    const model = plannerModel(node, plannerExternalHeight(node));
     const selWall = plannerSelWall(node);
     const selPoint = session.planner.sel?.kind === "point" ? session.planner.sel.id : "";
     const fitted = plannerFitCanvas(plan);
@@ -1134,6 +1142,12 @@
     const width = $("planner-width");
     const depth = $("planner-depth");
     const height = $("planner-height");
+    const linkedHeight = (activeBlueprint()?.links || []).some((link) => link.to === node.id && link.toPort === "height-in");
+    const incomingHeight = plannerExternalHeight(node);
+    if (height) {
+      height.disabled = linkedHeight && incomingHeight != null;
+      height.title = height.disabled ? "Высота поступает с подключённого входа" : "Высота стен, метры";
+    }
     if (rect && width && document.activeElement !== width) width.value = plannerInput(rect.w);
     if (rect && depth && document.activeElement !== depth) depth.value = plannerInput(rect.d);
     if (height && document.activeElement !== height) height.value = plannerInput(model.height);
@@ -1150,9 +1164,8 @@
   }
 
   function plannerSideHtml(node) {
-    const graph = activeBlueprint() ? computeGraph(activeBlueprint()) : null;
-    const incomingHeight = graph?.values?.[`${node.id}:height-in`];
-    const model = plannerModel(node, node.heightInputEnabled && Number.isFinite(incomingHeight) && incomingHeight > 0 ? incomingHeight : null);
+    const incomingHeight = plannerExternalHeight(node);
+    const model = plannerModel(node, incomingHeight);
     const linked = linkedFromPorts(node.id, activeBlueprint()?.links || []);
     const onBox = (id, on) => {
       const lock = linked.has(id);
@@ -1695,10 +1708,11 @@
     $("planner-height")?.addEventListener("input", (e) => {
       const node = plannerNode();
       const value = plannerDraft(e.target.value);
+      if (!node || value == null) return;
       const graph = activeBlueprint() ? computeGraph(activeBlueprint()) : null;
       const incomingHeight = graph?.values?.[`${node.id}:height-in`];
       const linkedHeight = (activeBlueprint()?.links || []).some((link) => link.to === node.id && link.toPort === "height-in");
-      if (!node || value == null || linkedHeight && Number.isFinite(incomingHeight)) return;
+      if (linkedHeight && Number.isFinite(incomingHeight)) return;
       node.height = plannerRound(plannerClamp(value, 0.2, 30));
       plannerCommit(false);
     });
