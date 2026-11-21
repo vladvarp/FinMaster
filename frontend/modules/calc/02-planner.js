@@ -1328,15 +1328,21 @@
     const depth = $("planner-depth");
     const height = $("planner-height");
     const graph = activeBlueprint() ? computeGraph(activeBlueprint()) : null;
-    const linkedHeight = (activeBlueprint()?.links || []).some((link) => link.to === node.id && link.toPort === "height-in");
-    const incomingHeight = graph?.values?.[`${node.id}:height-in`];
-    const effectiveHeight = Number.isFinite(incomingHeight) ? plannerRound(plannerClamp(incomingHeight, 0.2, 30)) : node.height;
+    const layout = plannerActive(node);
+    const individualPort = layout ? `height-in:${layout.id}` : "";
+    const links = activeBlueprint()?.links || [];
+    const linkedIndividual = !!individualPort && links.some((link) => link.to === node.id && link.toPort === individualPort);
+    const linkedGlobal = links.some((link) => link.to === node.id && (link.toPort === "height-global-in" || link.toPort === "height-in"));
+    const incomingHeight = plannerExternalHeight(node, layout?.id);
+    const effectiveHeight = Number.isFinite(incomingHeight) ? incomingHeight : node.height;
     if (width && document.activeElement !== width) width.value = plannerInput(boxW || 4);
     if (depth && document.activeElement !== depth) depth.value = plannerInput(boxD || 3);
     if (height && document.activeElement !== height) height.value = plannerInput(effectiveHeight);
     if (height) {
-      height.disabled = linkedHeight && Number.isFinite(incomingHeight);
-      height.title = height.disabled ? "Высота поступает с подключённого входа" : "Высота стен, метры";
+      height.disabled = Number.isFinite(incomingHeight) && (linkedIndividual || linkedGlobal);
+      height.title = height.disabled
+        ? (linkedIndividual ? "Высота поступает с индивидуального входа" : "Высота поступает с глобального входа")
+        : "Высота стен, метры";
     }
     const title = $("planner-title");
     const layout = plannerActive(node);
