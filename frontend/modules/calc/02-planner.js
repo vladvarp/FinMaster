@@ -309,11 +309,13 @@
     return layout;
   }
 
-  function plannerModel(node) {
+  function plannerModel(node, heightOverride) {
     if (node?.type === "planner") ensurePlanner(node);
     const walls = plannerWalls(node);
     const floor = plannerArea(node.points);
-    const height = node.height;
+    const height = Number.isFinite(heightOverride) && heightOverride > 0
+      ? plannerRound(plannerClamp(heightOverride, 0.2, 30))
+      : node.height;
     const outById = Object.fromEntries((node.outs || []).map((item) => [item.id, item]));
     const floorOut = (node.outs || []).find((item) => item.kind === "floor");
     const floorId = floorOut?.id || "floor";
@@ -354,12 +356,12 @@
     return { floor, height, walls, rows, sums, peri: walls.reduce((sum, wall) => sum + wall.len, 0) };
   }
 
-  function plannerLayoutPorts(node, links, all) {
+  function plannerLayoutPorts(node, links, all, heightOverride) {
     ensurePlanner(node);
     const linked = linkedFromPorts(node.id, links || []);
     const ports = [];
     (node.layouts || []).forEach((layout) => {
-      const model = plannerModel(layout);
+      const model = plannerModel(layout, heightOverride);
       ports.push({ id: plannerPort(layout, "plan"), name: layout.name, signal: "plan", layoutId: layout.id });
       model.rows.concat(model.sums).forEach((row) => {
         if (all || row.on || linked.has(row.id)) ports.push({ id: row.id, name: row.name, value: row.value ?? row.area, unit: row.unit || "м²", layoutId: layout.id });
@@ -372,8 +374,10 @@
 
   function plannerOutputs(node, links, values) {
     ensurePlanner(node);
-    const ports = plannerLayoutPorts(node, links, false);
-    appendCommons(node, ports, linkedFromPorts(node.id, links || []), plannerLayoutPorts(node, links, true), values, links);
+    const incomingHeight = values?.[`${node.id}:height-in`];
+    const heightOverride = node.heightInputEnabled && Number.isFinite(incomingHeight) && incomingHeight > 0 ? incomingHeight : null;
+    const ports = plannerLayoutPorts(node, links, false, heightOverride);
+    appendCommons(node, ports, linkedFromPorts(node.id, links || []), plannerLayoutPorts(node, links, true, heightOverride), values, links);
     return ports;
   }
 
@@ -1113,6 +1117,8 @@
       el.disabled = linked.has(id);
       el.title = linked.has(id) ? "Сначала снимите связь на схеме" : "Вывести число на ноду";
     });
+    const heightIn = document.querySelector('#planner-side [data-planner-height-in-on]');
+    if (heightIn) heightIn.checked = !!node.heightInputEnabled;
     const heightOut = document.querySelector('#planner-side [data-planner-height-on]');
     if (heightOut) {
       const heightId = plannerPort(plannerActive(node), "height");
@@ -1144,7 +1150,9 @@
   }
 
   function plannerSideHtml(node) {
-    const model = plannerModel(node);
+    const graph = activeBlueprint() ? computeGraph(activeBlueprint()) : null;
+    const incomingHeight = graph?.values?.[`${node.id}:height-in`];
+    const model = plannerModel(node, node.heightInputEnabled && Number.isFinite(incomingHeight) && incomingHeight > 0 ? incomingHeight : null);
     const linked = linkedFromPorts(node.id, activeBlueprint()?.links || []);
     const onBox = (id, on) => {
       const lock = linked.has(id);
@@ -1207,6 +1215,9 @@
       <div class="planner-block">
         <div class="planner-block-h">Параметры</div>
         <div class="planner-metric">
+          <label class="planner-on" title="Включить вход для внешней высоты потолка"><input type="checkbox" data-planner-height-in-on ${node.heightInputEnabled ? "checked" : ""} /> Вход высоты потолка</label>
+        </div>
+        <div class="planner-metric">
           <label class="planner-on" title="Вывести высоту стен на ноду"><input type="checkbox" data-planner-height-on ${node.heightOut ? "checked" : ""} /> На ноду</label>
           <span class="planner-label">Высота стен</span>
           <b>${esc(fmtShort(model.height))} м</b>
@@ -1225,6 +1236,13 @@
     if (!picker || !menu) return;
     const common = session.planner?.view === COMMON_VIEW;
     const layout = plannerActive(node);
+    const commonToggle = $("planner-common-toggle");
+    if (commonToggle) {
+      commonToggle.classList.toggle("is-on", common);
+      commonToggle.setAttribute("aria-pressed", String(common));
+      commonToggle.setAttribute("aria-label", common ? "Вернуться к чертежу" : "Открыть общий вывод");
+      commonToggle.title = common ? "Вернуться к чертежу" : "Общий вывод";
+    }
     picker.textContent = common ? "Общий вывод" : (layout?.name || "Планировка");
     menu.innerHTML = `${(node.layouts || []).map((item) => `<button type="button" class="planner-layout-option ${!common && item.id === node.layoutId ? "is-active" : ""}" role="menuitem" data-planner-layout-choice="${esc(item.id)}">${esc(item.name)}</button>`).join("")}<div class="planner-layout-menu-sep"></div><button type="button" class="planner-layout-option is-create" role="menuitem" data-planner-layout-choice="__new">＋ Создать планировку</button><button type="button" class="planner-layout-option ${common ? "is-active" : ""}" role="menuitem" data-planner-layout-choice="${COMMON_VIEW}">Общий вывод</button>`;
   }
@@ -1287,9 +1305,17 @@
     const width = $("planner-width");
     const depth = $("planner-depth");
     const height = $("planner-height");
+    const graph = activeBlueprint() ? computeGraph(activeBlueprint()) : null;
+    const linkedHeight = (activeBlueprint()?.links || []).some((link) => link.to === node.id && link.toPort === "height-in");
+    const incomingHeight = graph?.values?.[`${node.id}:height-in`];
+    const effectiveHeight = node.heightInputEnabled && Number.isFinite(incomingHeight) && incomingHeight > 0 ? incomingHeight : node.height;
     if (width && document.activeElement !== width) width.value = plannerInput(boxW || 4);
     if (depth && document.activeElement !== depth) depth.value = plannerInput(boxD || 3);
-    if (height && document.activeElement !== height) height.value = plannerInput(node.height);
+    if (height && document.activeElement !== height) height.value = plannerInput(effectiveHeight);
+    if (height) {
+      height.disabled = linkedHeight && Number.isFinite(incomingHeight);
+      height.title = height.disabled ? "Высота поступает с подключённого входа" : "Высота стен, метры";
+    }
     const title = $("planner-title");
     const layout = plannerActive(node);
     if (title && document.activeElement !== title) title.value = layout?.name || "Планировка 1";
@@ -1494,6 +1520,7 @@
           <button type="button" class="planner-layout-trigger" id="planner-layout-trigger" aria-haspopup="true" aria-expanded="false">Планировка</button>
           <div class="planner-layout-menu" id="planner-layout-menu" role="menu" hidden></div>
         </div>
+        <button type="button" class="planner-common-toggle" id="planner-common-toggle" aria-label="Открыть общий вывод" aria-pressed="false" title="Общий вывод">Σ</button>
         <input id="planner-title" class="planner-title" maxlength="48" spellcheck="false" aria-label="Имя планировки" />
         <label>Высота <input id="planner-height" inputmode="decimal" aria-label="Высота стен, метры" /> м</label>
         <label>Ширина <input id="planner-width" inputmode="decimal" aria-label="Ширина, метры" /> м</label>
@@ -1553,6 +1580,14 @@
       if (e.target === modal) closePlanner();
     });
     $("planner-close")?.addEventListener("click", () => closePlanner());
+    $("planner-common-toggle")?.addEventListener("click", () => {
+      if (!session.planner) return;
+      session.planner.view = session.planner.view === COMMON_VIEW ? "" : COMMON_VIEW;
+      const menu = $("planner-layout-menu");
+      if (menu) menu.hidden = true;
+      $("planner-layout-trigger")?.setAttribute("aria-expanded", "false");
+      plannerCommit(true);
+    });
     $("planner-layout-trigger")?.addEventListener("click", (e) => {
       e.stopPropagation();
       const menu = $("planner-layout-menu");
@@ -1660,7 +1695,10 @@
     $("planner-height")?.addEventListener("input", (e) => {
       const node = plannerNode();
       const value = plannerDraft(e.target.value);
-      if (!node || value == null) return;
+      const graph = activeBlueprint() ? computeGraph(activeBlueprint()) : null;
+      const incomingHeight = graph?.values?.[`${node.id}:height-in`];
+      const linkedHeight = (activeBlueprint()?.links || []).some((link) => link.to === node.id && link.toPort === "height-in");
+      if (!node || value == null || linkedHeight && Number.isFinite(incomingHeight)) return;
       node.height = plannerRound(plannerClamp(value, 0.2, 30));
       plannerCommit(false);
     });
@@ -1679,6 +1717,15 @@
       const node = plannerNode();
       if (!node) return;
       if (handleCommonInput(e, node)) return;
+      if (e.target.matches("[data-planner-height-in-on]")) {
+        node.heightInputEnabled = !!e.target.checked;
+        if (!node.heightInputEnabled) {
+          const bp = activeBlueprint();
+          if (bp) bp.links = (bp.links || []).filter((link) => !(link.to === node.id && link.toPort === "height-in"));
+        }
+        plannerCommit(true);
+        return;
+      }
       if (e.target.matches("[data-planner-height-on]")) {
         const linked = linkedFromPorts(node.id, activeBlueprint()?.links || []);
         const heightId = plannerPort(plannerActive(node), "height");
