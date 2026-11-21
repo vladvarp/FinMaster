@@ -226,6 +226,8 @@
 
   function ensurePlanner(node) {
     if (!node || node.type !== "planner") return node;
+    if (!Array.isArray(node.heightInputLayouts)) node.heightInputLayouts = [];
+    node.heightGlobalInputEnabled = !!node.heightGlobalInputEnabled;
     if (!Array.isArray(node.layouts) || !node.layouts.length) {
       const id = uid();
       const named = plannerName(node);
@@ -272,10 +274,12 @@
       plannerPort(removed, "height"),
       ...(removed.outs || []).map((item) => item.id),
     ]);
+    const inputId = `height-in:${removed.id}`;
+    node.heightInputLayouts = (node.heightInputLayouts || []).filter((layoutId) => layoutId !== removed.id);
     const bp = activeBlueprint();
     if (bp) {
       bp.links = (bp.links || []).filter(
-        (link) => !(link.from === node.id && outputIds.has(link.fromPort))
+        (link) => !((link.from === node.id && outputIds.has(link.fromPort)) || (link.to === node.id && link.toPort === inputId))
       );
     }
     if (node.layoutId === id) {
