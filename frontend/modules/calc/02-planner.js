@@ -1328,12 +1328,12 @@
     const depth = $("planner-depth");
     const height = $("planner-height");
     const graph = activeBlueprint() ? computeGraph(activeBlueprint()) : null;
-    const layout = plannerActive(node);
-    const individualPort = layout ? `height-in:${layout.id}` : "";
+    const selectedLayout = plannerActive(node);
+    const individualPort = selectedLayout ? `height-in:${selectedLayout.id}` : "";
     const links = activeBlueprint()?.links || [];
     const linkedIndividual = !!individualPort && links.some((link) => link.to === node.id && link.toPort === individualPort);
     const linkedGlobal = links.some((link) => link.to === node.id && (link.toPort === "height-global-in" || link.toPort === "height-in"));
-    const incomingHeight = plannerExternalHeight(node, layout?.id);
+    const incomingHeight = plannerExternalHeight(node, selectedLayout?.id);
     const effectiveHeight = Number.isFinite(incomingHeight) ? incomingHeight : node.height;
     if (width && document.activeElement !== width) width.value = plannerInput(boxW || 4);
     if (depth && document.activeElement !== depth) depth.value = plannerInput(boxD || 3);
