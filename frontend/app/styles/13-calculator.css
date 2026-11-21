@@ -3158,3 +3158,18 @@ html[data-theme="dark"] .calc-order.is-used small { color: #5eead4; }
 .tile-section-collapse[open] > summary.planner-block-h::before { transform: rotate(90deg); }
 .tile-section-collapse .tile-section-count { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: 500; }
 #mark-side .tile-preview-panel:not([hidden]) { display: flex !important; }
+
+.planner-common-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 32px; width: 32px; height: 32px; padding: 0;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg-2); color: var(--muted);
+  font: inherit; font-size: 17px; font-weight: 800; cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.planner-common-toggle:hover { color: var(--ink); border-color: var(--accent, #0f9b8e); }
+.planner-common-toggle.is-on {
+  color: #fff; background: #16a34a; border-color: #16a34a;
+  box-shadow: 0 0 0 2px rgba(22,163,74,.16);
+}
+@media (max-width: 760px) { .planner-common-toggle { flex: 0 0 32px; } }
