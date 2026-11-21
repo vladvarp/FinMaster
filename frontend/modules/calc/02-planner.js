@@ -1557,7 +1557,7 @@
         <label>Высота <input id="planner-height" inputmode="decimal" aria-label="Высота стен, метры" /> м</label>
         <label>Ширина <input id="planner-width" inputmode="decimal" aria-label="Ширина, метры" /> м</label>
         <label>Глубина <input id="planner-depth" inputmode="decimal" aria-label="Глубина, метры" /> м</label>
-        <button type="button" class="btn" id="planner-make-rect">Прямоугольник</button>
+        <button type="button" class="btn" id="planner-make-rect" aria-label="Прямоугольник" title="Прямоугольник"><svg width="20" height="16" viewBox="0 0 20 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="1.5" y="1.5" width="17" height="13" rx="0.5" stroke="currentColor" stroke-width="1.6"/></svg></button>
         <button type="button" class="btn primary" id="planner-close">Готово</button>
       </div>
       <div class="planner-body">
