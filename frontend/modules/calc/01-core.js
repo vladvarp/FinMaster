@@ -1131,8 +1131,9 @@
     if (node.type === "present") return presentPorts(node);
     if (node.type === "planner") {
       const linked = new Set((links || []).filter((link) => link.to === node.id).map((link) => link.toPort));
-      const globalEnabled = node.heightGlobalInputEnabled || linked.has("height-global-in") || linked.has("height-in");
-      const global = globalEnabled ? [{ id: "height-global-in", name: "Глобальная высота стен" }] : [];
+      const legacyGlobal = linked.has("height-in");
+      const globalEnabled = node.heightGlobalInputEnabled || linked.has("height-global-in") || legacyGlobal;
+      const global = globalEnabled ? [{ id: legacyGlobal && !linked.has("height-global-in") ? "height-in" : "height-global-in", name: "Глобальная высота стен" }] : [];
       const individual = (node.layouts || []).filter((layout) => (node.heightInputLayouts || []).includes(layout.id) || linked.has(`height-in:${layout.id}`))
         .map((layout) => ({ id: `height-in:${layout.id}`, name: `Высота стен · ${layout.name || "Чертёж"}` }));
       return global.concat(commonInputPorts(node, links), individual);
