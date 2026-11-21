@@ -1983,6 +1983,23 @@
     }
     dirty(); render(); return true;
   }
+
+  function removePlannerHeightInput(node, portId) {
+    if (!node || !portId) return false;
+    const bp = activeBlueprint();
+    if (!bp) return false;
+    if (portId === "height-global-in" || portId === "height-in") {
+      node.heightGlobalInputEnabled = false;
+      bp.links = (bp.links || []).filter((link) => !(link.to === node.id && ["height-global-in", "height-in"].includes(link.toPort)));
+    } else if (portId.startsWith("height-in:")) {
+      const layoutId = portId.slice("height-in:".length);
+      node.heightInputLayouts = (node.heightInputLayouts || []).filter((id) => id !== layoutId);
+      bp.links = (bp.links || []).filter((link) => !(link.to === node.id && link.toPort === portId));
+    } else return false;
+    dirty();
+    render();
+    return true;
+  }
   function showPlannerHeightPortMenu(clientX, clientY, nodeId, portId) {
     document.querySelector(".calc-port-menu")?.remove();
     const bp = activeBlueprint(), node = bp?.nodes?.find((item) => item.id === nodeId && item.type === "planner");
@@ -2112,6 +2129,15 @@
       session.busy = true;
       session.pan = { x: e.clientX, y: e.clientY, ox: bp.x || 0, oy: bp.y || 0 };
       $("calc-board").setPointerCapture(e.pointerId);
+      return;
+    }
+    const delHeightPort = e.target.closest("[data-del-planner-height]");
+    if (delHeightPort) {
+      e.preventDefault();
+      e.stopPropagation();
+      const nodeEl = delHeightPort.closest(".calc-node");
+      const node = nodeEl && bp.nodes.find((item) => item.id === nodeEl.dataset.node && item.type === "planner");
+      if (node) removePlannerHeightInput(node, delHeightPort.dataset.delPlannerHeight);
       return;
     }
     const delLayout = e.target.closest("[data-del-planner-layout]");
