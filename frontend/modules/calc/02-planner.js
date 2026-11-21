@@ -309,10 +309,15 @@
     return layout;
   }
 
-  function plannerExternalHeight(node) {
+  function plannerExternalHeight(node, layoutId) {
     const bp = activeBlueprint();
-    if (!node || !bp || !(bp.links || []).some((link) => link.to === node.id && link.toPort === "height-in")) return null;
-    const value = computeGraph(bp).values?.[`${node.id}:height-in`];
+    if (!node || !bp) return null;
+    const values = computeGraph(bp).values || {};
+    const layout = (node.layouts || []).find((item) => item.id === (layoutId || node.layoutId)) || plannerActive(node);
+    const individualId = layout ? `height-in:${layout.id}` : "";
+    const individual = individualId ? values[`${node.id}:${individualId}`] : null;
+    const global = values[`${node.id}:height-global-in`] ?? values[`${node.id}:height-in`];
+    const value = Number.isFinite(individual) ? individual : Number.isFinite(global) ? global : null;
     return Number.isFinite(value) ? plannerRound(plannerClamp(value, 0.2, 30)) : null;
   }
 
@@ -363,12 +368,13 @@
     return { floor, height, walls, rows, sums, peri: walls.reduce((sum, wall) => sum + wall.len, 0) };
   }
 
-  function plannerLayoutPorts(node, links, all, heightOverride) {
+  function plannerLayoutPorts(node, links, all, heightOverrides) {
     ensurePlanner(node);
     const linked = linkedFromPorts(node.id, links || []);
     const ports = [];
     (node.layouts || []).forEach((layout) => {
-      const model = plannerModel(layout, heightOverride);
+      const override = heightOverrides && Object.prototype.hasOwnProperty.call(heightOverrides, layout.id) ? heightOverrides[layout.id] : null;
+      const model = plannerModel(layout, override);
       ports.push({ id: plannerPort(layout, "plan"), name: layout.name, signal: "plan", layoutId: layout.id });
       model.rows.concat(model.sums).forEach((row) => {
         if (all || row.on || linked.has(row.id)) ports.push({ id: row.id, name: row.name, value: row.value ?? row.area, unit: row.unit || "м²", layoutId: layout.id });
@@ -381,10 +387,15 @@
 
   function plannerOutputs(node, links, values) {
     ensurePlanner(node);
-    const incomingHeight = values?.[`${node.id}:height-in`];
-    const heightOverride = Number.isFinite(incomingHeight) ? incomingHeight : null;
-    const ports = plannerLayoutPorts(node, links, false, heightOverride);
-    appendCommons(node, ports, linkedFromPorts(node.id, links || []), plannerLayoutPorts(node, links, true, heightOverride), values, links);
+    const globalHeight = values?.[`${node.id}:height-global-in`] ?? values?.[`${node.id}:height-in`];
+    const heightOverrides = {};
+    (node.layouts || []).forEach((layout) => {
+      const individual = values?.[`${node.id}:height-in:${layout.id}`];
+      if (Number.isFinite(individual)) heightOverrides[layout.id] = individual;
+      else if (Number.isFinite(globalHeight)) heightOverrides[layout.id] = globalHeight;
+    });
+    const ports = plannerLayoutPorts(node, links, false, heightOverrides);
+    appendCommons(node, ports, linkedFromPorts(node.id, links || []), plannerLayoutPorts(node, links, true, heightOverrides), values, links);
     return ports;
   }
 
@@ -1124,8 +1135,6 @@
       el.disabled = linked.has(id);
       el.title = linked.has(id) ? "Сначала снимите связь на схеме" : "Вывести число на ноду";
     });
-    const heightIn = document.querySelector('#planner-side [data-planner-height-in-on]');
-    if (heightIn) heightIn.checked = !!node.heightInputEnabled;
     const heightOut = document.querySelector('#planner-side [data-planner-height-on]');
     if (heightOut) {
       const heightId = plannerPort(plannerActive(node), "height");
@@ -1141,11 +1150,15 @@
     const width = $("planner-width");
     const depth = $("planner-depth");
     const height = $("planner-height");
-    const linkedHeight = (activeBlueprint()?.links || []).some((link) => link.to === node.id && link.toPort === "height-in");
-    const incomingHeight = plannerExternalHeight(node);
+    const bpLinks = activeBlueprint()?.links || [];
+    const activeLayout = plannerActive(node);
+    const individualPort = activeLayout ? `height-in:${activeLayout.id}` : "";
+    const linkedGlobal = bpLinks.some((link) => link.to === node.id && (link.toPort === "height-global-in" || link.toPort === "height-in"));
+    const linkedIndividual = !!individualPort && bpLinks.some((link) => link.to === node.id && link.toPort === individualPort);
+    const incomingHeight = plannerExternalHeight(node, activeLayout?.id);
     if (height) {
-      height.disabled = linkedHeight && incomingHeight != null;
-      height.title = height.disabled ? "Высота поступает с подключённого входа" : "Высота стен, метры";
+      height.disabled = incomingHeight != null && (linkedIndividual || linkedGlobal);
+      height.title = height.disabled ? (linkedIndividual ? "Высота поступает с индивидуального входа" : "Высота поступает с глобального входа") : "Высота стен, метры";
     }
     if (rect && width && document.activeElement !== width) width.value = plannerInput(rect.w);
     if (rect && depth && document.activeElement !== depth) depth.value = plannerInput(rect.d);
@@ -1226,9 +1239,6 @@
       </div>
       <div class="planner-block">
         <div class="planner-block-h">Параметры</div>
-        <div class="planner-metric">
-          <label class="planner-on" title="Включить вход для внешней высоты потолка"><input type="checkbox" data-planner-height-in-on ${node.heightInputEnabled ? "checked" : ""} /> Вход высоты потолка</label>
-        </div>
         <div class="planner-metric">
           <label class="planner-on" title="Вывести высоту стен на ноду"><input type="checkbox" data-planner-height-on ${node.heightOut ? "checked" : ""} /> На ноду</label>
           <span class="planner-label">Высота стен</span>
@@ -1730,15 +1740,6 @@
       const node = plannerNode();
       if (!node) return;
       if (handleCommonInput(e, node)) return;
-      if (e.target.matches("[data-planner-height-in-on]")) {
-        node.heightInputEnabled = !!e.target.checked;
-        if (!node.heightInputEnabled) {
-          const bp = activeBlueprint();
-          if (bp) bp.links = (bp.links || []).filter((link) => !(link.to === node.id && link.toPort === "height-in"));
-        }
-        plannerCommit(true);
-        return;
-      }
       if (e.target.matches("[data-planner-height-on]")) {
         const linked = linkedFromPorts(node.id, activeBlueprint()?.links || []);
         const heightId = plannerPort(plannerActive(node), "height");
