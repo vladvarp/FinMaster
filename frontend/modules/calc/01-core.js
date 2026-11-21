@@ -1129,7 +1129,10 @@
     ];
     if (node.type === "formula") return node.inputs || [];
     if (node.type === "present") return presentPorts(node);
-    if (node.type === "planner") return commonInputPorts(node, links);
+    if (node.type === "planner") {
+      const linkedHeight = (links || []).some((link) => link.to === node.id && link.toPort === "height-in");
+      return commonInputPorts(node, links).concat(node.heightInputEnabled || linkedHeight ? [{ id: "height-in", name: "Высота потолка" }] : []);
+    }
     if (node.type === "openings") return openingInputs(node).concat(commonInputPorts(node, links));
     if (node.type === "electrics") return electricInputs(node).concat(commonInputPorts(node, links));
     if (node.type === "tiles") return tileInputs(node).concat(commonInputPorts(node, links));
@@ -1424,6 +1427,11 @@
           const value = link ? values[`${link.from}:${link.fromPort}`] : null;
           setVal(nodeId, port.id, value);
         });
+        if (node.type === "planner") {
+          const heightLink = (incoming[nodeId] || []).find((item) => item.toPort === "height-in");
+          const heightValue = heightLink ? values[`${heightLink.from}:${heightLink.fromPort}`] : null;
+          setVal(nodeId, "height-in", heightValue);
+        }
       }
       if (node.type === "order") {
         const order = api.findOrder(node.orderId);
