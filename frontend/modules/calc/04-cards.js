@@ -4020,7 +4020,9 @@
     const commons = ports.filter((port) => port.common);
     const globalInputOn = !!node.heightGlobalInputEnabled || (bp.links || []).some((link) => link.to === node.id && (link.toPort === "height-global-in" || link.toPort === "height-in"));
     const globalInputValue = graph?.values?.[`${node.id}:height-global-in`] ?? graph?.values?.[`${node.id}:height-in`];
-    const globalHeightInput = globalInputOn ? `<div class="calc-row in"><i class="calc-port in" data-port="height-global-in" data-io="in" title="Глобальная высота стен"></i><span>Глобальная высота стен</span><b>${Number.isFinite(globalInputValue) ? esc(fmtShort(globalInputValue)) + " м" : "—"}</b></div>` : "";
+    const legacyGlobalInput = (bp.links || []).some((link) => link.to === node.id && link.toPort === "height-in") && !(bp.links || []).some((link) => link.to === node.id && link.toPort === "height-global-in");
+    const globalInputPort = legacyGlobalInput ? "height-in" : "height-global-in";
+    const globalHeightInput = globalInputOn ? `<div class="calc-row in"><i class="calc-port in" data-port="${globalInputPort}" data-io="in" title="Глобальная высота стен"></i><span>Глобальная высота стен</span><b>${Number.isFinite(globalInputValue) ? esc(fmtShort(globalInputValue)) + " м" : "—"}</b></div>` : "";
     return `<article class="calc-node is-planner ${nodeSelected(node.id) ? "is-on" : ""}" data-node="${esc(node.id)}" style="left:${node.x}px;top:${node.y}px;--planner-color:${esc(node.color || "#65a30d")}">
       <i class="calc-grip" data-drag-node="${esc(node.id)}" title="Перетащить"></i>
       <header class="calc-node-h">
