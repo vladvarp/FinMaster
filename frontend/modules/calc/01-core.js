@@ -1754,7 +1754,9 @@
       layouts.forEach((layout) => {
         n += Array.isArray(layout.outs) ? layout.outs.filter((item) => item && item.on).length : 1;
         if (layout.heightOut) n += 1;
+        if ((node.heightInputLayouts || []).includes(layout.id)) n += 1;
       });
+      if (node.heightGlobalInputEnabled) n += 1;
       return { w: 300, h: 168 + n * 28 };
     }
     if (node.type === "openings" || node.type === "electrics" || node.type === "tiles") return { w: 300, h: 460 };
