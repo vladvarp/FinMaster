@@ -310,9 +310,8 @@
   }
 
   function plannerExternalHeight(node) {
-    if (!node?.heightInputEnabled) return null;
     const bp = activeBlueprint();
-    if (!bp) return null;
+    if (!node || !bp || !(bp.links || []).some((link) => link.to === node.id && link.toPort === "height-in")) return null;
     const value = computeGraph(bp).values?.[`${node.id}:height-in`];
     return Number.isFinite(value) ? plannerRound(plannerClamp(value, 0.2, 30)) : null;
   }
@@ -383,7 +382,7 @@
   function plannerOutputs(node, links, values) {
     ensurePlanner(node);
     const incomingHeight = values?.[`${node.id}:height-in`];
-    const heightOverride = node.heightInputEnabled && Number.isFinite(incomingHeight) ? incomingHeight : null;
+    const heightOverride = Number.isFinite(incomingHeight) ? incomingHeight : null;
     const ports = plannerLayoutPorts(node, links, false, heightOverride);
     appendCommons(node, ports, linkedFromPorts(node.id, links || []), plannerLayoutPorts(node, links, true, heightOverride), values, links);
     return ports;
@@ -1321,7 +1320,7 @@
     const graph = activeBlueprint() ? computeGraph(activeBlueprint()) : null;
     const linkedHeight = (activeBlueprint()?.links || []).some((link) => link.to === node.id && link.toPort === "height-in");
     const incomingHeight = graph?.values?.[`${node.id}:height-in`];
-    const effectiveHeight = node.heightInputEnabled && Number.isFinite(incomingHeight) ? plannerRound(plannerClamp(incomingHeight, 0.2, 30)) : node.height;
+    const effectiveHeight = Number.isFinite(incomingHeight) ? plannerRound(plannerClamp(incomingHeight, 0.2, 30)) : node.height;
     if (width && document.activeElement !== width) width.value = plannerInput(boxW || 4);
     if (depth && document.activeElement !== depth) depth.value = plannerInput(boxD || 3);
     if (height && document.activeElement !== height) height.value = plannerInput(effectiveHeight);
