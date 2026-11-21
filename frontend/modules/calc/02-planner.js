@@ -1724,10 +1724,12 @@
       const node = plannerNode();
       const value = plannerDraft(e.target.value);
       if (!node || value == null) return;
-      const graph = activeBlueprint() ? computeGraph(activeBlueprint()) : null;
-      const incomingHeight = graph?.values?.[`${node.id}:height-in`];
-      const linkedHeight = (activeBlueprint()?.links || []).some((link) => link.to === node.id && link.toPort === "height-in");
-      if (linkedHeight && Number.isFinite(incomingHeight)) return;
+      const layout = plannerActive(node);
+      const links = activeBlueprint()?.links || [];
+      const individualPort = layout ? `height-in:${layout.id}` : "";
+      const linkedIndividual = !!individualPort && links.some((link) => link.to === node.id && link.toPort === individualPort);
+      const linkedGlobal = links.some((link) => link.to === node.id && (link.toPort === "height-global-in" || link.toPort === "height-in"));
+      if (plannerExternalHeight(node, layout?.id) != null && (linkedIndividual || linkedGlobal)) return;
       node.height = plannerRound(plannerClamp(value, 0.2, 30));
       plannerCommit(false);
     });
