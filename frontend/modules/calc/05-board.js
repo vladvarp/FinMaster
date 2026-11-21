@@ -2293,7 +2293,9 @@
       const ownerNode = bp.nodes.find((item) => item.id === nodeId);
       if (io === "out" && ownerNode?.type === "planner") {
         const layout = plannerLayoutForOutput(ownerNode, portId);
-        if (layout && !(ownerNode.heightInputLayouts || []).includes(layout.id)) { enablePlannerHeightInput(ownerNode, layout); return; }
+        const inputPort = layout ? `height-in:${layout.id}` : "";
+        const inputEnabled = !!layout && ((ownerNode.heightInputLayouts || []).includes(layout.id) || (bp.links || []).some((link) => link.to === ownerNode.id && link.toPort === inputPort));
+        if (layout && !inputEnabled) { enablePlannerHeightInput(ownerNode, layout); return; }
       }
       const board = $("calc-board");
       const at = screenToWorld(e.clientX, e.clientY, bp);
