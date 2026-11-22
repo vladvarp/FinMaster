@@ -1028,7 +1028,175 @@
     if (menu) menu.hidden = true;
   }
 
+  function closePaidMenu() {
+    const menu = $("paid-menu");
+    if (menu) menu.hidden = true;
+  }
+
+  function linePayDay(line) {
+    const day = dateDay(line?.payment_date);
+    return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : "";
+  }
+
+  function ruDay(iso) {
+    const day = dateDay(iso);
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+    if (!match) return day;
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).toLocaleDateString("ru-RU");
+  }
+
+  function paidExprNum(n) {
+    return qtyText(round2(n));
+  }
+
+  function writePaidExpr(line, expr) {
+    const next = stripLeadingZerosPlain(String(expr ?? "").replaceAll(",", "."));
+    line.paid_expr = next;
+    const value = evalExpr(next);
+    if (Number.isFinite(value)) line.paid = Math.max(0, round2(value));
+    applyPaidIfCovered(line);
+  }
+
+  function payLineToTotal(order, line) {
+    if (calcLockFor(order.id, line.id, "paid")) return false;
+    writePaidExpr(line, paidExprNum(lineTotals(line, order).after));
+    if (!linePayDay(line)) line.payment_date = dayKey(clockToday());
+    return true;
+  }
+
+  function addLineRemainder(order, line) {
+    if (calcLockFor(order.id, line.id, "paid")) return false;
+    const rest = round2(Math.max(0, lineTotals(line, order).unpaid));
+    if (rest <= 0.005) return false;
+    const raw = exprRaw(line, "paid_expr").trim().replaceAll(",", ".").replace(/\s+$/, "");
+    const piece = paidExprNum(rest);
+    const next = !raw ? piece : /[+\-*/]$/.test(raw) ? `${raw}${piece}` : `${raw}+${piece}`;
+    writePaidExpr(line, next);
+    return true;
+  }
+
+  function placeLineMenu(menu, x, y) {
+    menu.hidden = false;
+    const rect = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - rect.width - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))}px`;
+  }
+
+  function paidInputFromEvent(e) {
+    const direct = e.target.closest?.('[data-lk="paid_expr"]');
+    if (direct) return direct;
+    const cell = e.target.closest?.("td");
+    const input = cell?.querySelector?.('[data-lk="paid_expr"]');
+    if (!input || !cell.contains(e.target)) return null;
+    return input;
+  }
+
+  function openPaidMenu(e) {
+    const input = paidInputFromEvent(e);
+    if (!input) return false;
+    const tr = input.closest("tr[data-line]");
+    const card = tr?.closest("[data-order]");
+    const order = findOrder(card?.dataset.order);
+    const line = order?.lines?.find((item) => item.id === tr.dataset.line);
+    const menu = $("paid-menu");
+    if (!line || !order || !menu || isExpenseLine(line)) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    closeLineMenu();
+    const lock = calcLockFor(order.id, line.id, "paid");
+    if (lock) {
+      if (lock.reason) toast(lock.reason);
+      closePaidMenu();
+      return true;
+    }
+    const rest = round2(Math.max(0, lineTotals(line, order).unpaid));
+    const addBtn = $("paid-menu-add");
+    if (addBtn) {
+      const show = rest > 0.005;
+      addBtn.hidden = !show;
+      if (show) addBtn.textContent = `+ ${money(rest)}`;
+    }
+    menu.dataset.order = order.id;
+    menu.dataset.line = line.id;
+    placeLineMenu(menu, e.clientX, e.clientY);
+    return true;
+  }
+
+  function applyPaidMenu(kind) {
+    const menu = $("paid-menu");
+    const order = findOrder(menu?.dataset.order);
+    const line = order?.lines?.find((item) => item.id === menu?.dataset.line);
+    closePaidMenu();
+    if (!order || !line || isExpenseLine(line)) return;
+    if (calcLockFor(order.id, line.id, "paid")) return;
+    const changed = kind === "add" ? addLineRemainder(order, line) : payLineToTotal(order, line);
+    if (!changed) return;
+    markDirty();
+    renderOrders();
+  }
+
+  let payDatesWait = null;
+
+  function closePayDatesModal(result) {
+    $("pay-dates-modal")?.classList.remove("open");
+    const wait = payDatesWait;
+    payDatesWait = null;
+    if (wait) wait(result);
+  }
+
+  function confirmPayDatesModal() {
+    const ids = new Set();
+    $("pay-dates-list")?.querySelectorAll('input[type="checkbox"]:checked').forEach((box) => {
+      if (box.dataset.line) ids.add(box.dataset.line);
+    });
+    closePayDatesModal(ids);
+  }
+
+  function askPayDates(lines, today) {
+    const list = $("pay-dates-list");
+    const modal = $("pay-dates-modal");
+    if (!list || !modal) return Promise.resolve(null);
+    if (payDatesWait) closePayDatesModal(null);
+    list.innerHTML = lines
+      .map((line) => {
+        const name = String(line.product || "").trim() || String(line.order_type || "").trim() || "Позиция";
+        return `<label class="pay-date-pick"><input type="checkbox" checked data-line="${esc(line.id)}" /><span><b>${esc(name)}</b><span class="pay-date-when">${esc(ruDay(line.payment_date))} → ${esc(ruDay(today))}</span></span></label>`;
+      })
+      .join("");
+    modal.classList.add("open");
+    return new Promise((resolve) => {
+      payDatesWait = resolve;
+    });
+  }
+
+  async function payAllLines(order) {
+    const today = dayKey(clockToday());
+    const targets = (order.lines || []).filter((line) => {
+      if (isFrozenLine(line) || isExpenseLine(line)) return false;
+      if (calcLockFor(order.id, line.id, "paid")) return false;
+      return lineTotals(line, order).unpaid > 0.005;
+    });
+    if (!targets.length) return;
+    const dated = targets.filter((line) => {
+      const day = linePayDay(line);
+      return day && day !== today;
+    });
+    let changeDates = null;
+    if (dated.length) {
+      changeDates = await askPayDates(dated, today);
+      if (!changeDates) return;
+    }
+    targets.forEach((line) => {
+      const day = linePayDay(line);
+      writePaidExpr(line, paidExprNum(lineTotals(line, order).after));
+      if (!day || day === today || !changeDates || changeDates.has(line.id)) line.payment_date = today;
+    });
+    markDirty();
+    renderOrders();
+  }
+
   function onLineContextMenu(e) {
+    if (openPaidMenu(e)) return;
     const grip = e.target.closest(".line-drag");
     if (!grip) return;
     const tr = grip.closest("tr[data-line]");
@@ -1040,6 +1208,7 @@
     if (!line || !menu || !btn) return;
     e.preventDefault();
     e.stopPropagation();
+    closePaidMenu();
     menu.dataset.order = order.id;
     menu.dataset.line = line.id;
     btn.textContent = isFrozenLine(line) ? "Вернуть в заказ" : "Заморозить позицию";
@@ -1134,17 +1303,7 @@
       return;
     }
     if (act === "payall") {
-      (order.lines || []).forEach((line) => {
-        if (isFrozenLine(line) || isExpenseLine(line)) return;
-        const totals = lineTotals(line);
-        if (totals.unpaid <= 0.005) return;
-        line.paid = totals.after;
-        line.paid_expr = String(totals.after);
-        line.payment_date = dayKey(clockToday());
-        applyPaidIfCovered(line);
-      });
-      markDirty();
-      renderOrders();
+      void payAllLines(order);
       return;
     }
     if (act === "del") {

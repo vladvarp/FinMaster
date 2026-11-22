@@ -3177,13 +3177,30 @@
     $("orders-list").addEventListener("keydown", onOrderKeydown);
     document.addEventListener("click", (e) => {
       if (!e.target.closest("#line-menu")) closeLineMenu();
+      if (!e.target.closest("#paid-menu")) closePaidMenu();
     });
     $("line-menu-freeze")?.addEventListener("click", (e) => {
       e.preventDefault();
       toggleLineFrozen();
     });
+    $("paid-menu-full")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      applyPaidMenu("full");
+    });
+    $("paid-menu-add")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      applyPaidMenu("add");
+    });
+    $("pay-dates-cancel")?.addEventListener("click", () => closePayDatesModal(null));
+    $("pay-dates-ok")?.addEventListener("click", () => confirmPayDatesModal());
+    $("pay-dates-modal")?.addEventListener("click", (e) => {
+      if (e.target === $("pay-dates-modal")) closePayDatesModal(null);
+    });
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closeLineMenu();
+      if (e.key !== "Escape") return;
+      closeLineMenu();
+      closePaidMenu();
+      if ($("pay-dates-modal")?.classList.contains("open")) closePayDatesModal(null);
     });
     $("orders-list").addEventListener("focusin", (e) => {
       const kind = suggestKindOf(e.target);

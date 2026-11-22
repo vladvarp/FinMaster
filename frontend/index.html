@@ -1724,6 +1724,21 @@
   <div class="line-menu" id="line-menu" hidden role="menu">
     <button type="button" class="btn" id="line-menu-freeze" role="menuitem">Заморозить позицию</button>
   </div>
+  <div class="line-menu" id="paid-menu" hidden role="menu">
+    <button type="button" class="btn" id="paid-menu-full" role="menuitem">Оплатить</button>
+    <button type="button" class="btn" id="paid-menu-add" role="menuitem">+ 17 000,00 ₽</button>
+  </div>
+  <div class="modal" id="pay-dates-modal">
+    <div class="modal-card pay-dates-modal" role="dialog" aria-modal="true" aria-labelledby="pay-dates-title">
+      <h3 id="pay-dates-title">Даты оплаты</h3>
+      <p id="pay-dates-lead">У этих позиций дата оплаты уже стоит. С галочкой она станет сегодняшней, без галочки останется прежней. Сумма всё равно дойдёт до итога. Позиции без даты здесь не показаны — им ставится сегодня.</p>
+      <div id="pay-dates-list" class="pay-date-list"></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" id="pay-dates-cancel">Отмена</button>
+        <button class="btn primary" type="button" id="pay-dates-ok">Оплатить</button>
+      </div>
+    </div>
+  </div>
   <div id="dictionary-layer" class="dictionary-layer" hidden>
     <header class="dictionary-bar">
       <h2>Словари</h2>

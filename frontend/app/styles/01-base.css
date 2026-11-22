@@ -1639,6 +1639,32 @@ tr.is-frozen td { background: transparent; }
 }
 .line-menu[hidden] { display: none; }
 .line-menu .btn { width: 100%; justify-content: flex-start; }
+.line-menu .btn[hidden] { display: none; }
+.modal-card.pay-dates-modal { width: min(520px, 100%); }
+#pay-dates-modal.open { z-index: 90; }
+.pay-date-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow: auto;
+  margin: 4px 0 12px;
+}
+.pay-date-pick {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink);
+  font-weight: 500;
+}
+.pay-date-pick b { display: block; font-weight: 650; }
+.pay-date-when { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; font-weight: 500; }
 .line-menu .btn:hover {
   background: color-mix(in srgb, var(--accent) 16%, var(--card));
   border-color: var(--accent-2);
