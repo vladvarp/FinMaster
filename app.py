@@ -18,6 +18,7 @@ from backend import dictionary
 from backend import applog, bridge, netlog, qr, runtime, secrets, settings_pack, storage, voice
 from backend.backup import is_backup_path
 from backend import backup as report_backup
+from backend import desk as report_desk
 from backend.dialogs import (
     open_dictionary_dialog,
     open_report_dialog,
@@ -1107,6 +1108,7 @@ def api_bootstrap():
             "recent": _recent_payload(),
             "library": storage.list_library_reports(),
             "autosave": bool(cfg.get("autosave")),
+            "daily_backup": storage.daily_backup_enabled(),
             "history_limit": storage.history_limit(),
             "last_dir": cfg.get("last_dir") or "",
             "theme": "dark" if cfg.get("theme") == "dark" else "light",
@@ -1264,6 +1266,42 @@ def api_backups_create():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify({"ok": True, **info})
+
+
+@app.post("/api/desk/daily-backup")
+def api_desk_daily_backup():
+    if not _is_local() and not _desk_editor():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    if not storage.daily_backup_enabled():
+        return jsonify({"ok": True, "created": False, "enabled": False})
+    data = request.get_json(silent=True) or {}
+    document = data.get("document")
+    try:
+        doc = normalize_document(document)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    try:
+        info = report_desk.ensure_daily(doc, str(data.get("path") or ""))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, "enabled": True, **info})
+
+
+@app.post("/api/desk/daily-flag")
+def api_desk_daily_flag():
+    if not _is_local() and not _desk_editor():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    enabled = storage.set_daily_backup(bool(data.get("enabled")))
+    return jsonify({"ok": True, "enabled": enabled})
+
+
+@app.post("/api/desk/search")
+def api_desk_search():
+    if not _is_local() and not _desk_reader():
+        return jsonify({"error": "Только на этом компьютере."}), 403
+    data = request.get_json(silent=True) or {}
+    return jsonify({"ok": True, "hits": report_desk.search_library(str(data.get("query") or ""))})
 
 
 @app.post("/api/backups/delete")

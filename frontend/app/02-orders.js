@@ -3385,7 +3385,7 @@
             <td>${starRatingHtml(c.rating)}</td>
             <td class="meta">${esc(customerTenure(c))}</td>
             <td>${n}</td>
-            <td><button class="btn small danger" type="button" data-cact="delcust">Удалить</button></td>
+            <td><button class="btn small" type="button" data-cact="sheet">Сводка</button> <button class="btn small danger" type="button" data-cact="delcust">Удалить</button></td>
           </tr>`;
         })
         .join("")}</tbody></table>`;

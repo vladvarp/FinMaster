@@ -1454,6 +1454,7 @@
     remotePublish();
     rememberDeskBase(state.doc, state.path);
     toast(state.preview ? "Резервная копия открыта только для просмотра" : "Отчёт открыт");
+    deskCopyToday();
   }
 
   async function openPath(path, opts) {
@@ -1799,6 +1800,7 @@
         try {
           payload = await apiGet("/api/bootstrap");
           state.autosave = !!payload.autosave;
+          deskSetDaily(!!payload.daily_backup);
           if (payload.history_limit) history.limit = clampHistoryLimit(payload.history_limit);
         } catch {
           payload = {};
@@ -2822,7 +2824,10 @@
       refreshRuntime().catch((err) => toast(err.message || "Не удалось прочитать среду запуска"));
     }
     if (tab === "voice") loadVoiceModels().catch((err) => toast(err.message || "Не удалось прочитать модели"));
-    if (tab === "report") updateChrome();
+    if (tab === "report") {
+      updateChrome();
+      deskPaintDaily();
+    }
     if (tab === "program") paintWindowsLogin();
   }
 
@@ -3973,6 +3978,11 @@
         c.rating = c.rating === v ? 0 : v;
         markDirty();
         renderCustomers();
+        return;
+      }
+      const sheet = e.target.closest("[data-cact='sheet']");
+      if (sheet) {
+        openDeskCustomer(sheet.closest("[data-cid]")?.dataset.cid);
         return;
       }
       const btn = e.target.closest("[data-cact='delcust']");

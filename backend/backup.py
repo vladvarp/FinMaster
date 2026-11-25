@@ -207,6 +207,17 @@ def describe(doc: dict[str, Any] | None, path: str) -> dict[str, Any]:
     }
 
 
+def has_today(report_id: str) -> bool:
+    """Есть ли уже копия с сегодняшней датой в имени. Файлы копий не читает."""
+    folder = _folder(valid_id(report_id))
+    day = datetime.now().strftime("%Y-%m-%d")
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return False
+    return any(name.lower().endswith(EXT) and name.startswith(day) for name in names)
+
+
 def create_backup(doc: dict[str, Any], path: str) -> dict[str, Any]:
     if is_backup_path(path):
         raise ValueError("Резервную копию нельзя изменять. Сначала сохраните её как отчёт.")

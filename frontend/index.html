@@ -51,6 +51,12 @@
           <button class="btn icon js-theme-toggle" type="button" title="Тема" aria-label="Тема"></button>
         </div>
       </div>
+      <div class="start-find-wrap">
+        <label class="start-find">
+          <input id="start-find" type="search" placeholder="Номер, заказчик или продукт во всех отчётах" autocomplete="off" aria-label="Поиск по папке отчётов" />
+        </label>
+        <div id="start-find-list" class="start-find-list" hidden></div>
+      </div>
       <div class="start-galaxy" id="start-galaxy" hidden>
         <canvas id="start-galaxy-canvas" aria-label="Галактики отчётов"></canvas>
         <div class="start-galaxy-tip" id="start-galaxy-tip" hidden></div>
@@ -1518,6 +1524,8 @@
         <div class="report-settings-label">Файл</div>
         <div class="report-settings-path" id="file-path">Файл ещё не сохранён</div>
         <label class="report-settings-check"><input type="checkbox" id="autosave" /> <span>Автосохранение</span></label>
+        <label class="report-settings-check" title="Если сегодняшней копии ещё нет, при открытии отчёта она запишется сама"><input type="checkbox" id="daily-backup" /> <span>Копия дня</span></label>
+        <p class="report-settings-hint">Раз в сутки, при открытии уже сохранённого отчёта. Если файл с сегодняшней датой уже есть, новый не пишется. Сам отчёт не меняется.</p>
       </div>
 
       <div class="report-settings-block">
@@ -1880,6 +1888,15 @@
         </div>
         <div id="ngrok-usage-history" class="ngrok-usage-history"></div>
       </section>
+    </div>
+  </div>
+  <div class="modal" id="desk-customer-modal">
+    <div class="modal-card desk-modal" role="dialog" aria-modal="true" aria-labelledby="desk-customer-title">
+      <div class="modal-title-row">
+        <h3 id="desk-customer-title">Заказчик</h3>
+        <button class="btn ghost" type="button" id="desk-customer-close">Закрыть</button>
+      </div>
+      <div id="desk-customer-body"></div>
     </div>
   </div>
   <div class="toast" id="toast"></div>

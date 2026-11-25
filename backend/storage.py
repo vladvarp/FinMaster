@@ -229,6 +229,17 @@ def set_ui_pref(key: str, value: Any) -> dict[str, Any]:
     return {k: prefs[k] for k in UI_PREF_KEYS if k in prefs}
 
 
+def daily_backup_enabled() -> bool:
+    return bool(load_config().get("daily_backup"))
+
+
+def set_daily_backup(enabled: bool) -> bool:
+    cfg = load_config()
+    cfg["daily_backup"] = bool(enabled)
+    save_config(cfg)
+    return bool(cfg["daily_backup"])
+
+
 def window_maximized() -> bool:
     return bool(load_config().get("window_maximized"))
 

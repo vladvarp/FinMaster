@@ -9,7 +9,7 @@ window.FAQ_TOC = [
         { id: "ryadom-s-tem-chem-polzuyutsya-obychno", title: "Рядом с тем, чем пользуются обычно" },
         { id: "recenziya-ot-nejroseti", title: "Рецензия от нейросети" },
       ] },
-      { id: "start", title: "С чего начать", keys: "запуск установка exe python первый поиск справка", subs: [
+      { id: "start", title: "С чего начать", keys: "запуск установка exe python первый поиск справка папка", subs: [
         { id: "obychnyj-zapusk", title: "Обычный запуск" },
         { id: "esli-programma-uzhe-stoit", title: "Если программа уже стоит" },
         { id: "gde-lezhit-python", title: "Где лежит Python" },
@@ -92,7 +92,7 @@ window.FAQ_TOC = [
         { id: "edinicy-i-tipy", title: "Единицы и типы" },
         { id: "produkty", title: "Продукты" },
       ] },
-      { id: "clients", title: "Заказчики", keys: "контакт рейтинг телефон почта", subs: [
+      { id: "clients", title: "Заказчики", keys: "контакт рейтинг телефон почта сводка", subs: [
         { id: "kartochka", title: "Карточка" },
         { id: "imya-v-zakazah", title: "Имя в заказах" },
       ] },
@@ -205,7 +205,7 @@ window.FAQ_TOC = [
         { id: "kak-hodit-po-shagam", title: "Как ходить по шагам" },
         { id: "vse-istorii-otchetov", title: "Все истории отчётов" },
       ] },
-      { id: "backups", title: "Резервные копии", keys: "fbak копия другие отчёты удалить все вернуться смотреть", subs: [
+      { id: "backups", title: "Резервные копии", keys: "fbak копия другие отчёты удалить все вернуться смотреть копия дня", subs: [
         { id: "etot-otchet", title: "Этот отчёт" },
         { id: "drugie-otchety", title: "Другие отчёты" },
         { id: "poka-kopiya-otkryta", title: "Пока копия открыта" },
@@ -263,7 +263,7 @@ window.FAQ_TOC = [
         { id: "poka-dostup-vklyuchen", title: "Пока доступ включён" },
         { id: "komu-ne-otpravlyat-ssylku", title: "Кому не отправлять ссылку" },
       ] },
-      { id: "settings", title: "Где лежат настройки", keys: "appdata config документы экспорт импорт fms архив голос словарь", subs: [
+      { id: "settings", title: "Где лежат настройки", keys: "appdata config документы экспорт импорт fms архив голос словарь копия дня", subs: [
         { id: "okno", title: "Окно" },
         { id: "programma", title: "Программа" },
         { id: "arhiv-nastroek", title: "Архив настроек" },

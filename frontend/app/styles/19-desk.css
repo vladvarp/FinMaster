@@ -1,0 +1,61 @@
+.start-find-wrap { position: relative; max-width: 520px; margin: -6px 0 22px; }
+.start-find { display: block; }
+.start-find input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--ink);
+  padding: 10px 12px;
+  font: inherit;
+}
+.start-find-list {
+  position: absolute;
+  z-index: 8;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  overflow: auto;
+  max-height: min(320px, 46vh);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+}
+.start-find-list button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  padding: 8px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+.start-find-list button:last-child { border-bottom: 0; }
+.start-find-list button:hover { background: color-mix(in srgb, var(--accent) 10%, var(--card)); }
+.start-find-list small { color: var(--muted); }
+.modal-card.desk-modal {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(82vh, 760px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modal-card.desk-modal .modal-title-row { flex: 0 0 auto; }
+#desk-customer-body { overflow: auto; min-height: 0; }
+.desk-customer-meta { margin: 0 0 10px; color: var(--muted); }
+.desk-orders { width: 100%; }
+.desk-orders button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}

@@ -1,5 +1,3 @@
-/* bundle-seam */
-(() => {
   /* ==== Словарь запросов: одно окно на бота и поиск ==== */
 
   let dictionaryBook = null;
@@ -2349,4 +2347,3 @@
   }
 
   bindDictionary();
-})();
