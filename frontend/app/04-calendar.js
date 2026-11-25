@@ -1626,9 +1626,11 @@
         viewDays: TL_DEFAULT_DAYS,
         followOrder: readCalFollow(),
         hidePause: readCalHidePause(),
+        showUndated: readCalShowUndated(),
       };
     }
     if (!state.calendar.openLines || typeof state.calendar.openLines !== "object") state.calendar.openLines = {};
+    if (typeof state.calendar.showUndated !== "boolean") state.calendar.showUndated = readCalShowUndated();
     if (typeof state.calendar.selectedLine !== "string") state.calendar.selectedLine = "";
     if (!(state.calendar.anchor instanceof Date) || Number.isNaN(state.calendar.anchor.getTime())) {
       state.calendar.anchor = clockToday();
@@ -1657,6 +1659,18 @@
       /* ignore */
     }
     return true;
+  }
+
+  /** Таймлайн: строки позиций без полосы. По умолчанию скрыты. */
+  function readCalShowUndated() {
+    try {
+      const raw = localStorage.getItem(LS_CAL_SHOW_UNDATED);
+      if (raw === "true" || raw === "1") return true;
+      if (raw === "false" || raw === "0") return false;
+    } catch {
+      /* ignore */
+    }
+    return false;
   }
 
   /** Неделя и месяц: заказы и позиции «На паузе» спрятаны, пока включена кнопка. Таймлайн не трогает. */
@@ -2239,6 +2253,14 @@
       hidePauseBtn.classList.toggle("active", hidePauseOn);
       hidePauseBtn.setAttribute("aria-pressed", String(hidePauseOn));
     }
+    const undatedBtn = $("cal-show-undated");
+    const undatedOn = !!cal.showUndated;
+    if (undatedBtn) {
+      undatedBtn.hidden = cal.mode !== "timeline";
+      undatedBtn.classList.toggle("active", undatedOn);
+      undatedBtn.setAttribute("aria-pressed", String(undatedOn));
+      undatedBtn.title = undatedOn ? "Скрыть позиции без даты" : "Показать позиции без даты";
+    }
     if (weekendMenu) {
       weekendMenu.innerHTML = weekendMenuHtml();
       weekendMenu.hidden = !weekendOpen;
@@ -2689,6 +2711,8 @@
         const label = `${orderNum(order)} ${orderTitle(order)}`.trim();
         const paint = calendarBarPaint(order);
         const workLines = calendarWorkLines(order);
+        const undatedCount = workLines.filter((line) => !orderDrawSpan(lineWorkProxy(order, line), win.today)).length;
+        const datedCount = workLines.length - undatedCount;
         const bars = ganttBarsHtml(order, win, {
           order,
           label,
@@ -2699,13 +2723,15 @@
         });
         if (!bars) return "";
         const open = calendarLinesOpen(order.id);
+        const showUndated = !!calendarState().showUndated;
         const expand = workLines.length
           ? `<button type="button" class="gantt-expand ${open ? "is-open" : ""}" data-cal-expand="${esc(order.id)}" title="${open ? "Скрыть позиции" : "Показать позиции"} · или правый клик по строке заказа" aria-label="${open ? "Скрыть позиции" : "Показать позиции"}" aria-expanded="${open}">${ganttExpandIcon()}</button>`
           : `<span class="gantt-expand is-empty" aria-hidden="true"></span>`;
-        const lineRows = open
-          ? workLines
+        const lineRows = workLines
               .map((line, index) => {
                 const proxy = lineWorkProxy(order, line);
+                const hasBar = !!orderDrawSpan(proxy, win.today);
+                if (!open || (!hasBar && !showUndated)) return "";
                 const lineMeta = lineWorkMeta(order, line);
                 const linePaused = orderIsPausedNow(proxy, win.today);
                 const lineLabel = lineWorkName(line, index);
@@ -2739,14 +2765,13 @@
           <div class="gantt-track" data-cal-track="${esc(order.id)}" data-cal-line="${esc(line.id)}">${lineBars}${addDate}</div>
         </div>`;
               })
-              .join("")
-          : "";
+              .join("");
         return `<div class="gantt-row ${calSelectedClass(order.id)} ${due ? "has-deadline" : ""} ${pausedNow ? "is-paused" : ""} ${open ? "is-open" : ""}" data-cal-id="${esc(order.id)}">
           <div class="gantt-head">
             ${expand}
             <button type="button" class="gantt-label" data-cal-id="${esc(order.id)}">
               <b>${esc(orderNum(order))} ${esc(orderTitle(order))}</b>
-              <small>${esc(order.customer || "без заказчика")} · ${ganttStatusHtml(meta)}${workDurationDays(order) ? ` · ${workDurationDays(order)} дн.` : ""}${due ? ` · до ${calFmtDay(due)}` : ""}${workLines.length ? ` · ${workLines.length} поз.` : ""}</small>
+              <small>${esc(order.customer || "без заказчика")} · ${ganttStatusHtml(meta)}${workDurationDays(order) ? ` · ${workDurationDays(order)} дн.` : ""}${due ? ` · до ${calFmtDay(due)}` : ""}${datedCount ? ` · ${datedCount} поз.` : ""}${undatedCount ? ` · ${undatedCount} без даты` : ""}</small>
             </button>
           </div>
           <div class="gantt-track" data-cal-track="${esc(order.id)}">${bars}</div>
@@ -2787,7 +2812,7 @@
     <div class="cal-hint hint-i">
       <button type="button" class="info-btn" title="Подсказка по таймлайну" aria-label="Подсказка по таймлайну">i</button>
       <div class="hint-i-pop" role="tooltip">
-        Колесо на навигаторе — масштаб, на датах — период. Полосу двигают, края меняют даты. Стрелка — позиции. Паузы правят у позиций (Shift+клик). Shift+клик по правому краю открытой позиции переключает со следующего дня: на паузу или снова в работу. Повторный клик возвращает как было. У заказа пауза сама, если день пустой или все позиции стоят.
+        Колесо на навигаторе — масштаб, на датах — период. Полосу двигают, края меняют даты. Стрелка раскрывает позиции. Кнопка с пунктиром добавляет в раскрытый заказ позиции без даты. Паузы правят у позиций (Shift+клик). Shift+клик по правому краю открытой позиции переключает со следующего дня: на паузу или снова в работу. Повторный клик возвращает как было. У заказа пауза сама, если день пустой или все позиции стоят.
       </div>
     </div>`;
   }
@@ -3351,6 +3376,13 @@
       const cal = calendarState();
       cal.hidePause = cal.hidePause === false;
       persistPref(LS_CAL_HIDE_PAUSE, JSON.stringify(cal.hidePause !== false), { now: true });
+      renderCalendar();
+      return;
+    }
+    if (e.target.closest("#cal-show-undated")) {
+      const cal = calendarState();
+      cal.showUndated = !cal.showUndated;
+      persistPref(LS_CAL_SHOW_UNDATED, JSON.stringify(!!cal.showUndated), { now: true });
       renderCalendar();
       return;
     }
