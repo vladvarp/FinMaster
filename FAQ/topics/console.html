@@ -1,5 +1,5 @@
 <h1>Консоль</h1>
-<p class="lead">Плавающее окно внутри программы: сеть, лог правок и обмен с Telegram и ngrok. Это не чёрное окно Python при запуске. Подразделы: <a href="#console/kak-otkryt-i-zakryt">Как открыть и закрыть</a>, <a href="#console/set">Сеть</a>, <a href="#console/log">Лог</a>, <a href="#console/most-tg-i-most-ngrok">Мост TG и мост Ngrok</a>.</p>
+<p class="lead">Плавающее окно внутри программы: сеть, лог правок, запись на диск и обмен с Telegram и ngrok. Это не чёрное окно Python при запуске. Подразделы: <a href="#console/kak-otkryt-i-zakryt">Как открыть и закрыть</a>, <a href="#console/set">Сеть</a>, <a href="#console/log">Лог</a>, <a href="#console/disk">Диск</a>, <a href="#console/most-tg-i-most-ngrok">Мост TG и мост Ngrok</a>.</p>
 <section data-sub="kak-otkryt-i-zakryt">
 <figure class="shot">
   <div class="live" data-sel="#dictionary-open, #remote-console-open" data-flow="row" aria-label="Кнопки словаря и консоли"></div>
@@ -9,7 +9,7 @@
 
 <h2>Как открыть и закрыть</h2>
 <p>Кнопка <strong>Консоль</strong> в заголовке окна «<a href="#phone">Телефон</a>». То же окно открывает <a href="#assistant">ассистент</a> командой «консоль сети» и клавиши <kbd>Ctrl</kbd> <kbd>Ё</kbd>. Окно перетаскивается за шапку, размер тянется за правый нижний угол. <kbd>Esc</kbd> закрывает консоль. Если открыт список вкладок, <kbd>Esc</kbd> сначала прячет его.</p>
-<p>Вкладка выбирается списком в шапке: <strong>Сеть</strong>, <strong>Лог</strong>, <strong>Мост TG</strong>, <strong>Мост Ngrok</strong>. Выбор запоминается. <strong>Очистить</strong> стирает строки только текущей вкладки.</p>
+<p>Вкладка выбирается списком в шапке: <strong>Сеть</strong>, <strong>Лог</strong>, <strong>Мост TG</strong>, <strong>Мост Ngrok</strong>, <strong>Диск</strong>, <strong>WebView</strong>. Выбор запоминается. <strong>Очистить</strong> стирает строки только текущей вкладки.</p>
 <figure class="shot">
   <div class="live" data-sel="#nc-switch-menu" aria-label="Список вкладок консоли"></div>
   <figcaption>Список в шапке консоли. <kbd>Esc</kbd> сначала закрывает этот список, и только следующим нажатием — само окно.</figcaption>
@@ -23,6 +23,11 @@
 <section data-sub="log">
 <h2>Лог</h2>
 <p>Что изменилось, где и когда: открытие файла, правка <a href="#orders">заказа</a>, <a href="#settings">настройки</a>. Колонки — время, место, действие и кто сделал: «ПК», имя телефона или «WEB». Это не лента <a href="#history">отмены</a>: отсюда шаг не откатывается.</p>
+</section>
+<section data-sub="disk">
+<h2>Диск</h2>
+<p>Куда пишется и сколько байт прибавилось. Строка показывает путь, прирост и текущий размер папки. Сюда попадают файлы, которые программа записала сама, и папки кэша окна WebView2 в <code>AppData\Local\pywebview\EBWebView</code>. Пока размер не вырос, новых строк нет. Пока окно свёрнуто или не в фокусе, карта облака не перерисовывается и анимации стоят.</p>
+<p><strong>WebView</strong> — каждый процесс <code>msedgewebview2.exe</code>: pid, родитель, сколько байт прибавилось с прошлого замера, всего записано, всего прочитано и число операций записи. Пока процесс ничего не пишет, новая строка не появляется.</p>
 </section>
 <section data-sub="most-tg-i-most-ngrok">
 <h2>Мост TG и мост Ngrok</h2>

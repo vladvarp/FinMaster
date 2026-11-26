@@ -1381,6 +1381,11 @@ def atomic_write(path: str, content: str) -> None:
         fh.flush()
         os.fsync(fh.fileno())
     os.replace(tmp, path)
+    try:
+        from backend import disklog
+        disklog.note(path, len(content.encode("utf-8")))
+    except Exception:
+        pass
 
 
 def read_text(path: str) -> str:

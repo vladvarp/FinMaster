@@ -229,6 +229,19 @@
       this.resizeObserver.observe(this.canvas.parentElement);
       this.resize();
       this.loop = this.loop.bind(this);
+      if (!window.finmasterPause) {
+        const clouds = window.__fmClouds || (window.__fmClouds = new Set());
+        window.finmasterPause = (paused) => {
+          window.FM_PAUSED = !!paused;
+          document.documentElement.dataset.paused = window.FM_PAUSED ? "1" : "";
+          if (window.FM_PAUSED) return;
+          clouds.forEach((cloud) => {
+            if (!cloud.frame) cloud.frame = requestAnimationFrame(cloud.loop);
+          });
+        };
+        document.addEventListener("visibilitychange", () => window.finmasterPause(document.hidden));
+      }
+      window.__fmClouds.add(this);
       requestAnimationFrame(this.loop);
     }
 
@@ -745,6 +758,10 @@
     }
 
     loop(time) {
+      if (document.hidden || window.FM_PAUSED) {
+        this.frame = 0;
+        return;
+      }
       const dt = time - this.lastTime;
       this.lastTime = time;
       const moving = this.stepCamera(dt);

@@ -1,3 +1,5 @@
+html[data-paused="1"],
+html[data-paused="1"] * { animation-play-state: paused !important; }
 .start-find-wrap { position: relative; max-width: 520px; margin: -6px 0 22px; }
 .start-find { display: block; }
 .start-find input {

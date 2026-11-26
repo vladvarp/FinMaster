@@ -33,18 +33,21 @@
     http: "http",
     telegram: "telegram",
     ngrok: "ngrok",
+    disk: "диск",
   };
 
-  const CONSOLE_VIEWS = { net: "Сеть", log: "Лог", tg: "Мост TG", ngrok: "Мост Ngrok" };
+  const CONSOLE_VIEWS = { net: "Сеть", log: "Лог", tg: "Мост TG", ngrok: "Мост Ngrok", disk: "Диск", edge: "WebView" };
   const CONSOLE_EMPTY = {
     net: "Пока нет событий. Включите доступ — здесь появятся подключения, синхронизация, Telegram и ngrok.",
     log: "Пока нет записей. Здесь появятся правки отчёта, открытие файла и изменения настроек: что, где и когда.",
     tg: "Пока нет обмена с Telegram. Слева вопрос бота, справа ответ компьютера. Строку можно раскрыть.",
     ngrok: "Пока нет запросов через ngrok. Слева запрос, справа ответ компьютера. Служебные опросы сюда не пишутся.",
+    disk: "Пока роста нет. Здесь папки кэша окна и файлы, которые программа сама записала: путь и сколько байт прибавилось.",
+    edge: "Процессов msedgewebview2.exe не видно. Когда процесс пишет на диск, строка показывает pid, сколько байт прибавилось, всего записано и прочитано.",
   };
   const netConsole = {
     view: "net",
-    last: { net: 0, log: 0, tg: 0, ngrok: 0 },
+    last: { net: 0, log: 0, tg: 0, ngrok: 0, disk: 0, edge: 0 },
     timer: 0,
     stick: true,
     drag: null,
@@ -220,6 +223,33 @@
     stickConsole();
   }
 
+  function appendDisk(events, view) {
+    const log = $(view === "edge" ? "edge-console-log" : "disk-console-log");
+    if (!log || !events.length) return;
+    const body = $("net-console-body");
+    const stick = netConsole.stick || (body && body.scrollHeight - body.scrollTop - body.clientHeight < 28);
+    events.forEach((ev) => {
+      const row = document.createElement("div");
+      row.className = "log-row";
+      const plus = `+${fmtBytes(ev.bytes)}`;
+      const now = ev.note || (ev.fresh ? "новый файл" : `сейчас ${fmtBytes(ev.total)}`);
+      row.innerHTML = `<span class="log-time">${esc(formatNetTime(ev.ts))}</span><span class="log-where">${esc(ev.path || "")}</span><span class="log-what">${esc(plus)} · ${esc(now)}</span>`;
+      log.appendChild(row);
+    });
+    while (log.children.length > 400) log.removeChild(log.firstChild);
+    netConsole.stick = stick;
+    paintConsoleChrome();
+    if (stick) stickConsole();
+  }
+
+  function fmtBytes(n) {
+    n = Math.max(0, Number(n) || 0);
+    if (n < 1024) return `${Math.round(n)} Б`;
+    if (n < 1048576) return `${(n / 1024).toFixed(1)} КБ`;
+    if (n < 1073741824) return `${(n / 1048576).toFixed(1)} МБ`;
+    return `${(n / 1073741824).toFixed(2)} ГБ`;
+  }
+
   function bridgeText(value) {
     if (value == null || value === "") return "—";
     if (typeof value === "string") return value;
@@ -310,6 +340,7 @@
       if (events.length) {
         if (view === "log") appendAppLog(events);
         else if (view === "tg" || view === "ngrok") appendBridge(view, events);
+        else if (view === "disk" || view === "edge") appendDisk(events, view);
         else appendNetConsoleEvents(events);
       }
       if (typeof data.last_id === "number") netConsole.last[view] = data.last_id;

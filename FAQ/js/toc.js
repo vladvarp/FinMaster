@@ -221,10 +221,11 @@ window.FAQ_TOC = [
         { id: "okno-podklyucheniya", title: "Окно подключения" },
         { id: "kak-vedut-sebya-dva-ekrana", title: "Как ведут себя два экрана" },
       ] },
-      { id: "console", title: "Консоль", keys: "сеть лог мост telegram ngrok ctrl ё очистить", subs: [
+      { id: "console", title: "Консоль", keys: "сеть лог диск webview msedgewebview2 запись кэш мост telegram ngrok ctrl ё очистить", subs: [
         { id: "kak-otkryt-i-zakryt", title: "Как открыть и закрыть" },
         { id: "set", title: "Сеть" },
         { id: "log", title: "Лог" },
+        { id: "disk", title: "Диск" },
         { id: "most-tg-i-most-ngrok", title: "Мост TG и мост Ngrok" },
       ] },
       { id: "ngrok", title: "Интернет через ngrok", keys: "токен path store туннель", subs: [

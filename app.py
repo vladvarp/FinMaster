@@ -15,7 +15,7 @@ from flask import Flask, g, jsonify, redirect, request, send_from_directory
 
 from backend import ask
 from backend import dictionary
-from backend import applog, bridge, netlog, qr, runtime, secrets, settings_pack, storage, voice
+from backend import applog, bridge, disklog, netlog, qr, runtime, secrets, settings_pack, storage, voice
 from backend.backup import is_backup_path
 from backend import backup as report_backup
 from backend import desk as report_desk
@@ -2832,6 +2832,10 @@ def api_console():
         return jsonify(bridge.since("telegram", since))
     if view == "ngrok":
         return jsonify(bridge.since("ngrok", since))
+    if view == "disk":
+        return jsonify(disklog.since(since))
+    if view == "edge":
+        return jsonify(disklog.edge_since(since))
     return jsonify(netlog.since(since))
 
 
@@ -2846,6 +2850,10 @@ def api_console_clear():
         return jsonify(bridge.clear("telegram"))
     if view == "ngrok":
         return jsonify(bridge.clear("ngrok"))
+    if view == "disk":
+        return jsonify(disklog.clear())
+    if view == "edge":
+        return jsonify(disklog.edge_clear())
     return jsonify(netlog.clear())
 
 
@@ -3489,8 +3497,42 @@ def main(splash=None) -> None:
             pass
 
     try:
+        def pause_ui(paused: bool) -> None:
+            window = WINDOW
+
+            def run() -> None:
+                try:
+                    window.evaluate_js(f"window.finmasterPause&&window.finmasterPause({str(bool(paused)).lower()})")
+                except Exception:
+                    pass
+
+            threading.Thread(target=run, daemon=True).start()
+
+        def bind_focus_pause() -> None:
+            form = getattr(WINDOW, "native", None)
+            if form is None or getattr(form, "_fm_focus_pause", False):
+                return
+            form._fm_focus_pause = True
+
+            def on_deactivate(*_args) -> None:
+                pause_ui(True)
+
+            def on_activate(*_args) -> None:
+                try:
+                    state = str(getattr(form, "WindowState", ""))
+                except Exception:
+                    state = ""
+                if state == "Minimized":
+                    return
+                pause_ui(False)
+
+            form.Deactivate += on_deactivate
+            form.Activated += on_activate
+
         WINDOW.events.maximized += lambda: remember_maximized(True)
-        WINDOW.events.restored += lambda: remember_maximized(False)
+        WINDOW.events.minimized += lambda: pause_ui(True)
+        WINDOW.events.restored += lambda: (remember_maximized(False), pause_ui(False))
+        WINDOW.events.loaded += bind_focus_pause
     except Exception:
         pass
 
