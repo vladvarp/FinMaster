@@ -3508,31 +3508,9 @@ def main(splash=None) -> None:
 
             threading.Thread(target=run, daemon=True).start()
 
-        def bind_focus_pause() -> None:
-            form = getattr(WINDOW, "native", None)
-            if form is None or getattr(form, "_fm_focus_pause", False):
-                return
-            form._fm_focus_pause = True
-
-            def on_deactivate(*_args) -> None:
-                pause_ui(True)
-
-            def on_activate(*_args) -> None:
-                try:
-                    state = str(getattr(form, "WindowState", ""))
-                except Exception:
-                    state = ""
-                if state == "Minimized":
-                    return
-                pause_ui(False)
-
-            form.Deactivate += on_deactivate
-            form.Activated += on_activate
-
         WINDOW.events.maximized += lambda: remember_maximized(True)
         WINDOW.events.minimized += lambda: pause_ui(True)
         WINDOW.events.restored += lambda: (remember_maximized(False), pause_ui(False))
-        WINDOW.events.loaded += bind_focus_pause
     except Exception:
         pass
 
