@@ -250,6 +250,63 @@
     return `${(n / 1073741824).toFixed(2)} ГБ`;
   }
 
+
+  function renderEdgeSnapshot(data) {
+    const summary = $("edge-console-summary");
+    const tableBox = $("edge-console-log");
+    if (!summary || !tableBox) return;
+    const totals = data.totals || {};
+    const processes = Array.isArray(data.processes) ? data.processes : [];
+    summary.replaceChildren();
+    [
+      ["Процессов FinMaster", String(totals.process_count || 0)],
+      ["Скорость записи", fmtBytes(totals.write_rate) + "/с"],
+      ["Записано процессами", fmtBytes(totals.written)],
+      ["Прочитано процессами", fmtBytes(totals.read)],
+    ].forEach(([label, value]) => {
+      const card = document.createElement("div"); card.className = "edge-kpi";
+      const caption = document.createElement("span"); caption.textContent = label;
+      const number = document.createElement("strong"); number.textContent = value;
+      card.append(caption, number); summary.appendChild(card);
+    });
+    tableBox.replaceChildren();
+    if (!processes.length) {
+      const empty = document.createElement("div"); empty.className = "edge-empty";
+      empty.textContent = "Процессы WebView2, принадлежащие FinMaster, не обнаружены.";
+      tableBox.appendChild(empty); return;
+    }
+    const wrap = document.createElement("div"); wrap.className = "edge-table-scroll";
+    const table = document.createElement("table"); table.className = "edge-process-table";
+    const thead = document.createElement("thead"), headRow = document.createElement("tr");
+    ["Процесс / назначение","PID / родитель","Запись сейчас","Записано всего","Прочитано","Куда пишет"].forEach((label) => {
+      const th = document.createElement("th"); th.textContent = label; headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    const tbody = document.createElement("tbody");
+    const addCell = (row, primary, secondary, className) => {
+      const td = document.createElement("td"); if (className) td.className = className;
+      const strong = document.createElement("strong"); strong.textContent = primary; td.appendChild(strong);
+      if (secondary) { const small = document.createElement("small"); small.textContent = secondary; td.appendChild(small); }
+      row.appendChild(td); return td;
+    };
+    processes.forEach((item) => {
+      const row = document.createElement("tr");
+      addCell(row,item.exe || "msedgewebview2.exe",item.role || "Процесс WebView2");
+      addCell(row,"PID " + item.pid,"родитель: " + (item.parent || "—") + " · " + (item.ppid || "—"));
+      const cls=item.write_rate>=1048576?"edge-rate hot":item.write_rate>=262144?"edge-rate warm":"edge-rate";
+      addCell(row,fmtBytes(item.write_rate)+"/с","+"+fmtBytes(item.write_delta)+" за замер",cls);
+      addCell(row,fmtBytes(item.write_bytes),(item.write_ops||0)+" операций записи");
+      addCell(row,fmtBytes(item.read_bytes),(item.read_ops||0)+" операций чтения");
+      const location=addCell(row,item.where_kind||"Путь",item.where||"Путь не определён","edge-location");
+      location.title=item.command_line||item.where||"";
+      tbody.appendChild(row);
+    });
+    table.append(thead,tbody); wrap.appendChild(table); tableBox.appendChild(wrap);
+    const note=document.createElement("p"); note.className="edge-footnote";
+    note.textContent="Счётчики показывают I/O каждого процесса. Путь — папка профиля или кэша из параметров запуска; Windows не предоставляет этим счётчикам точную разбивку по каждому открытому файлу.";
+    tableBox.appendChild(note);
+  }
+
   function bridgeText(value) {
     if (value == null || value === "") return "—";
     if (typeof value === "string") return value;
@@ -309,6 +366,7 @@
   function clearConsolePane(view) {
     const pane = document.querySelector(`[data-console-pane="${view}"]`);
     if (pane) pane.replaceChildren();
+    if (view === "edge") $("edge-console-summary")?.replaceChildren();
   }
 
   async function setConsoleView(view) {
@@ -327,7 +385,7 @@
   }
 
   async function pollNetConsole(reset) {
-    if (!netConsoleOpen()) return;
+    if (!netConsoleOpen() || document.hidden) return;
     const view = netConsole.view;
     try {
       if (reset) {
@@ -337,10 +395,11 @@
       }
       const data = await apiGet(`/api/console?view=${encodeURIComponent(view)}&since=${netConsole.last[view] || 0}`);
       const events = data.events || [];
-      if (events.length) {
+      if (view === "edge") renderEdgeSnapshot(data);
+      else if (events.length) {
         if (view === "log") appendAppLog(events);
         else if (view === "tg" || view === "ngrok") appendBridge(view, events);
-        else if (view === "disk" || view === "edge") appendDisk(events, view);
+        else if (view === "disk") appendDisk(events, view);
         else appendNetConsoleEvents(events);
       }
       if (typeof data.last_id === "number") netConsole.last[view] = data.last_id;

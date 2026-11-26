@@ -61,3 +61,26 @@ html[data-paused="1"] * { animation-play-state: paused !important; }
   font: inherit;
   padding: 0;
 }
+
+
+/* Консоль WebView2: сводка и таблица процессов FinMaster. */
+.edge-console-pane { min-width: 0; }
+.edge-console-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; padding:10px 12px 4px; }
+.edge-kpi { min-width:0; padding:9px 10px; border:1px solid var(--line); border-radius:10px; background:color-mix(in srgb,var(--card) 88%,var(--accent) 12%); }
+.edge-kpi span,.edge-kpi strong { display:block; overflow:hidden; text-overflow:ellipsis; }
+.edge-kpi span { color:var(--muted); font-size:11px; }
+.edge-kpi strong { margin-top:3px; font-size:15px; font-variant-numeric:tabular-nums; }
+.edge-console-log { min-width:0; padding:8px 12px 14px; }
+.edge-table-scroll { width:100%; overflow-x:auto; }
+.edge-process-table { width:100%; border-collapse:collapse; font-size:12px; }
+.edge-process-table th { position:sticky; top:0; z-index:1; padding:8px 9px; text-align:left; color:var(--muted); font-size:10px; font-weight:650; white-space:nowrap; background:var(--card); border-bottom:1px solid var(--line); }
+.edge-process-table td { padding:9px; vertical-align:top; border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums; }
+.edge-process-table td strong,.edge-process-table td small { display:block; }
+.edge-process-table td strong { font-size:12px; font-weight:650; white-space:nowrap; }
+.edge-process-table td small { margin-top:3px; color:var(--muted); font-size:10px; }
+.edge-rate.hot strong { color:#ef6b62; }
+.edge-rate.warm strong { color:#d69a39; }
+.edge-location { min-width:190px; max-width:300px; }
+.edge-location small { overflow-wrap:anywhere; }
+.edge-footnote,.edge-empty { padding:10px 2px; color:var(--muted); font-size:11px; line-height:1.45; }
+@media (max-width:560px) { .edge-console-summary { grid-template-columns:repeat(2,minmax(0,1fr)); } }
