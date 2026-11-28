@@ -4474,9 +4474,9 @@
         const source = String(response?.text || "").trim();
         if (!source) throw new Error("Текст лицензии пуст.");
         const fragment = document.createDocumentFragment();
-        const blocks = source.split(/\\r?\\n\\s*\\r?\\n/);
+        const blocks = source.split(/\r?\n\s*\r?\n/);
         for (const rawBlock of blocks) {
-          const value = rawBlock.trim().replace(/\\s*\\n\\s*/g, " ");
+          const value = rawBlock.trim().replace(/\s*\n\s*/g, " ");
           if (!value) continue;
           const isSection = /^(?:Preamble|TERMS AND CONDITIONS|END OF TERMS AND CONDITIONS|How to Apply These Terms to Your New Programs)$/i.test(value);
           const isNumbered = /^\\d+\\.\\s/.test(value);
