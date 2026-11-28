@@ -1573,7 +1573,7 @@ def installed_commit_count(root: str) -> int | None:
     if count is not None:
         return count
     count = _remote_commit_count(3)
-    if count is not None:
+    if count is not None and not _repo_folder(root) and os.path.isfile(os.path.join(root, "run.vbs")):
         _write_stamp(root, None, commit_count=count)
     return count
 
