@@ -3524,3 +3524,29 @@ html[data-theme="dark"] #view-orders > .toolbar { box-shadow: 0 10px 24px rgba(0
 .remote-tg-hidden:empty {
   display: none;
 }
+
+.program-about-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+.program-about-meta p {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft, var(--panel));
+  font-size: 12px;
+  color: var(--muted);
+}
+.program-about-meta strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 560px) {
+  .program-about-meta { grid-template-columns: 1fr; }
+}
