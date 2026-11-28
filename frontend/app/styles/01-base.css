@@ -3613,3 +3613,37 @@ html[data-theme="dark"] #view-orders > .toolbar { box-shadow: 0 10px 24px rgba(0
   .program-license-content { margin: 0 18px; }
   .program-license-foot { padding: 10px 18px; }
 }
+
+/* Компоновка окна «О программе» */
+.program-about-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin: 2px 0 14px;
+}
+.program-about-brand strong {
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 750;
+  letter-spacing: -.025em;
+}
+.program-about-brand span {
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+}
+.program-about-description {
+  margin: 0 0 14px;
+}
+.program-about-meta {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0 0 16px;
+}
+.program-about-copy {
+  margin: 18px 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+@media (max-width: 560px) {
+  .program-about-meta { grid-template-columns: 1fr; }
+}

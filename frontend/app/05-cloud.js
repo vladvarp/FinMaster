@@ -4441,12 +4441,15 @@
       event.stopPropagation();
       const copy = $("program-about-copy");
       if (copy) copy.textContent = state.updateYear ? `© ${state.updateYear} V.Ar Production` : "© V.Ar Production";
+      const year = $("program-about-year");
+      if (year) year.textContent = state.updateYear ? String(state.updateYear) : "";
       const version = $("program-about-version");
       if (version) version.textContent = state.updateVersion || "Не определена";
       const build = $("program-about-build");
-      if (build) build.textContent = state.updateBuildDate || "Дата сборки неизвестна";
-      const commits = $("program-about-commits");
-      if (commits) commits.textContent = Number.isFinite(state.updateCommitCount) ? String(state.updateCommitCount) : "—";
+      if (build) {
+        const buildDate = String(state.updateBuildDate || "").replace(/,\s*\d{2}:\d{2}$/, "");
+        build.textContent = buildDate || "Дата сборки неизвестна";
+      }
       $("program-about-modal")?.classList.add("open");
     });
     const closeProgramAbout = () => $("program-about-modal")?.classList.remove("open");

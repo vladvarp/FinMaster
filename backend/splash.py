@@ -245,7 +245,7 @@ def _lerp_hex(a: str, b: str, t: float) -> str:
 
 
 def _splash_build_info() -> tuple[str, str]:
-    """Читает год, дату версии и число коммитов из commit.txt рядом с программой."""
+    """Читает год и дату версии из commit.txt рядом с программой."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     path = os.path.join(root, "commit.txt")
     try:
@@ -271,10 +271,7 @@ def _splash_build_info() -> tuple[str, str]:
     if version and count:
         number = max(0, int(count))
         program_version = f"{number // 1000}.{(number // 100) % 10}.{number % 100}"
-        last_two = number % 100
-        last = number % 10
-        word = "коммит" if last == 1 and last_two != 11 else "коммита" if 2 <= last <= 4 and not 12 <= last_two <= 14 else "коммитов"
-        return year, f"Версия {program_version} · {version} · {count} {word}"
+        return year, f"Версия {program_version} · {version}"
     if version:
         return year, f"Версия {version}"
     return year, ""
@@ -432,7 +429,7 @@ class Splash:
         if self._build_year:
             title_box = c.bbox(title_id)
             year_x = (title_box[2] + 10) if title_box else tx + 185
-            c.create_text(year_x, cy - 14, text=self._build_year, fill=ACCENT, font=("Segoe UI Semibold", 14, "bold"), anchor="w")
+            c.create_text(year_x, cy - 14, text=self._build_year, fill=ACCENT, font=("Segoe UI Semibold", 42, "bold"), anchor="w")
         c.create_text(tx, cy + 18, text="Учёт заказов · локально", fill=MUTED, font=("Segoe UI", 12), anchor="w")
         self._accent_line = c.create_line(tx, cy + 36, tx + 48, cy + 36, fill=GOLD, width=2)
 
