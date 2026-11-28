@@ -3629,7 +3629,7 @@ html[data-theme="dark"] #view-orders > .toolbar { box-shadow: 0 10px 24px rgba(0
 }
 .program-about-brand span {
   color: var(--accent);
-  font-size: 14px;
+  font-size: 28px;
   font-weight: 700;
 }
 .program-about-description {
