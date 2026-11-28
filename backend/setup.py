@@ -1537,6 +1537,11 @@ def prepare(report_path: str = "") -> int | None:
             return None
         if not _running_here(path):
             return _foreign_menu(path, report_path)
+        # После первого обновления старый установщик мог ещё не записать счётчик.
+        if _read_commit_count(path) is None:
+            count = _remote_commit_count(3)
+            if count is not None:
+                _write_stamp(path, None, commit_count=count)
         return None
     except _Stop:
         return 1
