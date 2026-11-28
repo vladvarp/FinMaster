@@ -1847,6 +1847,9 @@
       state.updateIntegrity = !!data.integrity;
       state.updateOffline = !!data.offline;
       state.updateYear = Number(data.year) || 0;
+      state.updateVersion = String(data.program_version || "");
+      state.updateCommitCount = data.commit_count !== null && data.commit_count !== undefined && Number.isFinite(Number(data.commit_count)) ? Number(data.commit_count) : null;
+      state.updateBuildDate = String(data.build_date || "");
       state.updateCurrentSha = data.current_sha || "";
       state.updateLatestSha = data.latest_sha || "";
       state.updateCurrentCode = data.current_code || "";
@@ -1857,6 +1860,9 @@
       state.updateIntegrity = false;
       state.updateOffline = false;
       state.updateYear = 0;
+      state.updateVersion = "";
+      state.updateCommitCount = null;
+      state.updateBuildDate = "";
       return false;
     }
     const fromRepo = data && data.enabled === false;
@@ -4435,10 +4441,71 @@
       event.stopPropagation();
       const copy = $("program-about-copy");
       if (copy) copy.textContent = state.updateYear ? `© ${state.updateYear} V.Ar Production` : "© V.Ar Production";
+      const version = $("program-about-version");
+      if (version) version.textContent = state.updateVersion || "Не определена";
+      const build = $("program-about-build");
+      if (build) build.textContent = state.updateBuildDate || "Дата сборки неизвестна";
+      const commits = $("program-about-commits");
+      if (commits) commits.textContent = Number.isFinite(state.updateCommitCount) ? String(state.updateCommitCount) : "—";
       $("program-about-modal")?.classList.add("open");
     });
     const closeProgramAbout = () => $("program-about-modal")?.classList.remove("open");
     $("program-about-close")?.addEventListener("click", closeProgramAbout);
+
+    const licenseModal = $("program-license-modal");
+    const licenseContent = $("program-license-content");
+    let licenseLoaded = false;
+    const closeProgramLicense = () => {
+      licenseModal?.classList.remove("open");
+      licenseModal?.setAttribute("aria-hidden", "true");
+    };
+    const openProgramLicense = async () => {
+      $("program-about-modal")?.classList.remove("open");
+      licenseModal?.classList.add("open");
+      licenseModal?.setAttribute("aria-hidden", "false");
+      if (licenseLoaded || !licenseContent) return;
+      licenseContent.replaceChildren();
+      const loading = document.createElement("div");
+      loading.className = "program-license-loading";
+      loading.textContent = "Загрузка текста лицензии…";
+      licenseContent.append(loading);
+      try {
+        const response = await apiGet("/api/license");
+        const source = String(response?.text || "").trim();
+        if (!source) throw new Error("Текст лицензии пуст.");
+        const fragment = document.createDocumentFragment();
+        const blocks = source.split(/\r?\n\s*\r?\n/);
+        for (const rawBlock of blocks) {
+          const value = rawBlock.trim().replace(/\s*\n\s*/g, " ");
+          if (!value) continue;
+          const isSection = /^(?:Preamble|TERMS AND CONDITIONS|END OF TERMS AND CONDITIONS|How to Apply These Terms to Your New Programs)$/i.test(value);
+          const isNumbered = /^\d+\.\s/.test(value);
+          const isTitle = /^GNU GENERAL PUBLIC LICENSE|^Version 3,/.test(value);
+          const element = document.createElement(isSection || isNumbered || isTitle ? "h4" : "p");
+          element.className = isSection ? "license-section-title" : isNumbered ? "license-clause-title" : isTitle ? "license-document-title" : "license-paragraph";
+          element.textContent = value;
+          fragment.append(element);
+        }
+        licenseContent.replaceChildren(fragment);
+        licenseLoaded = true;
+      } catch (error) {
+        licenseContent.replaceChildren();
+        const message = document.createElement("p");
+        message.className = "program-license-error";
+        message.textContent = error?.message || "Не удалось загрузить текст лицензии.";
+        licenseContent.append(message);
+      }
+    };
+    $("program-about-read-license")?.addEventListener("click", openProgramLicense);
+    $("program-license-close")?.addEventListener("click", closeProgramLicense);
+    $("program-license-back")?.addEventListener("click", () => {
+      closeProgramLicense();
+      $("program-about-modal")?.classList.add("open");
+    });
+    licenseModal?.addEventListener("click", (event) => {
+      if (event.target === licenseModal) closeProgramLicense();
+    });
+
     $("program-about-modal")?.addEventListener("click", async (event) => {
       if (event.target === $("program-about-modal")) {
         closeProgramAbout();

@@ -3236,11 +3236,32 @@ def api_window_fullscreen():
 def api_update_status():
     if not _is_local():
         return jsonify({"error": "Только в окне программы."}), 403
-    from backend.setup import installed_year, update_status
+    from backend.setup import (
+        _local_version,
+        format_program_version,
+        installed_commit_count,
+        installed_year,
+        update_status,
+    )
 
     payload = update_status(ROOT)
+    count = installed_commit_count(ROOT)
     payload["year"] = installed_year(ROOT)
+    payload["commit_count"] = count
+    payload["program_version"] = format_program_version(count)
+    payload["build_date"] = _local_version(ROOT)
     return jsonify(payload)
+
+
+@app.get("/api/license")
+def api_program_license():
+    if not _is_local():
+        return jsonify({"error": "Только в окне программы."}), 403
+    try:
+        with open(os.path.join(ROOT, "LICENSE"), "r", encoding="utf-8") as license_file:
+            return jsonify({"text": license_file.read()})
+    except OSError:
+        return jsonify({"error": "Текст лицензии недоступен."}), 404
 
 
 @app.get("/api/update/log")
