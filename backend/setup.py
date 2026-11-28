@@ -1567,6 +1567,25 @@ def offer_update() -> None:
     return
 
 
+def installed_commit_count(root: str) -> int | None:
+    """Число коммитов из commit.txt; заполняет его для старых установок."""
+    count = _read_commit_count(root)
+    if count is not None:
+        return count
+    count = _remote_commit_count(3)
+    if count is not None:
+        _write_stamp(root, None, commit_count=count)
+    return count
+
+
+def format_program_version(count: int | None) -> str:
+    """Версия в формате тысячи.сотни.остаток из общего числа коммитов."""
+    if count is None:
+        return ""
+    number = max(0, int(count))
+    return f"{number // 1000}.{(number // 100) % 10}.{number % 100}"
+
+
 def installed_year(root: str) -> int | None:
     """Год версии из первой строки commit.txt."""
     moment = _parse_when(_read_stamp(root))
