@@ -129,7 +129,7 @@
     if (foldButton) {
       foldButton.setAttribute("aria-expanded", "true");
       foldButton.setAttribute("title", "Свернуть консоль");
-      foldButton.textContent = "⌄";
+      foldButton.textContent = "—";
     }
     $("remote-console-open")?.classList.remove("on");
     if (netConsole.timer) clearInterval(netConsole.timer);
@@ -143,7 +143,7 @@
     const collapsed = box.classList.toggle("is-collapsed");
     button.setAttribute("aria-expanded", collapsed ? "false" : "true");
     button.setAttribute("title", collapsed ? "Развернуть консоль" : "Свернуть консоль");
-    button.textContent = collapsed ? "⌃" : "⌄";
+    button.textContent = collapsed ? ">_" : "—";
     closeConsoleMenu();
   }
 
