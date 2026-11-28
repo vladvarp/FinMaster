@@ -1505,8 +1505,16 @@ html[data-theme="dark"] .file-menu .btn.ghost:hover {
 }
 
 
-/* Главная полоса заказа отмечает наличие незапланированных позиций */
-.gantt-row.has-undated-lines:not(.is-line) .gantt-track .gantt-bar {
-  outline: 2px solid #eab308;
-  outline-offset: 2px;
+/* Единая обводка всей полосы заказа, а не отдельных сегментов */
+.gantt-undated-outline {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: calc(var(--from) * (100% / var(--days)));
+  width: calc(var(--span) * (100% / var(--days)));
+  border: 2px solid color-mix(in srgb, var(--cal-undated, #eab308) 92%, transparent);
+  border-radius: 11px;
+  box-shadow: 0 0 5px color-mix(in srgb, var(--cal-undated, #eab308) 32%, transparent);
+  pointer-events: none;
+  z-index: 3;
 }
