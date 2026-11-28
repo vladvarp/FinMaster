@@ -121,13 +121,16 @@
 
   function closeNetConsole() {
     const box = $("net-console");
+    const foldButton = $("net-console-fold");
     if (box) {
       box.hidden = true;
       box.classList.remove("is-collapsed");
     }
-    $("net-console-fold")?.setAttribute("aria-expanded", "true");
-    $("net-console-fold")?.setAttribute("title", "Свернуть консоль");
-    $("net-console-fold")?.textContent = "⌄";
+    if (foldButton) {
+      foldButton.setAttribute("aria-expanded", "true");
+      foldButton.setAttribute("title", "Свернуть консоль");
+      foldButton.textContent = "⌄";
+    }
     $("remote-console-open")?.classList.remove("on");
     if (netConsole.timer) clearInterval(netConsole.timer);
     netConsole.timer = 0;
