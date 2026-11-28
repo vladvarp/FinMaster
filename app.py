@@ -3253,6 +3253,17 @@ def api_update_status():
     return jsonify(payload)
 
 
+@app.get("/api/license")
+def api_program_license():
+    if not _is_local():
+        return jsonify({"error": "Только в окне программы."}), 403
+    try:
+        with open(os.path.join(ROOT, "LICENSE"), "r", encoding="utf-8") as license_file:
+            return jsonify({"text": license_file.read()})
+    except OSError:
+        return jsonify({"error": "Текст лицензии недоступен."}), 404
+
+
 @app.get("/api/update/log")
 def api_update_log():
     if not _is_local():
