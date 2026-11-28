@@ -1505,16 +1505,20 @@ html[data-theme="dark"] .file-menu .btn.ghost:hover {
 }
 
 
-/* Единая обводка всей полосы заказа, а не отдельных сегментов */
-.gantt-undated-outline {
+/* Одна непрерывная рамка по всему сроку заказа, поверх рабочих и паузных сегментов */
+.gantt-track.has-undated-outline::after {
+  content: "";
   position: absolute;
   top: 6px;
   bottom: 6px;
-  left: calc(var(--from) * (100% / var(--days)));
-  width: calc(var(--span) * (100% / var(--days)));
-  border: 2px solid color-mix(in srgb, var(--cal-undated, #eab308) 92%, transparent);
+  left: calc(var(--undated-from) / var(--days) * 100%);
+  width: calc(var(--undated-span) / var(--days) * 100%);
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, var(--cal-undated, #eab308) 94%, transparent);
   border-radius: 11px;
-  box-shadow: 0 0 5px color-mix(in srgb, var(--cal-undated, #eab308) 32%, transparent);
+  box-shadow:
+    0 0 4px color-mix(in srgb, var(--cal-undated, #eab308) 34%, transparent),
+    0 0 9px color-mix(in srgb, var(--cal-undated, #eab308) 18%, transparent);
   pointer-events: none;
-  z-index: 3;
+  z-index: 5;
 }
