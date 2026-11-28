@@ -16,6 +16,38 @@
       }
     } catch (e) {}
   </script>
+  <style>
+    #net-console .net-console-fold {
+      width: 28px;
+      min-width: 28px;
+      height: 28px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      line-height: 1;
+      border-radius: 7px;
+      flex: 0 0 28px;
+    }
+    #net-console.is-collapsed {
+      height: auto !important;
+      min-height: 0;
+      overflow: visible;
+    }
+    #net-console.is-collapsed .net-console-body,
+    #net-console.is-collapsed .bridge-legend,
+    #net-console.is-collapsed .net-console-resize {
+      display: none !important;
+    }
+    #net-console.is-collapsed .net-console-head {
+      border-bottom: 0;
+    }
+    .gantt-row.has-undated-lines:not(.is-line) .gantt-track .gantt-bar {
+      outline: 2px solid var(--cal-edge, currentColor);
+      outline-offset: 2px;
+    }
+  </style>
 </head>
 <body>
   <div class="start" id="start-screen">
@@ -1395,6 +1427,7 @@
         <button type="button" class="net-console-tool" id="net-console-cal-reset" title="Вернуть настоящий сегодняшний день">Сброс</button>
       </span>
       <button type="button" class="net-console-tool" id="net-console-clear">Очистить</button>
+      <button type="button" class="net-console-tool net-console-fold" id="net-console-fold" title="Свернуть консоль" aria-label="Свернуть консоль" aria-expanded="true">⌄</button>
       <button type="button" class="net-console-tool" id="net-console-close" title="Закрыть" aria-label="Закрыть">✕</button>
     </div>
     <div class="bridge-legend" data-console-only="tg" data-legend="tg" hidden>
