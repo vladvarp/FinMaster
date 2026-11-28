@@ -1511,8 +1511,8 @@ html[data-theme="dark"] .file-menu .btn.ghost:hover {
   position: absolute;
   top: 6px;
   bottom: 6px;
-  left: calc(var(--undated-from) / var(--days) * 100%);
-  width: calc(var(--undated-span) / var(--days) * 100%);
+  left: max(260px, calc(var(--undated-from) / var(--days) * 100%));
+  right: calc(100% - var(--undated-end) / var(--days) * 100%);
   box-sizing: border-box;
   border: 2px solid color-mix(in srgb, var(--cal-undated, #eab308) 94%, transparent);
   border-radius: 11px;
@@ -1521,4 +1521,93 @@ html[data-theme="dark"] .file-menu .btn.ghost:hover {
     0 0 9px color-mix(in srgb, var(--cal-undated, #eab308) 18%, transparent);
   pointer-events: none;
   z-index: 5;
+}
+
+
+/* Полная карточка заказа при наведении на подпись таймлайна */
+.cal-order-tooltip {
+  position: fixed;
+  z-index: 10050;
+  width: min(420px, calc(100vw - 24px));
+  max-height: min(72vh, 620px);
+  overflow: auto;
+  pointer-events: none;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 14px;
+  box-shadow: 0 16px 42px #0003, 0 3px 10px #0002;
+  scrollbar-width: thin;
+}
+.cal-order-tooltip[hidden] { display: none; }
+.cal-order-tip-card { padding: 14px; }
+.cal-order-tip-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.cal-order-tip-head > div { min-width: 0; display: grid; gap: 4px; }
+.cal-order-tip-kicker,
+.cal-order-tip-section > span,
+.cal-order-tip-notes > span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .09em;
+}
+.cal-order-tip-head > div > b { font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; }
+.cal-order-tip-status {
+  flex: none;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--card));
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 750;
+}
+.cal-order-tip-status.tone-ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, var(--card)); }
+.cal-order-tip-status.tone-warn { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--card)); }
+.cal-order-tip-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.cal-order-tip-meta > div,
+.cal-order-tip-money > div { display: grid; gap: 3px; min-width: 0; }
+.cal-order-tip-meta span,
+.cal-order-tip-money span { color: var(--muted); font-size: 10px; }
+.cal-order-tip-meta b { font-size: 11px; overflow-wrap: anywhere; }
+.cal-order-tip-money {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.cal-order-tip-money b { font-size: 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.cal-order-tip-section { display: grid; gap: 8px; padding-top: 12px; }
+.cal-order-tip-line {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg) 55%, var(--card));
+}
+.cal-order-tip-line-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.cal-order-tip-line-head b { font-size: 11px; overflow-wrap: anywhere; }
+.cal-order-tip-line-head span { flex: none; color: var(--muted); font-size: 9px; }
+.cal-order-tip-muted { margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.cal-order-tip-value { margin-top: 5px; font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cal-order-tip-note,
+.cal-order-tip-notes p { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cal-order-tip-empty { color: var(--muted); font-size: 11px; }
+.cal-order-tip-notes { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+@media (max-width: 560px) {
+  .cal-order-tooltip { width: min(360px, calc(100vw - 24px)); }
+  .cal-order-tip-card { padding: 11px; }
+  .cal-order-tip-money { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
