@@ -2137,6 +2137,101 @@
     return String(order?.name || "").trim() || "без названия";
   }
 
+  function calOrderTooltipHtml(order) {
+    const meta = workStatusMeta(order);
+    const totals = orderTotals(order);
+    const start = dateDay(order.work_start);
+    const end = dateDay(order.work_end);
+    const dateLabel = start || end
+      ? `${start ? calFmtDay(parseDay(start), true) : "не задано"} — ${end ? calFmtDay(parseDay(end), true) : "без конечной даты"}`
+      : "Даты не назначены";
+    const lines = (order.lines || [])
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => !isFrozenLine(line));
+    const lineHtml = lines.length
+      ? lines.map(({ line, index }) => {
+          const proxy = lineWorkProxy(order, line);
+          const lineStart = dateDay(proxy.work_start);
+          const lineEnd = dateDay(proxy.work_end);
+          const span = lineStart || lineEnd
+            ? `${lineStart ? calFmtDay(parseDay(lineStart), true) : "без начала"} — ${lineEnd ? calFmtDay(parseDay(lineEnd), true) : "без окончания"}`
+            : "Без дат";
+          const value = lineTotals(line, order);
+          const qty = qtyValue(line);
+          const qtyLabel = Number.isFinite(Number(qty)) && Number(qty) !== 0
+            ? `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }).format(Number(qty))} ${String(line.unit || "").trim()}`.trim()
+            : "";
+          const amount = value.expense
+            ? `Расход: ${money(value.cost)}`
+            : `Итог: ${money(value.after)} · оплачено: ${money(value.paid)} · остаток: ${money(value.unpaid)}`;
+          return `<div class="cal-order-tip-line">
+            <div class="cal-order-tip-line-head"><b>${esc(lineWorkName(line, index))}</b><span>${esc(String(line.status || "без статуса"))}</span></div>
+            <div class="cal-order-tip-muted">${esc([line.order_type, qtyLabel, span].filter(Boolean).join(" · "))}</div>
+            <div class="cal-order-tip-value">${esc(amount)}</div>
+            ${String(line.notes || "").trim() ? `<div class="cal-order-tip-note">${esc(line.notes.trim())}</div>` : ""}
+          </div>`;
+        }).join("")
+      : `<div class="cal-order-tip-empty">В заказе пока нет активных позиций.</div>`;
+    return `<div class="cal-order-tip-card">
+      <div class="cal-order-tip-head">
+        <div><span class="cal-order-tip-kicker">ЗАКАЗ №${esc(orderNum(order))}</span><b>${esc(orderTitle(order))}</b></div>
+        <span class="cal-order-tip-status tone-${esc(meta.tone)}">${esc(meta.label)}</span>
+      </div>
+      <div class="cal-order-tip-meta">
+        <div><span>Заказчик</span><b>${esc(String(order.customer || "не указан"))}</b></div>
+        <div><span>Период работ</span><b>${esc(dateLabel)}</b></div>
+        <div><span>Длительность</span><b>${workDurationDays(order) ? `${workDurationDays(order)} дн.` : "не определена"}</b></div>
+        <div><span>Позиций</span><b>${lines.length}</b></div>
+      </div>
+      <div class="cal-order-tip-money">
+        <div><span>Итого</span><b>${esc(money(totals.after))}</b></div>
+        <div><span>Оплачено</span><b>${esc(money(totals.paid))}</b></div>
+        <div><span>Остаток</span><b>${esc(money(totals.unpaid))}</b></div>
+        ${totals.cost > 0.005 ? `<div><span>Расходы</span><b>${esc(money(totals.cost))}</b></div><div><span>Чистыми</span><b>${esc(money(totals.net))}</b></div>` : ""}
+      </div>
+      <div class="cal-order-tip-section"><span>ПОЗИЦИИ</span>${lineHtml}</div>
+      ${String(order.notes || "").trim() ? `<div class="cal-order-tip-notes"><span>КОММЕНТАРИЙ К ЗАКАЗУ</span><p>${esc(order.notes.trim())}</p></div>` : ""}
+    </div>`;
+  }
+
+  function positionCalOrderTooltip(x, y) {
+    const tip = $("cal-order-tooltip");
+    if (!tip || tip.hidden) return;
+    const margin = 12;
+    const gap = 16;
+    const width = tip.offsetWidth || 380;
+    const height = tip.offsetHeight || 240;
+    let left = x + gap;
+    let top = y + gap;
+    if (left + width > window.innerWidth - margin) left = x - width - gap;
+    if (top + height > window.innerHeight - margin) top = window.innerHeight - height - margin;
+    tip.style.left = `${Math.max(margin, left)}px`;
+    tip.style.top = `${Math.max(margin, top)}px`;
+  }
+
+  function showCalOrderTooltip(target, x, y) {
+    const id = target?.dataset?.calId;
+    const order = id ? findOrder(id) : null;
+    if (!order) return;
+    let tip = $("cal-order-tooltip");
+    if (!tip) {
+      tip = document.createElement("div");
+      tip.id = "cal-order-tooltip";
+      tip.className = "cal-order-tooltip";
+      tip.hidden = true;
+      tip.setAttribute("role", "tooltip");
+      document.body.appendChild(tip);
+    }
+    tip.innerHTML = calOrderTooltipHtml(order);
+    tip.hidden = false;
+    positionCalOrderTooltip(x, y);
+  }
+
+  function hideCalOrderTooltip() {
+    const tip = $("cal-order-tooltip");
+    if (tip) tip.hidden = true;
+  }
+
   function calChipHtml(order, day, opts = {}) {
     const meta = workStatusMeta(order, day);
     const due = orderDeadline(order);
@@ -2728,7 +2823,7 @@
         const outlineTill = orderSpan && orderSpan.till > win.to ? win.to : orderSpan?.till;
         const undatedOutline = !!(undatedCount && outlineFrom && outlineTill && outlineFrom <= outlineTill);
         const undatedOutlineStyle = undatedOutline
-          ? `--undated-from:${dayDiff(win.from, outlineFrom)};--undated-span:${dayDiff(outlineFrom, outlineTill) + 1};`
+          ? `--undated-from:${dayDiff(win.from, outlineFrom)};--undated-span:${dayDiff(outlineFrom, outlineTill) + 1};--undated-end:${dayDiff(win.from, outlineTill) + 1};`
           : "";
         if (!bars) return "";
         const open = calendarLinesOpen(order.id);
@@ -2778,7 +2873,7 @@
         return `<div class="gantt-row ${calSelectedClass(order.id)} ${due ? "has-deadline" : ""} ${pausedNow ? "is-paused" : ""} ${undatedCount ? "has-undated-lines" : ""} ${open ? "is-open" : ""}" data-cal-id="${esc(order.id)}">
           <div class="gantt-head">
             ${expand}
-            <button type="button" class="gantt-label" data-cal-id="${esc(order.id)}">
+            <button type="button" class="gantt-label" data-cal-id="${esc(order.id)}" data-cal-order-tooltip>
               <b>${esc(orderNum(order))} ${esc(orderTitle(order))}</b>
               <small>${esc(order.customer || "без заказчика")} · ${ganttStatusHtml(meta)}${workDurationDays(order) ? ` · ${workDurationDays(order)} дн.` : ""}${due ? ` · до ${calFmtDay(due)}` : ""}${datedCount ? ` · ${datedCount} поз.` : ""}${undatedCount ? ` · ${undatedCount} без даты` : ""}</small>
             </button>
@@ -4217,6 +4312,27 @@
   }
 
   function bindCalendar() {
+    $("view-calendar")?.addEventListener("pointerover", (e) => {
+      const label = e.target.closest?.(".gantt-label[data-cal-order-tooltip]");
+      if (!label || label.contains(e.relatedTarget)) return;
+      showCalOrderTooltip(label, e.clientX, e.clientY);
+    });
+    $("view-calendar")?.addEventListener("pointermove", (e) => {
+      if (!$("cal-order-tooltip")?.hidden) positionCalOrderTooltip(e.clientX, e.clientY);
+    });
+    $("view-calendar")?.addEventListener("pointerout", (e) => {
+      const label = e.target.closest?.(".gantt-label[data-cal-order-tooltip]");
+      if (label && !label.contains(e.relatedTarget)) hideCalOrderTooltip();
+    });
+    $("view-calendar")?.addEventListener("focusin", (e) => {
+      const label = e.target.closest?.(".gantt-label[data-cal-order-tooltip]");
+      if (!label) return;
+      const rect = label.getBoundingClientRect();
+      showCalOrderTooltip(label, rect.right, rect.top + rect.height / 2);
+    });
+    $("view-calendar")?.addEventListener("focusout", (e) => {
+      if (e.target.closest?.(".gantt-label[data-cal-order-tooltip]")) hideCalOrderTooltip();
+    });
     $("view-calendar")?.addEventListener("click", onCalClick);
     $("view-calendar")?.addEventListener("contextmenu", onCalContextMenu);
     $("view-calendar")?.addEventListener("change", onCalChange);
