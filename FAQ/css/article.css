@@ -84,15 +84,18 @@ code {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--card);
-  overflow: auto;
+  overflow: hidden;
 }
 
 .shot .live { min-height: 44px; }
 
 .live-frame {
-  width: 100%;
-  border: 0;
   display: block;
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  border: 0;
   background: transparent;
 }
 
