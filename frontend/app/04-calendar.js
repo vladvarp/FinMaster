@@ -2732,8 +2732,9 @@
         const orderSpan = undatedCount ? orderDrawSpan(order, win.today) : null;
         const outlineFrom = orderSpan && orderSpan.from < win.from ? win.from : orderSpan?.from;
         const outlineTill = orderSpan && orderSpan.till > win.to ? win.to : orderSpan?.till;
-        const undatedOutline = undatedCount && outlineFrom && outlineTill && outlineFrom <= outlineTill
-          ? `<span class="gantt-undated-outline" aria-hidden="true" style="--from:${dayDiff(win.from, outlineFrom)};--span:${dayDiff(outlineFrom, outlineTill) + 1}"></span>`
+        const undatedOutline = !!(undatedCount && outlineFrom && outlineTill && outlineFrom <= outlineTill);
+        const undatedOutlineStyle = undatedOutline
+          ? `--undated-from:${dayDiff(win.from, outlineFrom)};--undated-span:${dayDiff(outlineFrom, outlineTill) + 1};`
           : "";
         if (!bars) return "";
         const open = calendarLinesOpen(order.id);
@@ -2788,7 +2789,7 @@
               <small>${esc(order.customer || "без заказчика")} · ${ganttStatusHtml(meta)}${workDurationDays(order) ? ` · ${workDurationDays(order)} дн.` : ""}${due ? ` · до ${calFmtDay(due)}` : ""}${datedCount ? ` · ${datedCount} поз.` : ""}${undatedCount ? ` · ${undatedCount} без даты` : ""}</small>
             </button>
           </div>
-          <div class="gantt-track" data-cal-track="${esc(order.id)}">${undatedOutline}${bars}</div>
+          <div class="gantt-track${undatedOutline ? " has-undated-outline" : ""}" data-cal-track="${esc(order.id)}" style="${undatedOutlineStyle}">${bars}</div>
         </div>${lineRows}`;
       })
       .join("");
