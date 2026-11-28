@@ -3550,3 +3550,66 @@ html[data-theme="dark"] #view-orders > .toolbar { box-shadow: 0 10px 24px rgba(0
 @media (max-width: 560px) {
   .program-about-meta { grid-template-columns: 1fr; }
 }
+
+
+/* Окно чтения GNU GPL */
+.program-about-license {
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  margin: 18px 0; padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 14px;
+  background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 9%, var(--card)), var(--card) 72%);
+}
+.program-about-license > div { min-width: 0; }
+.program-about-license strong { display: block; margin-bottom: 5px; font-size: 13px; }
+.program-about-license p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.program-about-license .btn { flex: 0 0 auto; }
+.program-license-modal {
+  display: flex; flex-direction: column; width: min(900px, calc(100vw - 32px));
+  max-width: 900px; max-height: min(88vh, 900px); padding: 0; overflow: hidden;
+}
+.program-license-head { flex: 0 0 auto; padding: 20px 24px 14px; border-bottom: 1px solid var(--line); }
+.program-license-head h3 { margin: 0; }
+.program-license-head p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.program-license-intro {
+  display: flex; align-items: center; gap: 14px; margin: 16px 24px 10px;
+  padding: 14px 16px; border-radius: 12px; background: var(--bg-2);
+}
+.program-license-mark {
+  display: grid; place-items: center; width: 48px; height: 48px; flex: 0 0 48px;
+  border-radius: 13px; background: var(--accent); color: #fff;
+  font-size: 15px; font-weight: 850; letter-spacing: -.04em;
+}
+.program-license-intro strong { font-size: 13px; }
+.program-license-intro p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.program-license-content {
+  min-height: 120px; margin: 0 24px; padding: 8px 18px 18px 4px;
+  overflow: auto; overscroll-behavior: contain; color: var(--ink);
+  line-height: 1.68; scrollbar-gutter: stable;
+}
+.program-license-content .license-document-title {
+  margin: 18px 0 8px; color: var(--muted); font-size: 12px; font-weight: 700;
+}
+.program-license-content .license-section-title {
+  margin: 24px 0 12px; padding-bottom: 9px; border-bottom: 1px solid var(--line);
+  color: var(--accent); font-size: 16px; font-weight: 750;
+}
+.program-license-content .license-clause-title { margin: 18px 0 7px; font-size: 13px; font-weight: 750; }
+.program-license-content .license-paragraph { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+.program-license-loading, .program-license-error {
+  padding: 24px 12px; color: var(--muted); text-align: center; font-size: 13px;
+}
+.program-license-error { color: var(--danger); }
+.program-license-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex: 0 0 auto; padding: 12px 24px; border-top: 1px solid var(--line);
+  background: var(--bg-2); color: var(--muted); font-size: 11px;
+}
+@media (max-width: 620px) {
+  .program-about-license { align-items: flex-start; flex-direction: column; }
+  .program-license-modal { max-height: 92vh; }
+  .program-license-head { padding: 16px 18px 12px; }
+  .program-license-intro { margin: 12px 18px 8px; }
+  .program-license-content { margin: 0 18px; }
+  .program-license-foot { padding: 10px 18px; }
+}
