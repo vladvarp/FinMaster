@@ -2172,16 +2172,26 @@
           </div>`;
         }).join("")
       : `<div class="cal-order-tip-empty">В заказе пока нет активных позиций.</div>`;
+    const timelineLines = calendarWorkLines(order);
+    const undatedCount = timelineLines.filter((line) => !orderDrawSpan(lineWorkProxy(order, line), clockToday())).length;
+    const datedCount = timelineLines.length - undatedCount;
+    const due = orderDeadline(order);
+    const subtitle = [
+      String(order.customer || "без заказчика"),
+      meta.label,
+      workDurationDays(order) ? `${workDurationDays(order)} дн.` : "",
+      due ? `до ${calFmtDay(due)}` : "",
+      datedCount ? `${datedCount} поз.` : "",
+      undatedCount ? `${undatedCount} без даты` : "",
+    ].filter(Boolean).join(" · ");
     return `<div class="cal-order-tip-card">
       <div class="cal-order-tip-head">
         <div><span class="cal-order-tip-kicker">ЗАКАЗ №${esc(orderNum(order))}</span><b>${esc(orderTitle(order))}</b></div>
         <span class="cal-order-tip-status tone-${esc(meta.tone)}">${esc(meta.label)}</span>
       </div>
+      <div class="cal-order-tip-subtitle">${esc(subtitle)}</div>
       <div class="cal-order-tip-meta">
-        <div><span>Заказчик</span><b>${esc(String(order.customer || "не указан"))}</b></div>
         <div><span>Период работ</span><b>${esc(dateLabel)}</b></div>
-        <div><span>Длительность</span><b>${workDurationDays(order) ? `${workDurationDays(order)} дн.` : "не определена"}</b></div>
-        <div><span>Позиций</span><b>${lines.length}</b></div>
       </div>
       <div class="cal-order-tip-money">
         <div><span>Итого</span><b>${esc(money(totals.after))}</b></div>
@@ -2194,16 +2204,17 @@
     </div>`;
   }
 
-  function positionCalOrderTooltip(x, y) {
+  function positionCalOrderTooltip(target) {
     const tip = $("cal-order-tooltip");
-    if (!tip || tip.hidden) return;
+    if (!tip || tip.hidden || !target) return;
     const margin = 12;
-    const gap = 16;
+    const gap = 4;
+    const rect = target.getBoundingClientRect();
     const width = tip.offsetWidth || 380;
     const height = tip.offsetHeight || 240;
-    let left = x + gap;
-    let top = y + gap;
-    if (left + width > window.innerWidth - margin) left = x - width - gap;
+    let left = rect.right - gap;
+    let top = rect.top;
+    if (left + width > window.innerWidth - margin) left = rect.left - width + gap;
     if (top + height > window.innerHeight - margin) top = window.innerHeight - height - margin;
     tip.style.left = `${Math.max(margin, left)}px`;
     tip.style.top = `${Math.max(margin, top)}px`;
@@ -2224,7 +2235,15 @@
     }
     tip.innerHTML = calOrderTooltipHtml(order);
     tip.hidden = false;
-    positionCalOrderTooltip(x, y);
+    if (!tip.dataset.calOrderTooltipBound) {
+      tip.dataset.calOrderTooltipBound = "1";
+      tip.addEventListener("pointerleave", (event) => {
+        if (event.relatedTarget?.closest?.(".gantt-label[data-cal-order-tooltip]")) return;
+        hideCalOrderTooltip();
+      });
+      tip.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
+    }
+    positionCalOrderTooltip(target);
   }
 
   function hideCalOrderTooltip() {
@@ -4317,18 +4336,15 @@
       if (!label || label.contains(e.relatedTarget)) return;
       showCalOrderTooltip(label, e.clientX, e.clientY);
     });
-    $("view-calendar")?.addEventListener("pointermove", (e) => {
-      if (!$("cal-order-tooltip")?.hidden) positionCalOrderTooltip(e.clientX, e.clientY);
-    });
     $("view-calendar")?.addEventListener("pointerout", (e) => {
       const label = e.target.closest?.(".gantt-label[data-cal-order-tooltip]");
-      if (label && !label.contains(e.relatedTarget)) hideCalOrderTooltip();
+      const tip = $("cal-order-tooltip");
+      if (label && !label.contains(e.relatedTarget) && !tip?.contains(e.relatedTarget)) hideCalOrderTooltip();
     });
     $("view-calendar")?.addEventListener("focusin", (e) => {
       const label = e.target.closest?.(".gantt-label[data-cal-order-tooltip]");
       if (!label) return;
-      const rect = label.getBoundingClientRect();
-      showCalOrderTooltip(label, rect.right, rect.top + rect.height / 2);
+      showCalOrderTooltip(label, 0, 0);
     });
     $("view-calendar")?.addEventListener("focusout", (e) => {
       if (e.target.closest?.(".gantt-label[data-cal-order-tooltip]")) hideCalOrderTooltip();
