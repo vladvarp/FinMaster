@@ -2164,7 +2164,9 @@
           const amount = value.expense
             ? `Расход: ${money(value.cost)}`
             : `Итог: ${money(value.after)} · оплачено: ${money(value.paid)} · остаток: ${money(value.unpaid)}`;
-          return `<div class="cal-order-tip-line">
+          const onTimeline = !!orderDrawSpan(proxy, clockToday());
+          const linePaint = calendarLineBarPaint(order, line);
+          return `<div class="cal-order-tip-line${onTimeline ? " is-on-timeline" : ""}"${onTimeline ? ` style="--tip-line-color:${esc(linePaint.base)}"` : ""}>
             <div class="cal-order-tip-line-head"><b>${esc(lineWorkName(line, index))}</b><span>${esc(String(line.status || "без статуса"))}</span></div>
             <div class="cal-order-tip-muted">${esc([line.order_type, qtyLabel, span].filter(Boolean).join(" · "))}</div>
             <div class="cal-order-tip-value">${esc(amount)}</div>
@@ -2177,10 +2179,10 @@
     const datedCount = timelineLines.length - undatedCount;
     const due = orderDeadline(order);
     const subtitle = [
-      String(order.customer || "без заказчика"),
-      meta.label,
+      esc(String(order.customer || "без заказчика")),
+      ganttStatusHtml(meta),
       workDurationDays(order) ? `${workDurationDays(order)} дн.` : "",
-      due ? `до ${calFmtDay(due)}` : "",
+      due ? `до ${esc(calFmtDay(due))}` : "",
       datedCount ? `${datedCount} поз.` : "",
       undatedCount ? `${undatedCount} без даты` : "",
     ].filter(Boolean).join(" · ");
@@ -2189,7 +2191,7 @@
         <div><span class="cal-order-tip-kicker">ЗАКАЗ №${esc(orderNum(order))}</span><b>${esc(orderTitle(order))}</b></div>
         <span class="cal-order-tip-status tone-${esc(meta.tone)}">${esc(meta.label)}</span>
       </div>
-      <div class="cal-order-tip-subtitle">${esc(subtitle)}</div>
+      <div class="cal-order-tip-subtitle">${subtitle}</div>
       <div class="cal-order-tip-meta">
         <div><span>Период работ</span><b>${esc(dateLabel)}</b></div>
       </div>
