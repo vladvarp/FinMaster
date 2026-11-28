@@ -1007,11 +1007,44 @@
         <p>Всего коммитов <strong id="program-about-commits">—</strong></p>
       </div>
       <p>FinMaster — локальная система учёта заказов, оплат и рабочих процессов. Данные отчётов хранятся в выбранной папке на вашем компьютере; для повседневной работы облачный аккаунт не требуется.</p>
-      <p>Программа распространяется по лицензии GNU GPL версии 3: её можно использовать, изучать и изменять в соответствии с условиями лицензии. Полный текст — в файле LICENSE в папке программы.</p>
+      <section class="program-about-license">
+        <div>
+          <strong>Свободное программное обеспечение</strong>
+          <p>FinMaster распространяется по GNU General Public License версии 3. Вы можете изучить условия лицензии прямо здесь.</p>
+        </div>
+        <button class="btn small" type="button" id="program-about-read-license">Читать лицензию <span aria-hidden="true">↗</span></button>
+      </section>
       <p class="program-about-links">
         <span>Telegram <a href="https://t.me/Var_production" data-link="telegram">https://t.me/Var_production</a></span>
         <span>GitHub <a href="https://github.com/vladvarp/FinMaster" data-link="github">https://github.com/vladvarp/FinMaster</a></span>
       </p>
+    </div>
+  </div>
+
+  <div class="modal" id="program-license-modal" aria-hidden="true">
+    <div class="modal-card program-license-modal">
+      <div class="modal-title-row program-license-head">
+        <div>
+          <h3>GNU General Public License</h3>
+          <p>Версия 3 · 29 июня 2007 года</p>
+        </div>
+        <button class="btn icon" type="button" id="program-license-close" title="Закрыть" aria-label="Закрыть">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <div class="program-license-intro">
+        <span class="program-license-mark">GPL</span>
+        <div><strong>Условия использования FinMaster</strong><p>Полный текст лицензии. Разделы и пункты оформлены отдельно для удобного чтения; содержание документа не сокращено.</p></div>
+      </div>
+      <div class="program-license-content" id="program-license-content" tabindex="0" aria-label="Полный текст GNU GPL версии 3">
+        <div class="program-license-loading">Загрузка текста лицензии…</div>
+      </div>
+      <div class="program-license-foot">
+        <span>GNU GPL v3 · Полный текст</span>
+        <button class="btn small" type="button" id="program-license-back">Вернуться к «О программе»</button>
+      </div>
     </div>
   </div>
 
