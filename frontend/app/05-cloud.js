@@ -1847,6 +1847,9 @@
       state.updateIntegrity = !!data.integrity;
       state.updateOffline = !!data.offline;
       state.updateYear = Number(data.year) || 0;
+      state.updateVersion = String(data.program_version || "");
+      state.updateCommitCount = Number.isFinite(Number(data.commit_count)) ? Number(data.commit_count) : null;
+      state.updateBuildDate = String(data.build_date || "");
       state.updateCurrentSha = data.current_sha || "";
       state.updateLatestSha = data.latest_sha || "";
       state.updateCurrentCode = data.current_code || "";
@@ -1857,6 +1860,9 @@
       state.updateIntegrity = false;
       state.updateOffline = false;
       state.updateYear = 0;
+      state.updateVersion = "";
+      state.updateCommitCount = null;
+      state.updateBuildDate = "";
       return false;
     }
     const fromRepo = data && data.enabled === false;
@@ -4435,6 +4441,12 @@
       event.stopPropagation();
       const copy = $("program-about-copy");
       if (copy) copy.textContent = state.updateYear ? `© ${state.updateYear} V.Ar Production` : "© V.Ar Production";
+      const version = $("program-about-version");
+      if (version) version.textContent = state.updateVersion || "Не определена";
+      const build = $("program-about-build");
+      if (build) build.textContent = state.updateBuildDate || "Дата сборки неизвестна";
+      const commits = $("program-about-commits");
+      if (commits) commits.textContent = Number.isFinite(state.updateCommitCount) ? String(state.updateCommitCount) : "—";
       $("program-about-modal")?.classList.add("open");
     });
     const closeProgramAbout = () => $("program-about-modal")?.classList.remove("open");
