@@ -30,7 +30,7 @@
   const CAL_COLOR_GROUPS = [
     {
       title: "Линии",
-      hint: "Полосы заказов и позиций",
+      hint: "Цвета полос заказов и позиций, а также контура заказов с позициями без даты",
       items: [
         ["paid", "Оплачено"],
         ["debt", "Долг"],
@@ -39,6 +39,7 @@
         ["work", "В работе"],
         ["live", "Выполняется"],
         ["finished", "Завершено"],
+        ["undated", "Контур"],
         ["stripe", "Штрих паузы"],
       ],
     },
@@ -69,6 +70,7 @@
       live: "#0369a1",
       finished: "#166534",
       stripe: "#64748b",
+      undated: "#eab308",
       edge: "#15803d",
       now: "#0369a1",
       was: "#4f46e5",
@@ -2721,6 +2723,13 @@
           hasNote: lineHasNote(order),
           noteText: String(order.notes || "").trim(),
         });
+        const orderSpan = undatedCount ? orderDrawSpan(order, win.today) : null;
+        const outlineFrom = orderSpan && orderSpan.from < win.from ? win.from : orderSpan?.from;
+        const outlineTill = orderSpan && orderSpan.till > win.to ? win.to : orderSpan?.till;
+        const undatedOutline = !!(undatedCount && outlineFrom && outlineTill && outlineFrom <= outlineTill);
+        const undatedOutlineStyle = undatedOutline
+          ? `--undated-from:${dayDiff(win.from, outlineFrom)};--undated-span:${dayDiff(outlineFrom, outlineTill) + 1};`
+          : "";
         if (!bars) return "";
         const open = calendarLinesOpen(order.id);
         const showUndated = !!calendarState().showUndated;
@@ -2766,7 +2775,7 @@
         </div>`;
               })
               .join("");
-        return `<div class="gantt-row ${calSelectedClass(order.id)} ${due ? "has-deadline" : ""} ${pausedNow ? "is-paused" : ""} ${open ? "is-open" : ""}" data-cal-id="${esc(order.id)}">
+        return `<div class="gantt-row ${calSelectedClass(order.id)} ${due ? "has-deadline" : ""} ${pausedNow ? "is-paused" : ""} ${undatedCount ? "has-undated-lines" : ""} ${open ? "is-open" : ""}" data-cal-id="${esc(order.id)}">
           <div class="gantt-head">
             ${expand}
             <button type="button" class="gantt-label" data-cal-id="${esc(order.id)}">
@@ -2774,7 +2783,7 @@
               <small>${esc(order.customer || "без заказчика")} · ${ganttStatusHtml(meta)}${workDurationDays(order) ? ` · ${workDurationDays(order)} дн.` : ""}${due ? ` · до ${calFmtDay(due)}` : ""}${datedCount ? ` · ${datedCount} поз.` : ""}${undatedCount ? ` · ${undatedCount} без даты` : ""}</small>
             </button>
           </div>
-          <div class="gantt-track" data-cal-track="${esc(order.id)}">${bars}</div>
+          <div class="gantt-track${undatedOutline ? " has-undated-outline" : ""}" data-cal-track="${esc(order.id)}" style="${undatedOutlineStyle}">${bars}</div>
         </div>${lineRows}`;
       })
       .join("");

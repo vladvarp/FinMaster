@@ -121,10 +121,30 @@
 
   function closeNetConsole() {
     const box = $("net-console");
-    if (box) box.hidden = true;
+    const foldButton = $("net-console-fold");
+    if (box) {
+      box.hidden = true;
+      box.classList.remove("is-collapsed");
+    }
+    if (foldButton) {
+      foldButton.setAttribute("aria-expanded", "true");
+      foldButton.setAttribute("title", "Свернуть консоль");
+      foldButton.textContent = "—";
+    }
     $("remote-console-open")?.classList.remove("on");
     if (netConsole.timer) clearInterval(netConsole.timer);
     netConsole.timer = 0;
+  }
+
+  function toggleNetConsoleFold() {
+    const box = $("net-console");
+    const button = $("net-console-fold");
+    if (!box || !button) return;
+    const collapsed = box.classList.toggle("is-collapsed");
+    button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    button.setAttribute("title", collapsed ? "Развернуть консоль" : "Свернуть консоль");
+    button.textContent = collapsed ? ">_" : "—";
+    closeConsoleMenu();
   }
 
   function formatNetTime(ts) {
@@ -434,6 +454,7 @@
     document.addEventListener("click", () => closeConsoleMenu());
     $("remote-console-open")?.addEventListener("click", () => toggleNetConsole(true));
     $("net-console-close")?.addEventListener("click", () => closeNetConsole());
+    $("net-console-fold")?.addEventListener("click", () => toggleNetConsoleFold());
     $("net-console-cal-next")?.addEventListener("click", () => applyClockOffset(clockOffsetDays + 1));
     $("net-console-cal-reset")?.addEventListener("click", () => applyClockOffset(0));
     paintClockOffset();

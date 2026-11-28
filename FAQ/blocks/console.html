@@ -18,6 +18,10 @@
       margin: 0 0 8px;
     }
     h2 { margin: 18px 0 8px; font-size: 15px; }
+    .faq-fold-demo { display:flex; align-items:center; gap:8px; margin:10px 0 18px; }
+    .faq-fold-demo button { width:44px; height:44px; border:1px solid var(--line,#334155); border-radius:50%; background:var(--panel,#172033); color:var(--text,#e5e7eb); font:600 14px/1 ui-monospace,Consolas,monospace; }
+    .faq-fold-demo .faq-dict { font:600 14px/1 system-ui,sans-serif; }
+    .faq-fold-demo-label { color:var(--muted,#94a3b8); font-size:12px; margin-left:5px; }
   </style>
 </head>
 <body>
@@ -39,6 +43,7 @@
         <button type="button" class="net-console-tool" tabindex="-1">Сброс</button>
       </span>
       <button type="button" class="net-console-tool" tabindex="-1">Очистить</button>
+      <button type="button" class="net-console-tool net-console-fold" tabindex="-1" aria-label="Свернуть консоль" title="Свернуть консоль">—</button>
       <button type="button" class="net-console-tool" tabindex="-1" aria-label="Закрыть">✕</button>
     </div>
     <div class="net-console-body">
@@ -49,6 +54,13 @@
         <div class="nc-row info"><span class="nc-time">22:42:40</span><span class="nc-kind">telegram</span><span class="nc-text">Связь есть: бот слушает сообщения</span></div>
       </div>
     </div>
+  </div>
+
+  <h2>Свёрнутые панели</h2>
+  <div class="faq-fold-demo" aria-label="Свёрнутые консоль и словарь на одном уровне">
+    <button type="button" tabindex="-1" aria-label="Развернуть консоль">&gt;_</button>
+    <button type="button" class="faq-dict" tabindex="-1" aria-label="Развернуть словарь">Aa</button>
+    <span class="faq-fold-demo-label">Консоль и словарь выровнены по одной линии; консоль слева</span>
   </div>
 
   <h2>Лог</h2>
@@ -63,6 +75,7 @@
       <span class="net-console-hint"><kbd>Ctrl</kbd><kbd>Ё</kbd></span>
       <span class="net-console-spacer"></span>
       <button type="button" class="net-console-tool" tabindex="-1">Очистить</button>
+      <button type="button" class="net-console-tool net-console-fold" tabindex="-1" aria-label="Свернуть консоль" title="Свернуть консоль">—</button>
       <button type="button" class="net-console-tool" tabindex="-1" aria-label="Закрыть">✕</button>
     </div>
     <div class="net-console-body">
@@ -86,6 +99,7 @@
       <span class="net-console-hint"><kbd>Ctrl</kbd><kbd>Ё</kbd></span>
       <span class="net-console-spacer"></span>
       <button type="button" class="net-console-tool" tabindex="-1">Очистить</button>
+      <button type="button" class="net-console-tool net-console-fold" tabindex="-1" aria-label="Свернуть консоль" title="Свернуть консоль">—</button>
       <button type="button" class="net-console-tool" tabindex="-1" aria-label="Закрыть">✕</button>
     </div>
     <div class="bridge-legend">
