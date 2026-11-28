@@ -319,6 +319,8 @@ def _read_sha(dest: str) -> str:
 
 def _read_commit_count(dest: str) -> int | None:
     for line in _stamp_lines(dest)[1:]:
+        if _sha_ok(line):
+            continue
         if line.isdigit():
             return max(0, int(line))
     return None
