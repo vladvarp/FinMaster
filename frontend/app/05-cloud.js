@@ -4479,7 +4479,7 @@
           const value = rawBlock.trim().replace(/\s*\n\s*/g, " ");
           if (!value) continue;
           const isSection = /^(?:Preamble|TERMS AND CONDITIONS|END OF TERMS AND CONDITIONS|How to Apply These Terms to Your New Programs)$/i.test(value);
-          const isNumbered = /^\\d+\\.\\s/.test(value);
+          const isNumbered = /^\d+\.\s/.test(value);
           const isTitle = /^GNU GENERAL PUBLIC LICENSE|^Version 3,/.test(value);
           const element = document.createElement(isSection || isNumbered || isTitle ? "h4" : "p");
           element.className = isSection ? "license-section-title" : isNumbered ? "license-clause-title" : isTitle ? "license-document-title" : "license-paragraph";
