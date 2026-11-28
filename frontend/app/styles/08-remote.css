@@ -1123,8 +1123,8 @@ html.fm-pc-locked .palette {
   flex: 0 0 28px;
 }
 .net-console.is-collapsed {
-  right: 72px !important;
-  bottom: 16px !important;
+  right: 16px !important;
+  bottom: 76px !important;
   left: auto !important;
   top: auto !important;
   width: auto !important;
@@ -1146,8 +1146,7 @@ html.fm-pc-locked .palette {
 .net-console.is-collapsed .net-console-head > :not(#net-console-fold):not(#net-console-close) {
   display: none !important;
 }
-.net-console.is-collapsed .net-console-tool.net-console-fold,
-.net-console.is-collapsed #net-console-close {
+.net-console.is-collapsed .net-console-tool.net-console-fold {
   width: 44px;
   min-width: 44px;
   height: 44px;
@@ -1155,6 +1154,10 @@ html.fm-pc-locked .palette {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font: 700 14px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: -0.08em;
   flex: 0 0 44px;
+}
+.net-console.is-collapsed #net-console-close {
+  display: none !important;
 }
