@@ -225,8 +225,10 @@ window.FAQ_TOC = [
         { id: "kak-otkryt-i-zakryt", title: "Как открыть и закрыть" },
         { id: "set", title: "Сеть" },
         { id: "log", title: "Лог" },
+        { id: "most-tg", title: "Мост TG" },
+        { id: "most-ngrok", title: "Мост Ngrok" },
         { id: "disk", title: "Диск" },
-        { id: "most-tg-i-most-ngrok", title: "Мост TG и мост Ngrok" },
+        { id: "webview", title: "WebView" },
       ] },
       { id: "ngrok", title: "Интернет через ngrok", keys: "токен path store туннель", subs: [
         { id: "postavit-ngrok", title: "Поставить ngrok" },
