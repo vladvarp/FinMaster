@@ -244,6 +244,33 @@ def _remote_head(timeout: float) -> tuple[str, str]:
     return sha, when
 
 
+def _remote_commit_count(timeout: float) -> int | None:
+    """Общее число коммитов в истории основной ветки GitHub."""
+    url = f"{API}/commits?per_page=1"
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "FinMaster", "Accept": "application/vnd.github+json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            links = str(response.headers.get("Link") or "")
+        for part in links.split(","):
+            if 'rel="last"' not in part:
+                continue
+            left = part.find("<")
+            right = part.find(">", left + 1)
+            if left < 0 or right < 0:
+                continue
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(part[left + 1:right]).query)
+            page = (query.get("page") or [""])[0]
+            if page.isdigit():
+                return max(1, int(page))
+        return len(payload) if isinstance(payload, list) and payload else None
+    except Exception:
+        return None
+
+
 def _remote_sha(timeout: float) -> str:
     return _remote_head(timeout)[0]
 
@@ -290,15 +317,30 @@ def _read_sha(dest: str) -> str:
     return ""
 
 
+def _read_commit_count(dest: str) -> int | None:
+    for line in _stamp_lines(dest)[1:]:
+        if line.isdigit():
+            return max(0, int(line))
+    return None
+
+
 def _broken_flag(dest: str) -> bool:
     return any(line.lower() == _BROKEN_MARK for line in _stamp_lines(dest)[1:])
 
 
-def _write_stamp(dest: str, when: str | None = None, *, broken: bool | None = None, sha: str | None = None) -> None:
-    """Первая строка — дата версии. Дальше код коммита и, если есть, пометка целостности."""
+def _write_stamp(
+    dest: str,
+    when: str | None = None,
+    *,
+    broken: bool | None = None,
+    sha: str | None = None,
+    commit_count: int | None = None,
+) -> None:
+    """Дата, SHA и число коммитов; старые дополнительные пометки сохраняются."""
     text = _read_stamp(dest) if when is None else str(when or "").strip()
     flag = _broken_flag(dest) if broken is None else bool(broken)
     code = _read_sha(dest) if sha is None else str(sha or "").strip().lower()
+    count = _read_commit_count(dest) if commit_count is None else max(0, int(commit_count))
     if code and not _sha_ok(code):
         code = _read_sha(dest)
     lines: list[str] = []
@@ -308,6 +350,10 @@ def _write_stamp(dest: str, when: str | None = None, *, broken: bool | None = No
         if not lines:
             lines.append("")
         lines.append(code)
+    if count is not None:
+        if not lines:
+            lines.append("")
+        lines.append(str(count))
     if flag:
         if not lines:
             lines.append("")
@@ -876,7 +922,7 @@ def _pull(
     try:
         remote, when = _remote_head(10)
         if remote == sha:
-            _write_stamp(dest, when, broken=False, sha=remote)
+            _write_stamp(dest, when, broken=False, sha=remote, commit_count=_remote_commit_count(10))
     except Exception:
         pass
     report("Готово", 100)
@@ -937,7 +983,7 @@ def _perform_install(dest: str, desktop: bool, start_menu: bool) -> str:
         saved = not holder["shortcut"]
         bundled = "bundled" if os.path.isfile(os.path.join(dest, "python", "pythonw.exe")) else ""
         _mark_installed(dest, sha, bundled, desktop and saved, start_menu and saved)
-        _write_stamp(dest, when, broken=False, sha=holder.get("sha") or "")
+        _write_stamp(dest, when, broken=False, sha=holder.get("sha") or "", commit_count=_remote_commit_count(20))
         report("Готово", 100)
 
     _run_splash(_icon(_here()) or _icon(dest), "Скачиваю FinMaster…", work)
@@ -1399,7 +1445,7 @@ def _refresh_snapshot(dest: str, wait_pid: int, copy_exe: bool = True, full: boo
         if copy_exe:
             report("Копирую FinMaster.exe…", 90)
             _copy_self(dest)
-        _write_stamp(dest, when, broken=False, sha=sha)
+        _write_stamp(dest, when, broken=False, sha=sha, commit_count=_remote_commit_count(20))
         _save_commit(dest, sha)
         report("Готово", 100)
 

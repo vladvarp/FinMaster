@@ -244,6 +244,37 @@ def _lerp_hex(a: str, b: str, t: float) -> str:
     )
 
 
+def _splash_build_info() -> tuple[str, str]:
+    """Читает год, дату версии и число коммитов из commit.txt рядом с программой."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(root, "commit.txt")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = [line.strip() for line in handle.read().splitlines()]
+    except OSError:
+        return "", ""
+
+    raw_date = lines[0] if lines else ""
+    year = raw_date[:4] if len(raw_date) >= 4 and raw_date[:4].isdigit() else ""
+    version = ""
+    if raw_date:
+        try:
+            raw = raw_date[:-1] + "+00:00" if raw_date.endswith("Z") else raw_date
+            from datetime import datetime
+
+            moment = datetime.fromisoformat(raw)
+            version = moment.astimezone().strftime("%d.%m.%Y")
+        except (TypeError, ValueError, OverflowError):
+            version = raw_date[:10]
+
+    count = next((line for line in lines[1:] if line.isdigit()), "")
+    if version and count:
+        return year, f"Версия {version} · {count} коммитов"
+    if version:
+        return year, f"Версия {version}"
+    return year, ""
+
+
 class Splash:
     # Окно чуть больше карточки — место под тень и свечение
     W = 720
@@ -260,6 +291,7 @@ class Splash:
         self._closable = closable
         self._on_cancel = on_cancel
         self._close_btn: tk.Widget | None = None
+        self._build_year, self._build_version = _splash_build_info()
         self.lines: list[str] = []
         if self._headless:
             return
@@ -391,7 +423,11 @@ class Splash:
             self._draw_mark(c, cx - 22, cy - 22)
 
         tx = cx + 72
-        c.create_text(tx, cy - 18, text="FinMaster", fill=INK, font=("Segoe UI Semibold", 32, "bold"), anchor="w")
+        title_id = c.create_text(tx, cy - 18, text="FinMaster", fill=INK, font=("Segoe UI Semibold", 32, "bold"), anchor="w")
+        if self._build_year:
+            title_box = c.bbox(title_id)
+            year_x = (title_box[2] + 10) if title_box else tx + 185
+            c.create_text(year_x, cy - 14, text=self._build_year, fill=ACCENT, font=("Segoe UI Semibold", 14, "bold"), anchor="w")
         c.create_text(tx, cy + 18, text="Учёт заказов · локально", fill=MUTED, font=("Segoe UI", 12), anchor="w")
         self._accent_line = c.create_line(tx, cy + 36, tx + 48, cy + 36, fill=GOLD, width=2)
 
@@ -416,7 +452,12 @@ class Splash:
 
         c.create_text(left, y2 - 28, text="OFFLINE-FIRST", fill=SOFT, font=("Segoe UI", 8), anchor="w")
         self._foot_id = c.create_text(
-            right, y2 - 28, text="данные остаются у вас", fill=SOFT, font=("Segoe UI", 9), anchor="e"
+            right,
+            y2 - 28,
+            text=self._build_version or "данные остаются у вас",
+            fill=SOFT,
+            font=("Segoe UI", 9),
+            anchor="e",
         )
 
         for gid in self._glow_ids:
