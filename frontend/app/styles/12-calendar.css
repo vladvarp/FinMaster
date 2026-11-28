@@ -1504,3 +1504,9 @@ html[data-theme="dark"] .file-menu .btn.ghost:hover {
   .order-work { grid-template-columns: 1fr; }
 }
 
+
+/* Главная полоса заказа отмечает наличие незапланированных позиций */
+.gantt-row.has-undated-lines:not(.is-line) .gantt-track .gantt-bar {
+  outline: 2px solid #eab308;
+  outline-offset: 2px;
+}
