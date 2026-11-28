@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{document.documentElement.dataset.theme=localStorage.getItem("finmaster.theme")==="dark"?"dark":"light"}catch(e){}</script>
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="stage.css">
+<style>
+body{padding:0}.demo{width:100%;min-width:0}.demo .net-console{position:relative!important;inset:auto!important;width:100%!important;height:auto!important;min-height:0!important;display:block!important;box-shadow:none!important;margin:0}.demo .net-console-head{position:relative}.demo .net-console-body{display:block!important;max-height:none!important;overflow:visible!important;padding:10px}.demo .net-console-tool{pointer-events:none}.demo .bridge-card{margin:0}.demo .edge-console-summary{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px}.demo .edge-kpi{min-width:0}.demo .edge-kpi span{display:block}.demo .edge-kpi strong{display:block}.demo .edge-table-scroll{overflow-x:auto}.demo .edge-process-table{width:100%;border-collapse:collapse;font-size:11px}.demo .edge-process-table th,.demo .edge-process-table td{padding:8px 7px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}.demo .edge-process-table th{color:var(--muted);font-weight:600}.demo .edge-process-table td strong,.demo .edge-process-table td small{display:block}.demo .edge-process-table td small{color:var(--muted);margin-top:3px}.demo .edge-footnote{font-size:11px;color:var(--muted);margin:9px 0 0}.demo .log-row{display:grid;grid-template-columns:72px minmax(0,1fr) minmax(0,1fr);gap:10px;padding:8px 6px;border-bottom:1px solid var(--line);font-size:12px}.demo .log-time{color:var(--muted);font-variant-numeric:tabular-nums}.demo .log-where{overflow-wrap:anywhere}.demo .log-what{color:var(--muted);text-align:right}.demo .edge-rate{color:var(--ok)}@media(max-width:620px){.demo .edge-console-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.demo .edge-process-table{min-width:650px}.demo .log-row{grid-template-columns:60px minmax(0,1fr)}.demo .log-what{grid-column:2;text-align:left}}
+</style>
+</head>
+<body><div class="demo"><div class="net-console"><div class="net-console-head"><div class="nc-switch"><button type="button" class="nc-switch-btn" tabindex="-1"><span>Мост Ngrok</span><span class="nc-switch-caret" aria-hidden="true"></span></button></div><span class="net-console-hint"><kbd>Ctrl</kbd><kbd>Ё</kbd></span><span class="net-console-spacer"></span><button type="button" class="net-console-tool" tabindex="-1">Очистить</button><button type="button" class="net-console-tool net-console-fold" tabindex="-1">—</button><button type="button" class="net-console-tool" tabindex="-1">✕</button></div><div class="net-console-body"><div class="bridge-legend"><span>Запрос</span><span>Ответ ПК</span></div><div class="bridge-board">
+<article class="bridge-card is-open"><button type="button" class="bridge-toggle" tabindex="-1" aria-expanded="true"><span>14:32:08</span><span class="bridge-who">GET /m</span><span class="bridge-chevron" aria-hidden="true"></span></button>
+<div class="bridge-cols"><p class="bridge-col bridge-col-ask">GET /m?t=•••••• · телефон</p><p class="bridge-col bridge-col-pc">200 OK · интерфейс телефона</p></div>
+<div class="bridge-raw"><div class="bridge-cols"><pre>method: GET
+path: /m
+query: t=••••••
+source: ngrok
+user-agent: Mobile browser</pre><pre>status: 200
+content-type: text/html
+result: Страница FinMaster
+duration: 42 ms</pre></div></div></article>
+<article class="bridge-card"><button type="button" class="bridge-toggle" tabindex="-1"><span>14:34:51</span><span class="bridge-who">POST /api/report</span><span class="bridge-chevron" aria-hidden="true"></span></button><div class="bridge-cols"><p class="bridge-col bridge-col-ask">Сохранение изменения отчёта</p><p class="bridge-col bridge-col-pc">200 OK · изменение принято</p></div></article>
+</div></div></div></body></html>
