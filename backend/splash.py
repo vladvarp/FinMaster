@@ -269,11 +269,12 @@ def _splash_build_info() -> tuple[str, str]:
 
     count = next((line for line in lines[1:] if line.isdigit() and len(line) != 40), "")
     if version and count:
-        number = int(count)
+        number = max(0, int(count))
+        program_version = f"{number // 1000}.{(number // 100) % 10}.{number % 100}"
         last_two = number % 100
         last = number % 10
         word = "коммит" if last == 1 and last_two != 11 else "коммита" if 2 <= last <= 4 and not 12 <= last_two <= 14 else "коммитов"
-        return year, f"Версия {version} · {count} {word}"
+        return year, f"Версия {program_version} · {version} · {count} {word}"
     if version:
         return year, f"Версия {version}"
     return year, ""
