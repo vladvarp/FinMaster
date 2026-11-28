@@ -2766,7 +2766,7 @@
         </div>`;
               })
               .join("");
-        return `<div class="gantt-row ${calSelectedClass(order.id)} ${due ? "has-deadline" : ""} ${pausedNow ? "is-paused" : ""} ${open ? "is-open" : ""}" data-cal-id="${esc(order.id)}">
+        return `<div class="gantt-row ${calSelectedClass(order.id)} ${due ? "has-deadline" : ""} ${pausedNow ? "is-paused" : ""} ${undatedCount ? "has-undated-lines" : ""} ${open ? "is-open" : ""}" data-cal-id="${esc(order.id)}">
           <div class="gantt-head">
             ${expand}
             <button type="button" class="gantt-label" data-cal-id="${esc(order.id)}">
