@@ -1848,7 +1848,7 @@
       state.updateOffline = !!data.offline;
       state.updateYear = Number(data.year) || 0;
       state.updateVersion = String(data.program_version || "");
-      state.updateCommitCount = Number.isFinite(Number(data.commit_count)) ? Number(data.commit_count) : null;
+      state.updateCommitCount = data.commit_count !== null && data.commit_count !== undefined && Number.isFinite(Number(data.commit_count)) ? Number(data.commit_count) : null;
       state.updateBuildDate = String(data.build_date || "");
       state.updateCurrentSha = data.current_sha || "";
       state.updateLatestSha = data.latest_sha || "";
