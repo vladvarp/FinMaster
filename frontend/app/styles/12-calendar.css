@@ -1571,6 +1571,10 @@ html[data-theme="dark"] .file-menu .btn.ghost:hover {
 .cal-order-tip-status.tone-ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, var(--card)); }
 .cal-order-tip-status.tone-warn { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--card)); }
 .cal-order-tip-subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 5px;
   margin-top: 7px;
   padding-bottom: 10px;
   color: var(--muted);
@@ -1578,6 +1582,11 @@ html[data-theme="dark"] .file-menu .btn.ghost:hover {
   line-height: 1.45;
   overflow-wrap: anywhere;
   border-bottom: 1px solid var(--line);
+}
+.cal-order-tip-subtitle .gantt-status { font-size: inherit; }
+.cal-order-tip-line.is-on-timeline {
+  border: 1.5px solid var(--tip-line-color);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tip-line-color) 12%, transparent);
 }
 .cal-order-tip-meta {
   display: grid;
